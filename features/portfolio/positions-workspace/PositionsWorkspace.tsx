@@ -318,9 +318,11 @@ interface ManagementActionProps {
   onAnalyze?: (position: Position, traderNote: string) => Promise<WorkspaceAiAnalysis>;
   renderAnalysisConversation?: (position: Position, analysis: WorkspaceAiAnalysis) => ReactNode;
   onFindPmccShortCall?: (opportunity: ExistingIncomeOpportunity) => void;
+  /** DECIDE-0001 S3-0a: refreshes the page's live position data (a missing recommendation's Refresh button calls this). */
+  onRefresh?: () => void;
 }
 
-function AnalysisView({ model, th, getManagementActions, onExecute, renderStopControl, onAnalyze, renderAnalysisConversation, onFindPmccShortCall, onIntentChange, sellDeps }: { model: PositionsWorkspaceModel; th: typeof THEMES[Theme]; sellDeps?: SellStockDialogDeps } & ManagementActionProps) {
+function AnalysisView({ model, th, getManagementActions, onExecute, renderStopControl, onAnalyze, renderAnalysisConversation, onFindPmccShortCall, onIntentChange, onRefresh, sellDeps }: { model: PositionsWorkspaceModel; th: typeof THEMES[Theme]; sellDeps?: SellStockDialogDeps } & ManagementActionProps) {
   const [preferences, setPreferences] = useState(DEFAULT_PREFERENCES);
   const [hydrated, setHydrated] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -536,7 +538,7 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
   const isActiveSort = sort?.column === column.id;
   const labelContent = column.id === 'strike' ? 'Strike / BE' : column.label;
   return <th key={column.id} data-column-id={column.id} scope="col" title={column.id === 'capital' ? 'Capital / Collateral' : sortable ? `Sort by ${column.label}` : undefined} aria-sort={isActiveSort ? (sort!.direction === 'asc' ? 'ascending' : 'descending') : undefined} onClick={sortable ? () => toggleSort(column.id) : undefined} className={`border-b border-r border-white/10 bg-slate-950 px-2 py-2 uppercase tracking-wider text-white/50 ${sortable ? 'cursor-pointer select-none hover:text-white/80' : ''} ${column.id === 'identity' ? 'sticky left-0 z-20' : ''} ${column.id === 'capital' ? 'w-28 max-w-28' : column.id === 'strike' ? 'w-24 max-w-24 whitespace-nowrap' : column.id === 'entry' ? 'whitespace-nowrap' : column.id === 'orders' || column.id === 'notes' ? 'w-40 max-w-40' : 'whitespace-nowrap'}`}>{labelContent}{sortable && <span aria-hidden="true" className={`ml-1 inline-block ${isActiveSort ? 'text-teal-400' : 'text-white/20'}`}>{isActiveSort ? (sort!.direction === 'asc' ? '▲' : '▼') : '⇅'}</span>}</th>;
-})}</tr></thead><tbody>{sortedRows.map(row => <AnalysisRow key={row.id} onIntentChange={onIntentChange} position={row.position} columns={columns} th={th} actions={getManagementActions?.(row.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze ? analyze : undefined} savedNote={notes[noteStorageKey(row.position)] ?? ''} onSaveNote={saveNote} savedAlert={priceAlerts[priceAlertStorageKey(row.position)] ?? null} onSaveAlert={savePriceAlert} chartOpen={openChartKey === row.position.key} setChartOpen={open => setOpenChartKey(open ? row.position.key : null)} sparkData={chartData[row.position.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.position.symbol]: data }))} sparkLoading={chartLoadingSymbol === row.position.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.position.symbol : current => current === row.position.symbol ? null : current)} />)}</tbody></table></div>
+})}</tr></thead><tbody>{sortedRows.map(row => <AnalysisRow key={row.id} onIntentChange={onIntentChange} position={row.position} columns={columns} th={th} actions={getManagementActions?.(row.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze ? analyze : undefined} onRefresh={onRefresh} savedNote={notes[noteStorageKey(row.position)] ?? ''} onSaveNote={saveNote} savedAlert={priceAlerts[priceAlertStorageKey(row.position)] ?? null} onSaveAlert={savePriceAlert} chartOpen={openChartKey === row.position.key} setChartOpen={open => setOpenChartKey(open ? row.position.key : null)} sparkData={chartData[row.position.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.position.symbol]: data }))} sparkLoading={chartLoadingSymbol === row.position.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.position.symbol : current => current === row.position.symbol ? null : current)} />)}</tbody></table></div>
     <StockHoldings earningsEnabled intentEnabled={!!onIntentChange} columnWidths={measuredWidths} groups={model.symbolGroups} quoteAsOf={model.quoteAsOf} notes={notes} alerts={priceAlerts} storageKey={storageKeyFor} onSaveNote={saveNoteFor} onSaveAlert={savePriceAlertFor} th={th} sellDeps={sellDeps} />
     {filterOpen && <FilterDialog draft={draftFilters} setDraft={setDraftFilters} onClose={() => setFilterOpen(false)} onApply={() => { setPreferences(current => ({ ...current, filters: draftFilters })); setFilterOpen(false); }} onClear={() => setDraftFilters(DEFAULT_FILTERS)} />}
     {columnsOpen && <ColumnsDialog selected={draftColumns} setSelected={setDraftColumns} preset={preferences.analysisView} onClose={() => setColumnsOpen(false)} onApply={() => { setPreferences(current => ({ ...current, analysisView: 'custom', customColumnIds: draftColumns })); setColumnsOpen(false); }} />}
@@ -560,13 +562,18 @@ function SemanticComparison({ label, prior, current, tone, digits = 1, suffix = 
 }
 
 export function recommendationTone(position: Position): SemanticTone {
+  // DECIDE-0001 S3-0a -- a missing recommendation is unjudged, not calm and
+  // not urgent; it must never inherit the 'Hold' keyword path below (that
+  // was the false-"Hold" bug: no recommendation rendered identically to an
+  // actual Hold verdict).
+  if (!position.recommendation) return 'neutral';
   // EXIT-PRESSURE-0001 -- a Cut Losses recommendation that specifically
   // matches the trader's own pre-set stop is a quiet confirmation the plan
   // is executing, not new alarming information -- rendered calm/
   // informational rather than the same urgent red used for a breach the
   // trader didn't already plan for.
-  if (position.recommendation?.managementIntent?.quietConfirmation) return 'informational';
-  const label = (position.recommendation?.label ?? 'Hold').toLowerCase();
+  if (position.recommendation.managementIntent?.quietConfirmation) return 'informational';
+  const label = position.recommendation.label.toLowerCase();
   if (label.includes('profit')) return 'positive';
   if (label.includes('cut') || label.includes('close')) return 'negative';
   if (label.includes('reduce') || label.includes('review')) return 'warning';
@@ -638,7 +645,7 @@ function PriceAlertEditor({ position, savedAlert, onSave }: { position: Position
   </div>;
 }
 
-function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExecute, renderStopControl, onAnalyze, savedNote, onSaveNote, savedAlert, onSaveAlert, chartOpen, setChartOpen, sparkData, setSparkData, sparkLoading, setSparkLoading }: { onIntentChange?: (key: string, intent: PositionIntent) => void; position: Position; columns: AnalysisColumnId[]; th: typeof THEMES[Theme]; actions: ActionType[]; onExecute?: (position: Position, action: ActionType, initialRollMode?: 'close' | 'roll') => void; renderStopControl?: (position: Position) => ReactNode; onAnalyze?: (position: Position) => void; savedNote: string; onSaveNote: (position: Position, note: string) => Promise<void>; savedAlert: { targetPrice: number; direction: 'above' | 'below' } | null; onSaveAlert: (position: Position, targetPrice: number | null, direction: 'above' | 'below') => Promise<void>; chartOpen: boolean; setChartOpen: (open: boolean) => void; sparkData: number[] | null; setSparkData: (data: number[] | null) => void; sparkLoading: boolean; setSparkLoading: (loading: boolean) => void }) {
+function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExecute, renderStopControl, onAnalyze, onRefresh, savedNote, onSaveNote, savedAlert, onSaveAlert, chartOpen, setChartOpen, sparkData, setSparkData, sparkLoading, setSparkLoading }: { onIntentChange?: (key: string, intent: PositionIntent) => void; position: Position; columns: AnalysisColumnId[]; th: typeof THEMES[Theme]; actions: ActionType[]; onExecute?: (position: Position, action: ActionType, initialRollMode?: 'close' | 'roll') => void; renderStopControl?: (position: Position) => ReactNode; onAnalyze?: (position: Position) => void; onRefresh?: () => void; savedNote: string; onSaveNote: (position: Position, note: string) => Promise<void>; savedAlert: { targetPrice: number; direction: 'above' | 'below' } | null; onSaveAlert: (position: Position, targetPrice: number | null, direction: 'above' | 'below') => Promise<void>; chartOpen: boolean; setChartOpen: (open: boolean) => void; sparkData: number[] | null; setSparkData: (data: number[] | null) => void; sparkLoading: boolean; setSparkLoading: (loading: boolean) => void }) {
   // Recommendation/Actions split (Ian/Paul/Diane/Quinn approved) -- Adjust
   // GTC/Stop opens the EXISTING renderStopControl output inline (no new
 
@@ -744,8 +751,15 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
     recommendation: <>
       {/* Recommendation zone -- pure explanation, never clickable (Ian). */}
       <p className={`text-[9px] uppercase tracking-wider ${th.textFaint}`}>Recommendation</p>
-      <b className={SEMANTIC_TONE_CLASS[recommendationTone(p)]}>{p.recommendation?.label ?? 'Hold'}</b>
-      <span className={`block max-w-48 ${th.textFaint}`}>{p.structureAmbiguous ? p.structureBlockMessage : p.recommendation?.managementIntent?.reasons?.[0] ?? p.recommendation?.primaryReason ?? 'Continue monitoring'}</span>
+      <b className={SEMANTIC_TONE_CLASS[recommendationTone(p)]}>{p.recommendation ? p.recommendation.label : 'No recommendation'}</b>
+      {p.recommendation ? (
+        <span className={`block max-w-48 ${th.textFaint}`}>{p.structureAmbiguous ? p.structureBlockMessage : p.recommendation.managementIntent?.reasons?.[0] ?? p.recommendation.primaryReason ?? 'Continue monitoring'}</span>
+      ) : (
+        <span className={`block max-w-48 ${th.textFaint}`}>
+          Recommendation could not be calculated.{' '}
+          <button type="button" onClick={() => onRefresh?.()} disabled={!onRefresh} className="underline decoration-dotted underline-offset-2 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-40">Refresh</button>
+        </span>
+      )}
 
       <div className="my-2 max-w-64 border-t border-white/10" />
 
@@ -787,9 +801,9 @@ function ColumnsDialog({ selected, setSelected, preset, onClose, onApply }: { se
   return <DialogShell title="Customize columns" onClose={onClose}><div className="grid gap-2 sm:grid-cols-2">{ANALYSIS_COLUMNS.map(column => <label key={column.id} className="flex min-h-11 items-center gap-2 rounded border border-white/10 px-3 text-xs"><input type="checkbox" checked={selected.includes(column.id)} disabled={column.id === 'identity'} onChange={() => toggle(column.id)} /><span><b className="block">{column.label}</b><span className="text-white/50">{column.group}</span></span></label>)}</div><div className="mt-5 flex justify-between"><button onClick={() => setSelected(columnsForView(preset === 'custom' ? 'management' : preset))} className="min-h-11 px-3 text-xs">Reset to preset</button><div className="flex gap-2"><button onClick={onClose} className="min-h-11 rounded border border-white/20 px-4 text-xs">Cancel</button><button disabled={selected.length < 2} onClick={onApply} className="min-h-11 rounded bg-teal-500 px-4 text-xs font-bold text-slate-950 disabled:opacity-40">Apply</button></div></div></DialogShell>;
 }
 
-export function PositionsWorkspace({ model, th, getManagementActions, onExecute, renderStopControl, onAnalyze, renderAnalysisConversation, onFindPmccShortCall, onIntentChange, sellDeps }: { model: PositionsWorkspaceModel; th: typeof THEMES[Theme]; sellDeps?: SellStockDialogDeps } & ManagementActionProps) {
+export function PositionsWorkspace({ model, th, getManagementActions, onExecute, renderStopControl, onAnalyze, renderAnalysisConversation, onFindPmccShortCall, onIntentChange, onRefresh, sellDeps }: { model: PositionsWorkspaceModel; th: typeof THEMES[Theme]; sellDeps?: SellStockDialogDeps } & ManagementActionProps) {
   const [view, setView] = useState<'portfolio' | 'analysis'>('portfolio');
   useEffect(() => { const loaded = loadPreferences(); setView(loaded.workspaceView); }, []);
   const switchView = (next: 'portfolio' | 'analysis') => { setView(next); const loaded = loadPreferences(); savePreferences({ ...loaded, workspaceView: next }); };
-  return <section className="p-4 sm:p-6" aria-label="Positions workspace"><div role="tablist" aria-label="Positions workspace views" className={`mb-4 flex gap-1 border-b ${th.border}`}>{(['portfolio', 'analysis'] as const).map(item => <button key={item} role="tab" aria-selected={view === item} onClick={() => switchView(item)} className={`min-h-11 border-b-2 px-4 text-xs font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-teal-400 ${view === item ? 'border-teal-400 text-white' : `border-transparent ${th.textFaint}`}`}>{item === 'portfolio' ? 'Portfolio' : 'Position Analysis'}</button>)}</div>{view === 'portfolio' ? <PortfolioView groups={model.symbolGroups} th={th} renderStopControl={renderStopControl} onIntentChange={onIntentChange} /> : <AnalysisView model={model} th={th} getManagementActions={getManagementActions} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} renderAnalysisConversation={renderAnalysisConversation} onFindPmccShortCall={onFindPmccShortCall} onIntentChange={onIntentChange} sellDeps={sellDeps} />}</section>;
+  return <section className="p-4 sm:p-6" aria-label="Positions workspace"><div role="tablist" aria-label="Positions workspace views" className={`mb-4 flex gap-1 border-b ${th.border}`}>{(['portfolio', 'analysis'] as const).map(item => <button key={item} role="tab" aria-selected={view === item} onClick={() => switchView(item)} className={`min-h-11 border-b-2 px-4 text-xs font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-teal-400 ${view === item ? 'border-teal-400 text-white' : `border-transparent ${th.textFaint}`}`}>{item === 'portfolio' ? 'Portfolio' : 'Position Analysis'}</button>)}</div>{view === 'portfolio' ? <PortfolioView groups={model.symbolGroups} th={th} renderStopControl={renderStopControl} onIntentChange={onIntentChange} /> : <AnalysisView model={model} th={th} getManagementActions={getManagementActions} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} renderAnalysisConversation={renderAnalysisConversation} onFindPmccShortCall={onFindPmccShortCall} onIntentChange={onIntentChange} onRefresh={onRefresh} sellDeps={sellDeps} />}</section>;
 }

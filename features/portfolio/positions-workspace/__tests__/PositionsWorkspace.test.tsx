@@ -529,4 +529,50 @@ describe('recommendationTone', () => {
     expect(recommendationTone(withRecommendation('Reduce Risk'))).toBe('warning');
     expect(recommendationTone(withRecommendation('Hold Position'))).toBe('neutral');
   });
+
+  // DECIDE-0001 S3-0a: a missing recommendation must never be treated like an
+  // actual 'Hold' verdict -- it is unjudged, not calm.
+  it('returns neutral for a missing recommendation, without falling through the Hold keyword path', () => {
+    expect(recommendationTone({ recommendation: undefined } as unknown as Position)).toBe('neutral');
+    expect(recommendationTone({ recommendation: null } as unknown as Position)).toBe('neutral');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DECIDE-0001 S3-0a: a missing recommendation must show "No recommendation",
+// never a false "Hold" -- with a per-row Refresh button that calls the
+// page's existing portfolio refresh (onRefresh).
+// ---------------------------------------------------------------------------
+
+describe('missing recommendation (DECIDE-0001 S3-0a)', () => {
+  it('shows "No recommendation" and a working Refresh button instead of a false "Hold"', async () => {
+    const user = userEvent.setup();
+    const onRefresh = vi.fn();
+    const unjudgedPosition = { ...position, recommendation: undefined } as Position;
+    const unjudgedModel = {
+      ...model,
+      analysisRows: [{ id: unjudgedPosition.key, position: unjudgedPosition, symbol: unjudgedPosition.symbol, strategy: unjudgedPosition.strategy, needsAttention: false }],
+    } as PositionsWorkspaceModel;
+    render(<PositionsWorkspace model={unjudgedModel} th={THEMES.dark} onRefresh={onRefresh} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getByText('No recommendation')).toBeInTheDocument();
+    expect(screen.queryByText('Hold')).not.toBeInTheDocument();
+    expect(screen.getByText(/Recommendation could not be calculated\./)).toBeInTheDocument();
+    const refreshButton = screen.getByRole('button', { name: 'Refresh' });
+    expect(refreshButton).toBeEnabled();
+    await user.click(refreshButton);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables the Refresh button when no onRefresh handler is supplied', async () => {
+    const user = userEvent.setup();
+    const unjudgedPosition = { ...position, recommendation: undefined } as Position;
+    const unjudgedModel = {
+      ...model,
+      analysisRows: [{ id: unjudgedPosition.key, position: unjudgedPosition, symbol: unjudgedPosition.symbol, strategy: unjudgedPosition.strategy, needsAttention: false }],
+    } as PositionsWorkspaceModel;
+    render(<PositionsWorkspace model={unjudgedModel} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
+  });
 });

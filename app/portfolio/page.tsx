@@ -10941,6 +10941,7 @@ export default function PortfolioPage() {
                 renderStopControl={position => <PortfolioStopControl pos={position} th={th} onRetry={fetchPositions} />}
                 onFindPmccShortCall={findPmccShortCall}
                 onIntentChange={handleIntentChange}
+                onRefresh={fetchPositions}
               />
             </>
           ) : (
