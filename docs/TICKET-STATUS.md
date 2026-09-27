@@ -16,9 +16,9 @@ One-time sweep of every file in `docs/tickets/` (127 files) plus GitHub issues, 
 | DECIDE-0001 | Revision 7. All 7 decisions approved 2026-09-27; **S3-0 (a/b/c) built and pushed 2026-09-27**. Remaining: the big cutover (S1-S3-D), gated on Ian's rulings and Alan's fixtures. Tracked in ROADMAP item 12 |
 | KEEP-CREDIT-0001 | Draft 2. Dean's approval of the mock + 5 decisions, Dane's pre-build review. ROADMAP item 13 |
 | WHEEL-SYSTEM-0003 | Draft 1. Diane's mock, then Dean's approval. ROADMAP item 14 |
-| LEAPS-PMCC-RECOVERY-0001 (issue #49) | Ian/Paul's 9 questions ruled on; mock published; still needs Diane/Alan's confirmation and Dean's build approval |
-| LEAPS-PMCC-RECOVERY-0002 (issue #50) | Draft, split out of #49; not reviewed |
-| LEAPS-PMCC-RECOVERY-0003 (issue #51) | Draft, split out of #49; needs Diane's mock before build |
+| LEAPS-PMCC-RECOVERY-0001 (issue #49) | Ian/Paul's 9 questions ruled on; mock published and corrected 2026-09-27 (Ian caught a sign-convention bug — "Opportunity Cost" renamed "Call Advantage"; Diane fixed a Wait-button weight issue). Ready for Dean's build approval |
+| LEAPS-PMCC-RECOVERY-0002 (issue #50) | Reviewed 2026-09-27 (Ian/Paul/Alan): formula sound, reuse `reconstructTrades.ts`'s already-fee-inclusive `ClosedTrade.pnl` for realized short-call income (no new fee model needed). One open decision for Dean/Paul: Trade Log's 12-month lookback cap would silently undercount income on longer-held LEAPS campaigns — needs a scoping call before build |
+| LEAPS-PMCC-RECOVERY-0003 (issue #51) | Diane's mock published 2026-09-27 (frontier scatter + row table, dominated candidates shown with reasons). Awaiting Dean's approval; depends on #49 landing first |
 | CI-FLAKY-0002 | Draft (Paul); Quinn's review; not yet on the roadmap — Dean to say yes/no |
 | AI-POLICY-0001B/C/D/E | Each Draft and explicitly blocked (0001A dependency, Diane's mocks, Ian's field list, the PMCC 3-stage flow landing first) |
 | AI-POLICY-0001G | Deferred; blocked on Paul (D10), reports not defined |
