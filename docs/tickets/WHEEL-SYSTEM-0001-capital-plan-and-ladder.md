@@ -192,3 +192,6 @@ The ladder has a "Credit" column (Dean asked for the premium, then chose "credit
 ### Label (2026-09-26, Dean): the ladder column "Put priced" is now "Put".
 
 ### Label (2026-09-26, Dean): the ladder column "Cash per Put" is now "Req. Cash" (required cash).
+
+### Override flow correction (2026-09-26, Dean was confused by "Your override")
+The "Your override" tag replaced the plan's own verdict on a row where Dean had typed a contract count, and it read like a button. Corrected: the Today column always shows the plan's own verdict (Wheel now, Concentrated only, Unlocks in N months), and a small amber "Yours" tag is added beside it only when the trader has typed a count in the "Your contracts" box; clearing the box removes it. Warnings about the cost are unchanged.

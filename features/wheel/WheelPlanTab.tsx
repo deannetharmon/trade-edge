@@ -606,14 +606,15 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                             </td>
                             <td className="px-3 py-2 text-right">{formatCents(row.fitsAt)}</td>
                             <td className="px-3 py-2">
-                              {isForced(row.entry.symbol) ? (
-                                <span className="rounded-full border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-300">Your override</span>
-                              ) : row.unlock.kind === 'fits' ? (
+                              {row.unlock.kind === 'fits' ? (
                                 <span className="rounded-full border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-300">Wheel now</span>
                               ) : row.fitsConcentrated ? (
                                 <span className="rounded-full border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-300">Concentrated only</span>
                               ) : (
                                 <span className="rounded-full border border-white/15 px-2 py-0.5 text-[10px] font-bold text-white/60">Unlocks in {formatUnlock(row.unlock as UnlockMonths)}</span>
+                              )}
+                              {isForced(row.entry.symbol) && (
+                                <span title="You set the contract count, so the plan's limits were not applied" className="ml-1 rounded-full border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-300">Yours</span>
                               )}
                             </td>
                           </>

@@ -244,7 +244,8 @@ describe('putting a name that does not fit on the wheel anyway', () => {
     const input = within(row).getByLabelText('Contracts for NVDA');
     await userEvent.type(input, '1{Enter}');
 
-    await waitFor(() => expect(within(screen.getByTestId('ladder-row-NVDA')).getByText('Your override')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByTestId('ladder-row-NVDA')).getByText('Yours')).toBeInTheDocument());
+    expect(within(screen.getByTestId('ladder-row-NVDA')).getByText(/Unlocks in/)).toBeInTheDocument(); // the plan's own verdict is still shown
     expect(screen.getByText(/Today \(\$20,500 in the plan\)/)).toBeInTheDocument();
     expect(screen.getByText(/NVDA: 1 contract ties up \$20,500 \(41.0% of the account\), above your \$15,000 limit for one name/)).toBeInTheDocument();
     expect(screen.getByText(/A 30% fall would cost \$6,150 \(12.3% of the account\), above your 9% budget/)).toBeInTheDocument();
@@ -261,7 +262,7 @@ describe('putting a name that does not fit on the wheel anyway', () => {
     await waitFor(() => expect(screen.getByLabelText('Contracts for NVDA')).toHaveValue('1')); // 0 refused, value restored
     await userEvent.clear(screen.getByLabelText('Contracts for NVDA'));
     await userEvent.tab();
-    await waitFor(() => expect(screen.queryByText('Your override')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText('Yours')).not.toBeInTheDocument());
   });
 
   it('warns when the plan uses more than the wheel cash', async () => {
