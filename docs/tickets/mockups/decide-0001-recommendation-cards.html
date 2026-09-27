@@ -72,8 +72,8 @@ button:focus-visible,summary:focus-visible{outline:2px solid var(--teal);outline
 
 <div class="wrap">
   <header>
-    <h1>Calm recommendation cell <span class="tag">Mock · sample data</span></h1>
-    <p class="lede">Diane's rendered mock for DECIDE-0001 revision 3 (open item O10). It shows all ten states in the Position Analysis table, beside the intent chip and the extrinsic and intrinsic rows. There is no red anywhere, labels are plain white, and the color lives only in a 6px dot. The stop follows production: a mark of 2× the credit.</p>
+    <h1>Calm recommendation cell <span class="tag">Approved mock · sample data</span></h1>
+    <p class="lede">Diane's rendered mock for DECIDE-0001 revision 3 (open item O10). It shows all ten states in the Position Analysis table, beside the intent chip and the extrinsic and intrinsic rows. There is no red anywhere, labels are plain white, and the color lives only in a 6px dot. The stop follows production: a mark of 2× the credit. Revised after Ian's review and <b>approved by Dean on 2026-09-27</b> (O10 closed).</p>
   </header>
 
   <div class="frame">
@@ -87,14 +87,15 @@ button:focus-visible,summary:focus-visible{outline:2px solid var(--teal);outline
         <tr>
           <td><span class="sym">QQQ</span><span class="strat">Bull Put Spread</span><span class="small">1 contract</span><span class="intent">Income <i>▾</i></span><span class="link">chart</span></td>
           <td class="num">−440P / +435P<span class="small">Nov 7 · 42 DTE</span></td>
-          <td class="num">Credit $1.30<span class="small">Mark $0.84</span><span class="small pos">P/L +$46</span></td>
-          <td><div class="rows num"><span>Int</span><span>$0.00</span><span>Ext left</span><span>$0.84</span></div></td>
+          <td class="num">Credit $2.55<span class="small">Mark $1.66</span><span class="small pos">P/L +$89</span></td>
+          <td><div class="rows num"><span>Int</span><span>$0.00</span><span>Ext left</span><span>$1.66</span></div></td>
           <td class="rec"><div role="group" aria-label="Recommendation for QQQ">
             <div class="cap">Recommendation</div>
             <div class="line1"><span class="dot d-neutral" aria-hidden="true"></span><span class="label">Hold</span><span class="conf">High</span></div>
             <div class="reason">Nothing needs doing. 35% of the credit is earned; the target is 50%.</div>
-            <div class="flip">Changes if the mark falls to $0.65 (take profit).</div>
-            <details><summary>Why and what would change</summary><ul><li>Short put is well out of the money.</li><li>Changes at 21 DTE (Oct 17) if still open.</li><li>Evaluated 10:42:18 ET.</li></ul></details>
+            <div class="flip">Changes if the mark falls to $1.27 (take profit).</div>
+            <div class="ctx">Stop cannot trigger; max loss is $245 per contract.</div>
+            <details><summary>Why and what would change</summary><ul><li>Short put is near the money; the credit is more than half the 5-point width.</li><li>The stop (2× the $2.55 credit = $5.10) is above the $5.00 width, so it can never fire. Profit, 21-DTE and roll rules still apply.</li><li>Changes at 21 DTE (Oct 17) if still open.</li><li>Evaluated 10:42:18 ET.</li></ul></details>
           </div></td>
           <td class="actions"><span class="cap">Actions</span><button class="btn">Close</button><button class="btn">Adjust</button></td>
         </tr>
@@ -155,7 +156,7 @@ button:focus-visible,summary:focus-visible{outline:2px solid var(--teal);outline
             <div class="line1"><span class="dot d-amber" aria-hidden="true"></span><span class="label">Stock has weakened</span><span class="conf">Medium</span></div>
             <div class="reason">NKE closed below the support it had when you entered, on heavy volume.</div>
             <div class="flip">Changes if NKE closes back above $73.56.</div>
-            <details><summary>Why and what would change</summary><ul><li>Gap down on Sep 19 has not recovered half.</li><li>Weaker than SPY over 20 sessions (supporting).</li><li>Close all four legs in one order; not a roll.</li><li>Support is reconstructed from the 20 sessions before entry.</li></ul></details>
+            <details><summary>Why and what would change</summary><ul><li>Fired because the position is at a loss; a winning position would show Hold with this as a note.</li><li>Gap down on Sep 19 has not recovered half.</li><li>Weaker than SPY over 20 sessions (supporting).</li><li>Close all four legs in one order; not a roll.</li><li>Support is reconstructed from the 20 sessions before entry.</li></ul></details>
           </div></td>
           <td class="actions"><span class="cap">Actions</span><button class="btn match">Close</button><button class="btn">Adjust</button></td>
         </tr>
@@ -186,7 +187,7 @@ button:focus-visible,summary:focus-visible{outline:2px solid var(--teal);outline
             <div class="line1"><span class="dot d-sky" aria-hidden="true"></span><span class="label">Consider rolling</span><span class="conf">High</span></div>
             <div class="reason">21 days left and the trade is behind. A roll to Nov 21, 225/220 collects $0.34 more.</div>
             <div class="flip">Changes to "Time to close" if no roll collects at least $0.10.</div>
-            <details><summary>Why and what would change</summary><ul><li>Roll credit after fees: $0.34 per share.</li><li>New short strike is lower and the expiry is later.</li></ul></details>
+            <details><summary>Why and what would change</summary><ul><li>Roll credit after fees: $0.34 per share (net credit to date $1.39).</li><li>New breakeven $223.61 (was $228.95).</li><li>New max loss $361 per contract (was $395).</li><li>New short strike is lower and the expiry is later.</li></ul></details>
           </div></td>
           <td class="actions"><span class="cap">Actions</span><button class="btn match">Roll</button><button class="btn">Close</button></td>
         </tr>
@@ -195,7 +196,7 @@ button:focus-visible,summary:focus-visible{outline:2px solid var(--teal);outline
         <tr>
           <td><span class="sym">KO</span><span class="strat">Covered Call</span><span class="small">100 shares · 1 contract</span><span class="intent">Acquire <i>▾</i></span><span class="link">chart</span></td>
           <td class="num">−70C<span class="small">Oct 10 · 14 DTE</span></td>
-          <td class="num">Credit $0.95<span class="small">Mark $1.92</span><span class="small neg">Call P/L −$97</span></td>
+          <td class="num">Credit $0.95<span class="small">Mark $1.92</span><span class="small">Call −$97 · shares +$540</span><span class="small pos">Net +$443</span></td>
           <td><div class="rows num"><span>Int</span><span>$1.80</span><span>Ext left</span><span>$0.12</span></div></td>
           <td class="rec"><div role="group" aria-label="Recommendation for KO">
             <div class="cap">Recommendation</div>
@@ -218,7 +219,7 @@ button:focus-visible,summary:focus-visible{outline:2px solid var(--teal);outline
             <div class="reason">Assignment is the plan, so no loss exit is suggested.</div>
             <div class="ctx">Down $270, 1.1 times the credit.</div>
             <div class="ctx">Acquire (default, not chosen)<button type="button">Choose intent</button></div>
-            <details><summary>Why and what would change</summary><ul><li>Choosing Income turns on the stop at a mark of $4.80.</li><li>Changes to "Expect assignment" at short delta 0.50 (now 0.47).</li></ul></details>
+            <details><summary>Why and what would change</summary><ul><li>Choosing Income now shows Stop level reached; the mark ($5.10) is already past $4.80.</li><li>Changes to "Expect assignment" at short delta 0.50 (now 0.47).</li></ul></details>
           </div></td>
           <td class="actions"><span class="cap">Actions</span><button class="btn">Close</button><button class="btn">Roll</button></td>
         </tr>
@@ -264,7 +265,7 @@ button:focus-visible,summary:focus-visible{outline:2px solid var(--teal);outline
         <li>One reason, max two lines, and one "Changes if" line when a flip exists. Everything else sits in the collapsed detail.</li>
         <li>Amber context lines only for information that is not the action (row 9: loss multiple and the default intent).</li>
         <li>Actions keep neutral borders. The button that matches the recommendation gets a slightly stronger border, not a color.</li>
-        <li>The P/L colors in the Value column are today's table colors and are not part of this change.</li>
+        <li>The P/L colors in the Value column are today's table colors. A covered call shows the call and the shares together with a net, and the call's own number stays neutral (Ian).</li>
       </ul>
     </div>
   </section>
