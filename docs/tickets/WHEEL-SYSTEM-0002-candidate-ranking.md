@@ -59,7 +59,7 @@ No invented composite "score" in v1: the order is the rule in 3b, so the ranking
 
 ## Where it goes
 
-A "Next candidate" table above the unlock ladder on the Plan tab. Columns: Stock, Verdict, Contracts ("auto: N", or the trader's own number with a "Yours" tag and a one-line cost warning), Fundamentals (chips), Put (strike, expiry, delta, and its OTM %, from W1's `percentBelowPriceTenths`), Credit (dollars per contract at the bid, and per share; W1's `creditPerContractCents`), Req. Cash, Annual ROC at the bid, Earnings note. The ladder below stays as built. No changes to Candidates, recommendations or any order path.
+A "Next candidate" table above the unlock ladder on the Plan tab. Columns: Stock, Verdict, Contracts ("auto: N", or the trader's own number with a "Yours" tag and a one-line cost warning), Checks (chips), Put (strike, expiry, delta, and its OTM %, from W1's `percentBelowPriceTenths`), Credit (dollars per contract at the bid, and per share; W1's `creditPerContractCents`), Req. Cash, Annual ROC at the bid, Earnings note. The ladder below stays as built. No changes to Candidates, recommendations or any order path.
 
 ## Files (proposed)
 
@@ -140,3 +140,5 @@ Consistency (Dean, 2026-09-26): the one-line earnings note and the "Find a short
 Ordering principle (Dean, 2026-09-26: "don't chase premium"): the Fundamentals checks decide WHETHER a name is a candidate; premium only decides WHICH put among acceptable ones, and ranks names only among those that pass. The shorter-expiry search uses the same rule (best Annual ROC in the delta band among liquid puts ending before earnings).
 
 Ian's review of the updated screen 2 mock (2026-09-26, on Dean's request): **approved**, on these points: the order (unflagged candidates, then flagged or unverified, then Wait, then Not yet), no invented score column, near misses shown as Wait with the gap visible, Credit, OTM %, Contracts with a "Yours" tag, bid-ask and open interest chips, the one-line earnings note with a "Find a shorter expiry" button on every flagged stock row, and the Fundamentals label (his objection recorded; Dean decided). Two states were missing from the first version and were added as a chip legend: the grey "date may move" note (earnings within 10 days after expiry) and the three "Earnings unverified" chips (no date on file, date in the past, data unavailable). Dean still confirms the earnings margin (Ian's proposal) before build approval.
+
+Label (Dean, 2026-09-26, final): the column is called **Checks**, not "Fundamentals" and not "Why". Ian's objection to "Fundamentals" (it usually means company financials) is resolved by the rename. A real company-health column (profitable, growing, low debt) would be a separate ticket with a data feed, shown beside Checks. Where this ticket says "the Fundamentals column" or "fundamentals decide whether a name is a candidate", read "the Checks column" and "the checks decide".
