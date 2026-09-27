@@ -67,7 +67,7 @@ New: `lib/wheel/candidateRank.ts` (pure: checks, verdicts, order, return math), 
 
 ## Golden fixtures (Alan to confirm)
 
-Balanced, ETF, bid 0.85, strike 51 (cash 5,100), dte 30, fee 100 cents: premium 8,500 cents, net 8,400 cents; annualizedBps = floor(8,400 x 365 x 10,000 / (510,000 x 30)) = 2,004 (20.04%): passes a 10% hurdle. Same put at bid 0.40: net 3,900, bps = 930 (9.30%): "Wait: premium too thin". Boundary: net premium exactly on the hurdle passes; one cent below fails. Bid 0: unknown and illiquid. Spread exactly 10% of the mid passes; one basis point over fails. IV rank exactly on the floor passes. RSI exactly 70 passes; 70.01 fails (compare in integer hundredths). Earnings on the expiry date counts as inside.
+Balanced, ETF, bid 0.85, strike 51 (cash 5,100), dte 30, fee 100 cents: premium 8,500 cents, net 8,400 cents; annualizedBps = floor(8,400 x 365 x 10,000 / (510,000 x 30)) = 2,003 (20.03%): passes a 10% hurdle. Same put at bid 0.40: net 3,900, bps = 930 (9.30%): "Wait: premium too thin". Boundary: net premium exactly on the hurdle passes; one cent below fails. Bid 0: unknown and illiquid. Spread exactly 10% of the mid passes; one basis point over fails. IV rank exactly on the floor passes. RSI exactly 70 passes; 70.01 fails (compare in integer hundredths). Earnings on the expiry date counts as inside.
 
 ## Acceptance criteria
 
