@@ -62,6 +62,13 @@ const defaultDeps: WheelPlanDeps = {
   fetchImpl: (...args) => fetch(...args),
 };
 
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** "2026-11-06" -> "Nov 6" (the window is at most a few months, so the year is left to the hover text). */
+const shortDate = (iso: string): string => {
+  const [, m, d] = iso.split('-').map(Number);
+  return m >= 1 && m <= 12 && d ? `${MONTH_ABBR[m - 1]} ${d}` : iso;
+};
+
 const STARTER_ETFS = ['XLU', 'XLF', 'XLE', 'XLP', 'XLV'];
 const SAVE_DELAY_MS = 600;
 const AUTH_ERROR = /\((401|403)\)/;
@@ -580,7 +587,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                         ) : <td className="px-3 py-2 text-right text-white/30">—</td>}
                         {row.kind === 'ok' && (
                           <>
-                            <td className="px-3 py-2">{row.status.kind === 'ok' && `${row.status.put.leg.strikePrice}P · ${row.status.put.expirationDate} · Δ${(row.status.put.deltaBps / 10_000).toFixed(2)}`}</td>
+                            <td className="whitespace-nowrap px-3 py-2" title={row.status.kind === 'ok' ? `Expires ${row.status.put.expirationDate}` : undefined}>{row.status.kind === 'ok' && `${row.status.put.leg.strikePrice}P · ${shortDate(row.status.put.expirationDate)} · Δ${(row.status.put.deltaBps / 10_000).toFixed(2)}`}</td>
                             <td className="px-3 py-2 text-right" title="Out of the money: how far the stock can fall from today's price before this put is in the money">{row.belowTenths == null ? '—' : formatPctTenths(row.belowTenths)}</td>
                             <td className="px-3 py-2 text-right" title={row.creditCents == null ? undefined : `$${(row.creditCents / 10_000).toFixed(2)} a share at the bid`}>{row.creditCents == null ? '—' : formatCents(row.creditCents)}</td>
                             <td className="px-3 py-2 text-right">{formatCents(row.cashCents)}</td>
