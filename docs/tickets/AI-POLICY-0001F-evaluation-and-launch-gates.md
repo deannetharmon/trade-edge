@@ -1,6 +1,6 @@
 # AI-POLICY-0001F — Evaluation Fixtures, Harness, and Launch-Gate Registry
 
-**Status:** Draft — can run in parallel with 0001B–E after 0001A; **blocks enabling any route in Production**
+**Status:** **Implemented and merged** (`docs/implementation/AI-POLICY-0001F-implementation-report.md`) — the gate registry (`LAUNCH_GATES`) ships **empty by design**: nothing is approved, no threshold chosen, no route or UI changed. **This is what currently blocks any AI-POLICY route from being enabled in Production** (Preview can bypass with `AI_POLICY_ALLOW_UNGATED_PREVIEW=true`, ignored in Production) — adding a route's gate is a separate, reviewed, Dean-approved commit, not yet done for any route.
 **Epic:** [AI-POLICY-0001](./AI-POLICY-0001-epic.md) · **Delivers spec sections:** "Tests and rollout" (evaluation, launch gate)
 
 ## Problem

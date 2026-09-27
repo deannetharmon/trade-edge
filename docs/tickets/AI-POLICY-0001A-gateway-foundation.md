@@ -1,6 +1,6 @@
 # AI-POLICY-0001A — AI Policy Gateway Foundation
 
-**Status:** Approved to start — decisions accepted by Dean 2026-09-19. D3 and D6 gate *enabling* a route, not this build.
+**Status:** **Implemented and merged** (`docs/implementation/AI-POLICY-0001A-implementation-report.md`) — decisions accepted by Dean 2026-09-19. Ships with no route, UI, or existing file changed; nothing is enabled by this alone. D3 and D6 still gate *enabling* a route (see "still open" note in the epic) — this build does not need them resolved.
 **Epic:** [AI-POLICY-0001](./AI-POLICY-0001-epic.md) · **ADR:** [ADR-0005](../decisions/ADR-0005-ai-analysis-input-trust-classes.md)
 **Delivers spec ACs:** 1 (boundary), 2, 3, 5, 6, 10, 11, 12 (budgets) — foundation only
 

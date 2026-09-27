@@ -1,6 +1,6 @@
 # AI-POLICY-0001B — Snapshot Freeze, `scan_summary`, `grounded_chat`
 
-**Status:** Draft — depends on 0001A merged and ADR-0005 accepted
+**Status:** **Implemented and merged**, ships dark (`docs/implementation/AI-POLICY-0001B-implementation-report.md`) — 26 files / 542 tests pass in isolation, full suite green. Every route returns `unavailable(FLAG_OFF)` until flags are set; no UI (that's 0001C) and no change to scanning. **Left before this can go live for real users:** (1) Dean's manual preview validation with the env vars listed in the implementation report's "Manual checks on the preview" section — flags on for one test user, freeze → summary → chat → GET, then flags off; (2) Ian approves the citable-field list and Diane the labels (report item 3); (3) a populated launch gate for these routes (0001F's registry ships empty by design).
 **Epic:** [AI-POLICY-0001](./AI-POLICY-0001-epic.md) · **Delivers spec ACs:** 2, 3, 5, 6 (route-level), 1 (regression)
 
 ## Problem
