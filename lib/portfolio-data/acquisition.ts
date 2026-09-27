@@ -2115,8 +2115,10 @@ export async function loadPositions(
       pop: !entryEconomicsComplete || isNetDebit ? null : calcPositionPop(strategy, positionLegs, stockPrices[symbol] ?? null, creditReceived, canonicalQuantity, dte, ivMap[symbol] ?? null),
       // POP-0001: same lognormal engine as `pop` above, but the threshold is
       // the raw short strike instead of the credit-adjusted breakeven --
-      // "will price ever touch my strike" rather than "will I keep my
-      // credit". Gated the same as `pop` (entry economics + not-a-debit) so
+      // "will price finish beyond my strike at expiration" rather than
+      // "will I keep my credit" (the terminal probability, not a
+      // touch/barrier probability -- KEEP-CREDIT-0001 Dane review item 1).
+      // Gated the same as `pop` (entry economics + not-a-debit) so
       // the two numbers have identical availability -- no surprise case
       // where one shows and the other doesn't.
       popVsStrike: !entryEconomicsComplete || isNetDebit ? null : calcPositionPopVsStrike(strategy, positionLegs, stockPrices[symbol] ?? null, dte, ivMap[symbol] ?? null),

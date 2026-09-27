@@ -410,8 +410,11 @@ export function calcPositionPop(
 
 // POP-0001: same lognormal engine as calcPositionPop above, but the
 // threshold is the raw short strike instead of the credit-adjusted
-// breakeven -- "will price ever touch my strike" rather than "will I keep
-// my credit." Reuses popAboveBreakeven/popBelowBreakeven/clampPct
+// breakeven -- "will price finish beyond my strike at expiration" rather
+// than "will I keep my credit" (KEEP-CREDIT-0001 Dane review item 1: this
+// is the terminal/at-expiry probability, not a touch/barrier probability --
+// the lognormal engine below never models a first-passage/ever-touched
+// event). Reuses popAboveBreakeven/popBelowBreakeven/clampPct
 // unchanged; no new probability math, just a different threshold input.
 // No credit/quantity/contractMultiplier needed -- the strike is already a
 // per-share price, unlike breakeven which had to be derived from

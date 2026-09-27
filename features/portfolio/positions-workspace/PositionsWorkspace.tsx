@@ -730,7 +730,9 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
     })(),
     // POP-0001: two readings of the same lognormal engine, different
     // thresholds. Breakeven = "will I keep my credit" (existing p.pop).
-    // Strike = "will price ever touch my strike" (new, p.popVsStrike). Both
+    // Strike = "will price finish beyond my strike at expiration" (new,
+    // p.popVsStrike) -- the terminal probability, not a touch/barrier
+    // probability (KEEP-CREDIT-0001 Dane review item 1). Both
     // null for debit/long positions (NFLX/UBER/MRNA-style) -- same
     // limitation calcPositionPop already has, not a regression.
     pop: <>
