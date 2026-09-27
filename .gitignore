@@ -5,3 +5,8 @@ node_modules
 .codex/
 .pnpm-store/
 *-deploy.sh
+
+# SEC-0001 S2: environment files with real credentials must never be tracked.
+.env
+.env.local
+.env*.local

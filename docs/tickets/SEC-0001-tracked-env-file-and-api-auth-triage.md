@@ -1,6 +1,6 @@
 # SEC-0001 — Tracked `.env.local` Credentials and API Authentication Triage
 
-**Status:** Draft — **urgent**; step S1 needs Dean today, before any other ticket in this package
+**Status:** S1 and S2 done 2026-09-27 (live incident: credentials were rotated at TastyTrade and Google after use, `.env.local` untracked). S3 (route auth triage) not started.
 **Found while:** grounding [AI-POLICY-0001](./AI-POLICY-0001-epic.md) against `main` @ 02b8276c
 **Values are deliberately not reproduced in this document.**
 
@@ -55,3 +55,8 @@ Removes the risk that a third party holds working credentials for Dean's brokera
 ## Rollout notes
 
 S1 first and independent of code. S2 can ship immediately after. S3 per route, lowest-risk first, each behind the Vercel preview check.
+
+
+## S1/S2 completion note (2026-09-27)
+
+S1: Dean rotated the TastyTrade client secret and refresh token, and the Google OAuth client secret, during a live incident that also surfaced and fixed three unrelated bugs (see `docs/TICKET-STATUS.md`, AUTH-LOOP-0001). S2: `.env.local` removed from git tracking (`git rm --cached`), `.env`/`.env.local`/`.env*.local` added to `.gitignore`. The tracked historical values in git history are now dead credentials — S3 (the route-by-route auth triage) remains open but is no longer urgent.
