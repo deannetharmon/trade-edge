@@ -23,6 +23,8 @@ export interface WheelListEntry {
   dropBps?: number;
   /** The trader's own contract count for this name; the plan places it as asked and warns instead of limiting it. */
   contracts?: number;
+  /** ETF or stock. Sets which target delta applies; when absent the broker's own classification is used. */
+  kind?: 'etf' | 'stock';
 }
 
 export interface WheelPlan {
@@ -55,7 +57,8 @@ const FIELD_CHECKS: Record<keyof PlanParams, ParamCheck> = {
   dropBps: (v) => bps(v) && (v as number) > 0,
   stressBps: bps,
   sectorLimitBps: bps,
-  targetDeltaBps: (v) => isInt(v) && v > 0 && v < 10_000,
+  etfDeltaBps: (v) => isInt(v) && v > 0 && v < 10_000,
+  stockDeltaBps: (v) => isInt(v) && v > 0 && v < 10_000,
   dteMin: (v) => isInt(v) && v >= 0 && v <= 1000,
   dteMax: (v) => isInt(v) && v >= 0 && v <= 1000,
   monthlyGrowthBps: (v) => typeof v === 'number' && Number.isFinite(v) && v >= -10_000 && v <= 10_000,
@@ -81,6 +84,7 @@ export function sanitizeWheelEntry(input: unknown): WheelListEntry | null {
   const entry: WheelListEntry = { symbol };
   if (typeof raw.sector === 'string' && raw.sector.trim()) entry.sector = raw.sector.trim().slice(0, MAX_SECTOR_LENGTH);
   if (isInt(raw.dropBps) && raw.dropBps > 0 && raw.dropBps <= 10_000) entry.dropBps = raw.dropBps;
+  if (raw.kind === 'etf' || raw.kind === 'stock') entry.kind = raw.kind;
   if (isInt(raw.contracts) && raw.contracts >= 1 && raw.contracts <= MAX_OVERRIDE_CONTRACTS) entry.contracts = raw.contracts;
   return entry;
 }

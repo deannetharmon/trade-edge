@@ -33,8 +33,10 @@ export interface PlanParams {
   stressBps: number;
   /** Most that may sit in one sector, basis points of the account. */
   sectorLimitBps: number;
-  /** Target absolute delta for the put to sell, in basis points (2000 = 0.20). */
-  targetDeltaBps: number;
+  /** Target absolute delta for the put to sell on an ETF, in basis points (3000 = 0.30). */
+  etfDeltaBps: number;
+  /** Target absolute delta for the put to sell on a single stock, in basis points (2500 = 0.25). */
+  stockDeltaBps: number;
   dteMin: number;
   dteMax: number;
   /** Assumed simple monthly growth of the account, basis points (75 = 0.75% a month). */
@@ -64,7 +66,8 @@ export const DEFAULT_PLAN_PARAMS: PlanParams = {
   dropBps: 3000, // 30%
   stressBps: 2500, // 25%
   sectorLimitBps: 3500, // 35%
-  targetDeltaBps: 2000, // 0.20
+  etfDeltaBps: 3000, // 0.30 (Dean, 2026-09-26)
+  stockDeltaBps: 2500, // 0.25
   dteMin: 30,
   dteMax: 45,
   monthlyGrowthBps: 75, // 0.75% a month
@@ -130,7 +133,9 @@ export function validateParams(p: PlanParams): PlanValidation {
   if (isInt(p.reserveBps) && isInt(p.spreadCapBps) && p.reserveBps + p.spreadCapBps > 10_000) {
     errors.push('Reserve plus the spread cap cannot be more than 100% of the account.');
   }
-  if (!isInt(p.targetDeltaBps) || p.targetDeltaBps <= 0 || p.targetDeltaBps >= 10_000) errors.push('Target delta must be between 0 and 1.');
+  for (const [value, label] of [[p.etfDeltaBps, 'ETF'], [p.stockDeltaBps, 'Stock']] as [number, string][]) {
+    if (!isInt(value) || value <= 0 || value >= 10_000) errors.push(`${label} target delta must be between 0 and 1.`);
+  }
   if (!isInt(p.dteMin) || !isInt(p.dteMax) || p.dteMin < 0 || p.dteMin > p.dteMax) errors.push('Days to expiry: the minimum cannot be above the maximum.');
   if (typeof p.monthlyGrowthBps !== 'number' || !Number.isFinite(p.monthlyGrowthBps)) errors.push('Monthly growth must be a number.');
 
@@ -142,7 +147,7 @@ export function validateParams(p: PlanParams): PlanValidation {
   if (p.reserveBps < 500) warnings.push('A reserve under 5% leaves little cash to act on a bad month.');
   if (p.spreadCapBps > 1000) warnings.push('A total spread cap above 10% of the account raises the worst case, because spreads can lose their full risk.');
   if (p.singleSpreadCapBps > p.spreadCapBps) warnings.push('The single-spread cap is above the total spread cap, so it can never bind.');
-  if (p.targetDeltaBps > 3500) warnings.push('A target delta above 0.35 puts the strike close to the money and raises the chance of assignment.');
+  if (Math.max(p.etfDeltaBps, p.stockDeltaBps) > 3500) warnings.push('A target delta above 0.35 puts the strike close to the money and raises the chance of assignment.');
   if (p.stressBps < 1500) warnings.push('A stress fall under 15% is milder than recent broad selloffs.');
   return { errors, warnings };
 }
@@ -322,6 +327,11 @@ export function summarizeStress(p: PlanParams, limits: PlanLimits, deployedCents
     worstCasePctTenths: pctTenthsOfAccount(worstCaseCents, p.accountCents),
   };
 }
+
+export type InstrumentKind = 'etf' | 'stock';
+
+/** The target delta for a put on an ETF or a single stock. */
+export const targetDeltaFor = (p: PlanParams, kind: InstrumentKind): number => (kind === 'etf' ? p.etfDeltaBps : p.stockDeltaBps);
 
 // ── Leveraged and inverse ETFs (Ian, O7): never a wheel candidate ─────────────────────────────────
 

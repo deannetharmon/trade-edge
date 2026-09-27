@@ -21,6 +21,7 @@ import {
   resolveParams,
   stressLossCents,
   summarizeStress,
+  targetDeltaFor,
   validateParams,
   type PlanParams,
 } from '../capitalPlan';
@@ -268,8 +269,8 @@ describe('validation: hard errors block, soft warnings only warn', () => {
     [{ reserveBps: 10_001 }],
     [{ reserveBps: 6000, spreadCapBps: 5000 }],
     [{ dropBps: 0 }],
-    [{ targetDeltaBps: 0 }],
-    [{ targetDeltaBps: 10_000 }],
+    [{ etfDeltaBps: 0 }],
+    [{ stockDeltaBps: 10_000 }],
     [{ dteMin: 50, dteMax: 40 }],
     [{ monthlyGrowthBps: Number.NaN }],
     [{ profile: 'custom', customLossBps: 0 }],
@@ -281,12 +282,22 @@ describe('validation: hard errors block, soft warnings only warn', () => {
     [{ dropBps: 1500 }],
     [{ reserveBps: 300 }],
     [{ spreadCapBps: 2000 }],
-    [{ targetDeltaBps: 4000 }],
+    [{ etfDeltaBps: 4000 }],
+    [{ stockDeltaBps: 3600 }],
     [{ singleSpreadCapBps: 1500 }],
   ])('%j is only a warning, never an error', (over) => {
     const r = v(over);
     expect(r.errors).toEqual([]);
     expect(r.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe('target delta by kind (Dean, 2026-09-26: 0.30 for ETFs, 0.25 for stocks)', () => {
+  it('defaults to 0.30 for an ETF and 0.25 for a stock, and each is editable', () => {
+    expect(targetDeltaFor(resolveParams(), 'etf')).toBe(3000);
+    expect(targetDeltaFor(resolveParams(), 'stock')).toBe(2500);
+    expect(targetDeltaFor(resolveParams({ etfDeltaBps: 2800, stockDeltaBps: 2200 }), 'etf')).toBe(2800);
+    expect(targetDeltaFor(resolveParams({ etfDeltaBps: 2800, stockDeltaBps: 2200 }), 'stock')).toBe(2200);
   });
 });
 

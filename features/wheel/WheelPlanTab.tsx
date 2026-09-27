@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getAccessToken } from '@/lib/auth/tastytradeToken';
-import { fetchWheelChain, getWheelQuote, type WheelChainResult } from '@/lib/wheel/chainSearch';
+import { fetchInstrumentKind, fetchWheelChain, getWheelQuote, type WheelChainResult } from '@/lib/wheel/chainSearch';
 import {
   DEFAULT_PLAN_PARAMS,
   PLAN_PARAM_KEYS,
@@ -35,6 +35,8 @@ import {
   validateParams,
   type PlanOverrides,
   type PlanParams,
+  targetDeltaFor,
+  type InstrumentKind,
   type PlanProfile,
   type UnlockMonths,
 } from '@/lib/wheel/capitalPlan';
@@ -45,6 +47,7 @@ export interface WheelPlanDeps {
   getToken: () => Promise<string>;
   fetchChain: (symbol: string, token: string, window: { min: number; max: number }) => Promise<WheelChainResult>;
   fetchQuote: (symbol: string, token: string) => Promise<number | null>;
+  fetchKind: (symbol: string, token: string) => Promise<InstrumentKind | null>;
   fetchImpl: typeof fetch;
 }
 
@@ -52,6 +55,7 @@ const defaultDeps: WheelPlanDeps = {
   getToken: () => getAccessToken(),
   fetchChain: (symbol, token, window) => fetchWheelChain(symbol, token, window),
   fetchQuote: (symbol, token) => getWheelQuote(symbol, token),
+  fetchKind: (symbol, token) => fetchInstrumentKind(symbol, token),
   fetchImpl: (...args) => fetch(...args),
 };
 
@@ -89,7 +93,9 @@ const FIELDS: FieldSpec[] = [
   bpsField('singleSpreadCapBps', 'Single spread cap', 'Most any one spread may risk.'),
   bpsField('dropBps', 'Assumed drop of one stock', 'How far one holding is assumed to fall when sizing a position.'),
   bpsField('stressBps', 'Stress fall (all together)', 'The fall applied to every holding at once in the worst-case line.'),
-  { key: 'targetDeltaBps', label: 'Target delta of the put', help: 'The put to price is the one nearest this delta.', suffix: 'delta',
+  { key: 'etfDeltaBps', label: 'Target delta, ETFs', help: 'For an ETF, the put priced is the one nearest this delta.', suffix: 'delta',
+    toText: (v) => (v / 10_000).toFixed(2), fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n * 10_000); } },
+  { key: 'stockDeltaBps', label: 'Target delta, stocks', help: 'For a single stock, the put priced is the one nearest this delta.', suffix: 'delta',
     toText: (v) => (v / 10_000).toFixed(2), fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n * 10_000); } },
   { key: 'dteMin', label: 'Days to expiry, from', help: 'Earliest expiry considered.', suffix: 'days', toText: String, fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n); } },
   { key: 'dteMax', label: 'Days to expiry, to', help: 'Latest expiry considered.', suffix: 'days', toText: String, fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n); } },
@@ -220,11 +226,11 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
     let outcome: FetchOutcome;
     try {
       const token = await deps.getToken();
-      const [chainResult, quoteResult] = await Promise.allSettled([deps.fetchChain(symbol, token, window), deps.fetchQuote(symbol, token)]);
+      const [chainResult, quoteResult, kindResult] = await Promise.allSettled([deps.fetchChain(symbol, token, window), deps.fetchQuote(symbol, token), deps.fetchKind(symbol, token)]);
       const chain = chainResult.status === 'fulfilled' ? chainResult.value : null;
       const chainError = chainResult.status === 'rejected' ? (chainResult.reason instanceof Error ? chainResult.reason.message : 'Chain failed to load.') : null;
       if (chainError && AUTH_ERROR.test(chainError) && !run.cancelled) setTokenProblem(true);
-      outcome = { quote: quoteResult.status === 'fulfilled' ? quoteResult.value : null, chain, chainError };
+      outcome = { quote: quoteResult.status === 'fulfilled' ? quoteResult.value : null, chain, chainError, kind: kindResult.status === 'fulfilled' ? kindResult.value : null };
     } catch {
       if (!run.cancelled) setTokenProblem(true);
       outcome = { quote: null, chain: null, chainError: 'TastyTrade session missing or expired.' };
@@ -305,14 +311,17 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
       if (isLeveragedEtf(entry.symbol)) return { entry, kind: 'leveraged' as const };
       const row = data[entry.symbol];
       if (!row || row.loading) return { entry, kind: 'loading' as const };
-      const status: RowStatus = classifyRow(row.outcome, params.targetDeltaBps);
-      if (status.kind !== 'ok') return { entry, kind: 'state' as const, status, quote: row.outcome.quote };
+      const detected: InstrumentKind = row.outcome.kind ?? 'stock';
+      const instrument: InstrumentKind = entry.kind ?? detected;
+      const targetBps = targetDeltaFor(params, instrument);
+      const status: RowStatus = classifyRow(row.outcome, targetBps);
+      if (status.kind !== 'ok') return { entry, kind: 'state' as const, status, quote: row.outcome.quote, instrument, detected, targetBps };
       const cashCents = cashForOnePutCents(status.put.leg.strikePrice);
       const dropBps = entry.dropBps ?? params.dropBps;
       const maxCash = maxCashPerNameCents(params, dropBps);
       const fitsAt = fitsAtAccountCents(cashCents, params, dropBps);
       return {
-        entry, kind: 'ok' as const, status, quote: row.outcome.quote, cashCents, maxCash,
+        entry, kind: 'ok' as const, status, quote: row.outcome.quote, instrument, detected, targetBps, cashCents, maxCash,
         fit: contractsThatFit(maxCash, cashCents), fitsAt,
         fitsConcentrated: cashCents <= maxCashPerNameCents({ ...params, profile: 'concentrated' }, dropBps), unlock: monthsToUnlock(fitsAt, params.accountCents, params.monthlyGrowthBps),
       };
@@ -532,7 +541,21 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                     {rows.map((row) => (
                       <tr key={row.entry.symbol} className="border-t border-white/5" data-testid={`ladder-row-${row.entry.symbol}`}>
                         <td className="px-3 py-2 font-bold">{row.entry.symbol}</td>
-                        <td className="px-3 py-2">
+                        <td className="space-y-1 px-3 py-2">
+                          {(row.kind === 'ok' || row.kind === 'state') && (
+                            <select
+                              aria-label={`Type of ${row.entry.symbol}`}
+                              value={row.instrument}
+                              onChange={(e) => {
+                                const picked = e.target.value as InstrumentKind;
+                                updateList((list) => list.map((x) => (x.symbol === row.entry.symbol ? { ...x, kind: picked === row.detected ? undefined : picked } : x)));
+                              }}
+                              className="block w-28 rounded border border-white/10 bg-white/5 px-2 py-1 text-xs focus:border-white/30 focus:outline-none"
+                            >
+                              <option value="etf">ETF</option>
+                              <option value="stock">Stock</option>
+                            </select>
+                          )}
                           <input
                             aria-label={`Sector for ${row.entry.symbol}`}
                             defaultValue={row.entry.sector ?? ''}
@@ -592,7 +615,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                           <td colSpan={7} className="px-3 py-2">
                             {row.status.kind === 'chain-error' && <span className="text-red-300">Chain error: {row.status.message}</span>}
                             {row.status.kind === 'quote-unavailable' && <span className="text-amber-300">Quote unavailable, and no put was found. Retry.</span>}
-                            {row.status.kind === 'no-put' && <span className="text-white/50">No put found near delta {(params.targetDeltaBps / 10_000).toFixed(2)} in {params.dteMin} to {params.dteMax} days.</span>}
+                            {row.status.kind === 'no-put' && <span className="text-white/50">No put found near delta {(row.targetBps / 10_000).toFixed(2)} in {params.dteMin} to {params.dteMax} days.</span>}
                           </td>
                         )}
                         <td className="whitespace-nowrap px-3 py-2 text-right">
@@ -606,7 +629,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
               </div>
             )}
             <p className="text-[10px] text-white/40">
-              Cash for one put is the strike times 100 at the put nearest delta {(params.targetDeltaBps / 10_000).toFixed(2)}. "Fits at account" is the account size at which one contract first fits your chosen profile, and "Wheel now" means it fits today.
+              Cash for one put is the strike times 100 at the put nearest the target delta (ETFs {(params.etfDeltaBps / 10_000).toFixed(2)}, stocks {(params.stockDeltaBps / 10_000).toFixed(2)}). "Fits at account" is the account size at which one contract first fits your chosen profile, and "Wheel now" means it fits today.
               Cash goes to names in list order until ranking arrives. No open-interest or spread filter is applied yet.
             </p>
           </section>

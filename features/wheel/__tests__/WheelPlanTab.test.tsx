@@ -34,6 +34,7 @@ function makeDeps(plan: Partial<WheelPlan> | 'error', over: Partial<WheelPlanDep
     getToken: async () => 'token',
     fetchChain: async (symbol) => chain(STRIKES[symbol] ?? null),
     fetchQuote: async () => 54.84,
+    fetchKind: async () => null,
     fetchImpl: fetchImpl as unknown as typeof fetch,
     ...over,
   };
@@ -103,7 +104,7 @@ describe('WheelPlanTab', () => {
   it('"no put found" appears only when the chain loaded cleanly', async () => {
     const { deps } = makeDeps({ wheelList: [{ symbol: 'XLF' }] }, { fetchChain: async () => chain(null, 0) });
     render(<WheelPlanTab deps={deps} />);
-    expect(await screen.findByText(/No put found near delta 0.20 in 30 to 45 days/)).toBeInTheDocument();
+    expect(await screen.findByText(/No put found near delta 0.25 in 30 to 45 days/)).toBeInTheDocument();
   });
 
   it('a missing or expired TastyTrade session shows a reconnect message and retries', async () => {
@@ -265,5 +266,49 @@ describe('putting a name that does not fit on the wheel anyway', () => {
     const { deps } = makeDeps({ wheelList: [{ symbol: 'NVDA', contracts: 2 }] });
     render(<WheelPlanTab deps={deps} />);
     expect(await screen.findByText(/The plan uses \$41,000, \$1,000 more than your \$40,000 of wheel cash/)).toBeInTheDocument();
+  });
+});
+
+describe('target delta by ETF or stock (0.30 and 0.25)', () => {
+  const threePuts = (): WheelChainResult => ({
+    expirations: ['2026-11-06'],
+    chains: { '2026-11-06': [put(50, -0.2), put(49, -0.25), put(48, -0.3)] },
+    failedBatches: 0,
+  });
+
+  it('prices the 0.30 put for an ETF the broker reports as an ETF', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLF' }] }, { fetchChain: async () => threePuts(), fetchKind: async () => 'etf' });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await screen.findByTestId('ladder-row-XLF');
+    await waitFor(() => expect(within(row).getByText(/48P · 2026-11-06 · Δ0.30/)).toBeInTheDocument());
+    expect(within(row).getByLabelText('Type of XLF')).toHaveValue('etf');
+  });
+
+  it('prices the 0.25 put for a stock, and for anything the broker does not classify', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'NVDA' }, { symbol: 'XYZ' }] }, { fetchChain: async () => threePuts(), fetchKind: async (s) => (s === 'NVDA' ? 'stock' : null) });
+    render(<WheelPlanTab deps={deps} />);
+    await waitFor(() => expect(within(screen.getByTestId('ladder-row-NVDA')).getByText(/49P · 2026-11-06 · Δ0.25/)).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByTestId('ladder-row-XYZ')).getByText(/49P · 2026-11-06 · Δ0.25/)).toBeInTheDocument());
+    expect(within(screen.getByTestId('ladder-row-XYZ')).getByLabelText('Type of XYZ')).toHaveValue('stock');
+  });
+
+  it('the trader can correct the type on a row, it re-prices from the same chain, and the choice is saved', async () => {
+    const fetchChain = vi.fn(async () => threePuts());
+    const { deps, posts } = makeDeps({ wheelList: [{ symbol: 'XYZ' }] }, { fetchChain, fetchKind: async () => null });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await screen.findByTestId('ladder-row-XYZ');
+    await waitFor(() => expect(within(row).getByText(/49P/)).toBeInTheDocument());
+    await userEvent.selectOptions(within(row).getByLabelText('Type of XYZ'), 'etf');
+    await waitFor(() => expect(within(screen.getByTestId('ladder-row-XYZ')).getByText(/48P · 2026-11-06 · Δ0.30/)).toBeInTheDocument());
+    expect(fetchChain).toHaveBeenCalledTimes(1); // re-priced from the chain already loaded
+    await waitFor(() => expect(posts.length).toBeGreaterThan(0), { timeout: 3000 });
+    expect((posts[posts.length - 1] as { wheelList: unknown[] }).wheelList).toEqual([{ symbol: 'XYZ', kind: 'etf' }]);
+  });
+
+  it('a changed ETF or stock delta in the adjustable defaults re-prices the rows', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLF' }], overrides: { etfDeltaBps: 2000 } }, { fetchChain: async () => threePuts(), fetchKind: async () => 'etf' });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await screen.findByTestId('ladder-row-XLF');
+    await waitFor(() => expect(within(row).getByText(/50P · 2026-11-06 · Δ0.20/)).toBeInTheDocument());
   });
 });

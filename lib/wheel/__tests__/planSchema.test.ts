@@ -28,6 +28,13 @@ describe('parseStoredPlan never throws', () => {
   });
 });
 
+describe('the ETF or stock type on a list entry', () => {
+  it('is kept only when it is etf or stock', () => {
+    const plan = parseStoredPlan(JSON.stringify({ wheelList: [{ symbol: 'XLF', kind: 'etf' }, { symbol: 'NVDA', kind: 'stock' }, { symbol: 'AMZN', kind: 'fund' }] }));
+    expect(plan.wheelList).toEqual([{ symbol: 'XLF', kind: 'etf' }, { symbol: 'NVDA', kind: 'stock' }, { symbol: 'AMZN' }]);
+  });
+});
+
 describe('the per-name contract override', () => {
   it('is kept when it is a whole number from 1 to 100 and dropped otherwise', () => {
     const plan = parseStoredPlan(JSON.stringify({ wheelList: [
@@ -47,7 +54,7 @@ describe('sanitizeOverrides', () => {
     expect(sanitizeOverrides('x')).toEqual({});
   });
   it('rejects non-integers, out-of-range values and wrong types', () => {
-    expect(sanitizeOverrides({ reserveBps: 10.5, spreadCapBps: 10_001, dropBps: '3000', targetDeltaBps: 0, dteMin: -1 })).toEqual({});
+    expect(sanitizeOverrides({ reserveBps: 10.5, spreadCapBps: 10_001, dropBps: '3000', etfDeltaBps: 0, dteMin: -1 })).toEqual({});
   });
 });
 
@@ -81,6 +88,6 @@ describe('validatePlanPatch', () => {
     expect(r.errors.join(' ')).toMatch(/100%/);
   });
   it('a merely unusual value is saved (soft warnings never block)', () => {
-    expect(validatePlanPatch({ overrides: { spreadCapBps: 2000, targetDeltaBps: 4000, dropBps: 1500 } }).ok).toBe(true);
+    expect(validatePlanPatch({ overrides: { spreadCapBps: 2000, etfDeltaBps: 4000, dropBps: 1500 } }).ok).toBe(true);
   });
 });

@@ -52,6 +52,8 @@ export type FetchOutcome = {
   chain: WheelChainResult | null;
   /** Set when the chain fetch threw. */
   chainError: string | null;
+  /** The broker's own ETF-or-stock classification, when it could be read. */
+  kind?: 'etf' | 'stock' | null;
 };
 
 export type RowStatus =

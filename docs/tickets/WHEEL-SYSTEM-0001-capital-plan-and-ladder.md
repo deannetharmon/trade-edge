@@ -137,7 +137,8 @@ Principle: the app ships with sensible defaults, and Dean can change any paramet
 | Per-symbol drop override | none | leveraged ETFs default to their own history (O7) |
 | Stress fall | 25% | the stress test line |
 | Sector limit | 35% of A | |
-| Target delta | 0.20 | strike rule |
+| Target delta, ETFs | 0.30 | strike rule (Dean, 2026-09-26; was a single 0.20) |
+| Target delta, stocks | 0.25 | strike rule (Dean, 2026-09-26) |
 | DTE window | 30 to 45 | strike rule |
 | Assumed monthly growth g | 0.75% | months-to-unlock |
 | Later slices (recorded now) | premium hurdle 10% a year; IV rank floor about 20 | W2 |
@@ -173,3 +174,7 @@ The first build put an eleven-field parameter form above everything, so the limi
 ### Per-name contract override (2026-09-26, Dean: "put NVDA and AMZN on my wheel for now as I am testing")
 
 The defaults-and-overrides principle extended to one name: the ladder has a "Your contracts" box per row. A count set there is placed first, exactly as asked, outside the per-name, sector and wheel-cash limits, tagged "Your override", and the tab warns instead of blocking: the cash tied up and its share of the account, what the assumed drop would cost against the loss budget, wheel cash exceeded (the extra comes out of the spread cap or reserve), and a sector limit exceeded. Saved as `wheelList[].contracts` (whole number 1 to 100; anything else is ignored on read and on save). Clearing the box returns the name to the plan's own sizing. Tests: 127 in the wheel set.
+
+### Target delta by ETF or stock (2026-09-26, Dean: "use .30 for ETFs and .25 for stock")
+
+The single 0.20 target (Ian's original proposal, never confirmed by Dean) is replaced by two editable defaults: ETFs 0.30 (`etfDeltaBps` 3000) and stocks 0.25 (`stockDeltaBps` 2500). Which applies to a row: the trader's own choice on the row (a Type box, saved as `wheelList[].kind`), else the broker's classification (`is-etf` from `/instruments/equities/{symbol}`, read in the browser; the field name is from memory of the broker API and unverified), else "stock". Changing the type or the delta re-prices from the chain already loaded, with no new fetch. The old `targetDeltaBps` override key is no longer recognised; a stored value under it is ignored. The 0.10 tolerance around the target is unchanged. Tests: 134 in the wheel set.
