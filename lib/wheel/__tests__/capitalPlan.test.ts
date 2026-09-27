@@ -401,6 +401,11 @@ describe('leveraged and inverse ETFs', () => {
     expect(isLeveragedEtf('TQQQ')).toBe(true);
     expect(isLeveragedEtf(' soxl ')).toBe(true);
     expect(isLeveragedEtf('XLF')).toBe(false);
+  });
+  it('covers every leveraged or inverse fund on Dean\'s 2026-09-26 list, and not the two ordinary stocks', () => {
+    for (const symbol of ['GGLL', 'SOXL', 'TQQQ', 'TSLL', 'NAIL', 'SQQQ', 'CONL', 'AMZU', 'BITX']) expect(isLeveragedEtf(symbol)).toBe(true);
+    expect(isLeveragedEtf('CRWV')).toBe(false);
+    expect(isLeveragedEtf('TEM')).toBe(false);
     expect(isLeveragedEtf('QQQ')).toBe(false);
   });
 });
