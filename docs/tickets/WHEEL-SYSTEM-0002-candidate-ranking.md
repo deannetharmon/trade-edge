@@ -26,7 +26,7 @@ W1 shows what fits. W2 answers Dean's original question: which name on my list s
 | 3 | IVR floor | ETF 20, stock 30 | Wait: not enough premium yet |
 | 4 | Earnings timing (stocks only) | flag | Flag (or Wait, if the switch is set) |
 | 5 | Not stretched: RSI(14) at or below | 70 | Wait for a pullback |
-| 6 | Liquid put: (ask - bid) at most 10% of the mid, and open interest at least 100 | 1000 bps, 100 | Skip: put is illiquid |
+| 6 | Liquid put: bid-ask gap (ask - bid) at most 10% of the mid, and open interest (OI) at least 100 | 1000 bps, 100 | Skip: put is illiquid |
 | 7 | Fits the plan | from W1 | Not yet: unlocks in N months (W1 wording), or "Your override" |
 
 "Unknown" (data missing) never fails a name: the row says "IVR unavailable" and the verdict is decided by the other checks.
@@ -55,7 +55,7 @@ No invented composite "score" in v1: the order is the rule in 3b, so the ranking
 
 ## New editable defaults (added to the plan's parameters)
 
-`minShortDte` 7, `hurdleBps` 1000, `ivrEtf` 20, `ivrStock` 30, `rsiMax` 70, `maxSpreadBps` 1000 (of the mid), `minOpenInterest` 100, `openFeeCents` 100 (placeholder), `earningsRule` `flag` or `wait`. Same override storage, validation (hard errors only for invalid math, warnings otherwise), reset and tests as W1.
+`minShortDte` 7, `hurdleBps` 1000, `ivrEtf` 20, `ivrStock` 30, `rsiMax` 70, `maxBidAskBps` 1000 (of the mid), `minOpenInterest` 100, `openFeeCents` 100 (placeholder), `earningsRule` `flag` or `wait`. Same override storage, validation (hard errors only for invalid math, warnings otherwise), reset and tests as W1.
 
 ## Where it goes
 
@@ -67,7 +67,7 @@ New: `lib/wheel/candidateRank.ts` (pure: checks, verdicts, order, return math), 
 
 ## Golden fixtures (Alan to confirm)
 
-Balanced, ETF, bid 0.85, strike 51 (cash 5,100), dte 30, fee 100 cents: premium 8,500 cents, net 8,400 cents; annualizedBps = floor(8,400 x 365 x 10,000 / (510,000 x 30)) = 2,003 (20.03%): passes a 10% hurdle. Same put at bid 0.40: net 3,900, bps = 930 (9.30%): "Wait: premium too thin". Boundary (Alan, recomputed by script): strike 51, dte 30, cash 510,000: net premium 4,192 cents gives exactly 1000 bps and passes; 4,191 gives 999 and fails. Bid 0: unknown and illiquid. Spread exactly 10% of the mid passes; one basis point over fails. IVR exactly on the floor passes. RSI exactly 70 passes; 70.01 fails (compare in integer hundredths). Earnings on the expiry date counts as inside.
+Balanced, ETF, bid 0.85, strike 51 (cash 5,100), dte 30, fee 100 cents: premium 8,500 cents, net 8,400 cents; annualizedBps = floor(8,400 x 365 x 10,000 / (510,000 x 30)) = 2,003 (20.03%): passes a 10% hurdle. Same put at bid 0.40: net 3,900, bps = 930 (9.30%): "Wait: premium too thin". Boundary (Alan, recomputed by script): strike 51, dte 30, cash 510,000: net premium 4,192 cents gives exactly 1000 bps and passes; 4,191 gives 999 and fails. Bid 0: unknown and illiquid. Bid-ask gap exactly 10% of the mid passes; one basis point over fails. IVR exactly on the floor passes. RSI exactly 70 passes; 70.01 fails (compare in integer hundredths). Earnings on the expiry date counts as inside.
 
 ## Acceptance criteria
 
@@ -103,7 +103,7 @@ Verified by the reviewers: every cited path and function exists; both fixtures r
 3. **Bid.** `bidCents = Math.floor(bid * 100 + 1e-6)` (floor is the conservative choice; the epsilon guards float error). If `netPremiumCents <= 0` (bid at or below the fee) the return is not a pass: the verdict is Wait with the reason "bid does not cover the fee", and negative values never throw. Add a sub-cent fixture (bid 0.855 counts as 85 cents).
 4. **dte.** Calendar days on the New York basis (`daysUntilNy`, `lib/scans/earningsPrecheck.ts:29`). Under 1 day the return is unknown ("expires today"), not clamped to 1 (a clamp would inflate the annualization about 365 times); W1 allows `dteMin` 0 so this can occur. The annualization is simple, not compounded (stated on screen).
 5. **Fee.** Named, dated, editable constant `openFeeCents`; the code has none today. About $1 per contract to open and free to close is recalled from the broker schedule, not verified, and any per-leg cap is unknown. Dean or Alan to confirm from the published schedule before build.
-6. **Liquidity in integer cents.** Spread passes when `2 x (askCents - bidCents) x 10000 <= maxSpreadBps x (askCents + bidCents)`. A bid of 0 with an ask above 0 is illiquid (W1's `selectPlanPut` only skips 0 and 0, `lib/wheel/planPut.ts:31`). W2 scores only the put W1 chose; it never re-selects a more liquid one.
+6. **Liquidity in integer cents.** Bid-ask passes when `2 x (askCents - bidCents) x 10000 <= maxBidAskBps x (askCents + bidCents)`. A bid of 0 with an ask above 0 is illiquid (W1's `selectPlanPut` only skips 0 and 0, `lib/wheel/planPut.ts:31`). W2 scores only the put W1 chose; it never re-selects a more liquid one.
 
 **Unknown never reads as pass (Quinn)**
 7. `earningsOnOrBeforeExpiration` returns false for a missing date and for a past date (`lib/scans/earningsPrecheck.ts:46,51`), so a missing or stale date would silently join the "no flag" group. Distinguish three states: **no date on file**, **date in the past (stale)** and **unavailable (call failed or item missing)**. Each shows an "earnings unverified" chip, and a stock with any of them ranks with the flagged group, not ahead of verified rows. ETFs and indexes are unaffected. If the ETF-or-stock type could not be read, earnings is unknown, not "ETF: skip".
@@ -122,3 +122,5 @@ Every unknown state above; verdict precedence and the fixed Wait reason order; a
 
 ### Labels (Dean, 2026-09-26)
 "IVR" replaces "IV rank" everywhere it is shown, and "ROC" (return on capital) replaces "yield", and the column is called "Net Annual ROC" (Dean), matching the rest of the app (the Wheel page's "Annual ROC", the spread rules' ROC minimums). Code names for the broker field stay `ivRank`; the new parameters are `ivrEtf` and `ivrStock`.
+
+Label note (Dean asked what "Spread x%" means, 2026-09-26): it was the bid-ask gap as a percent of the midpoint, and "spread" collides with credit spreads. The chip and column now say "Bid-ask", and the parameter is `maxBidAskBps`.
