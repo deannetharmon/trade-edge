@@ -1,5 +1,7 @@
 # DECIDE-0001 — O12 rulings (Ian)
 
+> **SUPERSEDED (2026-09-27).** This record came from a parallel session and conflicts with the ticket on `main` (revision 7). Revision 7 is the only source of truth. Do not build from this file. Anything it had that revision 7 lacked was carried into the ticket (Phase 0 entry-date finding, and open item O25).
+
 **Ruled 2026-09-27.** This closes O12 in DECIDE-0001 revision 3 and unblocks slice S2 (the B1 shadow evaluator). All tests use integer math, per the ticket's conventions. Alan to confirm the fixtures below.
 
 ## 1. Support-break confidence
