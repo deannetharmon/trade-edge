@@ -10,7 +10,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getAccessToken } from '@/lib/auth/tastytradeToken';
-import { fetchInstrumentKind, fetchWheelChain, getWheelQuote, type WheelChainResult } from '@/lib/wheel/chainSearch';
+import { fetchWheelChain, getWheelQuote, type WheelChainResult } from '@/lib/wheel/chainSearch';
+import { fetchInstrumentKind } from '@/lib/wheel/instrumentKind';
 import {
   DEFAULT_PLAN_PARAMS,
   PLAN_PARAM_KEYS,
@@ -552,7 +553,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                               }}
                               className="block w-28 rounded border border-white/10 bg-white/5 px-2 py-1 text-xs focus:border-white/30 focus:outline-none"
                             >
-                              <option value="etf">ETF</option>
+                              <option value="etf">ETF / index</option>
                               <option value="stock">Stock</option>
                             </select>
                           )}

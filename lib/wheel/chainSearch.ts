@@ -149,20 +149,6 @@ export async function getWheelQuote(symbol: string, token: string): Promise<numb
   }
 }
 
-// Whether a symbol is an ETF or a single stock, from the broker's instrument record (`is-etf`). Returns null when the
-// record cannot be read or does not say, so the caller falls back to "stock" and the trader can correct it.
-export async function fetchInstrumentKind(symbol: string, token: string): Promise<'etf' | 'stock' | null> {
-  try {
-    const data = await ttFetchWheel(`/instruments/equities/${encodeURIComponent(symbol)}`, token);
-    const flag = data?.data?.['is-etf'];
-    if (flag === true) return 'etf';
-    if (flag === false) return 'stock';
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 export type WheelStage = 'hunting-csp' | 'own-writing-cc';
 
 export interface WheelDeltaTarget {
