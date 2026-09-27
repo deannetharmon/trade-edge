@@ -59,7 +59,7 @@ No invented composite "score" in v1: the order is the rule in 3b, so the ranking
 
 ## Where it goes
 
-A "Next candidate" table above the unlock ladder on the Plan tab. Columns: Stock, Verdict, Why (chips), Put to sell (strike, expiry, delta, and its OTM %, from W1's `percentBelowPriceTenths`), Credit (dollars per contract at the bid, and per share; W1's `creditPerContractCents`), Cash per Put, Annual ROC at the bid, Earnings note. The ladder below stays as built. No changes to Candidates, recommendations or any order path.
+A "Next candidate" table above the unlock ladder on the Plan tab. Columns: Stock, Verdict, Why (chips), Put (strike, expiry, delta, and its OTM %, from W1's `percentBelowPriceTenths`), Credit (dollars per contract at the bid, and per share; W1's `creditPerContractCents`), Cash per Put, Annual ROC at the bid, Earnings note. The ladder below stays as built. No changes to Candidates, recommendations or any order path.
 
 ## Files (proposed)
 
@@ -128,3 +128,5 @@ Label note (Dean asked what "Spread x%" means, 2026-09-26): it was the bid-ask g
 **Display rule (added with the fee removal):** show the return floored to one decimal (9.97% reads 9.9%, never 10.0%), so a name that fails the 10% hurdle can never display as 10.0%. Comparisons use the integer basis points.
 
 Labels (Dean, 2026-09-26): "Cash per Put" replaces "Cash per Put" in the ladder and this table.
+
+Labels (Dean, 2026-09-26): the column "Put to sell" and the ladder's "Put priced" are both just "Put". Dean also asked whether the "Why" column should be called "Fundamentals"; Ian says no: the chips are option-market and chart checks (IVR, RSI, bid-ask, open interest, earnings date), not company fundamentals, and there is no fundamentals data source in the app. Suggested label "Checks", or keep "Why"; a real Fundamentals check (profitable, growing, low debt) would be a separate ticket with a data feed. Awaiting Dean.

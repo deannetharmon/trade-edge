@@ -532,7 +532,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                       <th className="px-3 py-2 text-left">Stock</th>
                       <th className="px-3 py-2 text-left">Sector</th>
                       <th className="px-3 py-2 text-right">Price</th>
-                      <th className="px-3 py-2 text-left">Put priced</th>
+                      <th className="px-3 py-2 text-left">Put</th>
                       <th className="px-3 py-2 text-right" title="Out of the money: how far the stock can fall from today's price before the put is in the money">OTM %</th>
                       <th className="px-3 py-2 text-right" title="What you collect for one contract at the bid, before fees">Credit</th>
                       <th className="px-3 py-2 text-right">Cash per Put</th>
