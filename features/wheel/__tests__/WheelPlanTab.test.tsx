@@ -67,6 +67,7 @@ describe('WheelPlanTab', () => {
     await waitFor(() => expect(within(xlf).getByText('$5,100')).toBeInTheDocument());
     expect(within(xlf).getByText('$17,000')).toBeInTheDocument(); // fits at account
     expect(within(xlf).getByText('7.0%')).toBeInTheDocument(); // strike 51 against a price of 54.84 is 7.0% below
+    expect(within(xlf).getByText('$50')).toBeInTheDocument(); // credit: bid 0.50 x 100 shares
     expect(within(xlf).getByText('Wheel now')).toBeInTheDocument();
     const xlv = screen.getByTestId('ladder-row-XLV');
     await waitFor(() => expect(within(xlv).getByText('$15,900')).toBeInTheDocument());

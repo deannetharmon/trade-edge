@@ -9,6 +9,7 @@ import {
   cashForOnePutCents,
   computeLimits,
   contractsThatFit,
+  creditPerContractCents,
   fitsAtAccountCents,
   formatBps,
   formatCents,
@@ -290,6 +291,25 @@ describe('validation: hard errors block, soft warnings only warn', () => {
     const r = v(over);
     expect(r.errors).toEqual([]);
     expect(r.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe('credit for one contract at the bid', () => {
+  it('is the bid in whole cents times 100 shares', () => {
+    expect(creditPerContractCents(0.85)).toBe(8500);
+    expect(creditPerContractCents(0.5)).toBe(5000);
+    expect(creditPerContractCents(4.1)).toBe(41000);
+  });
+  it('floors a sub-cent bid so it is never overstated, and guards float error', () => {
+    expect(creditPerContractCents(0.855)).toBe(8500);
+    expect(creditPerContractCents(0.29)).toBe(2900); // 0.29 x 100 is 28.999... in floats
+  });
+  it('is null for a missing, zero or negative bid', () => {
+    expect(creditPerContractCents(null)).toBeNull();
+    expect(creditPerContractCents(0)).toBeNull();
+    expect(creditPerContractCents(-0.1)).toBeNull();
+    expect(creditPerContractCents(Number.NaN)).toBeNull();
+    expect(creditPerContractCents(0.004)).toBeNull();
   });
 });
 

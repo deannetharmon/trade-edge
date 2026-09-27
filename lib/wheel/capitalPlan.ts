@@ -199,6 +199,16 @@ export const strikeToCents = (strikeDollars: number): number => Math.round(strik
 export const cashForOnePutCents = (strikeDollars: number): number => strikeToCents(strikeDollars) * 100;
 
 /**
+ * The credit for one contract at the BID, in cents: bid to whole cents (floored, so it is never overstated) times
+ * 100 shares. A missing or non-positive bid returns null.
+ */
+export function creditPerContractCents(bidDollars: number | null | undefined): number | null {
+  if (bidDollars == null || !Number.isFinite(bidDollars) || bidDollars <= 0) return null;
+  const bidCents = Math.floor(bidDollars * 100 + 1e-6);
+  return bidCents > 0 ? bidCents * 100 : null;
+}
+
+/**
  * How far below the price the strike sits, as tenths of a percent (51 = 5.1%), half-up, in integer cents.
  * Negative when the strike is above the price (in the money). Null when there is no usable price or strike.
  */

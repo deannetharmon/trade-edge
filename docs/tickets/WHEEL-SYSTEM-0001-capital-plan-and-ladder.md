@@ -182,3 +182,7 @@ The single 0.20 target (Ian's original proposal, never confirmed by Dean) is rep
 ### OTM % (2026-09-26, Dean: "on a suggested put, the %OTM is important", then "just call it OTM%")
 
 The ladder has an "OTM %" column (out of the money): how far the strike sits below today's price, in tenths of a percent, half-up, in integer cents (`percentBelowPriceTenths`), negative if the strike is above the price, blank without a price. Information only, no check. Example from Dean's screenshot: XLU 37.5 against 39.51 is 5.1%, XLE 57.5 against 62.04 is 7.3%, AMZN 225 against 249.98 is 10.0%. Tests: 148 in the wheel set.
+
+### Premium column (2026-09-26, Dean: show the premium on the suggested put and on the other positions)
+
+The ladder has a "Premium" column (Dean's word; "credit" was my first label): what you collect for one contract at the bid, before fees, in dollars (the per-share figure is the hover text). `creditPerContractCents`: bid to whole cents, floored so it is never overstated, times 100; blank for a missing or non-positive bid. Example: bid 0.50 shows $50. It uses the bid because the W2 hurdle is measured at the bid. Tests: 151 in the wheel set.

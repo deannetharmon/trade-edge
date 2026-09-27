@@ -59,7 +59,7 @@ No invented composite "score" in v1: the order is the rule in 3b, so the ranking
 
 ## Where it goes
 
-A "Next candidate" table above the unlock ladder on the Plan tab. Columns: Stock, Verdict, Why (chips), Put to sell (strike, expiry, delta, and its OTM %, from W1's `percentBelowPriceTenths`), Cash for one put, Net yield a year at the bid, Earnings note. The ladder below stays as built. No changes to Candidates, recommendations or any order path.
+A "Next candidate" table above the unlock ladder on the Plan tab. Columns: Stock, Verdict, Why (chips), Put to sell (strike, expiry, delta, and its OTM %, from W1's `percentBelowPriceTenths`), Premium (dollars per contract at the bid, and per share; W1's `creditPerContractCents`), Cash for one put, Net yield a year at the bid, Earnings note. The ladder below stays as built. No changes to Candidates, recommendations or any order path.
 
 ## Files (proposed)
 
@@ -85,6 +85,7 @@ Balanced, ETF, bid 0.85, strike 51 (cash 5,100), dte 30, fee 100 cents: premium 
 - **O3** Diane's updated screen 2 (drop the score column or keep a score).
 - **O4** Whether RSI 70 applies to ETFs too (Ian: yes, same rule; confirm).
 - **O5** Expected-move follow-up ticket (earnings distance versus strike).
+- **O8** (Dean, 2026-09-26: "show the premium on the new option, and on the other positions") Premium, what is collected per contract at the bid before fees, is shown on every suggested put: the W1 ladder (built), each candidate row, and the "Find a shorter expiry" result. Ian: show it as dollars per contract with the per-share figure on hover.
 - **O7** (Dean, 2026-09-26: "%OTM is important") OTM % is shown on every row in W1 (built) and in this table, as information. An optional minimum distance as a check, default off, is Ian's call; also whether to show the break-even (strike less the premium) as a second figure.
 - **O6** Ranking tie-break within a group (net annualized return; then the lower cash need).
 
