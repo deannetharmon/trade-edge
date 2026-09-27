@@ -10,7 +10,7 @@ W1 shows what fits. W2 answers Dean's original question: which name on my list s
 
 ## Decisions already made by Dean and Ian (2026-09-26)
 
-1. **Hurdle:** annualized ROC (return on capital: net premium divided by the cash tied up), measured at the actual **bid**, after fees, at least **10% a year**. Below it the verdict is "wait: premium too thin". Parked cash is counted at what it earns (shown in W4, not here).
+1. **Hurdle:** annualized ROC (return on capital: the credit at the bid divided by the cash tied up), **before fees** (Dean, 2026-09-26: no opening fee in the return), at least **10% a year**. Below it the verdict is "wait: premium too thin". Parked cash is counted at what it earns (shown in W4, not here).
 2. **The list is the "would own" list.** Being on the plan's wheel list means Dean would own it. No separate tag in W2.
 3. **Earnings is a timing flag, not a gate** (Dean and Ian, on a wheel you cross earnings): ETFs and indexes skip it. For a stock whose expected earnings date is on or before the chosen expiry the row is flagged, never blocked, with one short line ("NVDA reports Oct 28, before this put expires Nov 6. The price can gap.") and the return carries "includes earnings risk", so a stock cannot clear the hurdle only because the market is pricing in a gap. Dean's correction (2026-09-26): no explanatory paragraph and no three-choice list. The only action is a **"Find a shorter expiry"** button: a longer expiry is not offered because it still crosses earnings, and nobody can know how an option prices after the report. The button prices, from the same chain fetch, the put nearest the target delta among expirations from `minShortDte` (editable default 7 days) up to the day before the earnings date, outside the normal DTE window, and shows the result on the row (strike, expiry, days, delta, OTM %, net ROC at the bid). If no expiry qualifies it says so in one line. Default is "flag and keep ranking"; a switch makes it "wait until after earnings" (editable default). A follow-up (not W2) shows the strike's distance below the price against the stock's typical earnings move.
 3b. Ranking: names without an earnings flag rank first, then flagged names; within each group by net annualized ROC, best first.
@@ -22,7 +22,7 @@ W1 shows what fits. W2 answers Dean's original question: which name on my list s
 | # | Check | Default | If not met |
 |---|---|---|---|
 | 1 | On the list | required | (not scored) |
-| 2 | Net Annual ROC at the bid | at least 10% (1000 bps) | Wait: premium too thin |
+| 2 | Annual ROC at the bid | at least 10% (1000 bps) | Wait: premium too thin |
 | 3 | IVR floor | ETF 20, stock 30 | Wait: not enough premium yet |
 | 4 | Earnings timing (stocks only) | flag | Flag (or Wait, if the switch is set) |
 | 5 | Not stretched: RSI(14) at or below | 70 | Wait for a pullback |
@@ -42,7 +42,7 @@ No invented composite "score" in v1: the order is the rule in 3b, so the ranking
 - `dte` = calendar days from today to expiry on the New York basis (`daysUntilNy`, `lib/scans/earningsPrecheck.ts`), at least 1.
 - `annualizedBps = floor(netPremiumCents x 365 x 10000 / (cashCents x dte))`. Pass when `annualizedBps >= hurdleBps`.
 - Bid 0 or missing: return unknown and the put is treated as illiquid (check 6).
-- Fee: `openFeeCents` is a named constant with its source and date (Dean or Alan to confirm from the broker's published schedule; nothing in the code has one today: `page.tsx` says fees are excluded from all P&L figures). Editable default. Placeholder until confirmed: 100 cents per contract, unverified.
+- Fee: none (Dean, 2026-09-26). `openFeeCents` stays as an editable default of 0, so a fee can be added later without a code change; with 0, net and gross are the same number.
 
 ## Data sources (all browser-side; the wheel already fetches the chain and quote)
 
@@ -55,11 +55,11 @@ No invented composite "score" in v1: the order is the rule in 3b, so the ranking
 
 ## New editable defaults (added to the plan's parameters)
 
-`minShortDte` 7, `hurdleBps` 1000, `ivrEtf` 20, `ivrStock` 30, `rsiMax` 70, `maxBidAskBps` 1000 (of the mid), `minOpenInterest` 100, `openFeeCents` 100 (placeholder), `earningsRule` `flag` or `wait`. Same override storage, validation (hard errors only for invalid math, warnings otherwise), reset and tests as W1.
+`minShortDte` 7, `hurdleBps` 1000, `ivrEtf` 20, `ivrStock` 30, `rsiMax` 70, `maxBidAskBps` 1000 (of the mid), `minOpenInterest` 100, `openFeeCents` 0, `earningsRule` `flag` or `wait`. Same override storage, validation (hard errors only for invalid math, warnings otherwise), reset and tests as W1.
 
 ## Where it goes
 
-A "Next candidate" table above the unlock ladder on the Plan tab. Columns: Stock, Verdict, Why (chips), Put to sell (strike, expiry, delta, and its OTM %, from W1's `percentBelowPriceTenths`), Credit (dollars per contract at the bid, and per share; W1's `creditPerContractCents`), Cash for one put, Net Annual ROC at the bid, Earnings note. The ladder below stays as built. No changes to Candidates, recommendations or any order path.
+A "Next candidate" table above the unlock ladder on the Plan tab. Columns: Stock, Verdict, Why (chips), Put to sell (strike, expiry, delta, and its OTM %, from W1's `percentBelowPriceTenths`), Credit (dollars per contract at the bid, and per share; W1's `creditPerContractCents`), Cash per Put, Annual ROC at the bid, Earnings note. The ladder below stays as built. No changes to Candidates, recommendations or any order path.
 
 ## Files (proposed)
 
@@ -67,7 +67,7 @@ New: `lib/wheel/candidateRank.ts` (pure: checks, verdicts, order, return math), 
 
 ## Golden fixtures (Alan to confirm)
 
-Balanced, ETF, bid 0.85, strike 51 (cash 5,100), dte 30, fee 100 cents: premium 8,500 cents, net 8,400 cents; annualizedBps = floor(8,400 x 365 x 10,000 / (510,000 x 30)) = 2,003 (20.03%): passes a 10% hurdle. Same put at bid 0.40: net 3,900, bps = 930 (9.30%): "Wait: premium too thin". Boundary (Alan, recomputed by script): strike 51, dte 30, cash 510,000: net premium 4,192 cents gives exactly 1000 bps and passes; 4,191 gives 999 and fails. Bid 0: unknown and illiquid. Bid-ask gap exactly 10% of the mid passes; one basis point over fails. IVR exactly on the floor passes. RSI exactly 70 passes; 70.01 fails (compare in integer hundredths). Earnings on the expiry date counts as inside.
+Balanced, ETF, bid 0.85, strike 51 (cash 5,100), dte 30, no fee: credit 8,500 cents; annualizedBps = floor(8,500 x 365 x 10,000 / (510,000 x 30)) = 2,027 (20.27%): passes a 10% hurdle. Same put at bid 0.40: 4,000 cents gives 954 (9.54%): "Wait: premium too thin". At bid 0.41 the return is 978 (fails) and at 0.42 it is 1,001 (passes), the reachable edge. Formula boundary (Alan, recomputed by script; pure function inputs): strike 51, dte 30, cash 510,000: 4,192 cents gives 1000 bps and passes; 4,191 gives 999 and fails (not reachable from whole-cent bids, which move in 100-cent steps; the reachable edge is 0.41 versus 0.42 above). Bid 0: unknown and illiquid. Bid-ask gap exactly 10% of the mid passes; one basis point over fails. IVR exactly on the floor passes. RSI exactly 70 passes; 70.01 fails (compare in integer hundredths). Earnings on the expiry date counts as inside.
 
 ## Acceptance criteria
 
@@ -80,7 +80,7 @@ Balanced, ETF, bid 0.85, strike 51 (cash 5,100), dte 30, fee 100 cents: premium 
 
 ## Open items
 
-- **O1** Fee constant and its source (Dean or Alan from the broker schedule).
+- **O1** CLOSED (Dean, 2026-09-26): no opening fee in the return; `openFeeCents` defaults to 0.
 - **O2** IVR unit (Alan).
 - **O3** Diane's updated screen 2 (drop the score column or keep a score).
 - **O4** Whether RSI 70 applies to ETFs too (Ian: yes, same rule; confirm).
@@ -91,7 +91,7 @@ Balanced, ETF, bid 0.85, strike 51 (cash 5,100), dte 30, fee 100 cents: premium 
 
 ## Review gates
 
-Ian: the checks, defaults and verdict wording. Alan: return math, fixtures, IVR unit, fee. Quinn: data failures, tests, regression to W1. Diane: updated screen 2 mock. Dane: developer review last. Paul: scope (W2 only; W3 and W4 stay separate).
+Ian: the checks, defaults and verdict wording. Alan: return math, fixtures, IVR unit. Quinn: data failures, tests, regression to W1. Diane: updated screen 2 mock. Dane: developer review last. Paul: scope (W2 only; W3 and W4 stay separate).
 
 ## Revision 2: review changes (Alan, Quinn, Dane; all three: approve with changes)
 
@@ -102,7 +102,7 @@ Verified by the reviewers: every cited path and function exists; both fixtures r
 2. **RSI.** `rsiSeries` returns unrounded floats and 50 for a flat series (`lib/indicators/rsi.ts:17-48`). Use the last value, `rsiHundredths = Math.round(last * 100)`, compared to `rsiMax * 100`. Fixtures: 70.00 passes, 70.01 fails. IVR and RSI floors are stored as points (20, 30, 70), not basis points.
 3. **Bid.** `bidCents = Math.floor(bid * 100 + 1e-6)` (floor is the conservative choice; the epsilon guards float error). If `netPremiumCents <= 0` (bid at or below the fee) the return is not a pass: the verdict is Wait with the reason "bid does not cover the fee", and negative values never throw. Add a sub-cent fixture (bid 0.855 counts as 85 cents).
 4. **dte.** Calendar days on the New York basis (`daysUntilNy`, `lib/scans/earningsPrecheck.ts:29`). Under 1 day the return is unknown ("expires today"), not clamped to 1 (a clamp would inflate the annualization about 365 times); W1 allows `dteMin` 0 so this can occur. The annualization is simple, not compounded (stated on screen).
-5. **Fee.** Named, dated, editable constant `openFeeCents`; the code has none today. About $1 per contract to open and free to close is recalled from the broker schedule, not verified, and any per-leg cap is unknown. Dean or Alan to confirm from the published schedule before build.
+5. **Fee.** Superseded by Dean's decision (no opening fee, `openFeeCents` default 0, editable).
 6. **Liquidity in integer cents.** Bid-ask passes when `2 x (askCents - bidCents) x 10000 <= maxBidAskBps x (askCents + bidCents)`. A bid of 0 with an ask above 0 is illiquid (W1's `selectPlanPut` only skips 0 and 0, `lib/wheel/planPut.ts:31`). W2 scores only the put W1 chose; it never re-selects a more liquid one.
 
 **Unknown never reads as pass (Quinn)**
@@ -118,9 +118,13 @@ Verified by the reviewers: every cited path and function exists; both fixtures r
 **Added tests (Quinn)**
 Every unknown state above; verdict precedence and the fixed Wait reason order; a stale metrics answer dropped when the list changes; the sub-cent, fee-exceeds-bid, dte-under-1 and bid-0-ask-above-0 cases; the 4,192 and 4,191 boundary; IVR on the floor and RSI 70.00 versus 70.01; leveraged ETFs trigger no metrics or chart call; and a regression test that W1's ladder, allocation and stress outputs are unchanged.
 
-**Still open:** O1 fee confirmation; O3 Dean's answers on the updated mock (https://claude.ai/artifact/HFep9MoqLENf5KQDvmxFbW): the order, dropping the 0-100 score column, and near misses shown as Wait; item 8 Ian's earnings margin, for Dean to confirm.
+**Still open:** O3 Dean's answers on the updated mock (https://claude.ai/artifact/HFep9MoqLENf5KQDvmxFbW): the order, dropping the 0-100 score column, and near misses shown as Wait; item 8 Ian's earnings margin, for Dean to confirm.
 
 ### Labels (Dean, 2026-09-26)
-"IVR" replaces "IV rank" everywhere it is shown, and "ROC" (return on capital) replaces "yield", and the column is called "Net Annual ROC" (Dean), matching the rest of the app (the Wheel page's "Annual ROC", the spread rules' ROC minimums). Code names for the broker field stay `ivRank`; the new parameters are `ivrEtf` and `ivrStock`.
+"IVR" replaces "IV rank" everywhere it is shown, and "ROC" (return on capital) replaces "yield", and the column is called "Annual ROC" (it was briefly "Net Annual ROC" while a fee was in the return; with no fee there is nothing to net), matching the rest of the app (the Wheel page's "Annual ROC", the spread rules' ROC minimums). Code names for the broker field stay `ivRank`; the new parameters are `ivrEtf` and `ivrStock`.
 
 Label note (Dean asked what "Spread x%" means, 2026-09-26): it was the bid-ask gap as a percent of the midpoint, and "spread" collides with credit spreads. The chip and column now say "Bid-ask", and the parameter is `maxBidAskBps`.
+
+**Display rule (added with the fee removal):** show the return floored to one decimal (9.97% reads 9.9%, never 10.0%), so a name that fails the 10% hurdle can never display as 10.0%. Comparisons use the integer basis points.
+
+Labels (Dean, 2026-09-26): "Cash per Put" replaces "Cash per Put" in the ladder and this table.

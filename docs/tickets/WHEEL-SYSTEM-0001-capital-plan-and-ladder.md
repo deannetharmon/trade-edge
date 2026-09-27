@@ -186,3 +186,5 @@ The ladder has an "OTM %" column (out of the money): how far the strike sits bel
 ### Credit column (2026-09-26, Dean: show the credit on the suggested put and on the other positions)
 
 The ladder has a "Credit" column (Dean asked for the premium, then chose "credit" because the whole app says credit): what you collect for one contract at the bid, before fees, in dollars (the per-share figure is the hover text). `creditPerContractCents`: bid to whole cents, floored so it is never overstated, times 100; blank for a missing or non-positive bid. Example: bid 0.50 shows $50. It uses the bid because the W2 hurdle is measured at the bid. Tests: 151 in the wheel set.
+
+### Label (2026-09-26, Dean): the ladder column "Cash for one put" is now "Cash per Put".

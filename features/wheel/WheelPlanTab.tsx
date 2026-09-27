@@ -535,7 +535,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                       <th className="px-3 py-2 text-left">Put priced</th>
                       <th className="px-3 py-2 text-right" title="Out of the money: how far the stock can fall from today's price before the put is in the money">OTM %</th>
                       <th className="px-3 py-2 text-right" title="What you collect for one contract at the bid, before fees">Credit</th>
-                      <th className="px-3 py-2 text-right">Cash for one put</th>
+                      <th className="px-3 py-2 text-right">Cash per Put</th>
                       <th className="px-3 py-2 text-right">Fits</th>
                       <th className="px-3 py-2 text-right">In plan</th>
                       <th className="px-3 py-2 text-right">Your contracts</th>
@@ -638,7 +638,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
               </div>
             )}
             <p className="text-[10px] text-white/40">
-              Credit is what you collect for one contract at the bid, before fees. Cash for one put is the strike times 100 at the put nearest the target delta (ETFs {(params.etfDeltaBps / 10_000).toFixed(2)}, stocks {(params.stockDeltaBps / 10_000).toFixed(2)}). "Fits at account" is the account size at which one contract first fits your chosen profile, and "Wheel now" means it fits today.
+              Credit is what you collect for one contract at the bid, before fees. Cash per Put is the strike times 100 at the put nearest the target delta (ETFs {(params.etfDeltaBps / 10_000).toFixed(2)}, stocks {(params.stockDeltaBps / 10_000).toFixed(2)}). "Fits at account" is the account size at which one contract first fits your chosen profile, and "Wheel now" means it fits today.
               Cash goes to names in list order until ranking arrives. No open-interest or spread filter is applied yet.
             </p>
           </section>
