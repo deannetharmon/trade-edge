@@ -409,7 +409,8 @@ No automated order placement. No change to scan qualification or scoring. No cha
 | O21 | A "covered elsewhere" record for V | Quinn, Ian | Open; later slice |
 | O23 | S0 endpoint contract and the entry-support store (the values in "Endpoint contract" above are a proposal) | Quinn | Open, blocks S0 |
 | O24 | S3-0a: the Refresh button's handler and the `recommendationTone` replacement | Dean, Diane | Proposals in the slice table; confirm |
-| O25 | Default-Acquire CSP whose mark is already past the Income stop: the detail should say that choosing Income now shows the stop state at once (proposed copy: "Choosing Income now shows Stop level reached; the mark is already past the stop.") | Ian, Diane | Proposed; from a parallel review, not yet ruled |
+| O25 | Default-Acquire CSP whose mark is already past the Income stop: the detail says choosing Income shows the stop state at once | Ian, Diane | **Closed 2026-09-27:** already in the mock (D1, D2) |
+| O26 | Ian's mock review (2026-09-27): six copy fixes applied to the mock (confirm step before switching an Income put past its stop to Acquire; the 15-minute "unclear" sentence removed from C until O15; J states that no extra protection is needed; U's automatic-exercise wording; X's mixed message; O shows the dividend against the extrinsic value). Mock source now in `docs/tickets/mockups/decide-0001-mock-rev6.html` | Ian | **Applied; Ian to re-review for approval** |
 | O22 | Cross-day stop confirmation intended? "Expires soon" beats a roll at 7 DTE or less? | Ian | Open |
 
 ## Review gates
