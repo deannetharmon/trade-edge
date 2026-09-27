@@ -531,7 +531,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                       <th className="px-3 py-2 text-left">Sector</th>
                       <th className="px-3 py-2 text-right">Price</th>
                       <th className="px-3 py-2 text-left">Put priced</th>
-                      <th className="px-3 py-2 text-right">Below price</th>
+                      <th className="px-3 py-2 text-right" title="Out of the money: how far the stock can fall from today's price before the put is in the money">OTM %</th>
                       <th className="px-3 py-2 text-right">Cash for one put</th>
                       <th className="px-3 py-2 text-right">Fits</th>
                       <th className="px-3 py-2 text-right">In plan</th>
@@ -578,7 +578,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                         {row.kind === 'ok' && (
                           <>
                             <td className="px-3 py-2">{row.status.kind === 'ok' && `${row.status.put.leg.strikePrice}P · ${row.status.put.expirationDate} · Δ${(row.status.put.deltaBps / 10_000).toFixed(2)}`}</td>
-                            <td className="px-3 py-2 text-right" title="How far the stock can fall from today's price before this put is in the money">{row.belowTenths == null ? '—' : formatPctTenths(row.belowTenths)}</td>
+                            <td className="px-3 py-2 text-right" title="Out of the money: how far the stock can fall from today's price before this put is in the money">{row.belowTenths == null ? '—' : formatPctTenths(row.belowTenths)}</td>
                             <td className="px-3 py-2 text-right">{formatCents(row.cashCents)}</td>
                             <td className="px-3 py-2 text-right">{row.fit}</td>
                             <td className="px-3 py-2 text-right font-bold">{inPlan(row.entry.symbol)}</td>
