@@ -76,6 +76,7 @@ import {
 // their literal ttPost/ttPostComplex call INSIDE its callback, so there is
 // no broker-reaching statement outside of it.
 import { submitCloseOrderIfSafe } from '@/lib/portfolio/closeOrderSubmission';
+import { explainRoll } from '@/lib/portfolio/rollExplanation';
 import {
   DEFAULT_ENTRY_STOP_MULTIPLE,
   describeStopLossPolicy,
@@ -4387,6 +4388,48 @@ function BatchConfirmModal({
                               );
                             }
                             return null;
+                          })()}
+
+                          {/* KEEP-CREDIT-0001 Part A: first-time-roll explanation. Reads whatever
+                              is currently in `ri` -- selecting a candidate card above populates it,
+                              or the trader can type values directly. Shows only when the old
+                              position is at a loss (a winner is closed, not rolled). */}
+                          {ri?.credit && ri?.shortStrike && ri?.longStrike && (() => {
+                            const newShortStrike = parseFloat(ri.shortStrike);
+                            const newLongStrike = parseFloat(ri.longStrike);
+                            const newCreditPerShare = parseFloat(ri.credit);
+                            if (!Number.isFinite(newShortStrike) || !Number.isFinite(newLongStrike) || !Number.isFinite(newCreditPerShare)) return null;
+                            const r = explainRoll({ position: item.pos, newShortStrike, newLongStrike, newCreditPerShare });
+                            if (!r || r.lossAtCloseTotal <= 0) return null;
+                            const newDte = ri.expiry ? Math.round((new Date(ri.expiry).getTime() - Date.now()) / 86400000) : null;
+                            const nextCheck = new Date(Date.now() + 21 * 86400000).toISOString().slice(0, 10);
+                            const minCreditRule = 0.10;
+                            return (
+                              <div className="mt-2 rounded-lg border border-white/10 bg-white/[0.02] p-3 space-y-1.5">
+                                <p className={`text-[9px] ${th.textFaint}`}>Close the old spread</p>
+                                <p className="text-[10px]">Pay ${r.closeCostTotal.toFixed(2)} (${(r.closeCostTotal / (r.qty * 100)).toFixed(2)} a share, the closing mid) to close. You lose ${r.lossAtCloseTotal.toFixed(2)} on this trade, and that loss is now final.</p>
+                                <p className={`text-[9px] ${th.textFaint} pt-1`}>Open the new spread</p>
+                                <p className="text-[10px]">Sell the {newShortStrike}/{newLongStrike} {r.optionType === 'P' ? 'put' : 'call'} spread{ri.expiry ? ` expiring ${ri.expiry}` : ''} and collect ${r.openCreditTotal.toFixed(2)} (${newCreditPerShare.toFixed(2)} a share, the limit price).</p>
+                                <p className={`text-[9px] ${th.textFaint} pt-1`}>Fees and net</p>
+                                <p className="text-[10px]">Fees ${r.feesTotal.toFixed(2)} (${(r.feesTotal / (r.qty * 100)).toFixed(2)} a share, TastyTrade's published rate, not verified against a real fill). Net {r.isNetDebit ? 'debit' : 'credit'} ${Math.abs(r.netRollTotal).toFixed(2)} (${Math.abs(r.netRollPerShare).toFixed(2)} a share) after fees.</p>
+                                <p className={`text-[9px] ${th.textFaint} pt-1`}>What changes</p>
+                                <p className="text-[10px]">Most you can lose: ${r.newMaxLossTotal.toFixed(2)}{r.oldMaxLossTotal != null ? ` (was $${r.oldMaxLossTotal.toFixed(2)})` : ''}. Breakeven ${r.newBreakeven.toFixed(2)}{r.oldBreakeven != null ? ` (was $${r.oldBreakeven.toFixed(2)})` : ''}. Buying power needed: about the same.</p>
+                                <p className={`text-[9px] ${th.textFaint} pt-1`}>Your rules after the roll</p>
+                                <p className="text-[10px]">Your stop moves to a ${r.newStopTriggerPrice.toFixed(2)} mark, a total loss of about ${r.newStopTotalLoss.toFixed(2)}{r.oldStopTotalLoss != null ? ` (was $${r.oldStopTotalLoss.toFixed(2)})` : ''}. Next 21-day check: {nextCheck}.</p>
+                                <p className={`text-[9px] ${th.textFaint} pt-1`}>If you close instead</p>
+                                <p className="text-[10px]">Close now and you take the ${r.lossAtCloseTotal.toFixed(2)} loss and are done. Roll and you carry ${r.newMaxLossTotal.toFixed(2)} of risk{newDte != null ? ` for ${newDte} more days` : ''} and collect ${Math.abs(r.netRollTotal).toFixed(2)}.</p>
+                                {r.isWiderSpread && (
+                                  <p className="text-[10px] text-amber-400">⚠ Wider spread: the new spread is wider than the old one (${r.newWidth} vs ${r.oldWidth}), so the most you can lose rises even though you collect a credit.</p>
+                                )}
+                                {r.isNetDebit && (
+                                  <p className="text-[10px] text-amber-400">⚠ Net debit: you pay ${Math.abs(r.netRollTotal).toFixed(2)} more than you collect (${Math.abs(r.netRollPerShare).toFixed(2)} a share). You are risking more to stay in this trade.</p>
+                                )}
+                                {!r.isNetDebit && Math.abs(r.netRollPerShare) < minCreditRule && (
+                                  <p className="text-[10px] text-amber-400">⚠ Net credit after fees: ${r.netRollPerShare.toFixed(2)} a share. Your rule asks for ${minCreditRule.toFixed(2)}.</p>
+                                )}
+                                <p className={`text-[9px] ${th.textFaint} border-l-2 ${th.borderLight} pl-2 pt-1`}>A roll does not undo the ${r.lossAtCloseTotal.toFixed(2)} loss. It is a new trade that gives you more time, and it can lose too.</p>
+                              </div>
+                            );
                           })()}
                         </div>
                       </div>
