@@ -27,7 +27,7 @@ This replaces the interim rule in the ticket ("clears when `c[n] ≥ R`").
 
 **No.** The stop fires at a mark of `2·C`, which is a loss of `1·C`. The stop is unreachable when `2·C ≥ width`. In that case the most the spread can ever lose is `width − C ≤ C`, which is **no more than the loss the stop would have allowed**. Defined risk already caps the position at or below the stop.
 
-- For an IC, use the wider wing: max loss = `max(put width, call width) − C`.
+- For an IC, check each wing separately, as the ticket already does: a wing is flagged when `2·C ≥` that wing's width, and that wing's max loss is `wing width − C ≤ C`.
 - Keep the amber context line ("Stop cannot trigger; max loss is $X per contract"). The broken-stock, 21-DTE and delta rules still apply.
 - A credit of half the width or more means a near-the-money entry. Whether the scanner should warn about that at entry is a separate scan-qualification question. It is not part of this ticket.
 
@@ -68,4 +68,4 @@ A support break is LOW if either the distance or the volume ratio is LOW.
 |---|---|---|---|
 | 5-wide, C = $2.50 | $250 | $250 | none (equal) |
 | 5-wide, C = $2.55 | $245 | $255 | none (max loss is lower) |
-| IC 5/10 wings, C = $3.00 | 10 − 3 = $700 | 2C = 6 < 10, so reachable | not flagged |
+| IC, put wing 5, call wing 10, C = $3.00 | put wing $200; call wing $700 | put wing flagged (6 ≥ 5); call wing reachable (6 < 10) | none: the put wing's $200 is below the $300 stop loss |
