@@ -1731,26 +1731,6 @@ function isActionRelevant(pos: Position, action: ActionType, canonicalAction?: A
   return action === 'CLOSE_ROLL';
 }
 
-// Separate function so getRecommendation stays clean — called in PositionCard render
-function getExtendSignal(pos: Position): string | null {
-  if (!pos.hasGtc) return null;
-  if (!hasSupportedCreditEntryEconomics(pos)) return null;
-  // Never suggest extending on short-dated entries — the goal is fast profit capture, not riding theta longer
-  if (isShortDateEntry(pos)) return null;
-  const pnlPct = entryPnlPct(pos);
-  if (pnlPct == null) return null;
-  // Only suggest extension when: profit > 50%, DTE > 25, IVR >= 35, buffer > 5%
-  if (
-    pnlPct >= 50 &&
-    pos.dte >= 25 &&
-    (pos.ivr == null || pos.ivr >= 35) &&
-    (pos.buffer == null || pos.buffer >= 5)
-  ) {
-    return `↑ Consider extending — ${pnlPct.toFixed(0)}% profit with ${pos.dte}d left`;
-  }
-  return null;
-}
-
 // ── Canonical recommendation explanation ─────────────────────────────────
 const TRADING_CHAT_PROMPT = `You are a professional portfolio manager with three decades of experience trading options income strategies across multiple full market cycles. Your operating principle is capital preservation first, applied with a seasoned risk manager's judgment — not reflexively flagging every minor fluctuation as a reason to act. You advise a trader who uses the Options Hunter methodology as a foundation — but you treat those rules as informed guidelines, not rigid constraints.
 
@@ -8249,33 +8229,13 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
           <span className="text-xs text-purple-300 font-bold tracking-wider">SHORT-DATED ENTRY — {pos.entryDte}d at entry · {pos.dte} DTE left · maximize profit fast</span>
         </div>
       )}
-      {pos.hitTarget && !pos.needsClose && (
-        <div className="bg-emerald-500/10 border-b border-emerald-500/40 px-4 py-1.5 flex items-center gap-2">
-          <span className="text-emerald-400 text-xs">✓</span>
-          <span className="text-xs text-emerald-400 font-bold tracking-wider">{Math.round(pos.profitTarget * 100)}% PROFIT TARGET HIT</span>
-        </div>
-      )}
-      {!pos.needsClose && (() => {
-        // CSP past the 21-DTE mark gets an intent-aware banner instead of CLOSE NOW.
-        const puts = pos.legs.filter(l => l.optionType === 'P');
-        const calls = pos.legs.filter(l => l.optionType === 'C');
-        const isCsp = puts.some(l => l.direction === 'Short') && puts.filter(l => l.direction === 'Long').length === 0 && calls.length === 0;
-        if (!isCsp || pos.dte > 21 || pos.entryDte <= 21) return null;
-        if (pos.intent === 'acquisition') {
-          return (
-            <div className="bg-blue-500/10 border-b border-blue-500/30 px-4 py-1.5 flex items-center gap-2">
-              <span className="text-blue-400 text-xs">◆</span>
-              <span className="text-xs text-blue-300 font-bold tracking-wider">CSP · ACQUIRE — {pos.dte} DTE · assignment is the goal, not a close trigger</span>
-            </div>
-          );
-        }
-        return (
-          <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 flex items-center gap-2">
-            <span className="text-amber-400 text-xs">⚠</span>
-            <span className="text-xs text-amber-400 font-bold tracking-wider">CSP — {pos.dte} DTE · evaluate roll for premium or take assignment; not an auto-close</span>
-          </div>
-        );
-      })()}
+      {/* DECIDE-0001 S3-0b: the duplicate "PROFIT TARGET HIT" banner and the
+          CSP 21-DTE banners (intent-aware and generic) were deleted here --
+          both restated, in banner form, what the canonical recommendation
+          engine (pos.recommendation) already says below, and could show a
+          different verdict than it during a stale render. One recommendation
+          engine drives the visible recommendation; isShortDateEntry's own
+          banner above is unaffected. */}
 
       {/* ES-0001 (corrective round): ambiguous position structure -- per
           Product Owner ruling, disclosure is not a substitute for a hard
@@ -8906,7 +8866,6 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                 <span className={`text-[10px] font-bold whitespace-nowrap shrink-0 ${ACTION_META[rec.action].color}`}>{suggestedLabel}</span>
                 <span className={`text-[9px] ${th.textFaint} truncate`}>{rec.detail}</span>
               </div>
-              {(() => { const sig = getExtendSignal(pos); return sig ? <p className="text-[9px] text-blue-400 mt-0.5 leading-tight whitespace-nowrap truncate" title={sig}>{sig}</p> : null; })()}
               {pos.pricingDecisionEvidence?.verificationUnresolved && (() => {
                 const captured = pos.pricingDecisionEvidence?.marketableQuoteCapturedAt ?? null;
                 const parsed = captured ? Date.parse(captured) : NaN;
