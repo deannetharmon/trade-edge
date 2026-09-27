@@ -26,7 +26,6 @@ One-time sweep of every file in `docs/tickets/` (127 files) plus GitHub issues, 
 | CSP-WORKFLOW-0001 | Explicitly "partially implemented" |
 | ENTRY-0002 | Deferred until a reviewable complete-snapshot cohort exists (data-gated, not a decision) |
 | LCC-0001B/C/D/E | Each "Ready after" the previous slice; 0001A itself is implemented but pending Gate A acceptance, so B-E have not started |
-| PMCC-0001-leap-call-income-readiness-draft.md | Draft, never built. **Naming collision:** a second, unrelated ticket is also numbered PMCC-0001 (`PMCC-0001-broker-verified-existing-leap-covered-calls.md`, in progress). Worth renaming one so "PMCC-0001" stops being ambiguous |
 | STOCKS-ORDERS-0001 | Proposed, touches the order path; needs Diane's mocks and Alan/Ian's review before any build |
 | TRADELOG-0002 | Proposed, not started |
 | LEAPS-PI-0001 | A Dane-facing implementation plan; says implementation is not authorized by the doc alone — confirm whether its plan was ever actually greenlit and run |
@@ -36,6 +35,7 @@ One-time sweep of every file in `docs/tickets/` (127 files) plus GitHub issues, 
 | Ticket | Note |
 |---|---|
 | DECIDE-0001-G6-dane-review.md | Marked SUPERSEDED 2026-09-27; parallel-session record, revision 7 is truth |
+| PMCC-0001-leap-call-income-readiness-draft.md | Marked SUPERSEDED 2026-09-27; scope shipped as LEAPS-POS-0001/LEAPS-CYCLES-0001/LEAPS-DASH-0001-4 |
 | DECIDE-0001-O10-mock-approval.md | Same |
 | DECIDE-0001-O12-ian-rulings.md | Same |
 | LEAPS-PMCC-RECOVERY-0001-held-leaps-recovery-vs-income.md | Repo mirror of GitHub issue #49; had drifted out of sync (still had the self-approved "READY FOR IMPLEMENTATION" text the issue itself later corrected), reconciled 2026-09-27 to match the issue exactly |
@@ -58,10 +58,10 @@ Grouped by ticket family; the code check used is noted where there was no implem
 
 **Built and live this session** (not in the sweep above; tracked in ROADMAP items 9-11, 14): POSITION-INTENT-0001, RSI-TURN-0001 phase 1, CUT-LOSSES-REVIEW-0001 (partial), WHEEL-SYSTEM-0001 (W1), WHEEL-SYSTEM-0002 (W2).
 
-## Two more loose ends this sweep turned up
+## Two more loose ends this sweep turned up (both resolved 2026-09-27)
 
-1. **PMCC-0001 naming collision** (see the Outstanding table). Rename one before it causes a real mix-up.
-2. **`docs/tickets/README.md` is stale** (see Reference section). Low priority, purely a documentation-hygiene item.
+1. ~~**PMCC-0001 naming collision.**~~ Resolved: the draft (`PMCC-0001-leap-call-income-readiness-draft.md`) is marked SUPERSEDED — its scope shipped as LEAPS-POS-0001/LEAPS-CYCLES-0001/LEAPS-DASH-0001-4. The active one (`PMCC-0001-broker-verified-existing-leap-covered-calls.md`) keeps the number.
+2. ~~**`docs/tickets/README.md` is stale.**~~ Resolved: replaced with a pointer to `docs/ROADMAP.md` and this file.
 
 ## Changes since this sweep
 

@@ -5,7 +5,7 @@
 **Requirements:** Paul  
 **Design review:** Diane  
 **Data/identity review:** Quinn  
-**Status:** Draft — design mockup and team review required before implementation
+**Status:** SUPERSEDED (2026-09-27). Also a duplicate ticket number — a second, unrelated, active ticket is also called PMCC-0001 (`PMCC-0001-broker-verified-existing-leap-covered-calls.md`), which keeps the number. This draft's scope (a held-LEAP readiness card, reused candidate review, separate cycle history/P&L) shipped as `LEAPS-POS-0001` (income card), `LEAPS-CYCLES-0001` (income history) and `LEAPS-DASH-0001` through `-0004` (advisor cards), all implemented and approved by Dean 2026-09-20. Kept for its product-decision reasoning, not as a build spec.
 
 ## Problem
 
