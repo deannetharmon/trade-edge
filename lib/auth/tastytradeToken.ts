@@ -51,7 +51,15 @@ export async function getAccessToken(): Promise<string> {
   } catch {
     sessionStorage.removeItem('tt_access_token');
     try { localStorage.removeItem(LS_ACCESS_TOKEN); localStorage.removeItem(LS_ACCESS_TOKEN_EXPIRY); } catch {}
-    if (typeof window !== 'undefined') window.location.href = '/login';
+    // AUTH-LOOP-0001 (2026-09-27): this function is called unconditionally on every page, including
+    // /login itself, by globally-mounted providers (e.g. ActiveBrokerAccountProvider) that try to
+    // resolve a broker account on mount. Redirecting to /login with no guard meant that on /login
+    // itself -- where there is, correctly, no token yet -- this fired, reloaded the page, and fired
+    // again: an infinite reload loop with a visibly flashing favicon, entirely independent of
+    // whatever /login's own component was doing. Only redirect when we are not already there.
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      window.location.href = '/login';
+    }
     throw new Error('Session expired');
   }
 
