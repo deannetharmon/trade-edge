@@ -39,3 +39,13 @@ jobs:
 
       - name: Tests
         run: npm test
+
+      # CI-FLAKY-0002 -- re-runs the scan tests with the clock pinned to a known-risky evening UTC
+      # time (see lib/testing/fixedClock.ts and vitest.setup.ts's FAKE_NOW handling), so a
+      # time-of-day date-boundary flake is caught on every push, not only when someone happens to
+      # push late at night. Scoped to lib/scans/__tests__, where every flake of this kind so far has
+      # lived; widen the path if one shows up elsewhere.
+      - name: Tests (evening UTC clock guard)
+        run: npx vitest run lib/scans/__tests__
+        env:
+          FAKE_NOW: '2026-06-15T23:30:00Z'

@@ -44,3 +44,17 @@ The same `setDate(getDate() + n)` pattern appears in about 20 test files, includ
 ## Estimate
 
 Small: one helper, one setup file, one CI step, and edits to the files that fail the sweep (expected 3 to 6).
+
+
+## Build notes (2026-09-27)
+
+**Honest result of step 1 (reproduce first, Quinn's rule):** `ccConfigTruthfulness.test.ts` did NOT reproduce at any pinned hour tested (00:02Z, 00:24Z — the exact historical failure times — plus 12:00Z, 13:00Z, 18:00Z, 23:30Z, 23:59Z, all on 2026-06-15). Rather than force a speculative fix onto a file that currently passes everywhere, the sweep in step 3 was skipped: no product-adjacent test file was edited.
+
+**What was built instead**, matching steps 2 and 4 of the scope (still real, still useful, does not require the disproven step 3):
+- `lib/testing/fixedClock.ts` — `pinClock`/`unpinClock`/`isoDateFromNow`, exactly as specified. 5 tests.
+- `vitest.setup.ts` — when the `FAKE_NOW` environment variable is set, pins the clock for every test in that run (only `Date`, never timers). No-op when unset; the normal `npm test` run is unaffected (confirmed: full suite passes both with and without `FAKE_NOW`).
+- `.github/workflows/ci.yml` — a second CI step, "Tests (evening UTC clock guard)", re-runs `lib/scans/__tests__` with `FAKE_NOW=2026-06-15T23:30:00Z`. All 74 files / 1087 tests in that directory pass under it today.
+
+This is a guard against a recurrence, not a fix for a reproduced bug — because none reproduced. If the evening flake returns, this CI step will go red on the exact push that reintroduces it, with a clear cause (the pinned run) rather than a confusing, unrepeatable red build. If it's still silent after a few weeks, the guard step can be narrowed or dropped; it is cheap (adds well under a minute to CI).
+
+**Open question for Quinn:** was the original flake perhaps already fixed by `29db9b3` (which the ticket already credits with fixing two other evening flakes) touching something more broadly than just the Positions workspace tests? Worth a quick look before assuming the underlying cause is fully gone rather than just not reproduced today.
