@@ -2953,14 +2953,20 @@ function stratColor(strategy: string) {
 }
 
 function pnlColor(pnl: number | null) { return pnl == null ? 'text-slate-400' : pnl >= 0 ? 'text-emerald-400' : 'text-red-400'; }
-function dteColor(dte: number) { if (dte <= 7) return 'text-red-500 font-bold'; if (dte <= 21) return 'text-yellow-400 font-bold'; return 'text-slate-400'; }
+// DECIDE-0001 S3-0c: red removed (Paul: "no red on position recommendations
+// and their surfaces") -- amber-400 at 7 DTE or less keeps the tier visually
+// distinct from the amber/yellow-400 21-DTE tier without alarm-red.
+function dteColor(dte: number) { if (dte <= 7) return 'text-amber-400 font-bold'; if (dte <= 21) return 'text-yellow-400 font-bold'; return 'text-slate-400'; }
 
 const ACTION_META: Record<ActionType, { label: string; color: string; btnClass: string }> = {
   HOLD:        { label: '● Hold',         color: 'text-slate-400',   btnClass: 'border-slate-600 text-slate-400' },
   WATCH:       { label: '⚠ Watch',        color: 'text-yellow-400',  btnClass: 'border-yellow-700 text-yellow-400' },
   MANAGE:      { label: '⚡ Manage',       color: 'text-orange-400',  btnClass: 'border-orange-600 text-orange-400' },
   TAKE_PROFIT: { label: '✓ Take Profit',  color: 'text-emerald-400', btnClass: 'border-emerald-600 text-emerald-400 hover:bg-emerald-600/20' },
-  CUT_LOSSES:  { label: '✕ Cut Losses',   color: 'text-red-400',     btnClass: 'border-red-600 text-red-400 hover:bg-red-600/20' },
+  // DECIDE-0001 S3-0c: red removed (Paul: "no red on position recommendations
+  // and their surfaces"); the label rename to "Close at a loss" is a separate
+  // copy change, not done here.
+  CUT_LOSSES:  { label: '✕ Cut Losses',   color: 'text-amber-400',   btnClass: 'border-amber-600 text-amber-400 hover:bg-amber-600/20' },
   CLOSE_ROLL:  { label: '↻ Close/Roll',   color: 'text-purple-400',  btnClass: 'border-purple-600 text-purple-400 hover:bg-purple-600/20' },
   PLACE_GTC:   { label: '⏱ Place GTC',   color: 'text-blue-400',    btnClass: 'ac-btn hover:ac-bg-20' },
 };
@@ -8194,11 +8200,13 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
     onProfitTargetChange(pos.key, val);
   };
 
-  const _bannerNetEdge = netEdgeLive(pos);
-  const _reviewNotClose = pos.needsClose && _bannerNetEdge != null && _bannerNetEdge > 0;
+  // DECIDE-0001 S3-0c: red removed from the card border (Paul: "no red on
+  // position recommendations and their surfaces") -- both needsClose cases
+  // are now amber; the CLOSE NOW banner's own red text/background above is
+  // untouched here, deferred to the big cutover's G0/G1/G2 restyle (O7).
   const borderClass = checked
     ? 'border-blue-500/60'
-    : pos.needsClose ? (_reviewNotClose ? 'border-amber-500/60' : 'border-red-500/60')
+    : pos.needsClose ? 'border-amber-500/60'
     : pos.hitTarget ? 'border-emerald-500/60'
     : th.border;
 
@@ -8806,7 +8814,8 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
             {/* ── ORDERS ─────────────────────────────── */}
             <div className="border-t-2 border-amber-600/50 pt-1">
               <p className={`text-[9px] ${th.textFaint}`}>GTC</p>
-              <p className={`text-xs font-bold ${pos.hasGtc ? 'text-emerald-400' : 'text-red-400'}`}>{pos.hasGtc ? '✓ Live' : '✕ None'}</p>
+              {/* DECIDE-0001 S3-0c: red removed -- amber matches the same "no GTC" state's tone in PositionsWorkspace.tsx's orders cell (SEMANTIC_TONE_CLASS.warning). */}
+              <p className={`text-xs font-bold ${pos.hasGtc ? 'text-emerald-400' : 'text-amber-400'}`}>{pos.hasGtc ? '✓ Live' : '✕ None'}</p>
             </div>
 
             <div className="border-t-2 border-amber-600/50 pt-1 border-r border-r-slate-700/40 pr-2">

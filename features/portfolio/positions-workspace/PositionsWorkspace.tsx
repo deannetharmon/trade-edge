@@ -781,7 +781,7 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
           </span>
         ) : (
           <span key={action} className="flex items-center gap-1">
-            <button type="button" onClick={() => onExecute?.(p, action)} className={`min-h-8 rounded border px-2 text-[10px] focus:ring-2 focus:ring-teal-400 ${action === 'CUT_LOSSES' ? 'border-red-500/50 text-red-300' : 'border-white/20 text-white'}`}>{ACTION_LABELS[action] ?? action}</button>
+            <button type="button" onClick={() => onExecute?.(p, action)} className={`min-h-8 rounded border px-2 text-[10px] focus:ring-2 focus:ring-teal-400 ${action === 'CUT_LOSSES' ? 'border-amber-500/50 text-amber-300' : 'border-white/20 text-white'}`}>{ACTION_LABELS[action] ?? action}</button>
             {p.recommendation && canonicalRecommendationToAction(p.recommendation.kind) === action && <span className={`text-[9px] whitespace-nowrap ${th.textFaint}`}>← suggested</span>}
           </span>
         ))}
