@@ -557,7 +557,7 @@ interface RollSuggestion {
   shortStrike: number;
   longStrike: number;
   spreadWidth: number;
-  credit: number;           // conservative estimate (mid * 0.7)
+  credit: number;           // conservative, executable estimate (mid * 0.85 -- the tradeable limit price, not the mid). KEEP-CREDIT-0001 Dane review item 3: this comment said 0.7; findRollCandidates has always used 0.85.
   creditMid: number;        // true mid (bid+ask)/2
   creditRatio: number;      // credit / spreadWidth — must be >= 1/3
   delta: number;
