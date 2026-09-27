@@ -5,15 +5,15 @@
 **Rendered mock (revision 6):** https://claude.ai/artifact/1mhkVcQUysMBL2vPvrmucA . **The mock's `S` array is the canonical wording and the single label table**; this ticket records rules, not copy. A test asserts that every visible label appears in it.
 **Dean's decisions so far (2026-09-25 and 26):** production's stop stays (a mark of 2x the credit received, a loss of 1x); proceed with this epic now and do CUT-LOSSES-REVIEW-0001 after; no 21-DTE rule for CSP and CC; Finnhub is the news source (a later ticket); a CSP with an Acquire or Wheel aspect gets no strong action; an unconfirmed lone short put defaults to Acquire and has no stop until Dean chooses Income; no loud red commands; one design for everyone.
 
-## Decisions Dean owes (shortest list)
+## Decisions Dean owes — ALL SEVEN APPROVED 2026-09-27
 
-1. **Approve the mock**: the core states now, the rest later.
-2. **Approve dropping these behaviors** (each is something the app says today): the weak-health "Cut Losses" at −50%; "Reduce Risk"; the health-score "watch"; earnings ranked above the profit target (it becomes a note); the 21-DTE roll suggestion and banners for CSPs and covered calls; "Consider extending"; and Take Profit and Cut Losses labels on **bought options** (long calls, long puts, debit spreads). *Do you use those labels on your LEAPS and long-put hedges?*
-3. **Broken-stock exit gate (O17):** Ian and Alan recommend "a loss at all, **and** a loss of at least half the credit or a short delta of 0.30" (fewer premature exits); the alternative is any loss.
-4. **Fallback stop for a spread whose 2x stop can never trigger (O14):** Paul recommends **defer** (keep the amber warning line). Yes or no?
-5. **A spread at twice the credit with no TradeEdge stop order working (O19):** show it calmly as "Loss limit reached" with a note that no stop order is working (recommended), or say nothing (as the ticket's first draft implied)?
-6. **Covered-call net line (O20):** measure the shares' gain **since the call was sold** (recommended) or since bought?
-7. **Go ahead with the small safety slice S3-0 first** (no false "Hold", contradicting banners removed, red removed from existing labels), before the big cutover?
+1. **Mock approved.**
+2. **Dropping the listed behaviors approved**, including Take Profit/Cut Losses labels on bought options, LEAPs and long-put hedges (Dean confirmed he does not rely on those labels there).
+3. **O17 broken-stock gate: variant B′ approved** — `HOLD` unless (a loss at all) AND (loss ≥ half the credit OR short delta ≥ 0.30).
+4. **O14 approved: defer** the fallback-stop question; keep the amber "unreachable stop" warning line as-is.
+5. **O19 approved:** a position at 2x credit with no TradeEdge stop order shows calmly as "Loss limit reached" with the note "No TradeEdge stop order is working."
+6. **O20 approved:** the covered-call net line measures shares' gain since the call was sold (since bought if that date is missing, labeled as such).
+7. **S3-0 approved to start** (no false "Hold", contradicting banners removed, red removed from existing labels) — the big cutover (S1-S3-D) is still gated on Ian's remaining rulings and Alan's fixtures per the table below.
 
 ## Who reviews what (one table)
 

@@ -1,6 +1,6 @@
 # CI-FLAKY-0002 — Evening date flakes in scan tests
 
-**Status:** Draft (Paul), 2026-09-26. Test-only change; no product behavior changes. Quinn reviews.
+**Status:** Approved by Dean 2026-09-27. Test-only change; no product behavior changes.
 **Related:** CI-FLAKY-0001 (cold-start warm-ups), EARNINGS-DATEBASIS-0001 (known temporary split: expiration-window DTE still uses the old `daysUntil` basis), `29db9b3` (fixed two evening flakes in the Positions workspace tests).
 
 ## Problem

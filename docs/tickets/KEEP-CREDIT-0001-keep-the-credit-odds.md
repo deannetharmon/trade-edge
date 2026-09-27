@@ -4,13 +4,13 @@
 **Sponsor:** Dean. **Related:** DECIDE-0001 (`docs/tickets/DECIDE-0001-decisive-position-recommendations.md`). This ticket changes no rule, threshold, stop or action.
 **Rendered mock:** see the link in the roadmap entry (item 13) once published.
 
-## Decisions Dean owes (shortest list)
+## Decisions Dean owes — ALL FIVE APPROVED 2026-09-27
 
-1. **Approve Part A (the first-time-roll explanation) and its mock.** It ships first and alone.
-2. **Show the odds only on "Hold with a loss"** (a spread or an Income put, down at least 25% of the credit, above the stop, more than 21 days left), and **never** on a stop, "Loss limit reached", maximum-loss, "Stock has weakened", time-limit-winner, Acquire-or-Wheel-put or expires-soon state (Ian and Paul; Paul would also have allowed "Stock has weakened", Ian's trader ruling wins). The time-limit-with-no-roll state gets it in the fold-out only.
-3. **No touch percentage in version 1.** The fold-out carries one plain sentence instead: "If the stock reaches your strike, it is about a coin flip whether it finishes back out of the money."
-4. **Should a position be rolled at most once?** (Ian) Each roll resets the stop to twice the *cumulative* credit, so repeated rolls quietly widen your stop.
-5. **Make the hindsight review of your own closed spreads (KEEP-CREDIT-0002) a real ticket** after DECIDE-0001's data work (Paul).
+1. **Part A and its mock approved.** Builds first, alone.
+2. **Approved:** odds shown only on "Hold with a loss," never on stop/max-loss/broken-stock/time-limit-winner/Acquire-Wheel/expires-soon (Ian's ruling).
+3. **Approved:** no touch percentage in v1.
+4. **Approved: a position may be rolled at most once.** Enforce this in Part A: once a position has one roll on record, "Consider rolling" and the roll button no longer appear; the position shows its normal state with a plain note that it has already been rolled once.
+5. **Approved:** KEEP-CREDIT-0002 becomes a real ticket, sequenced after DECIDE-0001's data-capture work lands (draft written below).
 
 ## Problem (Dean, in his own words, 2026-09-26)
 
