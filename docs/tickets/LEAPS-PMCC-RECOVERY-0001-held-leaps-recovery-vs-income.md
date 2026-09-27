@@ -48,7 +48,9 @@ For every proposed short call against a verified held LEAPS, compare two portfol
 
 Reprice both structures across a common scenario grid and calculate:
 
-**Opportunity Cost = modeled value of A − modeled value of B**
+**Call Advantage = modeled value of B − modeled value of A**
+
+(Named and signed this way, not "Opportunity Cost = A − B", per Ian's sign-convention ruling 2026-09-27 on GitHub issue #49: positive/green means the PMCC is worth the same or more than the uncapped LEAPS in that scenario, matching every other P&L surface in the app; negative/rose means real upside was given up. A literal "Opportunity Cost" that reads positive-and-green as bad news would invert the app's one universal color convention at exactly the moment a trader is deciding whether to sell a call.)
 
 The UI must separately show the short-call credit received. This lets the trader see what premium is received in exchange for what modeled recovery participation is surrendered.
 
