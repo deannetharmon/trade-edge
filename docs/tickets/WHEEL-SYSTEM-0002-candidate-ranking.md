@@ -1,6 +1,6 @@
 # WHEEL-SYSTEM-0002 — Wheel candidate ranking and the return hurdle (slice W2)
 
-**Status:** DRAFT 2, 2026-09-26 (Alan, Quinn and Dane reviews folded in below). Not approved to build. Owner: Dean Harmon.
+**Status:** W2 BUILT 2026-09-26 (Dean approved the mock, the earnings margin and the build the same day; see "Build notes" at the end). Earlier: DRAFT 2 with Alan, Quinn and Dane reviews folded in. Owner: Dean Harmon.
 **Parent:** WHEEL-SYSTEM-0001 (W1 is built and live). **Roadmap:** item 14.
 **Mock:** screen 2 of https://claude.ai/artifact/PqJWm8PT2WvR4SwZHwDmTH was layout only. Diane must update it with the real fields below and Dean must see it before any build.
 
@@ -142,3 +142,16 @@ Ordering principle (Dean, 2026-09-26: "don't chase premium"): the Fundamentals c
 Ian's review of the updated screen 2 mock (2026-09-26, on Dean's request): **approved**, on these points: the order (unflagged candidates, then flagged or unverified, then Wait, then Not yet), no invented score column, near misses shown as Wait with the gap visible, Credit, OTM %, Contracts with a "Yours" tag, bid-ask and open interest chips, the one-line earnings note with a "Find a shorter expiry" button on every flagged stock row, and the Fundamentals label (his objection recorded; Dean decided). Two states were missing from the first version and were added as a chip legend: the grey "date may move" note (earnings within 10 days after expiry) and the three "Earnings unverified" chips (no date on file, date in the past, data unavailable). Dean still confirms the earnings margin (Ian's proposal) before build approval.
 
 Label (Dean, 2026-09-26, final): the column is called **Checks**, not "Fundamentals" and not "Why". Ian's objection to "Fundamentals" (it usually means company financials) is resolved by the rename. A real company-health column (profitable, growing, low debt) would be a separate ticket with a data feed, shown beside Checks. Where this ticket says "the Fundamentals column" or "fundamentals decide whether a name is a candidate", read "the Checks column" and "the checks decide".
+
+## Build notes (W2, 2026-09-26)
+
+Approved by Dean ("APPROVE", after Ian approved the mock and Dean confirmed the earnings margin). Built as specified in draft 2 plus every later decision in this ticket. Files: `lib/wheel/candidateRank.ts` (pure checks, earnings states, verdict precedence, order), `lib/wheel/liquidity.ts`, `lib/wheel/candidateData.ts` (metrics and closes adapters), `features/wheel/useCandidateData.ts`, `features/wheel/NextCandidateTable.tsx`; edited `lib/wheel/capitalPlan.ts` (nine new editable parameters), `lib/wheel/planSchema.ts`, `lib/wheel/planPut.ts` (fee- and liquidity-aware, and a `beforeDate` limit for the shorter-expiry search), `features/wheel/WheelPlanTab.tsx`. Tests: 251 in the wheel set (candidateRank 29, liquidity 8, candidateData 8, plus the new Plan-tab cases). Verification run: `tsc --noEmit -p tsconfig.check.json` clean; a real `next build` exit 0; full suite 401 files / 5,906 tests passing.
+
+Decisions the spec left open (Ian or Alan may overrule):
+1. The put shown on the ladder and in the table is now the best-paying LIQUID put in the delta band; if none is liquid, the best of the rest is shown and the verdict is Skip: put is illiquid (so a thin quote with a big credit never wins, and "illiquid" is never mistaken for "no put").
+2. The table appears only after IVR and earnings dates (one batched broker call, 20 symbols at a time) and every symbol's closes (one at a time) have settled; a symbol with no data shows "unavailable" or "unverified", never a pass. A failed batch shows one amber line with a Retry.
+3. A symbol whose ETF-or-stock type could not be read is treated as a stock (so the earnings check applies and can only flag it), as in W1.
+4. "Find a shorter expiry" uses the same delta band, the same liquidity rule and the fee, and only expirations strictly before the earnings date and at least `minShortDte` (default 7) days out; it does not change the row's own put.
+5. "auto: N" in the Contracts column is the count that fits the per-name limit (not reduced by wheel cash left); the ladder still shows the allocated count.
+6. IVR is taken from `getMarketMetrics` as a percent (0 to 100). That unit is recalled, not verified against a live payload: if IVR ever shows as 0.4 where about 40 is expected, that is the first place to look.
+7. Not done by design: expected-move distance versus the strike (O5), an optional minimum OTM % check (O7), a real company-health column, and removal of the old Candidates tab.

@@ -28,6 +28,21 @@ describe('parseStoredPlan never throws', () => {
   });
 });
 
+describe('the W2 check parameters', () => {
+  it('are accepted as overrides, including the earnings rule', () => {
+    const r = validatePlanPatch({ overrides: { hurdleBps: 1200, ivrEtf: 15, rsiMax: 75, earningsRule: 'wait', minShortDte: 10, openFeeCents: 100 } });
+    expect(r.ok).toBe(true);
+  });
+  it.each([
+    [{ earningsRule: 'never' }], [{ ivrEtf: 101 }], [{ rsiMax: -1 }], [{ minShortDte: 0 }], [{ minOpenInterest: 1.5 }], [{ openFeeCents: -5 }],
+  ])('%j is rejected', (overrides) => {
+    expect(validatePlanPatch({ overrides }).ok).toBe(false);
+  });
+  it('a bad stored value is dropped on read', () => {
+    expect(parseStoredPlan(JSON.stringify({ overrides: { hurdleBps: 1200, earningsRule: 'sometimes', ivrStock: 500 } })).overrides).toEqual({ hurdleBps: 1200 });
+  });
+});
+
 describe('the ETF or stock type on a list entry', () => {
   it('is kept only when it is etf or stock', () => {
     const plan = parseStoredPlan(JSON.stringify({ wheelList: [{ symbol: 'XLF', kind: 'etf' }, { symbol: 'NVDA', kind: 'stock' }, { symbol: 'AMZN', kind: 'fund' }] }));

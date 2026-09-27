@@ -43,7 +43,22 @@ import {
   type PlanProfile,
   type UnlockMonths,
 } from '@/lib/wheel/capitalPlan';
-import { classifyRow, type FetchOutcome, type RowStatus } from '@/lib/wheel/planPut';
+import { classifyRow, selectPlanPut, type FetchOutcome, type RowStatus } from '@/lib/wheel/planPut';
+import { fetchDailyCloses, fetchMetricsBatch, type MetricsResult } from '@/lib/wheel/candidateData';
+import {
+  classifyEarnings,
+  evaluateCandidate,
+  ivrToHundredths,
+  notFitText,
+  rankCandidates,
+  rsiToHundredths,
+  shortDate,
+  type CandidateInput,
+  type RankedCandidate,
+} from '@/lib/wheel/candidateRank';
+import { daysUntilNy } from '@/lib/scans/earningsPrecheck';
+import NextCandidateTable, { type CandidateRowView, type ShorterState } from './NextCandidateTable';
+import { useCandidateData } from './useCandidateData';
 import { MAX_OVERRIDE_CONTRACTS, MAX_WHEEL_LIST, SYMBOL_PATTERN, type WheelListEntry, type WheelPlan } from '@/lib/wheel/planSchema';
 
 export interface WheelPlanDeps {
@@ -51,6 +66,10 @@ export interface WheelPlanDeps {
   fetchChain: (symbol: string, token: string, window: { min: number; max: number }) => Promise<WheelChainResult>;
   fetchQuote: (symbol: string, token: string) => Promise<number | null>;
   fetchKind: (symbol: string, token: string) => Promise<InstrumentKind | null>;
+  /** W2: IVR and expected earnings date for the whole list. Optional so W1 callers and tests still work (the checks then show unavailable). */
+  fetchMetrics?: (symbols: string[], token: string) => Promise<MetricsResult>;
+  /** W2: the daily closes behind RSI. */
+  fetchCloses?: (symbol: string) => Promise<number[] | null>;
   fetchImpl: typeof fetch;
 }
 
@@ -59,14 +78,9 @@ const defaultDeps: WheelPlanDeps = {
   fetchChain: (symbol, token, window) => fetchWheelChain(symbol, token, window),
   fetchQuote: (symbol, token) => getWheelQuote(symbol, token),
   fetchKind: (symbol, token) => fetchInstrumentKind(symbol, token),
+  fetchMetrics: (symbols, token) => fetchMetricsBatch(symbols, token),
+  fetchCloses: (symbol) => fetchDailyCloses(symbol),
   fetchImpl: (...args) => fetch(...args),
-};
-
-const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-/** "2026-11-06" -> "Nov 6" (the window is at most a few months, so the year is left to the hover text). */
-const shortDate = (iso: string): string => {
-  const [, m, d] = iso.split('-').map(Number);
-  return m >= 1 && m <= 12 && d ? `${MONTH_ABBR[m - 1]} ${d}` : iso;
 };
 
 const STARTER_ETFS = ['XLU', 'XLF', 'XLE', 'XLP', 'XLV'];
@@ -110,6 +124,15 @@ const FIELDS: FieldSpec[] = [
   { key: 'dteMin', label: 'Days to expiry, from', help: 'Earliest expiry considered.', suffix: 'days', toText: String, fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n); } },
   { key: 'dteMax', label: 'Days to expiry, to', help: 'Latest expiry considered.', suffix: 'days', toText: String, fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n); } },
   bpsField('sectorLimitBps', 'Most in one sector', 'Cash tied up in one sector, as a share of the account.'),
+  bpsField('hurdleBps', 'Return hurdle (Annual ROC)', 'A put below this Annual ROC at the bid says "wait: premium too thin".'),
+  { key: 'ivrEtf', label: 'IVR floor, ETFs', help: 'Below this IVR, an ETF says "wait".', suffix: 'points', toText: String, fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n); } },
+  { key: 'ivrStock', label: 'IVR floor, stocks', help: 'Below this IVR, a stock says "wait".', suffix: 'points', toText: String, fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n); } },
+  { key: 'rsiMax', label: 'RSI limit', help: 'Above this RSI(14) the chart is stretched: "wait for a pullback".', suffix: 'points', toText: String, fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n); } },
+  bpsField('maxBidAskBps', 'Bid-ask limit (% of midpoint)', 'The widest gap between bid and ask a put may have and still count as liquid.'),
+  { key: 'minOpenInterest', label: 'Minimum open interest', help: 'Fewest open contracts for a put to count as liquid.', suffix: 'contracts', toText: String, fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n); } },
+  { key: 'openFeeCents', label: 'Opening fee per contract', help: 'Taken off the credit in Annual ROC. None by default.', suffix: '$',
+    toText: (v) => trimNumber(v / 100), fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n * 100); } },
+  { key: 'minShortDte', label: 'Shortest expiry for "Find a shorter expiry"', help: 'The nearest expiry the shorter-expiry search will look at.', suffix: 'days', toText: String, fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n); } },
   { key: 'monthlyGrowthBps', label: 'Assumed monthly growth', help: 'Used only for "months to unlock". A simple monthly rate; ignores losses, fees and taxes.', suffix: '% a month',
     toText: (v) => trimNumber(v / 100), fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n * 100); } },
 ];
@@ -202,6 +225,13 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
   const params = useMemo(() => resolveParams(overrides), [overrides]);
   const validation = useMemo(() => validateParams(params), [params]);
   const hasErrors = validation.errors.length > 0;
+  // The put shown is the best-paying LIQUID one (do not chase premium): a thin quote with a big credit must not win.
+  const selectOptions = useMemo(
+    () => ({ openFeeCents: params.openFeeCents, liquidity: { maxBidAskBps: params.maxBidAskBps, minOpenInterest: params.minOpenInterest } }),
+    [params.openFeeCents, params.maxBidAskBps, params.minOpenInterest],
+  );
+  const candidateSymbols = useMemo(() => wheelList.map((e) => e.symbol).filter((sym) => !isLeveragedEtf(sym)), [wheelList]);
+  const candidateData = useCandidateData(loadState === 'ready' && !hasErrors, candidateSymbols, deps);
 
   // ── Save (debounced), only ever the overrides and the list ──────────────────────────────────────
   useEffect(() => {
@@ -285,7 +315,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
   const retryAll = useCallback(() => requeue(wheelList.map((e) => e.symbol)), [requeue, wheelList]);
 
   // ── Edits ───────────────────────────────────────────────────────────────────────────────────────
-  const setParam = (key: keyof PlanParams, value: number | PlanProfile) => {
+  const setParam = (key: keyof PlanParams, value: number | string) => {
     dirty.current = true;
     setOverrides((prev) => {
       const next: Record<string, unknown> = { ...prev };
@@ -323,7 +353,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
       if (!row || row.loading) return { entry, kind: 'loading' as const };
       const detected: InstrumentKind = row.outcome.kind ?? 'stock';
       const instrument: InstrumentKind = entry.kind ?? detected;
-      const status: RowStatus = classifyRow(row.outcome, { minBps: params.deltaMinBps, maxBps: params.deltaMaxBps });
+      const status: RowStatus = classifyRow(row.outcome, { minBps: params.deltaMinBps, maxBps: params.deltaMaxBps }, undefined, selectOptions);
       if (status.kind !== 'ok') return { entry, kind: 'state' as const, status, quote: row.outcome.quote, instrument };
       const cashCents = cashForOnePutCents(status.put.leg.strikePrice);
       const dropBps = entry.dropBps ?? params.dropBps;
@@ -352,6 +382,69 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
 
   const stress = useMemo(() => (limits && allocation ? summarizeStress(params, limits, allocation.deployedCents) : null), [params, limits, allocation]);
   const inPlan = (symbol: string) => allocation?.rows.find((r) => r.symbol === symbol)?.contracts ?? 0;
+
+  // ── W2: the "Next candidate" table ─────────────────────────────────────────────────────────────
+  // Nothing to load (an empty list, or only leveraged ETFs) is ready by definition.
+  const dataReady = candidateSymbols.length === 0 || (candidateData.metrics != null && candidateSymbols.every((sym) => sym in candidateData.closes));
+  const candidates = useMemo(() => {
+    const byId: Record<string, CandidateRowView> = {};
+    if (!limits || !allocation || !dataReady) return { ranked: [] as CandidateRowView[], byId, leveraged: [] as string[] };
+    const metrics: MetricsResult = candidateData.metrics ?? { items: {}, failed: [] };
+    const list: RankedCandidate[] = [];
+    const views = new Map<string, CandidateRowView>();
+    for (const row of rows) {
+      if (row.kind !== 'ok' || row.status.kind !== 'ok') continue;
+      const symbol = row.entry.symbol;
+      const item = metrics.items[symbol];
+      const closes = candidateData.closes[symbol];
+      const alloc = allocation.rows.find((r) => r.symbol === symbol);
+      const input: CandidateInput = {
+        symbol,
+        instrument: row.instrument,
+        put: row.status.put,
+        cashCents: row.cashCents,
+        ivrHundredths: ivrToHundredths(item?.ivrPercent),
+        rsiHundredths: closes ? rsiToHundredths(closes) : null,
+        earnings: classifyEarnings({ instrument: row.instrument, dataAvailable: item != null, date: item?.earningsDate, expiration: row.status.put.expirationDate }),
+        fits: row.fit > 0,
+        forced: alloc?.forced ?? false,
+        fitsAtCents: row.fitsAt,
+        notYetReason: row.unlock.kind === 'fits' ? 'Over your per-name limit' : `Unlocks in ${formatUnlock(row.unlock as UnlockMonths)}`,
+        notFitText: notFitText(row.cashCents, row.maxCash),
+      };
+      const ranked = evaluateCandidate(input, params);
+      list.push(ranked);
+      views.set(symbol, { ranked, quote: row.quote, autoContracts: row.fit, typedContracts: row.entry.contracts ?? null });
+    }
+    const ordered = rankCandidates(list).map((r) => views.get(r.input.symbol) as CandidateRowView);
+    for (const v of ordered) byId[v.ranked.input.symbol] = v;
+    return { ranked: ordered, byId, leveraged: wheelList.map((e) => e.symbol).filter(isLeveragedEtf) };
+  }, [rows, limits, allocation, params, candidateData.metrics, candidateData.closes, dataReady, wheelList]);
+
+  // "Find a shorter expiry": only expirations that END BEFORE the earnings date, outside the normal window, priced by the same rule.
+  const [shorter, setShorter] = useState<Record<string, ShorterState>>({});
+  useEffect(() => { setShorter({}); }, [params.dteMin, params.dteMax, params.deltaMinBps, params.deltaMaxBps, params.minShortDte, params.openFeeCents, params.maxBidAskBps, params.minOpenInterest, symbolsKey]);
+  const findShorter = useCallback(async (symbol: string) => {
+    const view = candidates.byId[symbol];
+    const earnings = view?.ranked.input.earnings;
+    if (!view || !earnings || earnings.kind !== 'inside') return;
+    const untilEarnings = daysUntilNy(earnings.date);
+    const maxDte = (untilEarnings ?? 0) - 1;
+    if (maxDte < params.minShortDte) {
+      setShorter((prev) => ({ ...prev, [symbol]: { status: 'done', put: null, quote: view.quote, message: `No expiry before ${shortDate(earnings.date)} that is at least ${params.minShortDte} days out.` } }));
+      return;
+    }
+    setShorter((prev) => ({ ...prev, [symbol]: { status: 'loading' } }));
+    try {
+      const token = await deps.getToken();
+      const chain = await deps.fetchChain(symbol, token, { min: params.minShortDte, max: maxDte });
+      const put = selectPlanPut(chain, { minBps: params.deltaMinBps, maxBps: params.deltaMaxBps }, undefined, { ...selectOptions, beforeDate: earnings.date });
+      setShorter((prev) => ({ ...prev, [symbol]: { status: 'done', put, quote: view.quote, message: put ? null : `No put in the delta range that expires before ${shortDate(earnings.date)}.` } }));
+    } catch {
+      setShorter((prev) => ({ ...prev, [symbol]: { status: 'done', put: null, quote: view.quote, message: 'Could not load the shorter expiries. Try again.' } }));
+    }
+  }, [candidates, params, selectOptions, deps]);
+
   const isForced = (symbol: string) => allocation?.rows.find((r) => r.symbol === symbol)?.forced ?? false;
 
   // Warnings for the trader's own contract counts: shown, never blocking.
@@ -501,7 +594,26 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
             </div>
           </section>
 
-          {/* 3. Unlock ladder */}
+          {/* 3. Next candidate (W2) */}
+          <section className="space-y-3">
+            <h2 className="text-[10px] font-bold uppercase tracking-wider text-white/40">Next candidate: which name on my list should I wheel next?</h2>
+            {candidateSymbols.length > 0 && !dataReady ? (
+              <p className="text-[11px] text-white/40" data-testid="next-candidate-loading">Loading IVR, earnings dates and RSI…</p>
+            ) : (
+              <NextCandidateTable
+                rows={candidates.ranked}
+                leveraged={candidates.leveraged}
+                params={params}
+                shorter={shorter}
+                onFindShorter={findShorter}
+                dataProblem={(candidateData.metrics?.failed.length ?? 0) > 0 || (candidateData.metrics != null && candidateSymbols.some((sym) => !(sym in candidateData.metrics!.items)))}
+                dataLoading={false}
+                onRetryData={candidateData.retry}
+              />
+            )}
+          </section>
+
+          {/* 4. Unlock ladder */}
           <section className="space-y-3">
             <h2 className="text-[10px] font-bold uppercase tracking-wider text-white/40">Unlock ladder: what fits now, and what you grow into</h2>
             {tokenProblem && (
@@ -644,7 +756,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
         </>
       )}
 
-      {/* 4. Adjust any default (collapsed until you change something or hit an error) */}
+      {/* 5. Adjust any default (collapsed until you change something or hit an error) */}
       <section className="space-y-3 rounded-lg border border-white/10 p-4">
         <button
           type="button"
@@ -661,6 +773,26 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
               {FIELDS.map((spec) => (
                 <ParamField key={spec.key} spec={spec} params={params} overrides={overrides} onCommit={setParam} onReset={resetParam} />
               ))}
+              <div className="flex flex-col gap-1">
+                <label htmlFor="wheel-plan-earningsRule" className="text-[11px] text-white/70">Stock with earnings inside the expiry</label>
+                <div className="flex items-center gap-2">
+                  <select
+                    id="wheel-plan-earningsRule"
+                    value={params.earningsRule}
+                    onChange={(e) => setParam('earningsRule', e.target.value)}
+                    className="rounded border border-white/10 bg-white/5 px-2 py-1 text-xs focus:border-white/30 focus:outline-none"
+                  >
+                    <option value="flag">Flag it and keep ranking</option>
+                    <option value="wait">Say wait until after earnings</option>
+                  </select>
+                  {isOverridden(overrides, 'earningsRule') ? (
+                    <button type="button" onClick={() => resetParam('earningsRule')} className="text-[10px] text-amber-300 hover:text-amber-200">changed (default flag) · Reset</button>
+                  ) : (
+                    <span className="text-[10px] text-white/30">default</span>
+                  )}
+                </div>
+                <p className="text-[10px] text-white/35">A flag never blocks a name; "wait" turns the verdict into Wait until the report has passed.</p>
+              </div>
             </div>
             <button type="button" onClick={resetAll} className="text-[11px] text-white/50 hover:text-white/80">Reset all to defaults</button>
           </>

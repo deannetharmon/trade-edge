@@ -82,6 +82,49 @@ describe('selectPlanPut: the best-paying put whose delta is in the band', () => 
   });
 });
 
+describe('selectPlanPut with options: liquidity, fee, and a date limit', () => {
+  const LIQ = { maxBidAskBps: 1000, minOpenInterest: 100 };
+
+  it('only liquid puts compete: a thin high-credit put does not win (do not chase premium)', () => {
+    const chain = chainOf([
+      leg({ strikePrice: 48, delta: -0.3, bid: 1.5, ask: 2.2, openInterest: 500 }), // pays the most, gap 38%
+      leg({ strikePrice: 49, delta: -0.27, bid: 0.6, ask: 0.64, openInterest: 500 }),
+    ]);
+    expect(selectPlanPut(chain, BAND, TODAY)?.leg.strikePrice).toBe(48);
+    expect(selectPlanPut(chain, BAND, TODAY, { liquidity: LIQ })?.leg.strikePrice).toBe(49);
+  });
+
+  it('low open interest also keeps a put out of the running', () => {
+    const chain = chainOf([leg({ strikePrice: 48, delta: -0.3, bid: 1.0, ask: 1.02, openInterest: 5 }), leg({ strikePrice: 49, delta: -0.27, bid: 0.6, ask: 0.62, openInterest: 300 })]);
+    expect(selectPlanPut(chain, BAND, TODAY, { liquidity: LIQ })?.leg.strikePrice).toBe(49);
+  });
+
+  it('if no put is liquid, the best of the rest is still returned so the row can say illiquid, not "no put"', () => {
+    const chain = chainOf([leg({ strikePrice: 48, delta: -0.3, bid: 1.5, ask: 2.2 })]);
+    expect(selectPlanPut(chain, BAND, TODAY, { liquidity: LIQ })?.leg.strikePrice).toBe(48);
+  });
+
+  it('an opening fee comes off the credit in the return', () => {
+    const chain = chainOf([leg({ strikePrice: 51, delta: -0.27, bid: 0.85 })]);
+    expect(selectPlanPut(chain, BAND, TODAY)?.rocBps).toBe(Math.floor((8500 * 365 * 10_000) / (510_000 * 41)));
+    expect(selectPlanPut(chain, BAND, TODAY, { openFeeCents: 100 })?.rocBps).toBe(Math.floor((8400 * 365 * 10_000) / (510_000 * 41)));
+  });
+
+  it('a fee that eats the whole credit leaves no put to consider', () => {
+    expect(selectPlanPut(chainOf([leg({ bid: 0.01 })]), BAND, TODAY, { openFeeCents: 100 })).toBeNull();
+  });
+
+  it('beforeDate keeps only expirations strictly before it (the shorter-expiry search)', () => {
+    const chain = chainOf([
+      leg({ expirationDate: '2026-10-23', strikePrice: 50, bid: 0.4 }),
+      leg({ expirationDate: '2026-10-28', strikePrice: 50, bid: 0.9 }),
+      leg({ expirationDate: '2026-11-06', strikePrice: 50, bid: 1.2 }),
+    ]);
+    expect(selectPlanPut(chain, BAND, TODAY, { beforeDate: '2026-10-28' })?.expirationDate).toBe('2026-10-23');
+    expect(selectPlanPut(chain, BAND, TODAY, { beforeDate: '2026-10-23' })).toBeNull();
+  });
+});
+
 describe('classifyRow: a failure never looks like "no put found"', () => {
   const good = chainOf([leg({})]);
   it('ok when a put is found, even without a quote', () => {

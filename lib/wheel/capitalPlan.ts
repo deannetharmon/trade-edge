@@ -41,7 +41,27 @@ export interface PlanParams {
   dteMax: number;
   /** Assumed simple monthly growth of the account, basis points (75 = 0.75% a month). */
   monthlyGrowthBps: number;
+  // ── W2: the checks on the "Next candidate" table (WHEEL-SYSTEM-0002) ──
+  /** Annual ROC at the bid a put must reach, basis points (1000 = 10%). */
+  hurdleBps: number;
+  /** IVR floors in points (0 to 100): a lower IVR says "wait". */
+  ivrEtf: number;
+  ivrStock: number;
+  /** RSI(14) above this, in points, says "wait for a pullback". */
+  rsiMax: number;
+  /** Widest bid-ask gap as basis points of the midpoint (1000 = 10%). */
+  maxBidAskBps: number;
+  /** Fewest open contracts for a put to count as liquid. */
+  minOpenInterest: number;
+  /** Opening fee per contract in cents, taken off the credit in the return. Dean, 2026-09-26: none (0). */
+  openFeeCents: number;
+  /** 'flag' keeps a stock with earnings inside the expiry ranked and flagged; 'wait' says wait until after earnings. */
+  earningsRule: EarningsRule;
+  /** The shortest expiry, in days, the "Find a shorter expiry" search will look at. */
+  minShortDte: number;
 }
+
+export type EarningsRule = 'flag' | 'wait';
 
 export const PROFILE_LOSS_BPS: Record<Exclude<PlanProfile, 'custom'>, number> = {
   careful: 600,
@@ -71,6 +91,15 @@ export const DEFAULT_PLAN_PARAMS: PlanParams = {
   dteMin: 30,
   dteMax: 45,
   monthlyGrowthBps: 75, // 0.75% a month
+  hurdleBps: 1000, // 10% a year (Dean)
+  ivrEtf: 20,
+  ivrStock: 30,
+  rsiMax: 70,
+  maxBidAskBps: 1000, // 10% of the midpoint
+  minOpenInterest: 100,
+  openFeeCents: 0, // no opening fee in the return (Dean, 2026-09-26)
+  earningsRule: 'flag',
+  minShortDte: 7,
 };
 
 export const PLAN_PARAM_KEYS = Object.keys(DEFAULT_PLAN_PARAMS) as (keyof PlanParams)[];
@@ -139,6 +168,15 @@ export function validateParams(p: PlanParams): PlanValidation {
   if (isInt(p.deltaMinBps) && isInt(p.deltaMaxBps) && p.deltaMinBps > p.deltaMaxBps) errors.push('Delta range: the low end cannot be above the high end.');
   if (!isInt(p.dteMin) || !isInt(p.dteMax) || p.dteMin < 0 || p.dteMin > p.dteMax) errors.push('Days to expiry: the minimum cannot be above the maximum.');
   if (typeof p.monthlyGrowthBps !== 'number' || !Number.isFinite(p.monthlyGrowthBps)) errors.push('Monthly growth must be a number.');
+  if (!isInt(p.hurdleBps) || p.hurdleBps < 0 || p.hurdleBps > 100_000) errors.push('The return hurdle must be between 0% and 1,000% a year.');
+  for (const [value, label] of [[p.ivrEtf, 'ETF IVR floor'], [p.ivrStock, 'Stock IVR floor'], [p.rsiMax, 'RSI limit']] as [number, string][]) {
+    if (!isInt(value) || value < 0 || value > 100) errors.push(`${label} must be between 0 and 100.`);
+  }
+  if (!isInt(p.maxBidAskBps) || p.maxBidAskBps < 0 || p.maxBidAskBps > 10_000) errors.push('The bid-ask limit must be between 0% and 100% of the midpoint.');
+  if (!isInt(p.minOpenInterest) || p.minOpenInterest < 0 || p.minOpenInterest > 10_000_000) errors.push('Minimum open interest must be a whole number of contracts.');
+  if (!isInt(p.openFeeCents) || p.openFeeCents < 0 || p.openFeeCents > 100_000) errors.push('The opening fee must be between $0 and $1,000 per contract.');
+  if (p.earningsRule !== 'flag' && p.earningsRule !== 'wait') errors.push('The earnings rule must be flag or wait.');
+  if (!isInt(p.minShortDte) || p.minShortDte < 1 || p.minShortDte > 365) errors.push('The shortest expiry for the shorter-expiry search must be between 1 and 365 days.');
 
   if (errors.length) return { errors, warnings };
 
@@ -149,6 +187,10 @@ export function validateParams(p: PlanParams): PlanValidation {
   if (p.spreadCapBps > 1000) warnings.push('A total spread cap above 10% of the account raises the worst case, because spreads can lose their full risk.');
   if (p.singleSpreadCapBps > p.spreadCapBps) warnings.push('The single-spread cap is above the total spread cap, so it can never bind.');
   if (p.deltaMaxBps > 3500) warnings.push('A delta above 0.35 puts the strike close to the money and raises the chance of assignment.');
+  if (p.hurdleBps < 500) warnings.push('A return hurdle under 5% a year is about what idle cash can earn, so it will not screen out thin premium.');
+  if (p.rsiMax > 80) warnings.push('An RSI limit above 80 will not stop you selling puts on a stretched chart.');
+  if (p.maxBidAskBps > 2000) warnings.push('A bid-ask limit above 20% lets thinly quoted puts through, and you give up that gap when you trade.');
+  if (p.minOpenInterest < 10) warnings.push('Very low open interest can mean a put you cannot trade near the quoted price.');
   if (p.stressBps < 1500) warnings.push('A stress fall under 15% is milder than recent broad selloffs.');
   return { errors, warnings };
 }

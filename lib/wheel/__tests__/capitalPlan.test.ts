@@ -278,6 +278,15 @@ describe('validation: hard errors block, soft warnings only warn', () => {
     [{ dteMin: 50, dteMax: 40 }],
     [{ monthlyGrowthBps: Number.NaN }],
     [{ profile: 'custom', customLossBps: 0 }],
+    [{ hurdleBps: -1 }],
+    [{ ivrEtf: 101 }],
+    [{ ivrStock: -5 }],
+    [{ rsiMax: 150 }],
+    [{ maxBidAskBps: 10_001 }],
+    [{ minOpenInterest: -1 }],
+    [{ openFeeCents: -1 }],
+    [{ earningsRule: 'never' as never }],
+    [{ minShortDte: 0 }],
   ] as [Partial<PlanParams>][])('%j is a hard error', (over) => {
     expect(v(over).errors.length).toBeGreaterThan(0);
   });
@@ -288,6 +297,10 @@ describe('validation: hard errors block, soft warnings only warn', () => {
     [{ spreadCapBps: 2000 }],
     [{ deltaMaxBps: 4000 }],
     [{ singleSpreadCapBps: 1500 }],
+    [{ hurdleBps: 300 }],
+    [{ rsiMax: 85 }],
+    [{ maxBidAskBps: 2500 }],
+    [{ minOpenInterest: 5 }],
   ])('%j is only a warning, never an error', (over) => {
     const r = v(over);
     expect(r.errors).toEqual([]);
@@ -367,6 +380,19 @@ describe('Annual ROC at the bid (before fees)', () => {
     expect(formatRocBps(997)).toBe('9.9%');
     expect(formatRocBps(1000)).toBe('10.0%');
     expect(formatRocBps(2027)).toBe('20.2%');
+  });
+});
+
+describe('W2 defaults (Dean and Ian, 2026-09-26)', () => {
+  it('the checks start at the agreed defaults, with no opening fee', () => {
+    const p = resolveParams();
+    expect([p.hurdleBps, p.ivrEtf, p.ivrStock, p.rsiMax, p.maxBidAskBps, p.minOpenInterest, p.openFeeCents, p.earningsRule, p.minShortDte]).toEqual([1000, 20, 30, 70, 1000, 100, 0, 'flag', 7]);
+  });
+  it('each is an editable override', () => {
+    const p = resolveParams({ hurdleBps: 1200, earningsRule: 'wait', openFeeCents: 100 });
+    expect([p.hurdleBps, p.earningsRule, p.openFeeCents]).toEqual([1200, 'wait', 100]);
+    expect(isOverridden({ earningsRule: 'wait' }, 'earningsRule')).toBe(true);
+    expect(isOverridden({ earningsRule: 'flag' }, 'earningsRule')).toBe(false);
   });
 });
 

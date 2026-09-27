@@ -62,6 +62,15 @@ const FIELD_CHECKS: Record<keyof PlanParams, ParamCheck> = {
   dteMin: (v) => isInt(v) && v >= 0 && v <= 1000,
   dteMax: (v) => isInt(v) && v >= 0 && v <= 1000,
   monthlyGrowthBps: (v) => typeof v === 'number' && Number.isFinite(v) && v >= -10_000 && v <= 10_000,
+  hurdleBps: (v) => isInt(v) && v >= 0 && v <= 100_000,
+  ivrEtf: (v) => isInt(v) && v >= 0 && v <= 100,
+  ivrStock: (v) => isInt(v) && v >= 0 && v <= 100,
+  rsiMax: (v) => isInt(v) && v >= 0 && v <= 100,
+  maxBidAskBps: bps,
+  minOpenInterest: (v) => isInt(v) && v >= 0 && v <= 10_000_000,
+  openFeeCents: (v) => isInt(v) && v >= 0 && v <= 100_000,
+  earningsRule: (v) => v === 'flag' || v === 'wait',
+  minShortDte: (v) => isInt(v) && v >= 1 && v <= 365,
 };
 
 /** Keeps only known, valid override keys from arbitrary input (used when READING stored data). */

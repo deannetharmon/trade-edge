@@ -329,3 +329,229 @@ describe('the best-paying put in the delta band (0.25 to 0.30)', () => {
     expect(screen.getByLabelText('Delta range, to')).toHaveValue('0.30');
   });
 });
+
+// ── W2: the Next candidate table ─────────────────────────────────────────────────────────────────
+
+const lp = (strike: number, delta: number, bid: number, expirationDate = EXP): WheelChainLeg => ({
+  strikePrice: strike, expirationDate, optionType: 'P', delta, openInterest: 500, bid, ask: Math.round((bid + 0.02) * 100) / 100, mid: bid + 0.01, occSymbol: `P${strike}-${expirationDate}`,
+});
+const chainWith = (...legs: WheelChainLeg[]): WheelChainResult => {
+  const chains: Record<string, WheelChainLeg[]> = {};
+  for (const l of legs) (chains[l.expirationDate] ??= []).push(l);
+  return { expirations: Object.keys(chains).sort(), chains, failedBatches: 0 };
+};
+const flat = Array.from({ length: 40 }, (_, i) => 100 + (i % 2)); // RSI about 50
+const rising = Array.from({ length: 40 }, (_, i) => 100 + i); // RSI 100
+
+type MetricsMap = Record<string, { ivrPercent: number | null; earningsDate: string | null }>;
+const withData = (metrics: MetricsMap, kinds: Record<string, 'etf' | 'stock'> = {}, closes: Record<string, number[] | null> = {}): Partial<WheelPlanDeps> => ({
+  fetchMetrics: async (symbols: string[]) => ({ items: Object.fromEntries(symbols.filter((s) => metrics[s]).map((s) => [s, metrics[s]])), failed: [] }),
+  fetchCloses: async (symbol: string) => (symbol in closes ? closes[symbol] : flat),
+  fetchKind: async (symbol: string) => kinds[symbol] ?? null,
+});
+const rowOf = (symbol: string) => screen.findByTestId(`candidate-row-${symbol}`);
+const order = () => screen.getAllByTestId(/^candidate-row-/).map((el) => el.getAttribute('data-testid')!.replace('candidate-row-', ''));
+
+describe('Next candidate: order, verdicts and checks', () => {
+  it('ranks a clean ETF candidate above an earnings-flagged stock, shows the Checks, and marks the return as including earnings risk', async () => {
+    const chainFor = async (symbol: string) => (symbol === 'XLE' ? chainWith(lp(58, -0.27, 0.85)) : chainWith(lp(205, -0.26, 4.1)));
+    const { deps } = makeDeps(
+      { wheelList: [{ symbol: 'NVDA', contracts: 1 }, { symbol: 'XLE' }] },
+      { fetchChain: chainFor, ...withData({ XLE: { ivrPercent: 38, earningsDate: null }, NVDA: { ivrPercent: 44, earningsDate: inDays(10) } }, { XLE: 'etf', NVDA: 'stock' }) },
+    );
+    render(<WheelPlanTab deps={deps} />);
+    const xle = await rowOf('XLE');
+    await waitFor(() => expect(order()).toEqual(['XLE', 'NVDA'])); // clean candidate first, flagged second
+    expect(within(xle).getByText('Candidate')).toBeInTheDocument();
+    expect(within(xle).getByText('IVR 38')).toBeInTheDocument();
+    expect(within(xle).getByText(/ROC 13\.0% clears 10\.0%/)).toBeInTheDocument();
+    expect(within(xle).getByText('Fits plan')).toBeInTheDocument();
+    expect(within(xle).queryByText(/Earnings/)).not.toBeInTheDocument(); // an ETF has no earnings chip
+    const nvda = screen.getByTestId('candidate-row-NVDA');
+    expect(within(nvda).getByText(new RegExp(`Earnings ${label(10)}, inside this expiry`))).toBeInTheDocument();
+    expect(within(nvda).getAllByText(/includes earnings risk/i).length).toBeGreaterThan(0);
+    expect(within(nvda).getByText('Yours')).toBeInTheDocument(); // typed count never replaces the verdict
+    expect(within(nvda).getByText('Candidate')).toBeInTheDocument();
+    expect(screen.getByText('Candidates with an earnings flag')).toBeInTheDocument();
+  });
+
+  it('a put whose Annual ROC is under the hurdle is a Wait with the reason', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLU' }] }, { fetchChain: async () => chainWith(lp(37, -0.27, 0.3)), ...withData({ XLU: { ivrPercent: 40, earningsDate: null } }, { XLU: 'etf' }) });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await rowOf('XLU');
+    expect(within(row).getByText('Wait')).toBeInTheDocument();
+    expect(within(row).getByText('Premium too thin')).toBeInTheDocument();
+    expect(within(row).getByText(/ROC .*%, under 10\.0%/)).toBeInTheDocument();
+  });
+
+  it('a name that does not fit the profile is Not yet, with months to unlock, and a typed count removes that verdict', async () => {
+    const setup = (wheelList: { symbol: string; contracts?: number }[]) =>
+      makeDeps({ wheelList }, { fetchChain: async () => chainWith(lp(205, -0.26, 4.1)), ...withData({ NVDA: { ivrPercent: 44, earningsDate: inDays(200) } }, { NVDA: 'stock' }) });
+    const first = setup([{ symbol: 'NVDA' }]);
+    const { unmount } = render(<WheelPlanTab deps={first.deps} />);
+    const row = await rowOf('NVDA');
+    expect(within(row).getByText('Not yet')).toBeInTheDocument();
+    expect(within(row).getByText(/Unlocks in \d+ months/)).toBeInTheDocument();
+    unmount();
+    const second = setup([{ symbol: 'NVDA', contracts: 1 }]);
+    render(<WheelPlanTab deps={second.deps} />);
+    expect(within(await rowOf('NVDA')).getByText('Candidate')).toBeInTheDocument();
+  });
+
+  it('an illiquid put is a Skip, and a thin high-credit put does not beat a liquid one', async () => {
+    const thin: WheelChainLeg = { ...lp(56, -0.29, 1.4), ask: 2.4, openInterest: 500 }; // pays the most, gap is huge
+    const good = lp(57, -0.26, 0.8);
+    const both = makeDeps({ wheelList: [{ symbol: 'XLE' }] }, { fetchChain: async () => chainWith(thin, good), ...withData({ XLE: { ivrPercent: 38, earningsDate: null } }, { XLE: 'etf' }) });
+    const { unmount } = render(<WheelPlanTab deps={both.deps} />);
+    expect(await within(await rowOf('XLE')).findByText(/57P/)).toBeInTheDocument();
+    unmount();
+    const onlyThin = makeDeps({ wheelList: [{ symbol: 'XLE' }] }, { fetchChain: async () => chainWith(thin), ...withData({ XLE: { ivrPercent: 38, earningsDate: null } }, { XLE: 'etf' }) });
+    render(<WheelPlanTab deps={onlyThin.deps} />);
+    const row = await rowOf('XLE');
+    expect(within(row).getByText('Skip')).toBeInTheDocument();
+    expect(within(row).getByText('Put is illiquid')).toBeInTheDocument();
+  });
+
+  it('a stretched chart says wait for a pullback; the RSI limit is an editable default', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLE' }] }, { fetchChain: async () => chainWith(lp(58, -0.27, 0.85)), ...withData({ XLE: { ivrPercent: 38, earningsDate: null } }, { XLE: 'etf' }, { XLE: rising }) });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await rowOf('XLE');
+    expect(within(row).getByText('Wait for a pullback')).toBeInTheDocument();
+    expect(within(row).getByText(/RSI 100, over 70/)).toBeInTheDocument();
+  });
+
+  it('the return hurdle is an editable default: lowering it turns a Wait into a Candidate', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLU' }] }, { fetchChain: async () => chainWith(lp(37, -0.27, 0.3)), ...withData({ XLU: { ivrPercent: 40, earningsDate: null } }, { XLU: 'etf' }) });
+    render(<WheelPlanTab deps={deps} />);
+    expect(within(await rowOf('XLU')).getByText('Wait')).toBeInTheDocument();
+    await openAdjust();
+    const hurdle = screen.getByLabelText('Return hurdle (Annual ROC)');
+    await userEvent.clear(hurdle);
+    await userEvent.type(hurdle, '5{Enter}');
+    await waitFor(() => expect(within(screen.getByTestId('candidate-row-XLU')).getByText('Candidate')).toBeInTheDocument());
+  });
+});
+
+describe('Next candidate: unknown never reads as pass', () => {
+  it('a failed metrics call marks IVR unavailable and a stock unverified, keeps every row, and Retry loads it again', async () => {
+    let fail = true;
+    const fetchMetrics = vi.fn(async (symbols: string[]) => (fail ? { items: {}, failed: symbols } : { items: Object.fromEntries(symbols.map((s) => [s, { ivrPercent: 40, earningsDate: null }])), failed: [] }));
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'NVDA', contracts: 1 }, { symbol: 'XLE' }] }, { fetchChain: async (s) => chainWith(s === 'XLE' ? lp(58, -0.27, 0.85) : lp(205, -0.26, 4.1)), ...withData({}, { XLE: 'etf', NVDA: 'stock' }), fetchMetrics });
+    render(<WheelPlanTab deps={deps} />);
+    const nvda = await rowOf('NVDA');
+    expect(within(nvda).getByText('IVR unavailable')).toBeInTheDocument();
+    expect(within(nvda).getByText('Earnings unverified: data unavailable')).toBeInTheDocument();
+    expect(within(await rowOf('XLE')).getByText('IVR unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/IVR and earnings dates could not be loaded/)).toBeInTheDocument();
+    fail = false;
+    await userEvent.click(within(screen.getByTestId('next-candidate-table')).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(within(screen.getByTestId('candidate-row-XLE')).getByText('IVR 40')).toBeInTheDocument());
+    expect(fetchMetrics).toHaveBeenCalledTimes(2);
+  });
+
+  it('a stock with no earnings date on file is flagged as unverified and ranks after a clean candidate', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'NVDA', contracts: 1 }, { symbol: 'XLE' }] }, { fetchChain: async (s) => chainWith(s === 'XLE' ? lp(58, -0.27, 0.85) : lp(205, -0.26, 4.1)), ...withData({ XLE: { ivrPercent: 38, earningsDate: null }, NVDA: { ivrPercent: 44, earningsDate: null } }, { XLE: 'etf', NVDA: 'stock' }) });
+    render(<WheelPlanTab deps={deps} />);
+    const nvda = await rowOf('NVDA');
+    expect(within(nvda).getByText('Earnings unverified: no date on file')).toBeInTheDocument();
+    expect(order()).toEqual(['XLE', 'NVDA']);
+  });
+
+  it('a symbol whose closes cannot be read shows RSI unavailable and is still ranked', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLE' }] }, { fetchChain: async () => chainWith(lp(58, -0.27, 0.85)), ...withData({ XLE: { ivrPercent: 38, earningsDate: null } }, { XLE: 'etf' }, { XLE: null }) });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await rowOf('XLE');
+    expect(within(row).getByText('RSI unavailable')).toBeInTheDocument();
+    expect(within(row).getByText('Candidate')).toBeInTheDocument();
+  });
+});
+
+describe('Next candidate: earnings', () => {
+  const stock = (earningsInDays: number | null, over: Partial<WheelPlanDeps> = {}, overrides: Record<string, unknown> = {}) =>
+    makeDeps({ wheelList: [{ symbol: 'NVDA', contracts: 1 }], overrides: overrides as never }, { fetchChain: async () => chainWith(lp(205, -0.26, 4.1)), ...withData({ NVDA: { ivrPercent: 44, earningsDate: earningsInDays == null ? null : inDays(earningsInDays) } }, { NVDA: 'stock' }), ...over });
+
+  it('earnings a few days AFTER the expiry is a grey "date may move" note that does not flag or re-group the name', async () => {
+    const { deps } = stock(47);
+    render(<WheelPlanTab deps={deps} />);
+    const row = await rowOf('NVDA');
+    expect(within(row).getByText(new RegExp(`Earnings ${label(47)}, 6 days after expiry: date may move`))).toBeInTheDocument();
+    expect(screen.queryByText('Candidates with an earnings flag')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('earnings-note-NVDA')).not.toBeInTheDocument();
+  });
+
+  it('with the earnings rule set to wait, a stock with earnings inside the expiry says wait until after the date', async () => {
+    const { deps } = stock(10, {}, { earningsRule: 'wait' });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await rowOf('NVDA');
+    expect(within(row).getByText('Wait')).toBeInTheDocument();
+    expect(within(row).getByText(new RegExp(`Wait until after earnings ${label(10)}`))).toBeInTheDocument();
+  });
+
+  it('"Find a shorter expiry" prices only expirations that end before earnings, outside the normal window', async () => {
+    const shortExp = inDays(8);
+    const fetchChain = vi.fn(async (_s: string, _t: string, window: { min: number; max: number }) =>
+      window.min === 30 ? chainWith(lp(205, -0.26, 4.1)) : chainWith(lp(205, -0.26, 4.1), lp(200, -0.27, 2.15, shortExp), lp(195, -0.27, 3.0, inDays(20))));
+    const { deps } = stock(10, { fetchChain });
+    render(<WheelPlanTab deps={deps} />);
+    await rowOf('NVDA');
+    const note = await screen.findByTestId('earnings-note-NVDA');
+    await userEvent.click(within(note).getByRole('button', { name: 'Find a shorter expiry' }));
+    const result = await screen.findByTestId('shorter-result-NVDA');
+    expect(result).toHaveTextContent(`200P · ${label(8)} · 8 days`); // ends before earnings (day 10); the day-20 put is not considered
+    expect(result).toHaveTextContent('$215');
+    expect(fetchChain).toHaveBeenLastCalledWith('NVDA', 'token', { min: 7, max: 9 });
+  });
+
+  it('says so in one line when no expiry ends before earnings far enough out', async () => {
+    const { deps } = stock(5);
+    render(<WheelPlanTab deps={deps} />);
+    await rowOf('NVDA');
+    await userEvent.click(within(await screen.findByTestId('earnings-note-NVDA')).getByRole('button', { name: 'Find a shorter expiry' }));
+    expect(await screen.findByTestId('shorter-none-NVDA')).toHaveTextContent(/No expiry before .* that is at least 7 days out/);
+  });
+
+  it('an ETF never gets the earnings note or the button', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLE' }] }, { fetchChain: async () => chainWith(lp(58, -0.27, 0.85)), ...withData({ XLE: { ivrPercent: 38, earningsDate: inDays(10) } }, { XLE: 'etf' }) });
+    render(<WheelPlanTab deps={deps} />);
+    await rowOf('XLE');
+    expect(screen.queryByRole('button', { name: 'Find a shorter expiry' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Next candidate: leveraged ETFs and the adjustable defaults', () => {
+  it('a leveraged ETF is a Skip and triggers no metrics or chart call', async () => {
+    const fetchMetrics = vi.fn(async () => ({ items: {}, failed: [] }));
+    const fetchCloses = vi.fn(async () => flat);
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'TQQQ' }] }, { fetchMetrics, fetchCloses });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await rowOf('TQQQ');
+    expect(within(row).getByText('Skip')).toBeInTheDocument();
+    expect(within(row).getByText(/Leveraged or inverse ETF/)).toBeInTheDocument();
+    expect(fetchMetrics).not.toHaveBeenCalled();
+    expect(fetchCloses).not.toHaveBeenCalled();
+  });
+
+  it('the new checks are in the adjustable defaults with the agreed values, including the earnings rule', async () => {
+    const { deps } = makeDeps({});
+    render(<WheelPlanTab deps={deps} />);
+    await screen.findByText(/Add a symbol/);
+    await openAdjust();
+    expect(screen.getByLabelText('Return hurdle (Annual ROC)')).toHaveValue('10');
+    expect(screen.getByLabelText('IVR floor, ETFs')).toHaveValue('20');
+    expect(screen.getByLabelText('IVR floor, stocks')).toHaveValue('30');
+    expect(screen.getByLabelText('RSI limit')).toHaveValue('70');
+    expect(screen.getByLabelText('Bid-ask limit (% of midpoint)')).toHaveValue('10');
+    expect(screen.getByLabelText('Minimum open interest')).toHaveValue('100');
+    expect(screen.getByLabelText('Opening fee per contract')).toHaveValue('0');
+    expect(screen.getByLabelText(/Shortest expiry for/)).toHaveValue('7');
+    expect(screen.getByLabelText('Stock with earnings inside the expiry')).toHaveValue('flag');
+  });
+
+  it('with an empty list the table shows its empty state and never fetches metrics', async () => {
+    const fetchMetrics = vi.fn(async () => ({ items: {}, failed: [] }));
+    const { deps } = makeDeps({}, { fetchMetrics });
+    render(<WheelPlanTab deps={deps} />);
+    expect(await screen.findByTestId('next-candidate-empty')).toBeInTheDocument();
+    expect(fetchMetrics).not.toHaveBeenCalled();
+  });
+});
