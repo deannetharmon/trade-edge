@@ -87,6 +87,7 @@ import {
   type StopSource,
 } from '@/lib/portfolio/stopLossPolicy';
 import { evaluateStandaloneLeapsStopEligibility, standaloneLeapsStopProposal, STANDALONE_LEAPS_STOP_LOSS_CHOICES, type StandaloneLeapsStopLossPct } from '@/lib/portfolio/standaloneLeapsStop';
+import { explainRoll } from '@/lib/portfolio/rollExplanation';
 import {
   evaluateProfitProtectingStop,
   PROFIT_PROTECTING_STOP_POLICY_VERSION,
@@ -557,7 +558,7 @@ interface RollSuggestion {
   shortStrike: number;
   longStrike: number;
   spreadWidth: number;
-  credit: number;           // conservative estimate (mid * 0.7)
+  credit: number;           // conservative estimate (mid * 0.85) -- KEEP-CREDIT-0001 review: this comment previously said 0.7
   creditMid: number;        // true mid (bid+ask)/2
   creditRatio: number;      // credit / spreadWidth — must be >= 1/3
   delta: number;
@@ -1485,6 +1486,40 @@ async function fetchRollSuggestion(pos: Position, token: string): Promise<RollSu
 function rollIsBlocking(suggestion: RollSuggestion): boolean {
   // Only block on hard rule violations — soft warnings can be overridden
   return !suggestion.meetsMinCredit || !suggestion.meetsDte;
+}
+
+// KEEP-CREDIT-0001 Part A -- lays out both halves of a roll (close the old
+// spread, open the new one), the fees, the net, what changes and what
+// doesn't, before Dean clicks Roll. Shows only when the old position is at
+// a loss (a winner is closed, not rolled) and only for the two-leg vertical
+// spreads explainRoll supports (see its own scope note).
+function RollExplanationBox({ position, shortStrike, longStrike, creditPerShare, expiry, dte, th }: { position: Position; shortStrike: number; longStrike: number; creditPerShare: number; expiry: string; dte: number; th: typeof THEMES[Theme] }) {
+  const e = explainRoll({ position, newShortStrike: shortStrike, newLongStrike: longStrike, newCreditPerShare: creditPerShare });
+  if (!e || e.lossAtCloseTotal <= 0) return null;
+  const optWord = e.optionType === 'P' ? 'put' : 'call';
+  const dollars = (n: number) => `$${Math.abs(n).toFixed(2)}`;
+  const perShare = (total: number) => (Math.abs(total) / (e.qty * 100)).toFixed(2);
+  return (
+    <div className={`pt-2 mt-2 border-t ${th.borderLight} space-y-1.5`}>
+      <p className={`text-[9px] uppercase tracking-widest ${th.textFaint}`}>Roll explanation</p>
+      <p className="text-[10px] leading-relaxed">Pay {dollars(e.closeCostTotal)} (${perShare(e.closeCostTotal)} a share, the closing mid) to close. You lose {dollars(e.lossAtCloseTotal)} on this trade, and that loss is now final.</p>
+      <p className="text-[10px] leading-relaxed">Sell the {shortStrike}/{longStrike} {optWord} spread expiring {expiry} and collect {dollars(e.openCreditTotal)} (${creditPerShare.toFixed(2)} a share, the limit price).</p>
+      <p className="text-[10px] leading-relaxed">Fees {dollars(e.feesTotal)} (${perShare(e.feesTotal)} a share). {e.isNetDebit ? 'Net debit' : 'Net credit'} {dollars(e.netRollTotal)} (${perShare(e.netRollTotal)} a share) after fees.</p>
+      {!e.isNetDebit && e.netRollPerShare < 0.10 && (
+        <p className="text-[10px] leading-relaxed text-amber-300">Net credit after fees: ${e.netRollPerShare.toFixed(2)} a share. Your rule asks for $0.10.</p>
+      )}
+      <p className="text-[10px] leading-relaxed">Most you can lose: {dollars(e.newMaxLossTotal)}{e.oldMaxLossTotal != null ? ` (was ${dollars(e.oldMaxLossTotal)})` : ''}. Breakeven ${e.newBreakeven.toFixed(2)}{e.oldBreakeven != null ? ` (was $${e.oldBreakeven.toFixed(2)})` : ''}.</p>
+      <p className="text-[10px] leading-relaxed">Your stop moves to a ${e.newStopTriggerPrice.toFixed(2)} mark, a total loss of about {dollars(e.newStopTotalLoss)}{e.oldStopTotalLoss != null ? ` (was ${dollars(e.oldStopTotalLoss)})` : ''}.</p>
+      <p className="text-[10px] leading-relaxed">Close now and you take the {dollars(e.lossAtCloseTotal)} loss and are done. Roll and you carry {dollars(e.newMaxLossTotal)} of risk for {dte} more days and {e.isNetDebit ? `pay ${dollars(e.netRollTotal)}` : `collect ${dollars(e.netRollTotal)}`}.</p>
+      <p className={`text-[10px] leading-relaxed border-l-2 pl-2 ${th.borderLight} ${th.textFaint}`}>A roll does not undo the {dollars(e.lossAtCloseTotal)} loss. It is a new trade that gives you more time, and it can lose too.</p>
+      {e.isWiderSpread && (
+        <p className="text-[10px] leading-relaxed text-amber-300">The new spread is wider: the most you can lose rises to {dollars(e.newMaxLossTotal)}{e.oldMaxLossTotal != null ? ` (was ${dollars(e.oldMaxLossTotal)})` : ''}, even though you collect a credit.</p>
+      )}
+      {e.isNetDebit && (
+        <p className="text-[10px] leading-relaxed text-amber-300">You pay {dollars(e.netRollTotal)} more than you collect (${perShare(e.netRollTotal)} a share). New most you can lose: {dollars(e.newMaxLossTotal)}{e.oldMaxLossTotal != null ? ` (was ${dollars(e.oldMaxLossTotal)})` : ''}. You are risking more to stay in this trade.</p>
+      )}
+    </div>
+  );
 }
 
 // ── OCC Symbol Builder ─────────────────────────────────────────────────────
@@ -4263,7 +4298,10 @@ function BatchConfirmModal({
                             return (
                               <div key={`${c.expiry}-${c.shortStrike}-${c.longStrike}`} className={`rounded-lg border p-3 space-y-2 ${
                                 isSelected ? 'border-purple-500/60 bg-purple-500/10' :
-                                rollIsBlocking(c) ? 'border-red-500/50 bg-red-500/5' :
+                                // DECIDE-0001 S3-0c precedent extended here (Dean, 2026-09-27): a
+                                // blocked/rule-violation indicator is urgency styling, not a raw
+                                // P&L figure, so it follows the same no-red ruling -- amber, not red.
+                                rollIsBlocking(c) ? 'border-amber-500/50 bg-amber-500/5' :
                                 c.ruleViolations.length > 0 ? 'border-yellow-500/40 bg-yellow-500/5' :
                                 'border-blue-500/30 bg-blue-500/5'
                               }`}>
@@ -4291,7 +4329,7 @@ function BatchConfirmModal({
                                 <div className="grid grid-cols-4 gap-2">
                                   <div>
                                     <p className={`text-[9px} ${th.textFaint}`}>Credit (mid)</p>
-                                    <p className={`text-[10px} font-bold ${c.meetsMinCredit ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
+                                    <p className={`text-[10px} font-bold ${c.meetsMinCredit ? 'text-emerald-400' : 'text-amber-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                                       ${c.creditMid.toFixed(2)}
                                     </p>
                                     <p className={`text-[9px} ${th.textFaint}`}>{(c.creditRatio * 100).toFixed(0)}% of width</p>
@@ -4331,14 +4369,15 @@ function BatchConfirmModal({
                                     <span className={`text-[9px] ${th.textFaint}`}>New credit <span className="text-emerald-300 font-bold">+${c.openCredit.toFixed(2)}</span></span>
                                   </div>
                                 </div>
+                                <RollExplanationBox position={item.pos} shortStrike={c.shortStrike} longStrike={c.longStrike} creditPerShare={c.credit} expiry={c.expiry} dte={c.dte} th={th} />
                                 {c.ruleViolations.length > 0 && (
                                   <div className="space-y-1">
                                     {c.ruleViolations.map((v, i) => (
                                       <div key={i} className="flex items-start gap-1.5">
-                                        <span className={`text-[9px} shrink-0 mt-0.5 ${rollIsBlocking(c) ? 'text-red-400' : 'text-yellow-400'}`}>
+                                        <span className={`text-[9px} shrink-0 mt-0.5 ${rollIsBlocking(c) ? 'text-amber-400' : 'text-yellow-400'}`}>
                                           {rollIsBlocking(c) ? '✕' : '⚠'}
                                         </span>
-                                        <p className={`text-[9px} leading-relaxed ${rollIsBlocking(c) ? 'text-red-300' : 'text-yellow-300'}`}>{v}</p>
+                                        <p className={`text-[9px} leading-relaxed ${rollIsBlocking(c) ? 'text-amber-300' : 'text-yellow-300'}`}>{v}</p>
                                       </div>
                                     ))}
                                   </div>
@@ -4387,6 +4426,16 @@ function BatchConfirmModal({
                               );
                             }
                             return null;
+                          })()}
+                          {ri?.credit && ri?.shortStrike && ri?.longStrike && ri?.expiry && (() => {
+                            const manualShort = parseFloat(ri.shortStrike);
+                            const manualLong = parseFloat(ri.longStrike);
+                            const manualCredit = parseFloat(ri.credit);
+                            if (!Number.isFinite(manualShort) || !Number.isFinite(manualLong) || !Number.isFinite(manualCredit) || manualCredit <= 0) return null;
+                            const manualExpiry = new Date(ri.expiry);
+                            if (isNaN(manualExpiry.getTime())) return null;
+                            const manualDte = Math.round((manualExpiry.getTime() - Date.now()) / 86400000);
+                            return <RollExplanationBox position={item.pos} shortStrike={manualShort} longStrike={manualLong} creditPerShare={manualCredit} expiry={ri.expiry} dte={manualDte} th={th} />;
                           })()}
                         </div>
                       </div>
