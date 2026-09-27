@@ -1,6 +1,6 @@
 # WHEEL-SYSTEM-0002 — Wheel candidate ranking and the return hurdle (slice W2)
 
-**Status:** DRAFT 1, 2026-09-26. Not approved to build. Owner: Dean Harmon.
+**Status:** DRAFT 2, 2026-09-26 (Alan, Quinn and Dane reviews folded in below). Not approved to build. Owner: Dean Harmon.
 **Parent:** WHEEL-SYSTEM-0001 (W1 is built and live). **Roadmap:** item 14.
 **Mock:** screen 2 of https://claude.ai/artifact/PqJWm8PT2WvR4SwZHwDmTH was layout only. Diane must update it with the real fields below and Dean must see it before any build.
 
@@ -67,7 +67,7 @@ New: `lib/wheel/candidateRank.ts` (pure: checks, verdicts, order, return math), 
 
 ## Golden fixtures (Alan to confirm)
 
-Balanced, ETF, bid 0.85, strike 51 (cash 5,100), dte 30, fee 100 cents: premium 8,500 cents, net 8,400 cents; annualizedBps = floor(8,400 x 365 x 10,000 / (510,000 x 30)) = 2,003 (20.03%): passes a 10% hurdle. Same put at bid 0.40: net 3,900, bps = 930 (9.30%): "Wait: premium too thin". Boundary: net premium exactly on the hurdle passes; one cent below fails. Bid 0: unknown and illiquid. Spread exactly 10% of the mid passes; one basis point over fails. IV rank exactly on the floor passes. RSI exactly 70 passes; 70.01 fails (compare in integer hundredths). Earnings on the expiry date counts as inside.
+Balanced, ETF, bid 0.85, strike 51 (cash 5,100), dte 30, fee 100 cents: premium 8,500 cents, net 8,400 cents; annualizedBps = floor(8,400 x 365 x 10,000 / (510,000 x 30)) = 2,003 (20.03%): passes a 10% hurdle. Same put at bid 0.40: net 3,900, bps = 930 (9.30%): "Wait: premium too thin". Boundary (Alan, recomputed by script): strike 51, dte 30, cash 510,000: net premium 4,192 cents gives exactly 1000 bps and passes; 4,191 gives 999 and fails. Bid 0: unknown and illiquid. Spread exactly 10% of the mid passes; one basis point over fails. IV rank exactly on the floor passes. RSI exactly 70 passes; 70.01 fails (compare in integer hundredths). Earnings on the expiry date counts as inside.
 
 ## Acceptance criteria
 
@@ -90,3 +90,30 @@ Balanced, ETF, bid 0.85, strike 51 (cash 5,100), dte 30, fee 100 cents: premium 
 ## Review gates
 
 Ian: the checks, defaults and verdict wording. Alan: return math, fixtures, IV rank unit, fee. Quinn: data failures, tests, regression to W1. Diane: updated screen 2 mock. Dane: developer review last. Paul: scope (W2 only; W3 and W4 stay separate).
+
+## Revision 2: review changes (Alan, Quinn, Dane; all three: approve with changes)
+
+Verified by the reviewers: every cited path and function exists; both fixtures recompute (2,003 and 930 bps). Required changes, now part of the spec:
+
+**Units and arithmetic (Alan)**
+1. **IV rank.** Convert once, in `getMarketMetrics` (`lib/scans/tastytrade-client.ts:129-131`, which multiplies the raw fraction by 100). Do not use the Income Engine's `> 1` guess (`app/engine/page.tsx:363-365`); it is a heuristic on the same 0-1 fraction, not a competing unit (correction to draft 1). The raw field being a 0-1 fraction is recalled, not verified against a live payload: mark it unverified. Compare in hundredths: `ivRankHundredths = Math.round(raw * 10000)` against `floor * 100`, so "exactly on the floor passes" is not broken by float error (0.29 x 100 = 28.999...). A result outside 0-100 is unknown.
+2. **RSI.** `rsiSeries` returns unrounded floats and 50 for a flat series (`lib/indicators/rsi.ts:17-48`). Use the last value, `rsiHundredths = Math.round(last * 100)`, compared to `rsiMax * 100`. Fixtures: 70.00 passes, 70.01 fails. IV rank and RSI floors are stored as points (20, 30, 70), not basis points.
+3. **Bid.** `bidCents = Math.floor(bid * 100 + 1e-6)` (floor is the conservative choice; the epsilon guards float error). If `netPremiumCents <= 0` (bid at or below the fee) the return is not a pass: the verdict is Wait with the reason "bid does not cover the fee", and negative values never throw. Add a sub-cent fixture (bid 0.855 counts as 85 cents).
+4. **dte.** Calendar days on the New York basis (`daysUntilNy`, `lib/scans/earningsPrecheck.ts:29`). Under 1 day the return is unknown ("expires today"), not clamped to 1 (a clamp would inflate the annualization about 365 times); W1 allows `dteMin` 0 so this can occur. The annualization is simple, not compounded (stated on screen).
+5. **Fee.** Named, dated, editable constant `openFeeCents`; the code has none today. About $1 per contract to open and free to close is recalled from the broker schedule, not verified, and any per-leg cap is unknown. Dean or Alan to confirm from the published schedule before build.
+6. **Liquidity in integer cents.** Spread passes when `2 x (askCents - bidCents) x 10000 <= maxSpreadBps x (askCents + bidCents)`. A bid of 0 with an ask above 0 is illiquid (W1's `selectPlanPut` only skips 0 and 0, `lib/wheel/planPut.ts:31`). W2 scores only the put W1 chose; it never re-selects a more liquid one.
+
+**Unknown never reads as pass (Quinn)**
+7. `earningsOnOrBeforeExpiration` returns false for a missing date and for a past date (`lib/scans/earningsPrecheck.ts:46,51`), so a missing or stale date would silently join the "no flag" group. Distinguish three states: **no date on file**, **date in the past (stale)** and **unavailable (call failed or item missing)**. Each shows an "earnings unverified" chip, and a stock with any of them ranks with the flagged group, not ahead of verified rows. ETFs and indexes are unaffected. If the ETF-or-stock type could not be read, earnings is unknown, not "ETF: skip".
+8. **Earnings margin (Ian's ruling, subject to Dean).** Use the priced put's expiry (`PlanPut.expirationDate`). Earnings on or before that expiry is the amber flag. Earnings within 10 days AFTER expiry (the scans' `EARNINGS_MIN_DAYS_AFTER_EXPIRY`, `lib/scans/earningsPrecheck.ts:58-63`, because projected dates can move earlier) is a grey note, "date may move", with no ranking effect. This keeps the wheel consistent with the CSP scan without flagging most names.
+
+**Verdicts, order and states (Dane and Quinn)**
+9. **Precedence** (first that applies): no verdict while loading, on a chain error, a missing quote, or no put found (those keep W1's states); Skip for a leveraged or inverse ETF (no data is fetched for it, so nothing loads); Not yet when it does not fit the profile and has no contract override; Skip when the put is illiquid; Wait, with one reason chosen in this fixed order: return under hurdle (or bid not covering the fee), IV rank under floor, RSI over the limit, earnings-wait when `earningsRule` is `wait`; otherwise Candidate, or Your override when the trader set a contract count. "Warn" means a chip in amber that does not change the verdict (RSI within 3 points of the limit, an earnings flag, a note that dates may move).
+10. **Order inside groups:** Candidates: no earnings issue first, then flagged or unverified, each by net annualized return descending (ties: lower cash need, then symbol). Wait: by net annualized return descending. Not yet: by "fits at" ascending. Skip: by symbol.
+11. **Plumbing.** New parameters go in `PlanParams` and `DEFAULT_PLAN_PARAMS` (`lib/wheel/capitalPlan.ts:18`), eight entries in `FIELD_CHECKS` (`lib/wheel/planSchema.ts`, typed by key), and warnings in `validateParams` (hard errors only for invalid math). `earningsRule` is an enum, so the adjustable-defaults list needs a small select control (the current `FieldSpec` and `ParamField` are number-only). Metrics come from one batched `getMarketMetrics` call: give it its own state, a cancelled-run guard and a retry, do not fold it into `loadSymbol` or `FetchOutcome`, batch the symbols (the list holds up to 40) and URL-encode them, and match returned items by upper-cased symbol (a missing item means unknown). Chart closes come from `GET /api/chart?symbol=` (server-side Yahoo, about 125 daily closes, response `{bars}` or `{error}`); that is not a broker call, so the ticket's "all browser-side" applies to the broker calls only; fewer than 15 closes means RSI unknown; share the index-symbol map now private in `components/RsiLine.tsx:12`.
+12. **Retry:** W1 has a manual Retry per row and Retry all, not automatic retries; W2 does the same (correcting "single retry, same as W1").
+
+**Added tests (Quinn)**
+Every unknown state above; verdict precedence and the fixed Wait reason order; a stale metrics answer dropped when the list changes; the sub-cent, fee-exceeds-bid, dte-under-1 and bid-0-ask-above-0 cases; the 4,192 and 4,191 boundary; IV rank on the floor and RSI 70.00 versus 70.01; leveraged ETFs trigger no metrics or chart call; and a regression test that W1's ladder, allocation and stress outputs are unchanged.
+
+**Still open:** O1 fee confirmation; O3 Dean's answers on the updated mock (https://claude.ai/artifact/HFep9MoqLENf5KQDvmxFbW): the order, dropping the 0-100 score column, and near misses shown as Wait; item 8 Ian's earnings margin, for Dean to confirm.
