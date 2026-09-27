@@ -18,6 +18,7 @@ import {
   isOverridden,
   maxCashPerNameCents,
   monthsToUnlock,
+  percentBelowPriceTenths,
   resolveParams,
   stressLossCents,
   summarizeStress,
@@ -289,6 +290,31 @@ describe('validation: hard errors block, soft warnings only warn', () => {
     const r = v(over);
     expect(r.errors).toEqual([]);
     expect(r.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe('how far below the price the strike sits', () => {
+  it.each([
+    // price, strike, tenths of a percent (half-up), from Dean's ladder screenshot on 2026-09-26
+    [39.51, 37.5, 51],
+    [54.84, 52.5, 43],
+    [62.04, 57.5, 73],
+    [82.06, 79, 37],
+    [225, 205, 89],
+    [249.98, 225, 100],
+    [170.7, 162, 51],
+  ])('price %s, strike %s -> %s tenths of a percent', (price, strike, tenths) => {
+    expect(percentBelowPriceTenths(price, strike)).toBe(tenths);
+  });
+  it('is negative in the money, zero at the money, and null without a usable price', () => {
+    expect(percentBelowPriceTenths(50, 52)).toBe(-40);
+    expect(percentBelowPriceTenths(50, 50)).toBe(0);
+    expect(percentBelowPriceTenths(null, 50)).toBeNull();
+    expect(percentBelowPriceTenths(0, 50)).toBeNull();
+    expect(percentBelowPriceTenths(Number.NaN, 50)).toBeNull();
+  });
+  it('rounds half up on exact ties', () => {
+    expect(percentBelowPriceTenths(200, 199.9)).toBe(1); // 0.05% -> 1 tenth
   });
 });
 

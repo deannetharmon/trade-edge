@@ -31,6 +31,7 @@ import {
   maxCashPerNameCents,
   monthsToUnlock,
   pctTenthsOfAccount,
+  percentBelowPriceTenths,
   resolveParams,
   summarizeStress,
   validateParams,
@@ -323,6 +324,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
       const fitsAt = fitsAtAccountCents(cashCents, params, dropBps);
       return {
         entry, kind: 'ok' as const, status, quote: row.outcome.quote, instrument, detected, targetBps, cashCents, maxCash,
+        belowTenths: percentBelowPriceTenths(row.outcome.quote, status.put.leg.strikePrice),
         fit: contractsThatFit(maxCash, cashCents), fitsAt,
         fitsConcentrated: cashCents <= maxCashPerNameCents({ ...params, profile: 'concentrated' }, dropBps), unlock: monthsToUnlock(fitsAt, params.accountCents, params.monthlyGrowthBps),
       };
@@ -522,13 +524,14 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
               <p className="text-sm text-white/40">Add a symbol to see the cash one put needs, whether it fits, and when it unlocks.</p>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-white/10">
-                <table className="w-full min-w-[980px] text-xs">
+                <table className="w-full min-w-[1060px] text-xs">
                   <thead>
                     <tr className="bg-white/5 text-[10px] uppercase tracking-wider text-white/40">
                       <th className="px-3 py-2 text-left">Stock</th>
                       <th className="px-3 py-2 text-left">Sector</th>
                       <th className="px-3 py-2 text-right">Price</th>
                       <th className="px-3 py-2 text-left">Put priced</th>
+                      <th className="px-3 py-2 text-right">Below price</th>
                       <th className="px-3 py-2 text-right">Cash for one put</th>
                       <th className="px-3 py-2 text-right">Fits</th>
                       <th className="px-3 py-2 text-right">In plan</th>
@@ -575,6 +578,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                         {row.kind === 'ok' && (
                           <>
                             <td className="px-3 py-2">{row.status.kind === 'ok' && `${row.status.put.leg.strikePrice}P · ${row.status.put.expirationDate} · Δ${(row.status.put.deltaBps / 10_000).toFixed(2)}`}</td>
+                            <td className="px-3 py-2 text-right" title="How far the stock can fall from today's price before this put is in the money">{row.belowTenths == null ? '—' : formatPctTenths(row.belowTenths)}</td>
                             <td className="px-3 py-2 text-right">{formatCents(row.cashCents)}</td>
                             <td className="px-3 py-2 text-right">{row.fit}</td>
                             <td className="px-3 py-2 text-right font-bold">{inPlan(row.entry.symbol)}</td>
@@ -610,10 +614,10 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                             </td>
                           </>
                         )}
-                        {row.kind === 'loading' && <td colSpan={7} className="px-3 py-2 text-white/40">Loading…</td>}
-                        {row.kind === 'leveraged' && <td colSpan={7} className="px-3 py-2 text-amber-300">Not a wheel candidate: a leveraged or inverse ETF can fall far more than 30% in a month. Small put spreads only.</td>}
+                        {row.kind === 'loading' && <td colSpan={8} className="px-3 py-2 text-white/40">Loading…</td>}
+                        {row.kind === 'leveraged' && <td colSpan={8} className="px-3 py-2 text-amber-300">Not a wheel candidate: a leveraged or inverse ETF can fall far more than 30% in a month. Small put spreads only.</td>}
                         {row.kind === 'state' && (
-                          <td colSpan={7} className="px-3 py-2">
+                          <td colSpan={8} className="px-3 py-2">
                             {row.status.kind === 'chain-error' && <span className="text-red-300">Chain error: {row.status.message}</span>}
                             {row.status.kind === 'quote-unavailable' && <span className="text-amber-300">Quote unavailable, and no put was found. Retry.</span>}
                             {row.status.kind === 'no-put' && <span className="text-white/50">No put found near delta {(row.targetBps / 10_000).toFixed(2)} in {params.dteMin} to {params.dteMax} days.</span>}

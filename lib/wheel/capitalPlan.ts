@@ -198,6 +198,18 @@ export const strikeToCents = (strikeDollars: number): number => Math.round(strik
 /** Cash secured by one contract, in cents: strike x 100 shares. */
 export const cashForOnePutCents = (strikeDollars: number): number => strikeToCents(strikeDollars) * 100;
 
+/**
+ * How far below the price the strike sits, as tenths of a percent (51 = 5.1%), half-up, in integer cents.
+ * Negative when the strike is above the price (in the money). Null when there is no usable price or strike.
+ */
+export function percentBelowPriceTenths(priceDollars: number | null | undefined, strikeDollars: number): number | null {
+  if (priceDollars == null || !Number.isFinite(priceDollars) || priceDollars <= 0) return null;
+  const priceCents = Math.round(priceDollars * 100);
+  const strikeCents = strikeToCents(strikeDollars);
+  if (priceCents <= 0) return null;
+  return Math.round(((priceCents - strikeCents) * 1000) / priceCents);
+}
+
 /** How many contracts fit under the per-name cash limit. */
 export function contractsThatFit(maxCashCents: number, cashCents: number): number {
   if (!(cashCents > 0) || !(maxCashCents > 0)) return 0;
