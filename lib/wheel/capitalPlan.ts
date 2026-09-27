@@ -33,10 +33,10 @@ export interface PlanParams {
   stressBps: number;
   /** Most that may sit in one sector, basis points of the account. */
   sectorLimitBps: number;
-  /** Target absolute delta for the put to sell on an ETF, in basis points (3000 = 0.30). */
-  etfDeltaBps: number;
-  /** Target absolute delta for the put to sell on a single stock, in basis points (2500 = 0.25). */
-  stockDeltaBps: number;
+  /** Lowest absolute delta considered for the put, in basis points (2500 = 0.25). */
+  deltaMinBps: number;
+  /** Highest absolute delta considered, in basis points (3000 = 0.30). The plan prices the best-paying put in [min, max]. */
+  deltaMaxBps: number;
   dteMin: number;
   dteMax: number;
   /** Assumed simple monthly growth of the account, basis points (75 = 0.75% a month). */
@@ -66,8 +66,8 @@ export const DEFAULT_PLAN_PARAMS: PlanParams = {
   dropBps: 3000, // 30%
   stressBps: 2500, // 25%
   sectorLimitBps: 3500, // 35%
-  etfDeltaBps: 3000, // 0.30 (Dean, 2026-09-26)
-  stockDeltaBps: 2500, // 0.25
+  deltaMinBps: 2500, // 0.25 (Dean, 2026-09-26: the best-paying put between delta 0.25 and 0.30)
+  deltaMaxBps: 3000, // 0.30
   dteMin: 30,
   dteMax: 45,
   monthlyGrowthBps: 75, // 0.75% a month
@@ -133,9 +133,10 @@ export function validateParams(p: PlanParams): PlanValidation {
   if (isInt(p.reserveBps) && isInt(p.spreadCapBps) && p.reserveBps + p.spreadCapBps > 10_000) {
     errors.push('Reserve plus the spread cap cannot be more than 100% of the account.');
   }
-  for (const [value, label] of [[p.etfDeltaBps, 'ETF'], [p.stockDeltaBps, 'Stock']] as [number, string][]) {
-    if (!isInt(value) || value <= 0 || value >= 10_000) errors.push(`${label} target delta must be between 0 and 1.`);
+  for (const [value, label] of [[p.deltaMinBps, 'Low'], [p.deltaMaxBps, 'High']] as [number, string][]) {
+    if (!isInt(value) || value <= 0 || value >= 10_000) errors.push(`${label} end of the delta range must be between 0 and 1.`);
   }
+  if (isInt(p.deltaMinBps) && isInt(p.deltaMaxBps) && p.deltaMinBps > p.deltaMaxBps) errors.push('Delta range: the low end cannot be above the high end.');
   if (!isInt(p.dteMin) || !isInt(p.dteMax) || p.dteMin < 0 || p.dteMin > p.dteMax) errors.push('Days to expiry: the minimum cannot be above the maximum.');
   if (typeof p.monthlyGrowthBps !== 'number' || !Number.isFinite(p.monthlyGrowthBps)) errors.push('Monthly growth must be a number.');
 
@@ -147,7 +148,7 @@ export function validateParams(p: PlanParams): PlanValidation {
   if (p.reserveBps < 500) warnings.push('A reserve under 5% leaves little cash to act on a bad month.');
   if (p.spreadCapBps > 1000) warnings.push('A total spread cap above 10% of the account raises the worst case, because spreads can lose their full risk.');
   if (p.singleSpreadCapBps > p.spreadCapBps) warnings.push('The single-spread cap is above the total spread cap, so it can never bind.');
-  if (Math.max(p.etfDeltaBps, p.stockDeltaBps) > 3500) warnings.push('A target delta above 0.35 puts the strike close to the money and raises the chance of assignment.');
+  if (p.deltaMaxBps > 3500) warnings.push('A delta above 0.35 puts the strike close to the money and raises the chance of assignment.');
   if (p.stressBps < 1500) warnings.push('A stress fall under 15% is milder than recent broad selloffs.');
   return { errors, warnings };
 }
@@ -219,6 +220,25 @@ export function percentBelowPriceTenths(priceDollars: number | null | undefined,
   if (priceCents <= 0) return null;
   return Math.round(((priceCents - strikeCents) * 1000) / priceCents);
 }
+
+/**
+ * Annualized return on capital at the BID, in basis points, before fees unless a fee is given: the credit for one
+ * contract (bid floored to whole cents, times 100 shares) less the opening fee, over the cash the put ties up, scaled
+ * to a year by simple (not compounded) calendar days. Null when there is no usable bid, the credit does not cover
+ * the fee, or fewer than 1 day is left. Floored, so a name just under a hurdle can never read as passing.
+ */
+export function annualizedRocBps(bidDollars: number | null | undefined, strikeDollars: number, dte: number, openFeeCents = 0): number | null {
+  const credit = creditPerContractCents(bidDollars);
+  if (credit == null) return null;
+  const net = credit - openFeeCents;
+  if (net <= 0) return null;
+  const cash = cashForOnePutCents(strikeDollars);
+  if (!(cash > 0) || !Number.isInteger(dte) || dte < 1) return null;
+  return Math.floor((net * 365 * 10_000) / (cash * dte));
+}
+
+/** Basis points as a percent floored to one decimal (997 -> "9.9%"), so a shortfall never displays as reaching the mark. */
+export const formatRocBps = (bps: number): string => `${(Math.floor(bps / 10) / 10).toFixed(1)}%`;
 
 /** How many contracts fit under the per-name cash limit. */
 export function contractsThatFit(maxCashCents: number, cashCents: number): number {
@@ -351,9 +371,6 @@ export function summarizeStress(p: PlanParams, limits: PlanLimits, deployedCents
 }
 
 export type InstrumentKind = 'etf' | 'stock';
-
-/** The target delta for a put on an ETF or a single stock. */
-export const targetDeltaFor = (p: PlanParams, kind: InstrumentKind): number => (kind === 'etf' ? p.etfDeltaBps : p.stockDeltaBps);
 
 // ── Leveraged and inverse ETFs (Ian, O7): never a wheel candidate ─────────────────────────────────
 

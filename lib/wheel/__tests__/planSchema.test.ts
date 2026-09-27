@@ -54,7 +54,7 @@ describe('sanitizeOverrides', () => {
     expect(sanitizeOverrides('x')).toEqual({});
   });
   it('rejects non-integers, out-of-range values and wrong types', () => {
-    expect(sanitizeOverrides({ reserveBps: 10.5, spreadCapBps: 10_001, dropBps: '3000', etfDeltaBps: 0, dteMin: -1 })).toEqual({});
+    expect(sanitizeOverrides({ reserveBps: 10.5, spreadCapBps: 10_001, dropBps: '3000', deltaMinBps: 0, dteMin: -1 })).toEqual({});
   });
 });
 
@@ -88,6 +88,6 @@ describe('validatePlanPatch', () => {
     expect(r.errors.join(' ')).toMatch(/100%/);
   });
   it('a merely unusual value is saved (soft warnings never block)', () => {
-    expect(validatePlanPatch({ overrides: { spreadCapBps: 2000, etfDeltaBps: 4000, dropBps: 1500 } }).ok).toBe(true);
+    expect(validatePlanPatch({ overrides: { spreadCapBps: 2000, deltaMaxBps: 4000, dropBps: 1500 } }).ok).toBe(true);
   });
 });

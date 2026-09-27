@@ -6,16 +6,25 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { WheelChainLeg, WheelChainResult } from '@/lib/wheel/chainSearch';
+import { currentNewYorkDate } from '@/lib/scans/earningsPrecheck';
 import type { WheelPlan } from '@/lib/wheel/planSchema';
 import WheelPlanTab, { type WheelPlanDeps } from '../WheelPlanTab';
 
-const put = (strike: number, delta = -0.2): WheelChainLeg => ({
-  strikePrice: strike, expirationDate: '2026-11-06', optionType: 'P', delta, openInterest: 500, bid: 0.5, ask: 0.6, mid: 0.55, occSymbol: `P${strike}`,
+// Expiries are relative to today (New York), so these tests never age out.
+const inDays = (n: number): string => {
+  const [y, m, d] = currentNewYorkDate().split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+};
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const label = (n: number): string => { const [, m, d] = inDays(n).split('-').map(Number); return `${MONTHS[m - 1]} ${d}`; };
+const EXP = inDays(41);
+const put = (strike: number, delta = -0.27, bid = 0.5): WheelChainLeg => ({
+  strikePrice: strike, expirationDate: EXP, optionType: 'P', delta, openInterest: 500, bid, ask: bid + 0.1, mid: bid + 0.05, occSymbol: `P${strike}`,
 });
 const chain = (strike: number | null, failedBatches = 0): WheelChainResult =>
   strike == null
     ? { expirations: [], chains: {}, failedBatches }
-    : { expirations: ['2026-11-06'], chains: { '2026-11-06': [put(strike)] }, failedBatches };
+    : { expirations: [EXP], chains: { [EXP]: [put(strike)] }, failedBatches };
 
 const STRIKES: Record<string, number> = { XLF: 51, XLE: 58, XLU: 37, XLP: 76, XLV: 159, BIG: 250, NVDA: 205 };
 const openAdjust = () => userEvent.click(screen.getByRole('button', { name: /Adjust any default/ }));
@@ -106,7 +115,7 @@ describe('WheelPlanTab', () => {
   it('"no put found" appears only when the chain loaded cleanly', async () => {
     const { deps } = makeDeps({ wheelList: [{ symbol: 'XLF' }] }, { fetchChain: async () => chain(null, 0) });
     render(<WheelPlanTab deps={deps} />);
-    expect(await screen.findByText(/No put found near delta 0.25 in 30 to 45 days/)).toBeInTheDocument();
+    expect(await screen.findByText(/No put found with delta 0.25 to 0.30 in 30 to 45 days/)).toBeInTheDocument();
   });
 
   it('a missing or expired TastyTrade session shows a reconnect message and retries', async () => {
@@ -272,46 +281,51 @@ describe('putting a name that does not fit on the wheel anyway', () => {
   });
 });
 
-describe('target delta by ETF or stock (0.30 and 0.25)', () => {
-  const threePuts = (): WheelChainResult => ({
-    expirations: ['2026-11-06'],
-    chains: { '2026-11-06': [put(50, -0.2), put(49, -0.25), put(48, -0.3)] },
+describe('the best-paying put in the delta band (0.25 to 0.30)', () => {
+  const bandPuts = (): WheelChainResult => ({
+    expirations: [EXP],
+    chains: { [EXP]: [put(50, -0.2, 0.5), put(49, -0.26, 0.6), put(48, -0.3, 0.75), put(47, -0.33, 1.0)] },
     failedBatches: 0,
   });
 
-  it('prices the 0.30 put for an ETF the broker reports as an ETF', async () => {
-    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLF' }] }, { fetchChain: async () => threePuts(), fetchKind: async () => 'etf' });
+  it('shows the highest Annual ROC put whose delta is between 0.25 and 0.30, not the nearest to a target', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLF' }] }, { fetchChain: async () => bandPuts() });
     render(<WheelPlanTab deps={deps} />);
     const row = await screen.findByTestId('ladder-row-XLF');
-    await waitFor(() => expect(within(row).getByText(/48P · Nov 6 · Δ0.30/)).toBeInTheDocument());
-    expect(within(row).getByLabelText('Type of XLF')).toHaveValue('etf');
+    await waitFor(() => expect(within(row).getByText(new RegExp(`48P · ${label(41)} · Δ0.30`))).toBeInTheDocument());
+    expect(within(row).getByText('$75')).toBeInTheDocument(); // credit: bid 0.75 x 100
+    expect(within(row).getByText('13.9%')).toBeInTheDocument(); // Annual ROC: 7,500 x 365 x 10,000 / (480,000 x 41) = 1,390 bps, floored to one decimal
   });
 
-  it('prices the 0.25 put for a stock, and for anything the broker does not classify', async () => {
-    const { deps } = makeDeps({ wheelList: [{ symbol: 'NVDA' }, { symbol: 'XYZ' }] }, { fetchChain: async () => threePuts(), fetchKind: async (s) => (s === 'NVDA' ? 'stock' : null) });
-    render(<WheelPlanTab deps={deps} />);
-    await waitFor(() => expect(within(screen.getByTestId('ladder-row-NVDA')).getByText(/49P · Nov 6 · Δ0.25/)).toBeInTheDocument());
-    await waitFor(() => expect(within(screen.getByTestId('ladder-row-XYZ')).getByText(/49P · Nov 6 · Δ0.25/)).toBeInTheDocument());
-    expect(within(screen.getByTestId('ladder-row-XYZ')).getByLabelText('Type of XYZ')).toHaveValue('stock');
-  });
-
-  it('the trader can correct the type on a row, it re-prices from the same chain, and the choice is saved', async () => {
-    const fetchChain = vi.fn(async () => threePuts());
-    const { deps, posts } = makeDeps({ wheelList: [{ symbol: 'XYZ' }] }, { fetchChain, fetchKind: async () => null });
-    render(<WheelPlanTab deps={deps} />);
-    const row = await screen.findByTestId('ladder-row-XYZ');
-    await waitFor(() => expect(within(row).getByText(/49P/)).toBeInTheDocument());
-    await userEvent.selectOptions(within(row).getByLabelText('Type of XYZ'), 'etf');
-    await waitFor(() => expect(within(screen.getByTestId('ladder-row-XYZ')).getByText(/48P · Nov 6 · Δ0.30/)).toBeInTheDocument());
-    expect(fetchChain).toHaveBeenCalledTimes(1); // re-priced from the chain already loaded
-    await waitFor(() => expect(posts.length).toBeGreaterThan(0), { timeout: 3000 });
-    expect((posts[posts.length - 1] as { wheelList: unknown[] }).wheelList).toEqual([{ symbol: 'XYZ', kind: 'etf' }]);
-  });
-
-  it('a changed ETF or stock delta in the adjustable defaults re-prices the rows', async () => {
-    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLF' }], overrides: { etfDeltaBps: 2000 } }, { fetchChain: async () => threePuts(), fetchKind: async () => 'etf' });
+  it('a changed delta range re-prices the rows from the chain already loaded', async () => {
+    const fetchChain = vi.fn(async () => bandPuts());
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLF' }], overrides: { deltaMinBps: 2000, deltaMaxBps: 2000 } }, { fetchChain });
     render(<WheelPlanTab deps={deps} />);
     const row = await screen.findByTestId('ladder-row-XLF');
-    await waitFor(() => expect(within(row).getByText(/50P · Nov 6 · Δ0.20/)).toBeInTheDocument());
+    await waitFor(() => expect(within(row).getByText(new RegExp(`50P · ${label(41)} · Δ0.20`))).toBeInTheDocument());
+    expect(fetchChain).toHaveBeenCalledTimes(1);
+  });
+
+  it('says so plainly when no put falls in the band', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLF' }], overrides: { deltaMinBps: 4000, deltaMaxBps: 4500 } }, { fetchChain: async () => ({ expirations: [EXP], chains: { [EXP]: [put(50, -0.2)] }, failedBatches: 0 }) });
+    render(<WheelPlanTab deps={deps} />);
+    expect(await screen.findByText(/No put found with delta 0.40 to 0.45 in 30 to 45 days/)).toBeInTheDocument();
+  });
+
+  it('labels each row ETF / index or Stock from the screener\'s detection (information only for now)', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLF' }, { symbol: 'NVDA' }, { symbol: 'XYZ' }] }, { fetchKind: async (s) => (s === 'XLF' ? 'etf' : s === 'NVDA' ? 'stock' : null) });
+    render(<WheelPlanTab deps={deps} />);
+    await waitFor(() => expect(screen.getByTestId('type-XLF')).toHaveTextContent('ETF / index'));
+    expect(screen.getByTestId('type-NVDA')).toHaveTextContent('Stock');
+    expect(screen.getByTestId('type-XYZ')).toHaveTextContent('Stock'); // unknown falls back to Stock
+  });
+
+  it('the delta range fields are in the adjustable defaults, with the band as the default', async () => {
+    const { deps } = makeDeps({});
+    render(<WheelPlanTab deps={deps} />);
+    await screen.findByText(/Add a symbol/);
+    await openAdjust();
+    expect(screen.getByLabelText('Delta range, from')).toHaveValue('0.25');
+    expect(screen.getByLabelText('Delta range, to')).toHaveValue('0.30');
   });
 });

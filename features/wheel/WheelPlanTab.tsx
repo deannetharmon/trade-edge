@@ -38,7 +38,7 @@ import {
   validateParams,
   type PlanOverrides,
   type PlanParams,
-  targetDeltaFor,
+  formatRocBps,
   type InstrumentKind,
   type PlanProfile,
   type UnlockMonths,
@@ -103,9 +103,9 @@ const FIELDS: FieldSpec[] = [
   bpsField('singleSpreadCapBps', 'Single spread cap', 'Most any one spread may risk.'),
   bpsField('dropBps', 'Assumed drop of one stock', 'How far one holding is assumed to fall when sizing a position.'),
   bpsField('stressBps', 'Stress fall (all together)', 'The fall applied to every holding at once in the worst-case line.'),
-  { key: 'etfDeltaBps', label: 'Target delta, ETFs', help: 'For an ETF, the put priced is the one nearest this delta.', suffix: 'delta',
+  { key: 'deltaMinBps', label: 'Delta range, from', help: 'Lowest delta considered for the put.', suffix: 'delta',
     toText: (v) => (v / 10_000).toFixed(2), fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n * 10_000); } },
-  { key: 'stockDeltaBps', label: 'Target delta, stocks', help: 'For a single stock, the put priced is the one nearest this delta.', suffix: 'delta',
+  { key: 'deltaMaxBps', label: 'Delta range, to', help: 'Highest delta considered. The put shown is the best-paying one (highest Annual ROC at the bid) in this range.', suffix: 'delta',
     toText: (v) => (v / 10_000).toFixed(2), fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n * 10_000); } },
   { key: 'dteMin', label: 'Days to expiry, from', help: 'Earliest expiry considered.', suffix: 'days', toText: String, fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n); } },
   { key: 'dteMax', label: 'Days to expiry, to', help: 'Latest expiry considered.', suffix: 'days', toText: String, fromText: (t) => { const n = num(t); return n === null ? null : Math.round(n); } },
@@ -323,17 +323,17 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
       if (!row || row.loading) return { entry, kind: 'loading' as const };
       const detected: InstrumentKind = row.outcome.kind ?? 'stock';
       const instrument: InstrumentKind = entry.kind ?? detected;
-      const targetBps = targetDeltaFor(params, instrument);
-      const status: RowStatus = classifyRow(row.outcome, targetBps);
-      if (status.kind !== 'ok') return { entry, kind: 'state' as const, status, quote: row.outcome.quote, instrument, detected, targetBps };
+      const status: RowStatus = classifyRow(row.outcome, { minBps: params.deltaMinBps, maxBps: params.deltaMaxBps });
+      if (status.kind !== 'ok') return { entry, kind: 'state' as const, status, quote: row.outcome.quote, instrument };
       const cashCents = cashForOnePutCents(status.put.leg.strikePrice);
       const dropBps = entry.dropBps ?? params.dropBps;
       const maxCash = maxCashPerNameCents(params, dropBps);
       const fitsAt = fitsAtAccountCents(cashCents, params, dropBps);
       return {
-        entry, kind: 'ok' as const, status, quote: row.outcome.quote, instrument, detected, targetBps, cashCents, maxCash,
+        entry, kind: 'ok' as const, status, quote: row.outcome.quote, instrument, cashCents, maxCash,
         belowTenths: percentBelowPriceTenths(row.outcome.quote, status.put.leg.strikePrice),
         creditCents: creditPerContractCents(status.put.leg.bid),
+        rocBps: status.put.rocBps,
         fit: contractsThatFit(maxCash, cashCents), fitsAt,
         fitsConcentrated: cashCents <= maxCashPerNameCents({ ...params, profile: 'concentrated' }, dropBps), unlock: monthsToUnlock(fitsAt, params.accountCents, params.monthlyGrowthBps),
       };
@@ -533,7 +533,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
               <p className="text-sm text-white/40">Add a symbol to see the cash one put needs, whether it fits, and when it unlocks.</p>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-white/10">
-                <table className="w-full min-w-[1140px] text-xs">
+                <table className="w-full min-w-[1240px] text-xs">
                   <thead>
                     <tr className="bg-white/5 text-[10px] uppercase tracking-wider text-white/40">
                       <th className="px-3 py-2 text-left">Stock</th>
@@ -542,6 +542,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                       <th className="px-3 py-2 text-left">Put</th>
                       <th className="px-3 py-2 text-right" title="Out of the money: how far the stock can fall from today's price before the put is in the money">OTM %</th>
                       <th className="px-3 py-2 text-right" title="What you collect for one contract at the bid, before fees">Credit</th>
+                      <th className="px-3 py-2 text-right" title="Credit at the bid over the cash tied up, scaled to a year (simple, not compounded), before fees">Annual ROC</th>
                       <th className="px-3 py-2 text-right">Req. Cash</th>
                       <th className="px-3 py-2 text-right">Fits</th>
                       <th className="px-3 py-2 text-right">In plan</th>
@@ -557,18 +558,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                         <td className="px-3 py-2 font-bold">{row.entry.symbol}</td>
                         <td className="space-y-1 px-3 py-2">
                           {(row.kind === 'ok' || row.kind === 'state') && (
-                            <select
-                              aria-label={`Type of ${row.entry.symbol}`}
-                              value={row.instrument}
-                              onChange={(e) => {
-                                const picked = e.target.value as InstrumentKind;
-                                updateList((list) => list.map((x) => (x.symbol === row.entry.symbol ? { ...x, kind: picked === row.detected ? undefined : picked } : x)));
-                              }}
-                              className="block w-28 rounded border border-white/10 bg-white/5 px-2 py-1 text-xs focus:border-white/30 focus:outline-none"
-                            >
-                              <option value="etf">ETF / index</option>
-                              <option value="stock">Stock</option>
-                            </select>
+                            <span className="block text-[10px] text-white/40" data-testid={`type-${row.entry.symbol}`}>{row.instrument === 'etf' ? 'ETF / index' : 'Stock'}</span>
                           )}
                           <input
                             aria-label={`Sector for ${row.entry.symbol}`}
@@ -590,6 +580,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                             <td className="whitespace-nowrap px-3 py-2" title={row.status.kind === 'ok' ? `Expires ${row.status.put.expirationDate}` : undefined}>{row.status.kind === 'ok' && `${row.status.put.leg.strikePrice}P · ${shortDate(row.status.put.expirationDate)} · Δ${(row.status.put.deltaBps / 10_000).toFixed(2)}`}</td>
                             <td className="px-3 py-2 text-right" title="Out of the money: how far the stock can fall from today's price before this put is in the money">{row.belowTenths == null ? '—' : formatPctTenths(row.belowTenths)}</td>
                             <td className="px-3 py-2 text-right" title={row.creditCents == null ? undefined : `$${(row.creditCents / 10_000).toFixed(2)} a share at the bid`}>{row.creditCents == null ? '—' : formatCents(row.creditCents)}</td>
+                            <td className="px-3 py-2 text-right">{formatRocBps(row.rocBps)}</td>
                             <td className="px-3 py-2 text-right">{formatCents(row.cashCents)}</td>
                             <td className="px-3 py-2 text-right">{row.fit}</td>
                             <td className="px-3 py-2 text-right font-bold">{inPlan(row.entry.symbol)}</td>
@@ -626,13 +617,13 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                             </td>
                           </>
                         )}
-                        {row.kind === 'loading' && <td colSpan={9} className="px-3 py-2 text-white/40">Loading…</td>}
-                        {row.kind === 'leveraged' && <td colSpan={9} className="px-3 py-2 text-amber-300">Not a wheel candidate: a leveraged or inverse ETF can fall far more than 30% in a month. Small put spreads only.</td>}
+                        {row.kind === 'loading' && <td colSpan={10} className="px-3 py-2 text-white/40">Loading…</td>}
+                        {row.kind === 'leveraged' && <td colSpan={10} className="px-3 py-2 text-amber-300">Not a wheel candidate: a leveraged or inverse ETF can fall far more than 30% in a month. Small put spreads only.</td>}
                         {row.kind === 'state' && (
-                          <td colSpan={9} className="px-3 py-2">
+                          <td colSpan={10} className="px-3 py-2">
                             {row.status.kind === 'chain-error' && <span className="text-red-300">Chain error: {row.status.message}</span>}
                             {row.status.kind === 'quote-unavailable' && <span className="text-amber-300">Quote unavailable, and no put was found. Retry.</span>}
-                            {row.status.kind === 'no-put' && <span className="text-white/50">No put found near delta {(row.targetBps / 10_000).toFixed(2)} in {params.dteMin} to {params.dteMax} days.</span>}
+                            {row.status.kind === 'no-put' && <span className="text-white/50">No put found with delta {(params.deltaMinBps / 10_000).toFixed(2)} to {(params.deltaMaxBps / 10_000).toFixed(2)} in {params.dteMin} to {params.dteMax} days.</span>}
                           </td>
                         )}
                         <td className="whitespace-nowrap px-3 py-2 text-right">
@@ -646,7 +637,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
               </div>
             )}
             <p className="text-[10px] text-white/40">
-              Credit is what you collect for one contract at the bid, before fees. Req. Cash (required cash) is the strike times 100 at the put nearest the target delta (ETFs {(params.etfDeltaBps / 10_000).toFixed(2)}, stocks {(params.stockDeltaBps / 10_000).toFixed(2)}). "Fits at account" is the account size at which one contract first fits your chosen profile, and "Wheel now" means it fits today.
+              Credit is what you collect for one contract at the bid, before fees. Req. Cash (required cash) is the strike times 100. The put shown is the best-paying one (highest Annual ROC at the bid) with delta between {(params.deltaMinBps / 10_000).toFixed(2)} and {(params.deltaMaxBps / 10_000).toFixed(2)} inside your days-to-expiry window. "Fits at account" is the account size at which one contract first fits your chosen profile, and "Wheel now" means it fits today.
               Cash goes to names in list order until ranking arrives. No open-interest or spread filter is applied yet.
             </p>
           </section>

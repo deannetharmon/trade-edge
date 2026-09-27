@@ -8,8 +8,10 @@ import {
   allocate,
   cashForOnePutCents,
   computeLimits,
+  annualizedRocBps,
   contractsThatFit,
   creditPerContractCents,
+  formatRocBps,
   fitsAtAccountCents,
   formatBps,
   formatCents,
@@ -23,7 +25,6 @@ import {
   resolveParams,
   stressLossCents,
   summarizeStress,
-  targetDeltaFor,
   validateParams,
   type PlanParams,
 } from '../capitalPlan';
@@ -271,8 +272,9 @@ describe('validation: hard errors block, soft warnings only warn', () => {
     [{ reserveBps: 10_001 }],
     [{ reserveBps: 6000, spreadCapBps: 5000 }],
     [{ dropBps: 0 }],
-    [{ etfDeltaBps: 0 }],
-    [{ stockDeltaBps: 10_000 }],
+    [{ deltaMinBps: 0 }],
+    [{ deltaMaxBps: 10_000 }],
+    [{ deltaMinBps: 3100, deltaMaxBps: 2500 }],
     [{ dteMin: 50, dteMax: 40 }],
     [{ monthlyGrowthBps: Number.NaN }],
     [{ profile: 'custom', customLossBps: 0 }],
@@ -284,8 +286,7 @@ describe('validation: hard errors block, soft warnings only warn', () => {
     [{ dropBps: 1500 }],
     [{ reserveBps: 300 }],
     [{ spreadCapBps: 2000 }],
-    [{ etfDeltaBps: 4000 }],
-    [{ stockDeltaBps: 3600 }],
+    [{ deltaMaxBps: 4000 }],
     [{ singleSpreadCapBps: 1500 }],
   ])('%j is only a warning, never an error', (over) => {
     const r = v(over);
@@ -338,12 +339,34 @@ describe('how far below the price the strike sits', () => {
   });
 });
 
-describe('target delta by kind (Dean, 2026-09-26: 0.30 for ETFs, 0.25 for stocks)', () => {
-  it('defaults to 0.30 for an ETF and 0.25 for a stock, and each is editable', () => {
-    expect(targetDeltaFor(resolveParams(), 'etf')).toBe(3000);
-    expect(targetDeltaFor(resolveParams(), 'stock')).toBe(2500);
-    expect(targetDeltaFor(resolveParams({ etfDeltaBps: 2800, stockDeltaBps: 2200 }), 'etf')).toBe(2800);
-    expect(targetDeltaFor(resolveParams({ etfDeltaBps: 2800, stockDeltaBps: 2200 }), 'stock')).toBe(2200);
+describe('Annual ROC at the bid (before fees)', () => {
+  // strike 51 -> cash 510,000 cents; dte 30 (fixtures for W2, Alan)
+  it.each([
+    [0.85, 30, 2027],
+    [0.4, 30, 954],
+    [0.41, 30, 978],
+    [0.42, 30, 1001],
+  ])('bid %s, 30 days -> %s bps', (bid, dte, bps) => {
+    expect(annualizedRocBps(bid, 51, dte)).toBe(bps);
+  });
+  it('the 10% hurdle edge from whole-cent bids: 0.41 fails and 0.42 passes', () => {
+    expect((annualizedRocBps(0.41, 51, 30) as number) >= 1000).toBe(false);
+    expect((annualizedRocBps(0.42, 51, 30) as number) >= 1000).toBe(true);
+  });
+  it('an opening fee, when one is set, comes off the credit', () => {
+    expect(annualizedRocBps(0.85, 51, 30, 100)).toBe(Math.floor((8400 * 365 * 10_000) / (510_000 * 30)));
+  });
+  it('is null with no bid, a credit that does not cover the fee, or under one day left', () => {
+    expect(annualizedRocBps(null, 51, 30)).toBeNull();
+    expect(annualizedRocBps(0, 51, 30)).toBeNull();
+    expect(annualizedRocBps(0.01, 51, 30, 100)).toBeNull();
+    expect(annualizedRocBps(0.5, 51, 0)).toBeNull();
+    expect(annualizedRocBps(0.5, 51, 1.5)).toBeNull();
+  });
+  it('floors to one decimal for display, so 9.97% never reads as 10%', () => {
+    expect(formatRocBps(997)).toBe('9.9%');
+    expect(formatRocBps(1000)).toBe('10.0%');
+    expect(formatRocBps(2027)).toBe('20.2%');
   });
 });
 

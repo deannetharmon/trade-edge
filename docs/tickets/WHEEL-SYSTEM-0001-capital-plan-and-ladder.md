@@ -137,8 +137,7 @@ Principle: the app ships with sensible defaults, and Dean can change any paramet
 | Per-symbol drop override | none | leveraged ETFs default to their own history (O7) |
 | Stress fall | 25% | the stress test line |
 | Sector limit | 35% of A | |
-| Target delta, ETFs | 0.30 | strike rule (Dean, 2026-09-26; was a single 0.20) |
-| Target delta, stocks | 0.25 | strike rule (Dean, 2026-09-26) |
+| Delta range | 0.25 to 0.30 | strike rule (Dean, 2026-09-26: the best-paying put between delta 0.25 and 0.30; was a single 0.20, then 0.30 ETFs / 0.25 stocks) |
 | DTE window | 30 to 45 | strike rule |
 | Assumed monthly growth g | 0.75% | months-to-unlock |
 | Later slices (recorded now) | premium hurdle 10% a year; IV rank floor about 20 | W2 |
@@ -197,3 +196,7 @@ The ladder has a "Credit" column (Dean asked for the premium, then chose "credit
 The "Your override" tag replaced the plan's own verdict on a row where Dean had typed a contract count, and it read like a button. Corrected: the Today column always shows the plan's own verdict (Wheel now, Concentrated only, Unlocks in N months), and a small amber "Yours" tag is added beside it only when the trader has typed a count in the "Your contracts" box; clearing the box removes it. Warnings about the cost are unchanged.
 
 ### Put cell layout (2026-09-26, Dean): the expiry wrapped ("Nov" / "6") and read as two items. The Put cell now stays on one line and shows the expiry as "Nov 6" (the full ISO date is the hover text).
+
+### Best-paying put in a delta band (2026-09-26, Dean: "the best paying put available between the delta of 25 and 30")
+
+The two separate targets (ETF 0.30, stock 0.25) are replaced by one editable range, `deltaMinBps` 2500 and `deltaMaxBps` 3000, for every name. The put shown is the one inside the band (edges inclusive) with the highest Annual ROC at the bid, so a longer expiry does not win just for a bigger credit. Ties: lower delta (safer), then the nearer expiry, then the lower strike. Skipped: calls, no delta, dead quotes, no bid to collect, under one day left. "No put found with delta 0.25 to 0.30 in 30 to 45 days" when none qualifies. The ladder gained an "Annual ROC" column (credit at the bid over the cash tied up, scaled to a year, simple not compounded, before fees; floored to one decimal so 9.97% reads 9.9%). The per-row ETF or stock box is removed for now (it only chose a delta); each row shows a small "ETF / index" or "Stock" label from the screener's detection, and the type is stored for W2's earnings check. Test fixtures now use expiries relative to today so they cannot age out. Tests: 160 in the wheel set. Caveat for W2: shopping within the band should only consider puts that pass the liquidity check (bid-ask and open interest), so a high credit on a thin quote cannot win.
