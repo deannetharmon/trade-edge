@@ -22,7 +22,7 @@ W1 shows what fits. W2 answers Dean's original question: which name on my list s
 | # | Check | Default | If not met |
 |---|---|---|---|
 | 1 | On the list | required | (not scored) |
-| 2 | Net annualized ROC at the bid | at least 10% (1000 bps) | Wait: premium too thin |
+| 2 | Net Annual ROC at the bid | at least 10% (1000 bps) | Wait: premium too thin |
 | 3 | IVR floor | ETF 20, stock 30 | Wait: not enough premium yet |
 | 4 | Earnings timing (stocks only) | flag | Flag (or Wait, if the switch is set) |
 | 5 | Not stretched: RSI(14) at or below | 70 | Wait for a pullback |
@@ -59,7 +59,7 @@ No invented composite "score" in v1: the order is the rule in 3b, so the ranking
 
 ## Where it goes
 
-A "Next candidate" table above the unlock ladder on the Plan tab. Columns: Stock, Verdict, Why (chips), Put to sell (strike, expiry, delta, and its OTM %, from W1's `percentBelowPriceTenths`), Credit (dollars per contract at the bid, and per share; W1's `creditPerContractCents`), Cash for one put, Net ROC a year at the bid, Earnings note. The ladder below stays as built. No changes to Candidates, recommendations or any order path.
+A "Next candidate" table above the unlock ladder on the Plan tab. Columns: Stock, Verdict, Why (chips), Put to sell (strike, expiry, delta, and its OTM %, from W1's `percentBelowPriceTenths`), Credit (dollars per contract at the bid, and per share; W1's `creditPerContractCents`), Cash for one put, Net Annual ROC at the bid, Earnings note. The ladder below stays as built. No changes to Candidates, recommendations or any order path.
 
 ## Files (proposed)
 
@@ -121,4 +121,4 @@ Every unknown state above; verdict precedence and the fixed Wait reason order; a
 **Still open:** O1 fee confirmation; O3 Dean's answers on the updated mock (https://claude.ai/artifact/HFep9MoqLENf5KQDvmxFbW): the order, dropping the 0-100 score column, and near misses shown as Wait; item 8 Ian's earnings margin, for Dean to confirm.
 
 ### Labels (Dean, 2026-09-26)
-"IVR" replaces "IV rank" everywhere it is shown, and "ROC" (return on capital) replaces "yield", matching the rest of the app (the Wheel page's "Annual ROC", the spread rules' ROC minimums). Code names for the broker field stay `ivRank`; the new parameters are `ivrEtf` and `ivrStock`.
+"IVR" replaces "IV rank" everywhere it is shown, and "ROC" (return on capital) replaces "yield", and the column is called "Net Annual ROC" (Dean), matching the rest of the app (the Wheel page's "Annual ROC", the spread rules' ROC minimums). Code names for the broker field stay `ivRank`; the new parameters are `ivrEtf` and `ivrStock`.
