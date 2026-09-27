@@ -208,3 +208,22 @@ describe('order', () => {
     expect(list).toEqual(copy);
   });
 });
+
+describe('outside market hours the bid-ask gap is not trusted (Dean, Saturday 9 PM: 90 to 109% gaps and OI 0)', () => {
+  const wide = leg({ bid: 0.22, ask: 0.7, openInterest: 500 });
+  it('a wide gap cannot fail a put while the market is closed; open interest still decides', () => {
+    const closed = evaluateCandidate(input({ put: putOf(2000, wide) }), params, { marketOpen: false });
+    expect(closed.verdict.kind).toBe('candidate');
+    expect(closed.chips.find((c) => c.id === 'liquidity')).toMatchObject({ tone: 'note', text: 'Bid-ask unverified (market closed), OI 500' });
+    const open = evaluateCandidate(input({ put: putOf(2000, wide) }), params, { marketOpen: true });
+    expect(open.verdict).toEqual({ kind: 'skip', reason: 'Put is illiquid' });
+  });
+  it('low open interest still fails while the market is closed', () => {
+    const r = evaluateCandidate(input({ put: putOf(2000, leg({ bid: 0.22, ask: 0.7, openInterest: 0 })) }), params, { marketOpen: false });
+    expect(r.verdict).toEqual({ kind: 'skip', reason: 'Put is illiquid' });
+    expect(r.chips.find((c) => c.id === 'liquidity')?.text).toContain('OI 0, illiquid');
+  });
+  it('a put with no bid to collect is never liquid, open or closed', () => {
+    expect(evaluateCandidate(input({ put: putOf(2000, leg({ bid: 0, ask: 0.5 })) }), params, { marketOpen: false }).verdict.kind).toBe('skip');
+  });
+});

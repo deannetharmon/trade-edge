@@ -41,6 +41,8 @@ interface Props {
   dataProblem: boolean;
   dataLoading: boolean;
   onRetryData: () => void;
+  /** Outside regular market hours: quotes can be stale or wide, so the bid-ask gap is not checked. */
+  marketClosed: boolean;
 }
 
 const CHIP_CLASS: Record<Chip['tone'], string> = {
@@ -96,7 +98,7 @@ function ShorterLine({ row, params, state, onFind }: { row: CandidateRowView; pa
   );
 }
 
-export default function NextCandidateTable({ rows, leveraged, params, shorter, onFindShorter, dataProblem, dataLoading, onRetryData }: Props) {
+export default function NextCandidateTable({ rows, leveraged, params, shorter, onFindShorter, dataProblem, dataLoading, onRetryData, marketClosed }: Props) {
   const byGroup = new Map<CandidateGroup, CandidateRowView[]>();
   for (const row of rows) byGroup.set(row.ranked.group, [...(byGroup.get(row.ranked.group) ?? []), row]);
 
@@ -106,6 +108,11 @@ export default function NextCandidateTable({ rows, leveraged, params, shorter, o
 
   return (
     <div className="space-y-2" data-testid="next-candidate-table">
+      {marketClosed && (
+        <p role="status" className="rounded border border-white/15 bg-white/[0.03] px-3 py-2 text-[11px] text-white/60" data-testid="market-closed-note">
+          The market is closed, so option quotes can be stale or wide. Bid-ask is not checked until it opens, and Credit and Annual ROC use the last quotes and will change. Open interest is still checked.
+        </p>
+      )}
       {dataProblem && (
         <div role="alert" className="flex items-center gap-3 rounded border border-amber-400/40 bg-amber-400/5 p-3 text-xs text-amber-200">
           <span>IVR and earnings dates could not be loaded for some symbols. Those checks show "unavailable" or "unverified", never a pass.</span>
@@ -114,7 +121,7 @@ export default function NextCandidateTable({ rows, leveraged, params, shorter, o
       )}
       {dataLoading && <p className="text-[11px] text-white/40">Loading IVR, earnings dates and RSI…</p>}
       <div className="overflow-x-auto rounded-lg border border-white/10">
-        <table className="w-full min-w-[1240px] text-xs">
+        <table className="w-full min-w-[1180px] text-xs">
           <thead>
             <tr className="bg-white/5 text-[10px] uppercase tracking-wider text-white/40">
               <th className="px-3 py-2 text-left">Stock</th>
@@ -177,12 +184,12 @@ function GroupRows({ group, list, leveraged, params, shorter, onFindShorter }: {
           <tr key={symbol} className="border-t border-white/5 align-top" data-testid={`candidate-row-${symbol}`}>
             <td className="px-3 py-2">
               <b>{symbol}</b>
-              <div className="text-[10px] text-white/40">{input.instrument === 'etf' ? 'ETF / index' : 'Stock'}</div>
+              <div className="whitespace-nowrap text-[10px] text-white/40">{input.instrument === 'etf' ? 'ETF / index' : 'Stock'}</div>
             </td>
             <td className="px-3 py-2">
-              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${VERDICT_CLASS[verdict.kind]}`}>{VERDICT_LABEL[verdict.kind]}</span>
+              <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold ${VERDICT_CLASS[verdict.kind]}`}>{VERDICT_LABEL[verdict.kind]}</span>
             </td>
-            <td className="px-3 py-2">
+            <td className="min-w-[280px] max-w-[420px] px-3 py-2">
               <div className="flex flex-wrap gap-1">
                 {ranked.chips.map((chip) => (
                   <span key={chip.id} className={`rounded border px-1.5 py-0.5 text-[10px] ${CHIP_CLASS[chip.tone]}`}>{chip.text}</span>

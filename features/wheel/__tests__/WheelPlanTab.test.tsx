@@ -2,13 +2,18 @@
 //
 // WHEEL-SYSTEM-0001 (W1) -- the Plan tab: empty, loading, error and token-expired states, honest row states, overrides.
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { WheelChainLeg, WheelChainResult } from '@/lib/wheel/chainSearch';
 import { currentNewYorkDate } from '@/lib/scans/earningsPrecheck';
 import type { WheelPlan } from '@/lib/wheel/planSchema';
 import WheelPlanTab, { type WheelPlanDeps } from '../WheelPlanTab';
+
+// The market clock is controlled so no test depends on the day or hour it runs.
+const clock = vi.hoisted(() => ({ open: true }));
+vi.mock('@/lib/wheel/marketHours', () => ({ isMarketOpen: () => clock.open }));
+beforeEach(() => { clock.open = true; });
 
 // Expiries are relative to today (New York), so these tests never age out.
 const inDays = (n: number): string => {
@@ -553,5 +558,36 @@ describe('Next candidate: leveraged ETFs and the adjustable defaults', () => {
     render(<WheelPlanTab deps={deps} />);
     expect(await screen.findByTestId('next-candidate-empty')).toBeInTheDocument();
     expect(fetchMetrics).not.toHaveBeenCalled();
+  });
+});
+
+describe('Next candidate: the market is closed (quotes can be stale or wide)', () => {
+  const thin: WheelChainLeg = { ...lp(56, -0.29, 0.38), ask: 1.0, openInterest: 500 }; // a 90%+ gap, as seen after hours
+
+  it('shows a note, does not fail a put on the bid-ask gap, and says the gap is unverified', async () => {
+    clock.open = false;
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLE' }] }, { fetchChain: async () => chainWith(thin), ...withData({ XLE: { ivrPercent: 69, earningsDate: null } }, { XLE: 'etf' }) });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await rowOf('XLE');
+    expect(screen.getByTestId('market-closed-note')).toHaveTextContent(/market is closed/i);
+    expect(within(row).getByText('Bid-ask unverified (market closed), OI 500')).toBeInTheDocument();
+    expect(within(row).queryByText('Skip')).not.toBeInTheDocument();
+  });
+
+  it('open interest still fails a put while closed', async () => {
+    clock.open = false;
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLF' }] }, { fetchChain: async () => chainWith({ ...thin, openInterest: 0 }), ...withData({ XLF: { ivrPercent: 42, earningsDate: null } }, { XLF: 'etf' }) });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await rowOf('XLF');
+    expect(within(row).getByText('Skip')).toBeInTheDocument();
+    expect(within(row).getByText(/OI 0, illiquid/)).toBeInTheDocument();
+  });
+
+  it('with the market open there is no note and the bid-ask gap is checked', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'XLE' }] }, { fetchChain: async () => chainWith(thin), ...withData({ XLE: { ivrPercent: 69, earningsDate: null } }, { XLE: 'etf' }) });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await rowOf('XLE');
+    expect(screen.queryByTestId('market-closed-note')).not.toBeInTheDocument();
+    expect(within(row).getByText('Skip')).toBeInTheDocument();
   });
 });

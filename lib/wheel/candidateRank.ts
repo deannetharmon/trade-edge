@@ -136,7 +136,13 @@ export function earningsChip(state: EarningsState): Chip | null {
   }
 }
 
-export function evaluateCandidate(input: CandidateInput, params: PlanParams): RankedCandidate {
+export interface EvaluateOptions {
+  /** False outside regular market hours: the bid-ask gap is then unverified (quotes can be stale or wide) and cannot fail a put. */
+  marketOpen?: boolean;
+}
+
+export function evaluateCandidate(input: CandidateInput, params: PlanParams, options: EvaluateOptions = {}): RankedCandidate {
+  const marketOpen = options.marketOpen ?? true;
   const { put } = input;
   const chips: Chip[] = [];
 
@@ -173,12 +179,16 @@ export function evaluateCandidate(input: CandidateInput, params: PlanParams): Ra
   }
 
   // 6. Liquid put (bid-ask gap and open interest)
-  const liquid = isLiquid(put.leg, { maxBidAskBps: params.maxBidAskBps, minOpenInterest: params.minOpenInterest });
+  // Outside market hours the gap is not trusted, so only open interest (which updates overnight) decides.
+  const liquid = isLiquid(put.leg, { maxBidAskBps: marketOpen ? params.maxBidAskBps : Number.MAX_SAFE_INTEGER / 1e6, minOpenInterest: params.minOpenInterest });
   const gap = bidAskPercent(put.leg);
+  const oi = put.leg.openInterest.toLocaleString('en-US');
   chips.push({
     id: 'liquidity',
-    text: `Bid-ask ${gap == null ? 'n/a' : `${gap}%`}, OI ${put.leg.openInterest.toLocaleString('en-US')}${liquid ? '' : ', illiquid'}`,
-    tone: liquid ? 'ok' : 'bad',
+    text: marketOpen
+      ? `Bid-ask ${gap == null ? 'n/a' : `${gap}%`}, OI ${oi}${liquid ? '' : ', illiquid'}`
+      : `Bid-ask unverified (market closed), OI ${oi}${liquid ? '' : ', illiquid'}`,
+    tone: liquid ? (marketOpen ? 'ok' : 'note') : 'bad',
   });
 
   // 4. Earnings timing

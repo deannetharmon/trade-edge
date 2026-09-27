@@ -57,6 +57,7 @@ import {
   type RankedCandidate,
 } from '@/lib/wheel/candidateRank';
 import { daysUntilNy } from '@/lib/scans/earningsPrecheck';
+import { isMarketOpen } from '@/lib/wheel/marketHours';
 import NextCandidateTable, { type CandidateRowView, type ShorterState } from './NextCandidateTable';
 import { useCandidateData } from './useCandidateData';
 import { MAX_OVERRIDE_CONTRACTS, MAX_WHEEL_LIST, SYMBOL_PATTERN, type WheelListEntry, type WheelPlan } from '@/lib/wheel/planSchema';
@@ -226,9 +227,18 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
   const validation = useMemo(() => validateParams(params), [params]);
   const hasErrors = validation.errors.length > 0;
   // The put shown is the best-paying LIQUID one (do not chase premium): a thin quote with a big credit must not win.
+  // Outside regular hours option quotes can be stale or very wide, so the bid-ask gap is not trusted then (open interest still is).
+  const [marketOpen, setMarketOpen] = useState<boolean>(() => isMarketOpen());
+  useEffect(() => {
+    const timer = setInterval(() => setMarketOpen(isMarketOpen()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const selectOptions = useMemo(
-    () => ({ openFeeCents: params.openFeeCents, liquidity: { maxBidAskBps: params.maxBidAskBps, minOpenInterest: params.minOpenInterest } }),
-    [params.openFeeCents, params.maxBidAskBps, params.minOpenInterest],
+    () => ({
+      openFeeCents: params.openFeeCents,
+      liquidity: { maxBidAskBps: marketOpen ? params.maxBidAskBps : Number.MAX_SAFE_INTEGER / 1e6, minOpenInterest: params.minOpenInterest },
+    }),
+    [params.openFeeCents, params.maxBidAskBps, params.minOpenInterest, marketOpen],
   );
   const candidateSymbols = useMemo(() => wheelList.map((e) => e.symbol).filter((sym) => !isLeveragedEtf(sym)), [wheelList]);
   const candidateData = useCandidateData(loadState === 'ready' && !hasErrors, candidateSymbols, deps);
@@ -412,14 +422,14 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
         notYetReason: row.unlock.kind === 'fits' ? 'Over your per-name limit' : `Unlocks in ${formatUnlock(row.unlock as UnlockMonths)}`,
         notFitText: notFitText(row.cashCents, row.maxCash),
       };
-      const ranked = evaluateCandidate(input, params);
+      const ranked = evaluateCandidate(input, params, { marketOpen });
       list.push(ranked);
       views.set(symbol, { ranked, quote: row.quote, autoContracts: row.fit, typedContracts: row.entry.contracts ?? null });
     }
     const ordered = rankCandidates(list).map((r) => views.get(r.input.symbol) as CandidateRowView);
     for (const v of ordered) byId[v.ranked.input.symbol] = v;
     return { ranked: ordered, byId, leveraged: wheelList.map((e) => e.symbol).filter(isLeveragedEtf) };
-  }, [rows, limits, allocation, params, candidateData.metrics, candidateData.closes, dataReady, wheelList]);
+  }, [rows, limits, allocation, params, candidateData.metrics, candidateData.closes, dataReady, wheelList, marketOpen]);
 
   // "Find a shorter expiry": only expirations that END BEFORE the earnings date, outside the normal window, priced by the same rule.
   const [shorter, setShorter] = useState<Record<string, ShorterState>>({});
@@ -608,6 +618,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                 onFindShorter={findShorter}
                 dataProblem={(candidateData.metrics?.failed.length ?? 0) > 0 || (candidateData.metrics != null && candidateSymbols.some((sym) => !(sym in candidateData.metrics!.items)))}
                 dataLoading={false}
+                marketClosed={!marketOpen}
                 onRetryData={candidateData.retry}
               />
             )}
