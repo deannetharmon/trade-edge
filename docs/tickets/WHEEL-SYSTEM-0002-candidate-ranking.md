@@ -12,7 +12,7 @@ W1 shows what fits. W2 answers Dean's original question: which name on my list s
 
 1. **Hurdle:** annualized return on the cash tied up, measured at the actual **bid**, after fees, at least **10% a year**. Below it the verdict is "wait: premium too thin". Parked cash is counted at what it earns (shown in W4, not here).
 2. **The list is the "would own" list.** Being on the plan's wheel list means Dean would own it. No separate tag in W2.
-3. **Earnings is a timing flag, not a gate** (Dean and Ian, on a wheel you cross earnings): ETFs and indexes skip it. For a stock whose expected earnings date is on or before the chosen expiry the row is flagged, never blocked. The flag says the price can gap, offers the three choices (a shorter expiry that ends before it, wait until after it, or take it knowingly with the existing contract override), and adds "premium includes earnings risk" to the return so a stock cannot clear the hurdle only because the market is pricing in a gap. Default is "flag and keep ranking"; a switch makes it "wait until after earnings" (editable default). A follow-up (not W2) shows the strike's distance below the price against the stock's typical earnings move.
+3. **Earnings is a timing flag, not a gate** (Dean and Ian, on a wheel you cross earnings): ETFs and indexes skip it. For a stock whose expected earnings date is on or before the chosen expiry the row is flagged, never blocked, with one short line ("NVDA reports Oct 28, before this put expires Nov 6. The price can gap.") and the return carries "includes earnings risk", so a stock cannot clear the hurdle only because the market is pricing in a gap. Dean's correction (2026-09-26): no explanatory paragraph and no three-choice list. The only action is a **"Find a shorter expiry"** button: a longer expiry is not offered because it still crosses earnings, and nobody can know how an option prices after the report. The button prices, from the same chain fetch, the put nearest the target delta among expirations from `minShortDte` (editable default 7 days) up to the day before the earnings date, outside the normal DTE window, and shows the result on the row (strike, expiry, days, delta, OTM %, net yield at the bid). If no expiry qualifies it says so in one line. Default is "flag and keep ranking"; a switch makes it "wait until after earnings" (editable default). A follow-up (not W2) shows the strike's distance below the price against the stock's typical earnings move.
 3b. Ranking: names without an earnings flag rank first, then flagged names; within each group by net annualized return, best first.
 4. Target delta 0.30 for ETFs and indexes, 0.25 for stocks (W1, built).
 5. Principle from W1: every threshold below is an editable default with a Reset, stored as an override, and the tab warns about unusual values but never blocks.
@@ -55,7 +55,7 @@ No invented composite "score" in v1: the order is the rule in 3b, so the ranking
 
 ## New editable defaults (added to the plan's parameters)
 
-`hurdleBps` 1000, `ivRankEtf` 20, `ivRankStock` 30, `rsiMax` 70, `maxSpreadBps` 1000 (of the mid), `minOpenInterest` 100, `openFeeCents` 100 (placeholder), `earningsRule` `flag` or `wait`. Same override storage, validation (hard errors only for invalid math, warnings otherwise), reset and tests as W1.
+`minShortDte` 7, `hurdleBps` 1000, `ivRankEtf` 20, `ivRankStock` 30, `rsiMax` 70, `maxSpreadBps` 1000 (of the mid), `minOpenInterest` 100, `openFeeCents` 100 (placeholder), `earningsRule` `flag` or `wait`. Same override storage, validation (hard errors only for invalid math, warnings otherwise), reset and tests as W1.
 
 ## Where it goes
 
@@ -74,7 +74,7 @@ Balanced, ETF, bid 0.85, strike 51 (cash 5,100), dte 30, fee 100 cents: premium 
 1. Every check shows its reason; unknown never fails a name; one reason per row.
 2. Order: Candidates without an earnings flag first, then flagged, each by net annualized return; then Wait, Not yet and Skip rows.
 3. Changing any threshold recalculates the table; Reset returns the default.
-4. An ETF or index never shows an earnings flag. A stock with earnings on or before expiry shows the flag with the date, "premium includes earnings risk", and the three choices; with `earningsRule = wait` the verdict is Wait until after the date.
+4. An ETF or index never shows an earnings flag. A stock with earnings on or before expiry shows the one-line flag with the date, "includes earnings risk", and a "Find a shorter expiry" button; the button prices only expirations ending before the earnings date (never a longer one) and shows the result on the row; with `earningsRule = wait` the verdict is Wait until after the date.
 5. Missing data shows "unavailable" for that check only; nothing blanks the tab; retry works.
 6. No order, position or recommendation changes; standing line "Guidance from TradeEdge rules. You decide; no orders are placed automatically."
 
