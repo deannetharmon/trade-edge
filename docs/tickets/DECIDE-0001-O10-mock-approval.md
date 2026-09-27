@@ -1,5 +1,7 @@
 # DECIDE-0001 — O10 mock approval record
 
+> **SUPERSEDED (2026-09-27).** This record came from a parallel session and conflicts with the ticket on `main` (revision 7). Revision 7 is the only source of truth. Do not build from this file. Anything it had that revision 7 lacked was carried into the ticket (Phase 0 entry-date finding, and open item O25).
+
 **Approved by Dean, 2026-09-27.** This closes open items O1 and O10 in DECIDE-0001 revision 3.
 
 - **Mock:** `docs/tickets/mockups/decide-0001-recommendation-cards.html` (version 3)

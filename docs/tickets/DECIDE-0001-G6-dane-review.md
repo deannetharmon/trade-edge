@@ -1,5 +1,7 @@
 # DECIDE-0001 — G6 pre-development review (Dane)
 
+> **SUPERSEDED (2026-09-27).** This record came from a parallel session and conflicts with the ticket on `main` (revision 7). Revision 7 is the only source of truth. Do not build from this file. Anything it had that revision 7 lacked was carried into the ticket (Phase 0 entry-date finding, and open item O25).
+
 **Reviewed 2026-09-27** against revision 3 on `main` (`29db9b3`), plus the O10 approval and the O12 rulings.
 
 **Verdict: approve S0 now.**
