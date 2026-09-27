@@ -190,3 +190,5 @@ The ladder has a "Credit" column (Dean asked for the premium, then chose "credit
 ### Label (2026-09-26, Dean): the ladder column "Cash for one put" is now "Cash per Put".
 
 ### Label (2026-09-26, Dean): the ladder column "Put priced" is now "Put".
+
+### Label (2026-09-26, Dean): the ladder column "Cash per Put" is now "Req. Cash" (required cash).
