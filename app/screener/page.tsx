@@ -2554,8 +2554,9 @@ function WatchlistBox({
         {scanning && ocrProgress && (
           <div className="mt-1.5 flex items-center gap-2" role="status" aria-live="polite">
             <p className={`text-[10px] ${th.textMuted} whitespace-nowrap`}>{describeOcrProgress(ocrProgress.phase, ocrProgress.done, ocrProgress.total)}</p>
-            <div className="flex-1 h-1.5 rounded-full ac-bg-20 overflow-hidden">
-              <div className="h-full rounded-full ac-bg transition-[width] duration-300" style={{ width: `${progressPercent(ocrProgress.done, ocrProgress.total)}%` }} />
+            {/* Inline colors: the screener's accent <style> block doesn't define .ac-bg / .ac-bg-20. */}
+            <div className="flex-1 min-w-[60px] h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(var(--accent-r, 59), var(--accent-g, 130), var(--accent-b, 246), 0.2)' }}>
+              <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${progressPercent(ocrProgress.done, ocrProgress.total)}%`, backgroundColor: 'var(--accent, #3b82f6)' }} />
             </div>
             <span className={`text-[10px] ${th.textFaint} tabular-nums w-8 text-right`}>{progressPercent(ocrProgress.done, ocrProgress.total)}%</span>
           </div>
