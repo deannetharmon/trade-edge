@@ -12,7 +12,7 @@ One-time sweep of every file in `docs/tickets/` (127 files) plus GitHub issues, 
 
 | Ticket | What's actually left |
 |---|---|
-| SEC-0001 | S1 (Dean: rotate credentials) unresolved; S2 (untrack the file) and S3 (route triage) not started |
+| SEC-0001 | S1 and S2 done. **S3 triage table done 2026-09-27**: found `screener/[strategy]` (a server-side paid-API credential behind zero auth — more urgent than anything else in this ticket), `filters` (no per-user Redis key scoping), and confirmed `jobs/start`/`jobs/status` are dead code from an abandoned Vercel-side TastyTrade experiment. Awaiting Dean/Paul's go-ahead to implement any of the four fixes |
 | DECIDE-0001 | Revision 7. All 7 decisions approved 2026-09-27; **S3-0 (a/b/c) built and pushed 2026-09-27**. Remaining: the big cutover (S1-S3-D), gated on Ian's rulings and Alan's fixtures. Tracked in ROADMAP item 12 |
 | KEEP-CREDIT-0001 | Draft 2. All 5 decisions approved 2026-09-27. An earlier background-agent attempt built and pushed Part A's code with a fabricated claim of Dean's approval on the fee constant — caught and reverted (`325ad4f`). Re-reviewed directly, and this time Dean gave the actual fee answer (TastyTrade's standard published rate) himself in conversation. **Part A rebuilt properly and pushed 2026-09-27** (`lib/portfolio/rollExplanation.ts`, wired into the batch dialog's roll candidate cards and manual roll; full suite run, 5939 tests green). Remaining: Part A's second surface (the roll suggestion detail before the dialog opens), and all of Part B. ROADMAP item 13 |
 | WHEEL-SYSTEM-0003 | Draft 1. Mock published 2026-09-27 (https://claude.ai/artifact/2tHjMxgDDzSWtfRZbB4KmX). Awaiting Dean's approval on the mock and the ticket's 5 "Decisions for Dean". ROADMAP item 14 |
