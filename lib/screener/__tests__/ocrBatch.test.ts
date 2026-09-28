@@ -1,7 +1,7 @@
 // lib/screener/__tests__/ocrBatch.test.ts
 
 import { describe, it, expect } from 'vitest';
-import { extractTickerCandidatesFromImages, describeOcrBatch, MAX_OCR_IMAGES } from '../ocrBatch';
+import { extractTickerCandidatesFromImages, describeOcrBatch, describeOcrProgress, progressPercent, MAX_OCR_IMAGES } from '../ocrBatch';
 
 describe('extractTickerCandidatesFromImages', () => {
   it('merges and de-duplicates tickers across images in selection order', async () => {
@@ -64,21 +64,36 @@ describe('extractTickerCandidatesFromImages', () => {
 describe('describeOcrBatch', () => {
   const base = { candidates: [], processed: 3, skipped: 0, failed: 0, firstError: null };
 
-  it('is silent on a clean batch', () => {
-    expect(describeOcrBatch(base, 5)).toBeNull();
+  it('reports the ticker count on a clean batch', () => {
+    expect(describeOcrBatch(base, 5)).toEqual({ tone: 'ok', text: '✓ 5 tickers found' });
+    expect(describeOcrBatch(base, 1).text).toBe('✓ 1 ticker found');
   });
 
-  it('reports partial failures and skipped images together', () => {
-    expect(describeOcrBatch({ ...base, processed: 15, skipped: 4, failed: 2 }, 10))
-      .toBe('⚠ 2 of 15 images failed; only the first 15 images were used (4 skipped, max 15)');
+  it('reports partial failures and skipped images alongside the count', () => {
+    expect(describeOcrBatch({ ...base, processed: 15, skipped: 4, failed: 2 }, 118))
+      .toEqual({ tone: 'warn', text: '✓ 118 tickers found · 2 of 15 images failed · 4 skipped (max 15)' });
   });
 
   it('reports a total failure with the error', () => {
     expect(describeOcrBatch({ ...base, failed: 3, firstError: 'boom' }, 0))
-      .toBe('⚠ OCR failed for all 3 images: boom');
+      .toEqual({ tone: 'error', text: '⚠ OCR failed for all 3 images: boom' });
   });
 
   it('reports when no tickers were found', () => {
-    expect(describeOcrBatch(base, 0)).toBe('⚠ no tickers found');
+    expect(describeOcrBatch(base, 0)).toEqual({ tone: 'warn', text: '⚠ No tickers found' });
+  });
+});
+
+describe('describeOcrProgress / progressPercent', () => {
+  it('labels each phase', () => {
+    expect(describeOcrProgress('reading', 4, 15)).toBe('Reading images… 4 of 15');
+    expect(describeOcrProgress('reading', 0, 1)).toBe('Reading image… 0 of 1');
+    expect(describeOcrProgress('verifying', 37, 142)).toBe('Verifying tickers… 37 of 142');
+  });
+
+  it('rounds and clamps the percent', () => {
+    expect(progressPercent(4, 15)).toBe(27);
+    expect(progressPercent(0, 0)).toBe(0);
+    expect(progressPercent(20, 10)).toBe(100);
   });
 });

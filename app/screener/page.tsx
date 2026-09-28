@@ -36,7 +36,7 @@ import {
   findBestSpreadUnfiltered, findBestICUnfiltered, findBestTargetedICWithCreditRatioFloor, calculateTargetedConservativeCredit,
 } from '@/lib/scans/spread-finder';
 import { findBestCsp, findAllCsp } from '@/lib/scans/csp-finder';
-import { MAX_OCR_IMAGES, extractTickerCandidatesFromImages, describeOcrBatch } from '@/lib/screener/ocrBatch';
+import { MAX_OCR_IMAGES, extractTickerCandidatesFromImages, describeOcrBatch, describeOcrProgress, progressPercent, type OcrPhase, type OcrStatus } from '@/lib/screener/ocrBatch';
 import { DEFAULT_PMCC_DTE_RANGES, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
 import { LEAP_ENTRY_DTE_TARGET, LEAPS_DTE_MAX_CHIPS, LEAPS_DTE_MIN_CHIPS } from '@/lib/scans/leapsEntryTargets';
 import { getPmccChain } from '@/lib/scans/pmccChainClient';
@@ -634,7 +634,10 @@ function normalizeTickerInput(input: string): string[] {
   ));
 }
 
-async function validateTickersWithMarketData(tickers: string[]): Promise<string[]> {
+async function validateTickersWithMarketData(
+  tickers: string[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<string[]> {
   const unique = Array.from(new Set(tickers));
   if (unique.length === 0) return [];
 
@@ -650,13 +653,16 @@ async function validateTickersWithMarketData(tickers: string[]): Promise<string[
 
   // Validate sequentially to avoid blasting the API when OCR produces noisy text.
   // This is intentionally conservative and deterministic.
-  for (const symbol of unique) {
+  onProgress?.(0, unique.length);
+  for (let i = 0; i < unique.length; i++) {
+    const symbol = unique[i];
     try {
       const quote = await getQuote(symbol, token);
       if (quote != null && quote > 0) valid.push(symbol);
     } catch {
       // Invalid/no-data symbols are ignored.
     }
+    onProgress?.(i + 1, unique.length);
   }
 
   return valid;
@@ -2324,8 +2330,8 @@ function WatchlistBox({
   const fileRef = useRef<HTMLInputElement>(null);
   const pendingSymbolsRef = useRef<string[]>([]);
   const [scanning, setScanning] = useState(false);
-  const [ocrProgress, setOcrProgress] = useState<{ done: number; total: number } | null>(null);
-  const [ocrNotice, setOcrNotice] = useState<string | null>(null);
+  const [ocrProgress, setOcrProgress] = useState<{ phase: OcrPhase; done: number; total: number } | null>(null);
+  const [ocrNotice, setOcrNotice] = useState<OcrStatus | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [savedWatchlists, setSavedWatchlists] = useState<SavedWatchlists>({});
   const [showSaveInput, setShowSaveInput] = useState(false);
@@ -2393,12 +2399,13 @@ function WatchlistBox({
   const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []); if (files.length === 0) return;
     setScanning(true); setOcrNotice(null);
-    setOcrProgress({ done: 0, total: Math.min(files.length, MAX_OCR_IMAGES) });
+    setOcrProgress({ phase: 'reading', done: 0, total: Math.min(files.length, MAX_OCR_IMAGES) });
     try {
       const batch = await extractTickerCandidatesFromImages(files, extractTickerCandidatesFromImage, {
-        onProgress: (done, total) => setOcrProgress({ done, total }),
+        onProgress: (done, total) => setOcrProgress({ phase: 'reading', done, total }),
       });
-      const symbols = await validateTickersWithMarketData(batch.candidates);
+      const symbols = await validateTickersWithMarketData(batch.candidates,
+        (done, total) => setOcrProgress({ phase: 'verifying', done, total }));
       setOcrNotice(describeOcrBatch(batch, symbols.length));
       if (symbols.length > 0) {
         const token = await getAccessToken();
@@ -2418,7 +2425,7 @@ function WatchlistBox({
       }
     } catch (err: any) {
       console.error('OCR error:', err?.message ?? err);
-      setOcrNotice(`⚠ OCR error: ${err?.message ?? 'unknown'}`);
+      setOcrNotice({ tone: 'error', text: `⚠ OCR error: ${err?.message ?? 'unknown'}` });
     }
     setScanning(false); setOcrProgress(null);
   };
@@ -2526,7 +2533,7 @@ function WatchlistBox({
         <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium mb-2`}>IMPORT TICKER LIST FROM IMAGE OR ADD MANUALLY</p>
         <div className="flex items-center gap-1">
           <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleOCR} />
-          <button onClick={handleImgClick} disabled={disabled || scanning} title={`Upload up to ${MAX_OCR_IMAGES} screenshots at once`} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-40`}>{scanning ? (ocrProgress && ocrProgress.total > 1 ? `⟳ ${ocrProgress.done}/${ocrProgress.total}` : '⟳') : '↑ img'}</button>
+          <button onClick={handleImgClick} disabled={disabled || scanning} title={`Upload up to ${MAX_OCR_IMAGES} screenshots at once`} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-40`}>{scanning ? '⟳ img' : '↑ img'}</button>
           <div className="relative">
             <button onClick={() => { setShowSaveInput(!showSaveInput); setShowLoad(false); setSaveError(''); }} disabled={disabled || tickers.length === 0} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-40`}>💾</button>
             {showSaveInput && (
@@ -2544,9 +2551,18 @@ function WatchlistBox({
             <button onClick={() => { setShowLoad(!showLoad); setShowSaveInput(false); if (!showLoad) refreshPresets(); }} disabled={disabled} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-40`}>▼</button>
           </div>
         </div>
-        {ocrNotice && (
-          <div className="mt-1.5 flex items-start justify-between gap-2">
-            <p className="text-[9px] text-amber-500">{ocrNotice}</p>
+        {scanning && ocrProgress && (
+          <div className="mt-1.5 flex items-center gap-2" role="status" aria-live="polite">
+            <p className={`text-[10px] ${th.textMuted} whitespace-nowrap`}>{describeOcrProgress(ocrProgress.phase, ocrProgress.done, ocrProgress.total)}</p>
+            <div className="flex-1 h-1.5 rounded-full ac-bg-20 overflow-hidden">
+              <div className="h-full rounded-full ac-bg transition-[width] duration-300" style={{ width: `${progressPercent(ocrProgress.done, ocrProgress.total)}%` }} />
+            </div>
+            <span className={`text-[10px] ${th.textFaint} tabular-nums w-8 text-right`}>{progressPercent(ocrProgress.done, ocrProgress.total)}%</span>
+          </div>
+        )}
+        {!scanning && ocrNotice && (
+          <div className="mt-1.5 flex items-start justify-between gap-2" role="status">
+            <p className={`text-[10px] ${ocrNotice.tone === 'ok' ? 'text-emerald-500' : ocrNotice.tone === 'error' ? 'text-red-500' : 'text-amber-500'}`}>{ocrNotice.text}</p>
             <button onClick={() => setOcrNotice(null)} className="text-[9px] text-slate-500 hover:text-red-500 shrink-0">✕</button>
           </div>
         )}

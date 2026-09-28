@@ -66,14 +66,37 @@ export async function extractTickerCandidatesFromImages<T>(
   return { candidates, processed: batch.length, skipped, failed, firstError };
 }
 
-/** One-line status for the import box; null when there is nothing to report. */
-export function describeOcrBatch(result: OcrBatchResult, validCount: number): string | null {
-  const parts: string[] = [];
-  if (result.failed > 0 && result.failed === result.processed) {
-    return `⚠ OCR failed for all ${result.processed} image${result.processed !== 1 ? 's' : ''}${result.firstError ? `: ${result.firstError}` : ''}`;
+export type OcrPhase = 'reading' | 'verifying';
+
+export interface OcrStatus {
+  tone: 'ok' | 'warn' | 'error';
+  text: string;
+}
+
+/** Live progress line, e.g. "Reading images… 4 of 15". */
+export function describeOcrProgress(phase: OcrPhase, done: number, total: number): string {
+  const noun = phase === 'reading'
+    ? (total === 1 ? 'image' : 'images')
+    : (total === 1 ? 'ticker' : 'tickers');
+  return `${phase === 'reading' ? 'Reading' : 'Verifying'} ${noun}… ${done} of ${total}`;
+}
+
+/** Whole-number percent for the progress bar, clamped 0-100. */
+export function progressPercent(done: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+}
+
+/** Final status line for the import box after a batch completes. */
+export function describeOcrBatch(result: OcrBatchResult, validCount: number): OcrStatus {
+  const plural = (n: number, w: string) => `${n} ${w}${n !== 1 ? 's' : ''}`;
+  if (result.processed > 0 && result.failed === result.processed) {
+    return { tone: 'error', text: `⚠ OCR failed for all ${plural(result.processed, 'image')}${result.firstError ? `: ${result.firstError}` : ''}` };
   }
-  if (result.failed > 0) parts.push(`${result.failed} of ${result.processed} images failed`);
-  if (result.skipped > 0) parts.push(`only the first ${result.processed} images were used (${result.skipped} skipped, max ${MAX_OCR_IMAGES})`);
-  if (validCount === 0) parts.push('no tickers found');
-  return parts.length ? `⚠ ${parts.join('; ')}` : null;
+  const issues: string[] = [];
+  if (result.failed > 0) issues.push(`${result.failed} of ${result.processed} images failed`);
+  if (result.skipped > 0) issues.push(`${result.skipped} skipped (max ${MAX_OCR_IMAGES})`);
+  const head = validCount > 0 ? `✓ ${plural(validCount, 'ticker')} found` : '⚠ No tickers found';
+  const text = [head, ...issues].join(' · ');
+  return { tone: validCount === 0 ? 'warn' : issues.length ? 'warn' : 'ok', text };
 }
