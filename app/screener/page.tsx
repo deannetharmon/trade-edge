@@ -796,6 +796,7 @@ async function loadFilters(strategy: string): Promise<SavedFilters | GlobalFilte
   } catch {}
   try {
     const res = await fetch(`/api/filters?strategy=${strategy}`);
+    if (!res.ok) return {};
     const data = await res.json();
     const filters = data.filters ?? {};
     localStorage.setItem(lsKey, JSON.stringify(filters));
