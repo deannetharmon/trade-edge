@@ -50,12 +50,23 @@ export function applyAccent(accent: Accent) {
 }
 
 
+// The single accent stylesheet for every page. Pages used to inject their own
+// partial copies under the same id, and whichever loaded first won -- so on the
+// screener/portfolio/home the ac-* classes were often undefined. Always
+// (re)writing the content means a stale partial sheet gets upgraded.
 export function injectAccentStyle() {
   if (typeof document === 'undefined') return;
-  if (document.getElementById('hunter-accent-style')) return;
-  const style = document.createElement('style');
-  style.id = 'hunter-accent-style';
-  style.textContent = `
+  let style = document.getElementById('hunter-accent-style') as HTMLStyleElement | null;
+  if (!style) {
+    style = document.createElement('style');
+    style.id = 'hunter-accent-style';
+    document.head.appendChild(style);
+  }
+  if (style.textContent === ACCENT_CSS) return;
+  style.textContent = ACCENT_CSS;
+}
+
+const ACCENT_CSS = `
     :root { --accent: #3b82f6; --accent-r: 59; --accent-g: 130; --accent-b: 246; }
 
     /* Text */
@@ -88,6 +99,10 @@ export function injectAccentStyle() {
 
     /* Active nav */
     .active-nav { background-color: rgba(var(--accent-r),var(--accent-g),var(--accent-b),0.25) !important; border-bottom: 2px solid var(--accent) !important; }
+
+    /* Legacy accent-* names (home, portfolio, screener) */
+    .accent-border { border-color: var(--accent) !important; }
+    .accent-text { color: var(--accent) !important; }
+    .accent-bg { background-color: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.1) !important; }
+    .accent-ring { box-shadow: 0 0 0 1px var(--accent) !important; }
   `;
-  document.head.appendChild(style);
-}

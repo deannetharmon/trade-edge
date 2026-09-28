@@ -4,6 +4,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
+import { injectAccentStyle } from '@/lib/theme';
 import { buildTradingViewWidgetUrl } from '@/components/TradingViewChartButton';
 
 // ── TE-0005A: extracted to lib/scans/ ───────────────────────────────────────
@@ -8962,22 +8963,8 @@ export default function Home() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
-  // Ensure the shared accent variables exist after hydration.
-  useEffect(() => {
-    if (!document.getElementById('hunter-accent-style')) {
-      const style = document.createElement('style');
-      style.id = 'hunter-accent-style';
-      style.textContent = `
-        :root { --accent: #3b82f6; --accent-r: 59; --accent-g: 130; --accent-b: 246; }
-        .accent-border { border-color: var(--accent) !important; }
-        .accent-text { color: var(--accent) !important; }
-        .accent-bg { background-color: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.1) !important; }
-        .accent-ring { box-shadow: 0 0 0 1px var(--accent) !important; }
-        nav a.active-nav, nav span.active-nav { background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.2); color: var(--accent); }
-      `;
-      document.head.appendChild(style);
-    }
-  }, []);
+  // Ensure the shared accent stylesheet (lib/theme.ts) exists after hydration.
+  useEffect(() => { injectAccentStyle(); }, []);
 
   const [tickers, setTickers] = useState<WatchlistTicker[]>([]);
   const [watchlistLoading, setWatchlistLoading] = useState(true);

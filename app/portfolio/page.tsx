@@ -273,22 +273,8 @@ import {
 } from '@/lib/portfolio-data/acquisition';
 
 
-// Inject accent CSS variable style
-if (typeof document !== 'undefined') {
-  if (!document.getElementById('hunter-accent-style')) {
-    const style = document.createElement('style');
-    style.id = 'hunter-accent-style';
-    style.textContent = `
-      :root { --accent: #3b82f6; --accent-r: 59; --accent-g: 130; --accent-b: 246; }
-      .accent-border { border-color: var(--accent) !important; }
-      .accent-text { color: var(--accent) !important; }
-      .accent-bg { background-color: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.1) !important; }
-      .accent-ring { box-shadow: 0 0 0 1px var(--accent) !important; }
-      nav a.active-nav, nav span.active-nav { background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.2); color: var(--accent); }
-    `;
-    document.head.appendChild(style);
-  }
-}
+// Shared accent stylesheet (lib/theme.ts) -- the complete ac-* / accent-* set.
+injectAccentStyle();
 
 const LS_AUDIT_LOG = 'hunter-audit-log';
 const LS_MEMORY = 'hunter-trading-memory';
