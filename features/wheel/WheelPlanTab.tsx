@@ -45,6 +45,9 @@ import {
 } from '@/lib/wheel/capitalPlan';
 import { classifyRow, selectPlanPut, type FetchOutcome, type RowStatus } from '@/lib/wheel/planPut';
 import { fetchDailyCloses, fetchMetricsBatch, type MetricsResult } from '@/lib/wheel/candidateData';
+import { fetchPriceHistory } from '@/lib/wheel/historyData';
+import { analyzePriceHistory, suggestedDropBps, worseThanEffectiveDropBps } from '@/lib/wheel/priceHistory';
+import { useHistoryData } from './useHistoryData';
 import {
   classifyEarnings,
   evaluateCandidate,
@@ -76,6 +79,8 @@ export interface WheelPlanDeps {
   fetchMetrics?: (symbols: string[], token: string) => Promise<MetricsResult>;
   /** W2: the daily closes behind RSI. */
   fetchCloses?: (symbol: string) => Promise<number[] | null>;
+  /** W3: up to 10 years of daily closes for the own-history check (a separate, session-gated route -- not fetchCloses's 6-month /api/chart). */
+  fetchHistory?: (symbol: string) => Promise<number[] | null>;
   fetchImpl: typeof fetch;
 }
 
@@ -86,6 +91,7 @@ const defaultDeps: WheelPlanDeps = {
   fetchKind: (symbol, token) => fetchInstrumentKind(symbol, token),
   fetchMetrics: (symbols, token) => fetchMetricsBatch(symbols, token),
   fetchCloses: (symbol) => fetchDailyCloses(symbol),
+  fetchHistory: (symbol) => fetchPriceHistory(symbol),
   fetchImpl: (...args) => fetch(...args),
 };
 
@@ -247,6 +253,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
   );
   const candidateSymbols = useMemo(() => wheelList.map((e) => e.symbol).filter((sym) => !isLeveragedEtf(sym)), [wheelList]);
   const candidateData = useCandidateData(loadState === 'ready' && !hasErrors, candidateSymbols, deps);
+  const historyData = useHistoryData(loadState === 'ready' && !hasErrors, candidateSymbols, deps);
 
   // ── Save (debounced), only ever the overrides and the list ──────────────────────────────────────
   useEffect(() => {
@@ -684,7 +691,48 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                   <tbody>
                     {rows.map((row) => (
                       <tr key={row.entry.symbol} className="border-t border-white/5" data-testid={`ladder-row-${row.entry.symbol}`}>
-                        <td className="px-3 py-2 font-bold">{row.entry.symbol}</td>
+                        <td className="px-3 py-2 font-bold">
+                          {row.entry.symbol}
+                          {row.kind !== 'leveraged' && (() => {
+                            const histCloses = historyData.closes[row.entry.symbol];
+                            if (!(row.entry.symbol in historyData.closes)) {
+                              return <span className="mt-1 block text-[10px] font-normal text-white/40">Loading history…</span>;
+                            }
+                            const stats = histCloses ? analyzePriceHistory(histCloses) : null;
+                            if (!stats) {
+                              return (
+                                <span className="mt-1 block text-[10px] font-normal text-white/40">
+                                  History unavailable
+                                  {histCloses === null && (
+                                    <button type="button" aria-label={`Retry history for ${row.entry.symbol}`} onClick={() => historyData.retry()} className="ml-1 text-blue-300 hover:text-blue-200">Retry</button>
+                                  )}
+                                </span>
+                              );
+                            }
+                            const effectiveDrop = row.entry.dropBps ?? params.dropBps;
+                            const worseBy = worseThanEffectiveDropBps(stats.worstMonthBps, effectiveDrop);
+                            const warn = worseBy > params.historyWarnMarginBps;
+                            const suggested = suggestedDropBps(stats.worstMonthBps, params.dropBps);
+                            return (
+                              <span className="mt-1 block max-w-[220px] text-[10px] font-normal leading-snug text-white/50">
+                                History: worst month {(stats.worstMonthBps / 100).toFixed(0)}%, peak-to-trough {(stats.maxDrawdownBps / 100).toFixed(0)}%, {stats.years.toFixed(1)} years
+                                {stats.shortHistory && <span className="ml-1 rounded-full border border-white/15 px-1.5 py-0.5 text-[9px] font-bold text-white/60">Short history</span>}
+                                {warn && (
+                                  <span className="mt-1 block rounded border border-amber-500/30 bg-amber-500/5 px-1.5 py-1 text-amber-300">
+                                    ⚠ {(worseBy / 100).toFixed(0)} pts worse than your {(effectiveDrop / 100).toFixed(0)}% drop
+                                    <button
+                                      type="button"
+                                      onClick={() => updateList((list) => list.map((x) => (x.symbol === row.entry.symbol ? { ...x, dropBps: suggested } : x)))}
+                                      className="ml-1 rounded border border-emerald-500/40 px-1.5 py-0.5 text-[9px] font-bold text-emerald-300 hover:bg-emerald-500/10"
+                                    >
+                                      Use {(suggested / 100).toFixed(0)}%
+                                    </button>
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })()}
+                        </td>
                         <td className="space-y-1 px-3 py-2">
                           {(row.kind === 'ok' || row.kind === 'state') && (
                             <span className="block text-[10px] text-white/40" data-testid={`type-${row.entry.symbol}`}>{row.instrument === 'etf' ? 'ETF / index' : 'Stock'}</span>

@@ -340,6 +340,63 @@ describe('per-name drop override (WHEEL-SYSTEM-0003 Slice A)', () => {
   });
 });
 
+describe('own-history check (WHEEL-SYSTEM-0003 Slice B)', () => {
+  // 23 closes: flat at 100 for 21 days, then a sharp fall -- worst month -44%, matching a
+  // plan-default 30% drop by 14 points (Ian's relative-margin threshold: warns).
+  const fallingHistory = [...Array(21).fill(100), 56, 60];
+  // 23 closes with only a mild fall -- worst month -10%, well within the 30% plan default (quiet).
+  const mildHistory = [...Array(21).fill(100), 90, 92];
+
+  it('shows the history line, a warning and a Use button when the worst month is well past the effective drop', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'NVDA' }] }, { fetchHistory: async () => fallingHistory });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await screen.findByTestId('ladder-row-NVDA');
+    expect(await within(row).findByText(/History: worst month -44%, peak-to-trough -44%, 0\.1 years/)).toBeInTheDocument();
+    expect(within(row).getByText('Short history')).toBeInTheDocument();
+    expect(within(row).getByText(/14 pts worse than your 30% drop/)).toBeInTheDocument();
+
+    await userEvent.click(within(row).getByRole('button', { name: 'Use 45%' }));
+    await waitFor(() => expect(within(screen.getByTestId('ladder-row-NVDA')).getByLabelText('Drop percent for NVDA')).toHaveValue('45'));
+    expect(within(screen.getByTestId('ladder-row-NVDA')).getByTestId('drop-custom-NVDA')).toBeInTheDocument();
+  });
+
+  it('goes quiet (no warning, no Use button) when the worst month is within the effective drop\'s margin', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'NVDA' }] }, { fetchHistory: async () => mildHistory });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await screen.findByTestId('ladder-row-NVDA');
+    expect(await within(row).findByText(/History: worst month -10%/)).toBeInTheDocument();
+    expect(within(row).queryByText(/pts worse than/)).not.toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: /^Use \d+%$/ })).not.toBeInTheDocument();
+  });
+
+  it('a name already sized conservatively (its own Drop covers its history) reads calm, not alarmed', async () => {
+    // Same falling history (worst month -44%), but the trader already set this name's own Drop to 45% --
+    // only 1 point short, well inside the 10-point margin -- so Ian's relative threshold goes quiet.
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'NVDA', dropBps: 4500 }] }, { fetchHistory: async () => fallingHistory });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await screen.findByTestId('ladder-row-NVDA');
+    expect(await within(row).findByText(/History: worst month -44%/)).toBeInTheDocument();
+    expect(within(row).queryByText(/pts worse than/)).not.toBeInTheDocument();
+  });
+
+  it('shows "History unavailable" with a retry when the fetch fails, and never blocks the row', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'NVDA' }] }, { fetchHistory: async () => null });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await screen.findByTestId('ladder-row-NVDA');
+    expect(await within(row).findByText('History unavailable')).toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: 'Retry history for NVDA' })).toBeInTheDocument();
+    // The row itself still renders normally -- history is information only, never a gate.
+    expect(within(row).getByText('$20,500')).toBeInTheDocument();
+  });
+
+  it('too few closes for even one 21-day window reads as unavailable, not a guess', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'NVDA' }] }, { fetchHistory: async () => [100, 99, 98] });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await screen.findByTestId('ladder-row-NVDA');
+    expect(await within(row).findByText('History unavailable')).toBeInTheDocument();
+  });
+});
+
 describe('the best-paying put in the delta band (0.25 to 0.30)', () => {
   const bandPuts = (): WheelChainResult => ({
     expirations: [EXP],
