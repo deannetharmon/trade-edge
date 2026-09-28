@@ -36,6 +36,7 @@ import {
   findBestSpreadUnfiltered, findBestICUnfiltered, findBestTargetedICWithCreditRatioFloor, calculateTargetedConservativeCredit,
 } from '@/lib/scans/spread-finder';
 import { findBestCsp, findAllCsp } from '@/lib/scans/csp-finder';
+import { MAX_OCR_IMAGES, extractTickerCandidatesFromImages, describeOcrBatch } from '@/lib/screener/ocrBatch';
 import { DEFAULT_PMCC_DTE_RANGES, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
 import { LEAP_ENTRY_DTE_TARGET, LEAPS_DTE_MAX_CHIPS, LEAPS_DTE_MIN_CHIPS } from '@/lib/scans/leapsEntryTargets';
 import { getPmccChain } from '@/lib/scans/pmccChainClient';
@@ -662,6 +663,14 @@ async function validateTickersWithMarketData(tickers: string[]): Promise<string[
 }
 
 async function extractTickersFromImage(file: File): Promise<string[]> {
+  // OCR is allowed to capture short real tickers like KO, C, F, T, X, V.
+  // Market-data validation decides what is actually real.
+  return validateTickersWithMarketData(await extractTickerCandidatesFromImage(file));
+}
+
+// OCR only, no market-data validation -- multi-image imports validate the
+// merged candidate set once instead of once per image.
+async function extractTickerCandidatesFromImage(file: File): Promise<string[]> {
   // Convert file to base64
   const base64 = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -698,9 +707,7 @@ async function extractTickersFromImage(file: File): Promise<string[]> {
     }
   }
 
-  // OCR is allowed to capture short real tickers like KO, C, F, T, X, V.
-  // Market-data validation decides what is actually real.
-  return validateTickersWithMarketData(candidates);
+  return candidates;
 }
 
 function mergeTickers(existing: string, newTickers: string[]): string {
@@ -2317,6 +2324,8 @@ function WatchlistBox({
   const fileRef = useRef<HTMLInputElement>(null);
   const pendingSymbolsRef = useRef<string[]>([]);
   const [scanning, setScanning] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState<{ done: number; total: number } | null>(null);
+  const [ocrNotice, setOcrNotice] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [savedWatchlists, setSavedWatchlists] = useState<SavedWatchlists>({});
   const [showSaveInput, setShowSaveInput] = useState(false);
@@ -2382,9 +2391,15 @@ function WatchlistBox({
   };
 
   const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return; setScanning(true);
+    const files = Array.from(e.target.files ?? []); if (files.length === 0) return;
+    setScanning(true); setOcrNotice(null);
+    setOcrProgress({ done: 0, total: Math.min(files.length, MAX_OCR_IMAGES) });
     try {
-      const symbols = await extractTickersFromImage(file);
+      const batch = await extractTickerCandidatesFromImages(files, extractTickerCandidatesFromImage, {
+        onProgress: (done, total) => setOcrProgress({ done, total }),
+      });
+      const symbols = await validateTickersWithMarketData(batch.candidates);
+      setOcrNotice(describeOcrBatch(batch, symbols.length));
       if (symbols.length > 0) {
         const token = await getAccessToken();
         if (tickers.length > 0) {
@@ -2403,8 +2418,9 @@ function WatchlistBox({
       }
     } catch (err: any) {
       console.error('OCR error:', err?.message ?? err);
+      setOcrNotice(`⚠ OCR error: ${err?.message ?? 'unknown'}`);
     }
-    setScanning(false);
+    setScanning(false); setOcrProgress(null);
   };
 
   const handleSave = async (replace = false) => {
@@ -2509,8 +2525,8 @@ function WatchlistBox({
       <div className={`border ${th.border} rounded-lg p-2 mb-2`}>
         <p className={`text-[9px] ${th.textMuted} tracking-widest font-medium mb-2`}>IMPORT TICKER LIST FROM IMAGE OR ADD MANUALLY</p>
         <div className="flex items-center gap-1">
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleOCR} />
-          <button onClick={handleImgClick} disabled={disabled || scanning} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-40`}>{scanning ? '⟳' : '↑ img'}</button>
+          <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleOCR} />
+          <button onClick={handleImgClick} disabled={disabled || scanning} title={`Upload up to ${MAX_OCR_IMAGES} screenshots at once`} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-40`}>{scanning ? (ocrProgress && ocrProgress.total > 1 ? `⟳ ${ocrProgress.done}/${ocrProgress.total}` : '⟳') : '↑ img'}</button>
           <div className="relative">
             <button onClick={() => { setShowSaveInput(!showSaveInput); setShowLoad(false); setSaveError(''); }} disabled={disabled || tickers.length === 0} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-40`}>💾</button>
             {showSaveInput && (
@@ -2528,6 +2544,12 @@ function WatchlistBox({
             <button onClick={() => { setShowLoad(!showLoad); setShowSaveInput(false); if (!showLoad) refreshPresets(); }} disabled={disabled} className={`text-[9px] px-1.5 py-0.5 border ${th.inputBorder} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-40`}>▼</button>
           </div>
         </div>
+        {ocrNotice && (
+          <div className="mt-1.5 flex items-start justify-between gap-2">
+            <p className="text-[9px] text-amber-500">{ocrNotice}</p>
+            <button onClick={() => setOcrNotice(null)} className="text-[9px] text-slate-500 hover:text-red-500 shrink-0">✕</button>
+          </div>
+        )}
         {showLoad && (
           <div data-testid="watchlist-preset-menu" className={`mt-2 w-full ${th.sidebar} border ${th.border} rounded-lg overflow-hidden shadow-xl`}>
             {loadingPresets ? <p className={`text-[9px] ${th.textFaint} px-3 py-2`}>Loading...</p>

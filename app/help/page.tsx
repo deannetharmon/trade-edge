@@ -110,7 +110,7 @@ export default function HelpPage() {
         <Section title="Screening Workflow" th={th}>
           <div className="space-y-3">
             {[
-              { step: '1', title: 'Finviz', desc: 'Run your Finviz screen (S&P 500, large cap, optionable, 500K+ avg volume). Upload a screenshot using the ↑ img button to automatically extract tickers via OCR.' },
+              { step: '1', title: 'Finviz', desc: 'Run your Finviz screen (S&P 500, large cap, optionable, 500K+ avg volume). Upload screenshots (up to 15 at once) using the ↑ img button to automatically extract tickers via OCR.' },
               { step: '2', title: 'Add Tickers', desc: 'Paste tickers into the BPS, BCS, or IC scan list boxes based on your chart analysis. Or use AUTO TREND DETECT to let the screener determine the strategy for up to 5 tickers.' },
               { step: '3', title: 'Set Rules', desc: 'Click SCAN SELECTED ... to open the rules modal. Verify your screening rules match your current market approach, then click RUN.' },
               { step: '4', title: 'Review Results', desc: 'Qualified results appear at the top with a color-coded left border. Expand any card to see the full checklist. Disqualified results show the failure reason.' },
@@ -173,7 +173,7 @@ export default function HelpPage() {
           </div>
           <div className="space-y-1 mt-3">
             {[
-              { icon: '↑ img', desc: 'Upload a Finviz screenshot — OCR extracts tickers automatically and appends them to the box' },
+              { icon: '↑ img', desc: 'Upload up to 15 Finviz screenshots at once — OCR extracts tickers automatically and appends them to the box' },
               { icon: '💾', desc: 'Save the current tickers in this box as a named filter' },
               { icon: '▼', desc: 'Load a previously saved filter — choose Replace or Merge' },
             ].map(b => (
