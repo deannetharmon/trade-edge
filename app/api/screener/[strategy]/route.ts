@@ -6,12 +6,22 @@ import { evaluatePMCC, scorePMCC } from '@/lib/screener/strategies/pmcc';
 import { evaluateCreditSpread, scoreCreditSpread } from '@/lib/screener/strategies/creditSpread';
 import { evaluateCoveredCall, scoreCoveredCall } from '@/lib/screener/strategies/coveredCall';
 import { evaluateCSP, scoreCSP } from '@/lib/screener/strategies/csp';
+import { requireSessionUserId } from '@/lib/ai/requireSession';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: { strategy: string } }
 ) {
   try {
+    // SEC-0001 S3: this route sends process.env.MARKET_DATA_API_TOKEN (a
+    // server-only, cost-incurring credential) to an external provider for
+    // whatever symbols the caller supplies -- it had no session check at
+    // all. Same pattern AI-SEC-0001 already applied to analyze/ai/ocr.
+    const userId = await requireSessionUserId();
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { symbols, config } = body as { symbols: string[]; config: Partial<ScreenerParams> };
 
