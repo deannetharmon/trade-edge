@@ -10,6 +10,7 @@
 import { afterEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import { pinClock } from './lib/testing/fixedClock';
 
 afterEach(() => {
   cleanup();
@@ -19,8 +20,8 @@ afterEach(() => {
 // this run to that instant, so a date-boundary flake that depends on the real time of day (see
 // lib/testing/fixedClock.ts) is caught regardless of which file it's in. Unset in normal runs: this
 // changes nothing about local `npm test` or the primary CI pass.
+// Static import (not top-level await): next build type-checks this file under the es5 target.
 if (process.env.FAKE_NOW) {
-  const { pinClock } = await import('./lib/testing/fixedClock');
   pinClock(process.env.FAKE_NOW);
 }
 

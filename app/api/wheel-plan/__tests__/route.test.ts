@@ -54,7 +54,7 @@ describe('/api/wheel-plan', () => {
   it('saves and reads back through the signed-in user\'s own key only', async () => {
     const res = await POST(post({ overrides: { reserveBps: 500 }, wheelList: [{ symbol: 'XLF' }] }));
     expect(res.status).toBe(200);
-    expect([...store.keys()]).toEqual(['wheel-plan:user-a']);
+    expect(Array.from(store.keys())).toEqual(['wheel-plan:user-a']);
     const back = await (await GET(req)).json();
     expect(back.plan.overrides).toEqual({ reserveBps: 500 });
     expect(back.plan.wheelList).toEqual([{ symbol: 'XLF' }]);
