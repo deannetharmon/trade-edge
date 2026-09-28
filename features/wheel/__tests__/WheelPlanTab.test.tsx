@@ -286,6 +286,60 @@ describe('putting a name that does not fit on the wheel anyway', () => {
   });
 });
 
+describe('per-name drop override (WHEEL-SYSTEM-0003 Slice A)', () => {
+  it('typing a percent stores it, tags the row Custom, changes the per-name limit, and saves it', async () => {
+    const { deps, posts } = makeDeps({ wheelList: [{ symbol: 'NVDA' }] });
+    render(<WheelPlanTab deps={deps} />);
+    const row = await screen.findByTestId('ladder-row-NVDA');
+    expect(within(row).queryByTestId('drop-custom-NVDA')).not.toBeInTheDocument();
+    const dropInput = within(row).getByLabelText('Drop percent for NVDA');
+    expect(dropInput).toHaveAttribute('placeholder', '30'); // the plan-wide default, shown as ghost text
+
+    await userEvent.type(dropInput, '50{Enter}');
+    await waitFor(() => expect(within(screen.getByTestId('ladder-row-NVDA')).getByTestId('drop-custom-NVDA')).toBeInTheDocument());
+
+    // A 50% assumed drop halves the per-name limit from the 30%-default $15,000 to $9,000.
+    const contractsInput = within(screen.getByTestId('ladder-row-NVDA')).getByLabelText('Contracts for NVDA');
+    await userEvent.type(contractsInput, '1{Enter}');
+    expect(await screen.findByText(/NVDA: 1 contract ties up \$20,500 \(41\.0% of the account\), above your \$9,000 limit for one name/)).toBeInTheDocument();
+    expect(screen.getByText(/A 50% fall would cost \$10,250 \(20\.5% of the account\), above your 9% budget/)).toBeInTheDocument();
+
+    await waitFor(() => expect(posts.length).toBeGreaterThan(0), { timeout: 3000 });
+    expect((posts[posts.length - 1] as { wheelList: unknown[] }).wheelList).toEqual([{ symbol: 'NVDA', dropBps: 5000, contracts: 1 }]);
+  });
+
+  it('an out-of-range or non-numeric percent is refused and the field reverts', async () => {
+    const { deps } = makeDeps({ wheelList: [{ symbol: 'NVDA', dropBps: 4000 }] });
+    render(<WheelPlanTab deps={deps} />);
+    const input = await screen.findByLabelText('Drop percent for NVDA');
+    expect(input).toHaveValue('40');
+
+    await userEvent.clear(input);
+    await userEvent.type(input, '0{Enter}'); // below the 1% floor
+    await waitFor(() => expect(screen.getByLabelText('Drop percent for NVDA')).toHaveValue('40'));
+
+    await userEvent.clear(screen.getByLabelText('Drop percent for NVDA'));
+    await userEvent.type(screen.getByLabelText('Drop percent for NVDA'), '96{Enter}'); // above the 95% ceiling
+    await waitFor(() => expect(screen.getByLabelText('Drop percent for NVDA')).toHaveValue('40'));
+
+    await userEvent.clear(screen.getByLabelText('Drop percent for NVDA'));
+    await userEvent.type(screen.getByLabelText('Drop percent for NVDA'), 'abc{Enter}');
+    await waitFor(() => expect(screen.getByLabelText('Drop percent for NVDA')).toHaveValue('40'));
+  });
+
+  it('clearing the box returns the name to the plan-wide drop and removes the Custom tag', async () => {
+    const { deps, posts } = makeDeps({ wheelList: [{ symbol: 'NVDA', dropBps: 4000 }] });
+    render(<WheelPlanTab deps={deps} />);
+    expect(await screen.findByTestId('drop-custom-NVDA')).toBeInTheDocument();
+    const input = screen.getByLabelText('Drop percent for NVDA');
+    await userEvent.clear(input);
+    await userEvent.tab();
+    await waitFor(() => expect(screen.queryByTestId('drop-custom-NVDA')).not.toBeInTheDocument());
+    await waitFor(() => expect(posts.length).toBeGreaterThan(0), { timeout: 3000 });
+    expect((posts[posts.length - 1] as { wheelList: unknown[] }).wheelList).toEqual([{ symbol: 'NVDA' }]);
+  });
+});
+
 describe('the best-paying put in the delta band (0.25 to 0.30)', () => {
   const bandPuts = (): WheelChainResult => ({
     expirations: [EXP],

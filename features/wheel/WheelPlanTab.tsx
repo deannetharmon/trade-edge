@@ -62,6 +62,11 @@ import NextCandidateTable, { type CandidateRowView, type ShorterState } from './
 import { useCandidateData } from './useCandidateData';
 import { MAX_OVERRIDE_CONTRACTS, MAX_WHEEL_LIST, SYMBOL_PATTERN, type WheelListEntry, type WheelPlan } from '@/lib/wheel/planSchema';
 
+// WHEEL-SYSTEM-0003 Slice A: the Drop box accepts a whole percent, 1-95 (Ian/ticket).
+// The schema itself allows up to 100% (general bps bound); this is a UI-level choice.
+const MIN_DROP_PCT = 1;
+const MAX_DROP_PCT = 95;
+
 export interface WheelPlanDeps {
   getToken: () => Promise<string>;
   fetchChain: (symbol: string, token: string, window: { min: number; max: number }) => Promise<WheelChainResult>;
@@ -661,6 +666,7 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                     <tr className="bg-white/5 text-[10px] uppercase tracking-wider text-white/40">
                       <th className="px-3 py-2 text-left">Stock</th>
                       <th className="px-3 py-2 text-left">Sector</th>
+                      <th className="px-3 py-2 text-right" title="Assumed fall used to size this name. Blank uses the plan-wide drop.">Drop</th>
                       <th className="px-3 py-2 text-right">Price</th>
                       <th className="px-3 py-2 text-left">Put</th>
                       <th className="px-3 py-2 text-right" title="Out of the money: how far the stock can fall from today's price before the put is in the money">OTM %</th>
@@ -694,6 +700,39 @@ export default function WheelPlanTab({ deps = defaultDeps }: { deps?: WheelPlanD
                             }}
                             className="w-28 rounded border border-white/10 bg-white/5 px-2 py-1 text-xs focus:border-white/30 focus:outline-none"
                           />
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <input
+                              key={`${row.entry.symbol}-${row.entry.dropBps ?? 'plan'}`}
+                              aria-label={`Drop percent for ${row.entry.symbol}`}
+                              defaultValue={row.entry.dropBps != null ? String(row.entry.dropBps / 100) : ''}
+                              placeholder={String(params.dropBps / 100)}
+                              inputMode="numeric"
+                              onBlur={(e) => {
+                                const text = e.target.value.trim();
+                                if (text === '') {
+                                  if (row.entry.dropBps == null) return;
+                                  updateList((list) => list.map((x) => (x.symbol === row.entry.symbol ? { ...x, dropBps: undefined } : x)));
+                                  return;
+                                }
+                                const pct = Number.parseInt(text, 10);
+                                if (!(Number.isInteger(pct) && pct >= MIN_DROP_PCT && pct <= MAX_DROP_PCT)) {
+                                  e.target.value = row.entry.dropBps != null ? String(row.entry.dropBps / 100) : '';
+                                  return;
+                                }
+                                const bps = pct * 100;
+                                if (bps === row.entry.dropBps) return;
+                                updateList((list) => list.map((x) => (x.symbol === row.entry.symbol ? { ...x, dropBps: bps } : x)));
+                              }}
+                              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                              className="w-14 rounded border border-white/10 bg-white/5 px-2 py-1 text-right text-xs focus:border-white/30 focus:outline-none"
+                            />
+                            <span className="text-white/40">%</span>
+                          </div>
+                          {row.entry.dropBps != null && (
+                            <span data-testid={`drop-custom-${row.entry.symbol}`} className="mt-1 inline-block rounded-full border border-sky-500/40 px-1.5 py-0.5 text-[9px] font-bold text-sky-300">Custom</span>
+                          )}
                         </td>
                         {row.kind === 'ok' || row.kind === 'state' ? (
                           <td className="px-3 py-2 text-right">{row.quote != null ? `$${row.quote.toFixed(2)}` : 'unavailable'}</td>
