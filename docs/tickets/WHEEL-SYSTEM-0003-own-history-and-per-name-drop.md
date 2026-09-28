@@ -1,8 +1,8 @@
 # WHEEL-SYSTEM-0003 — Own-history check and a per-name drop setting
 
-**Status:** DRAFT 1, 2026-09-26. Not approved to build. Owner: Dean Harmon. For Dean's review.
+**Status:** DRAFT 1. **Ian ruled on all 5 decisions 2026-09-27: all approved, one with a change** (the warning-chip threshold moves from a flat −40% to a margin over the row's own effective drop — see below). Mock published 2026-09-27. Not yet approved to build — awaiting Dean's sign-off on the mock and Ian's corrected threshold.
 **Parents:** WHEEL-SYSTEM-0001 (W1, live) and WHEEL-SYSTEM-0002 (W2, live). **Roadmap:** item 14.
-**Mock:** none yet. Diane must produce one (ladder row with the history line and the Drop box) and Dean must see it before any build.
+**Mock:** https://claude.ai/artifact/2tHjMxgDDzSWtfRZbB4KmX
 
 ## Why
 
@@ -11,13 +11,15 @@ Dean pulled eleven tickers from a video (GGLL, SOXL, TQQQ, TSLL, CRWV, NAIL, TEM
 1. There is no way in the UI to tell the plan that one name can fall further than 30% (the per-name drop is stored in the plan's schema, `wheelList[].dropBps`, and used by the sizing math, but no box sets it).
 2. Nothing tells Dean how far a name has actually fallen in its own history, so an idea from a video can be screened in about a minute.
 
-## Decisions for Dean
+## Decisions for Dean — Ian's ruling 2026-09-27 (all 5 approved; the threshold changes)
 
-1. **History is information, not a gate, in v1** (recommended). It shows a line and an amber chip, and offers a "Use 50%" button; it never changes a verdict or blocks a name. A gate can come later if Dean wants one.
-2. **Window: 5 years of daily closes** (recommended). Longer windows include the 2020 crash, which the 5-year window misses (TQQQ's worst month is −44% over 5 years and −69% counting 2020), so the screen says how many years it covers and warns when there are fewer than 3.
-3. **Suggested drop rounds UP to the next 5%** and is never below the plan-wide drop (30% by default).
-4. **The new price-history route requires a signed-in session** (recommended; the existing chart route does not).
-5. **Slice C (catching leveraged funds by their broker description) is optional** and rests on a field name I have not verified; skip it or keep it as its own later ticket.
+1. **History is information, not a gate, in v1 — APPROVED (Ian).** "Info-only is right for v1 — this data is an unverified public feed over a window that misses 2020, and I'm not gating a name's eligibility off a number I can't stand behind. The whole point of CSP sizing is that the trader owns the drop assumption; a line, a chip, and a one-click 'Use 50%' keeps the human in the loop where the human belongs. Revisit a hard gate only once the history data's been checked against the broker for a stretch." It shows a line and an amber chip, and offers a "Use 50%" button; it never changes a verdict or blocks a name.
+2. **Window: 5 years of daily closes — APPROVED (Ian).** "5 years with an explicit years-covered readout and a sub-3-year flag is the honest way to show this — hiding the 2020 gap would be worse than disclosing it. CRWV and TEM getting 'short history' tags is exactly the behavior I want; don't let anyone read those two the same as a 5-year-clean name." Longer windows include the 2020 crash, which the 5-year window misses (TQQQ's worst month is −44% over 5 years and −69% counting 2020), so the screen says how many years it covers and warns when there are fewer than 3.
+3. **Suggested drop rounds UP to the next 5% and is never below the plan-wide drop — APPROVED (Ian).** "Rounding up to the next 5% and flooring at the plan default is the conservative direction on both ends — never suggests less protection than the plan already assumes, never pretends more precision than the data supports."
+4. **The new price-history route requires a signed-in session — APPROVED (Ian).** "Session-required on new surface is correct, full stop. The existing chart route being open is a separate pre-existing hole — don't let this ticket get held hostage to fixing that, but it goes on the backlog, not forgotten." (The existing chart route does not require a session; unrelated to this ticket, not proposed to change here — noted as a real, separate item.)
+5. **Slice C (catching leveraged funds by their broker description) is optional — APPROVED, skip it (Ian).** "Building a detector on a field name you admit you haven't verified against a real broker payload is exactly the kind of thing that ships broken and gives false confidence. The hand-kept list already caught 8 of 11 and got patched for the other 3 today — good enough for v1. Spin C into its own ticket once someone's actually looked at a live instrument payload." Rests on a field name not yet verified; skip it, keep it as its own later ticket.
+
+**The −40% warning threshold — APPROVED WITH CHANGES (Ian), this is his actual gate per this ticket's Review Gates line.** "Flat −40% for every name is the wrong shape. The number that matters is how far a name's own worst month clears the *plan's* assumed drop, not an absolute constant — a plan running a 20% drop should flag a −35% name, and a plan running 40% shouldn't necessarily flag a −42% name that's barely worse than what's already assumed. Make `historyWarnBps` a margin over `planDropBps` (or per-row `dropBps ?? planDropBps`), not a fixed floor. Ship the fixed default only as a fallback if the relative version doesn't make the v1 cut — don't ship it as the permanent design." **This changes the "Where it shows" spec below** — build the relative-margin version, not the flat −4000bps constant as originally written.
 
 ## Scope
 
@@ -36,7 +38,7 @@ Dean pulled eleven tickers from a video (GGLL, SOXL, TQQQ, TSLL, CRWV, NAIL, TEM
   - `share30Bps`: the share of 21-day windows at or below −30%, in basis points.
   - `years` = number of closes / 251 (one decimal); `shortHistory` = fewer than 3 years; needs at least 22 closes or the result is unavailable.
   - `suggestedDropBps = clamp(ceil(|worstMonthBps| / 500) x 500, planDropBps, 9500)`.
-- **Where it shows:** under the symbol on each ladder row and in the Checks column of the Next candidate table: "History: worst month −48%, peak-to-trough −67%, 1.5 years" with a "short history" tag under 3 years, an amber chip when the worst month is worse than −40% (the threshold is an editable default `historyWarnBps` 4000, information only), and a **"Use 50%"** button that fills the Drop box. Nothing is applied automatically.
+- **Where it shows:** under the symbol on each ladder row and in the Checks column of the Next candidate table: "History: worst month −48%, peak-to-trough −67%, 1.5 years" with a "short history" tag under 3 years, and a **"Use 50%"** button that fills the Drop box. Nothing is applied automatically. **Warning chip threshold, corrected per Ian's ruling above:** amber when the name's own worst month clears the *row's effective drop* (`entry.dropBps ?? params.dropBps`) by a margin — not a flat −40% for every name regardless of the plan's own assumption. `historyWarnMarginBps` (editable default, e.g. 1000 = 10 percentage points) is the margin over the effective drop; a name whose worst month is within that margin of (or better than) the effective drop shows no chip. Ship the flat −4000bps constant only as a documented fallback if the relative version doesn't make the v1 cut.
 - One fetch per symbol, one at a time, same failure handling as W2: a symbol whose history cannot be read shows "history unavailable" and never blocks or passes anything; Retry loads it again.
 
 ### Slice C — catch leveraged funds by description (optional, separate)
