@@ -57,6 +57,7 @@ Open items:
 
 ## Later (on the horizon, not yet scoped)
 
+- **TREND-TRAIL-0001 (PSAR advisory signal, added 2026-09-27):** Dean's proposal for a small, advisory "Trend Trail" callout (Parabolic SAR on daily OHLC) in the Screener result card and AI context — explicitly advisory only, never changes qualification, scoring, stops, or orders. Full proposal in `docs/tickets/TREND-TRAIL-0001-psar-advisory-signal.md`. Backlog only: Dean said to store it and debate it later. Do not start review or build until he brings it back up.
 - PMCC-HELD-LONG-FLAGGED-0001: draft, not approved. Held LEAPs that go OTM are dropped silently (`LONG_NOT_ITM`); needs a rendered flagged-state mock. Approve after 0001C's surface exists.
 - Paper trading parity, six phases: (1) stock + CC, (2) PMCC, (3) LEAP-only, (4) rolls, (5) GTC/stop simulation via Vercel Cron, (6) assignment/expiration. Plan lives in `docs/paper-trading-full-parity-plan.md`. No phase ticketed or scoped yet.
 - PMCC three-stage discovery flow: partially implemented. `isPairedPmccLong` in `lib/portfolio-data/pmccPairDetection.ts` is reusable. Blocks AI-POLICY-0001E.
