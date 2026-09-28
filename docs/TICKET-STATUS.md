@@ -27,7 +27,7 @@ One-time sweep of every file in `docs/tickets/` (127 files) plus GitHub issues, 
 | CSP-WORKFLOW-0001 | Explicitly "partially implemented" |
 | ENTRY-0002 | Deferred until a reviewable complete-snapshot cohort exists (data-gated, not a decision) |
 | LCC-0001B/C/D/E | Each "Ready after" the previous slice; 0001A itself is implemented but pending Gate A acceptance, so B-E have not started. **Confirmed 2026-09-27: this is a real operational blocker, not stale docs** — Gate A needs live shadow-parity telemetry (`NEXT_PUBLIC_LCC_0001A_CC_CAPACITY_SHADOW_ENABLED=true` in Vercel, a rebuild/redeploy, real production usage time to accumulate comparisons, then a query of `GET /api/telemetry/cc-capacity-shadow`) — Dean's action, not something buildable further from here |
-| STOCKS-ORDERS-0001 | Proposed, touches the order path; needs Diane's mocks and Alan/Ian's review before any build |
+| STOCKS-ORDERS-0001 | **Corrected 2026-09-27 — the Sell to Close flow (items 1-3, 5) is already built and live** (real order submission, `sellDeps` in `app/portfolio/page.tsx`; 42 tests pass), per a mock Diane/Ian/Quinn/Paul approved 2026-09-22 — the ticket's "Not built" status line was just never updated. Only item 4 (Take Profit for stocks, a distinct order type) remains; needs Diane's mock and Alan/Ian's review before that piece is built |
 | TRADELOG-0002 | Proposed, not started |
 
 ## ⚪ Superseded / duplicate — safe to ignore, already marked or noted here

@@ -1,6 +1,6 @@
 # STOCKS-ORDERS-0001 — Sell, Take Profit and Buy to Cover from Stock holdings
 
-**Status:** Proposed (Dean 2026-09-20: "we already have the plumbing" — agreed, in part). Not built. **Touches the order path:** Diane mocks the actions column and dialog first; Alan and Ian review before it is run.
+**Status:** **Correction (2026-09-27): items 1-3 and 5 are already built and live**, contrary to this line's "Not built" — confirmed by reading `features/portfolio/positions-workspace/SellStockDialog.tsx` (its own header comment cites "the mock approved 2026-09-22, Diane, with Ian/Quinn/Paul sign-off"), `lib/portfolio/stockOrderBuilder.ts`, `stockOrderSafety.ts`, `stockOrderSubmission.ts`, and `app/portfolio/page.tsx`'s `sellDeps` (a real `ttPost` to `/accounts/${accountNumber}/orders`, gated by `assertLiveContextReady`) — not a mock, not shipped dark. 42 existing tests pass. Same class of stale-status-line gap as PMCC-0001/AI-POLICY-0001A-B-F/LEAPS-PI-0001 found earlier this session — the build happened, the ticket's own status line was just never updated. **Item 4 (Take Profit for stocks) is the one piece not built** — only a passive "Target reached: consider selling" badge exists (`StockHoldings.tsx:97`, driven by `isPriceAlertCrossed`), not an actual Take Profit order type/flow. **Touches the order path:** any further work here (item 4) still needs Diane's mock and Alan/Ian's review first, per this ticket's own standing rule.
 
 ## Why
 
