@@ -82,7 +82,7 @@ Open items:
 - SCREENER-VISUAL-0001: draft, deferred by Dean 2026-09-23. Unstick: pick up alongside the CC, PMCC and LEAPS phases of SCREENER-CONFIG-0001.
 - ENTRY-0002: deferred. Unstick: a reviewable complete-snapshot cohort of closed credit spreads.
 - AI-POLICY-0001G: deferred, do not start. Unstick: Paul defines the reports (D10).
-- STOCKS-ORDERS-0001: **corrected 2026-09-27 — Sell to Close (items 1-3, 5) is already built and live**, per a mock approved 2026-09-22; the ticket's status line was stale. Only item 4 (a distinct Take Profit order type for stocks) remains. Unstick: Diane mocks that piece, then Alan and Ian review.
+- STOCKS-ORDERS-0001: **corrected 2026-09-27 — Sell to Close (items 1-3, 5) is already built and live**, per a mock approved 2026-09-22; the ticket's status line was stale. Item 4 (Take Profit for stocks): Diane's mock published 2026-09-27 (https://claude.ai/artifact/VpiCDLo9ftqxY7fpsoQF3E). Unstick: Alan and Ian review, then Dean's build approval.
 - PERFORMANCE-STRATEGY-0002: draft, not approved. Unstick: approval.
 - TRADELOG-0002: proposed. Unstick: approval.
 - ENTRY-0001 release enablement: implemented, awaits Quinn's live filled-OTO verification.
