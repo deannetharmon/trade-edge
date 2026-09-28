@@ -59,6 +59,14 @@ export interface PlanParams {
   earningsRule: EarningsRule;
   /** The shortest expiry, in days, the "Find a shorter expiry" search will look at. */
   minShortDte: number;
+  // ── WHEEL-SYSTEM-0003 (W3): the own-history check ──
+  /**
+   * The warning chip fires when a name's own worst month is worse than its effective drop
+   * (its Drop override, else the plan-wide drop) by more than this margin, in basis points.
+   * A margin over the effective drop, not a flat percentage (Ian's ruling, 2026-09-27): a name
+   * already sized conservatively should read calm, not alarm regardless of the raw number.
+   */
+  historyWarnMarginBps: number;
 }
 
 export type EarningsRule = 'flag' | 'wait';
@@ -100,6 +108,7 @@ export const DEFAULT_PLAN_PARAMS: PlanParams = {
   openFeeCents: 0, // no opening fee in the return (Dean, 2026-09-26)
   earningsRule: 'flag',
   minShortDte: 7,
+  historyWarnMarginBps: 1000, // 10 percentage points (Ian, 2026-09-27)
 };
 
 export const PLAN_PARAM_KEYS = Object.keys(DEFAULT_PLAN_PARAMS) as (keyof PlanParams)[];
@@ -177,6 +186,7 @@ export function validateParams(p: PlanParams): PlanValidation {
   if (!isInt(p.openFeeCents) || p.openFeeCents < 0 || p.openFeeCents > 100_000) errors.push('The opening fee must be between $0 and $1,000 per contract.');
   if (p.earningsRule !== 'flag' && p.earningsRule !== 'wait') errors.push('The earnings rule must be flag or wait.');
   if (!isInt(p.minShortDte) || p.minShortDte < 1 || p.minShortDte > 365) errors.push('The shortest expiry for the shorter-expiry search must be between 1 and 365 days.');
+  if (!isInt(p.historyWarnMarginBps) || p.historyWarnMarginBps < 0 || p.historyWarnMarginBps > 10_000) errors.push('The history warning margin must be between 0% and 100%.');
 
   if (errors.length) return { errors, warnings };
 

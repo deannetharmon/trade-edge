@@ -38,6 +38,15 @@ describe('the W2 check parameters', () => {
   ])('%j is rejected', (overrides) => {
     expect(validatePlanPatch({ overrides }).ok).toBe(false);
   });
+});
+
+describe('W3: historyWarnMarginBps', () => {
+  it('is accepted as an override', () => {
+    expect(validatePlanPatch({ overrides: { historyWarnMarginBps: 500 } }).ok).toBe(true);
+  });
+  it.each([[{ historyWarnMarginBps: -1 }], [{ historyWarnMarginBps: 10_001 }], [{ historyWarnMarginBps: 5.5 }]])('%j is rejected', (overrides) => {
+    expect(validatePlanPatch({ overrides }).ok).toBe(false);
+  });
   it('a bad stored value is dropped on read', () => {
     expect(parseStoredPlan(JSON.stringify({ overrides: { hurdleBps: 1200, earningsRule: 'sometimes', ivrStock: 500 } })).overrides).toEqual({ hurdleBps: 1200 });
   });

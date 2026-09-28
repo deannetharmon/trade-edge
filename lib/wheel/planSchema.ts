@@ -71,6 +71,7 @@ const FIELD_CHECKS: Record<keyof PlanParams, ParamCheck> = {
   openFeeCents: (v) => isInt(v) && v >= 0 && v <= 100_000,
   earningsRule: (v) => v === 'flag' || v === 'wait',
   minShortDte: (v) => isInt(v) && v >= 1 && v <= 365,
+  historyWarnMarginBps: bps,
 };
 
 /** Keeps only known, valid override keys from arbitrary input (used when READING stored data). */

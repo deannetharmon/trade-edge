@@ -287,6 +287,8 @@ describe('validation: hard errors block, soft warnings only warn', () => {
     [{ openFeeCents: -1 }],
     [{ earningsRule: 'never' as never }],
     [{ minShortDte: 0 }],
+    [{ historyWarnMarginBps: -1 }],
+    [{ historyWarnMarginBps: 10_001 }],
   ] as [Partial<PlanParams>][])('%j is a hard error', (over) => {
     expect(v(over).errors.length).toBeGreaterThan(0);
   });
@@ -387,6 +389,10 @@ describe('W2 defaults (Dean and Ian, 2026-09-26)', () => {
   it('the checks start at the agreed defaults, with no opening fee', () => {
     const p = resolveParams();
     expect([p.hurdleBps, p.ivrEtf, p.ivrStock, p.rsiMax, p.maxBidAskBps, p.minOpenInterest, p.openFeeCents, p.earningsRule, p.minShortDte]).toEqual([1000, 20, 30, 70, 1000, 100, 0, 'flag', 7]);
+  });
+  it('W3: the history warning margin defaults to 10 percentage points (Ian, 2026-09-27) and is an editable override', () => {
+    expect(resolveParams().historyWarnMarginBps).toBe(1000);
+    expect(resolveParams({ historyWarnMarginBps: 500 }).historyWarnMarginBps).toBe(500);
   });
   it('each is an editable override', () => {
     const p = resolveParams({ hurdleBps: 1200, earningsRule: 'wait', openFeeCents: 100 });
