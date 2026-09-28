@@ -1,6 +1,6 @@
 # WHEEL-SYSTEM-0003 — Own-history check and a per-name drop setting
 
-**Status:** DRAFT 1. **Ian ruled on all 5 decisions 2026-09-27: all approved, one with a change** (the warning-chip threshold moves from a flat −40% to a margin over the row's own effective drop — see below). Mock published 2026-09-27. Not yet approved to build — awaiting Dean's sign-off on the mock and Ian's corrected threshold.
+**Status:** **Slices A and B built and pushed 2026-09-27** (Dean: "do it"). Ian ruled on all 5 decisions (all approved, one changed: the warning threshold is a margin over the row's own effective drop, not a flat −40%). **Not fully complete: the Next Candidate table's Checks-column history chip (also named in "Where it shows") was not built** — only the ladder row (which matches the reviewed mock exactly) is wired up. Slice C (catch leveraged funds by broker description) skipped per Ian's approval, unchanged.
 **Parents:** WHEEL-SYSTEM-0001 (W1, live) and WHEEL-SYSTEM-0002 (W2, live). **Roadmap:** item 14.
 **Mock:** https://claude.ai/artifact/2tHjMxgDDzSWtfRZbB4KmX
 
@@ -91,3 +91,18 @@ New: `lib/wheel/priceHistory.ts`, `lib/wheel/__tests__/priceHistory.test.ts`, `a
 ## Review gates
 
 Ian: what to show and the warning threshold. Alan: the arithmetic, fixtures and data adjustments. Quinn: route security, failure states, tests. Diane: a mock of the ladder row and the Checks chip before code. Dane: developer review last. Paul: scope (A and B together are a small slice; C is separate).
+
+## Build notes (2026-09-27)
+
+**Slice A** (`features/wheel/WheelPlanTab.tsx`): a Drop column next to Sector. Typing a whole percent (1-95) stores `wheelList[].dropBps`; clearing returns to the plan-wide default; a "Custom" tag shows when overridden. The sizing math already read `entry.dropBps ?? params.dropBps` everywhere (rows, allocation, the override-warning text) — only the input box was missing. 3 new tests.
+
+**Slice B:**
+- `lib/wheel/priceHistory.ts` — pure, integer-arithmetic worst-month/max-drawdown/share-at-or-below-30%/years/short-history calc, plus `suggestedDropBps` and `worseThanEffectiveDropBps` (Ian's relative-margin threshold). 13 tests recompute the ticket's own fixture exactly.
+- `app/api/chart-history/route.ts` — new, session-required, `years=1-10` (default 5), returns the `quote` (split-adjusted, dividend-unadjusted) close series, never `adjclose`. `/api/chart` is untouched. 9 tests.
+- `lib/wheel/historyData.ts` / `features/wheel/useHistoryData.ts` — fetch adapter and the one-symbol-at-a-time loading hook, mirroring `candidateData.ts`/`useCandidateData.ts` exactly. 4 + integration tests.
+- `historyWarnMarginBps` added to `PlanParams` (default 1000 = 10 points, Ian's number).
+- Wired under the symbol on each ladder row: the history line, a "Short history" tag under 3 years, and — only when the worst month is worse than the row's own effective drop by more than the margin — an amber note with a "Use N%" button that fills the Drop box. A fetch failure shows "History unavailable" with a uniquely-labeled Retry button (a plain "Retry" collided with the existing chain-error Retry in tests). 5 new integration tests, including Ian's own CONL example (a name whose Drop override already covers its history reads calm, not alarmed).
+
+**Not built:** the Next Candidate table's Checks-column history chip (also named in the ticket's "Where it shows," alongside the ladder row) — only the ladder row is wired. Slice C remains skipped per Ian.
+
+**Verified:** `tsc --noEmit -p tsconfig.check.json` clean throughout. Full suite: 408/409 files, 5992/5993 tests green — the one failure is a pre-existing, unrelated date-boundary flake in `PositionsWorkspace.test.tsx` (an earnings-date test), reproduced in isolation before any wheel code was touched; not caused by and not fixed by this build.
