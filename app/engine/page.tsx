@@ -2,6 +2,7 @@
 
 'use client';
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
+import { RsiStrip } from '@/components/RsiStrip';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
@@ -1527,6 +1528,8 @@ function ChartPopup({ symbol, pos, sparkData, sparkLoading, th, onClose }: {
         {!sparkLoading && sparkData && sparkData.length === 0 && (
           <p className={`text-[9px] ${th.textFaint} text-center py-3`}>Chart data unavailable</p>
         )}
+        {/* RSI-SPARK-PARITY: same RSI strip as the shared quick chart. */}
+        {!sparkLoading && sparkData && sparkData.length > 1 && <div className="mb-2"><RsiStrip closes={sparkData} th={th} /></div>}
         <a href={buildTradingViewWidgetUrl(TV_SYMBOL)}
           target="_blank"
           rel="noopener noreferrer"
@@ -1537,7 +1540,7 @@ function ChartPopup({ symbol, pos, sparkData, sparkLoading, th, onClose }: {
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
             <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
           </svg>
-          Open chart with RSI
+          Open TradingView
         </a>
       </div>
     </>

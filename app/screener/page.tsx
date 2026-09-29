@@ -5,7 +5,6 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { injectAccentStyle } from '@/lib/theme';
-import { buildTradingViewWidgetUrl } from '@/components/TradingViewChartButton';
 
 // ── TE-0005A: extracted to lib/scans/ ───────────────────────────────────────
 // Mechanical extraction — moved, not rewritten. See docs/reviews/TE-0005A-Implementation-Report.md
@@ -219,6 +218,7 @@ import { ScanModalShell, ScanModeRadioGroup, type ScanMode } from '@/features/sc
 // current recommendation set -- see lib/recommendations/RecommendationService.ts.
 import { publishRecommendations, clearRecommendations, failRecommendationsEvaluation, evaluateScreenResultsInBatches } from '@/lib/recommendations';
 import { RsiLine } from '@/components/RsiLine';
+import { ChartLinkButton } from '@/components/ChartLinkButton';
 
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
 // as module-level side effects (`if (typeof document !== 'undefined') {...}`).
@@ -3611,7 +3611,7 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
               the ticker was buried after the status badge and hard to find in a long list. */}
           <div className="flex flex-col items-start gap-1" data-testid="leaps-result-ticker-column">
             <span className={`${th.text} text-[14px] font-bold tracking-wide`} data-testid="leaps-result-ticker">{candidate.symbol}</span>
-            <ChartLinkButton symbol={candidate.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
+            <ScreenerChartLink symbol={candidate.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
               sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
           </div>
           {/* LEAPS-0004: the score is the first thing after the ticker -- Ian's own composite ranking
@@ -5275,12 +5275,10 @@ type ResultCardProps = {
   };
 };
 
-// PMCC-CARD-0001 item 4 — reuses the exact chart/sparkline/TradingView
-// pattern already shipped in GenericResultCard below, so PMCC tickers get
-// the same chart link "the same way we do it on other pages" (Dean's
-// framing). No new data source: same /api/chart endpoint, same sparkline
-// rendering, same TradingView deep link.
-function ChartLinkButton({ symbol, th, showChart, setShowChart, sparkData, setSparkData, sparkLoading, setSparkLoading }: {
+// PMCC-CARD-0001 item 4 / RSI-SPARK-PARITY: every screener chart link uses the
+// shared components/ChartLinkButton (price sparkline + RSI strip + chart button),
+// the same popup the Positions workspace uses.
+function ScreenerChartLink({ symbol, th, showChart, setShowChart, sparkData, setSparkData, sparkLoading, setSparkLoading }: {
   symbol: string;
   th: typeof THEMES[Theme];
   showChart: boolean;
@@ -5290,106 +5288,14 @@ function ChartLinkButton({ symbol, th, showChart, setShowChart, sparkData, setSp
   sparkLoading: boolean;
   setSparkLoading: (value: boolean) => void;
 }) {
+  // The popup is portaled, but React still bubbles its clicks to the card;
+  // stop them here so clicking inside the chart doesn't expand/collapse the card.
   return (
-    <div className="relative">
-      <button
-        onClick={e => {
-          e.stopPropagation();
-          if (!showChart) {
-            setShowChart(true);
-            if (!sparkData) {
-              setSparkLoading(true);
-              fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}`)
-                .then(r => r.json())
-                .then(d => {
-                  const allBars = (d?.bars ?? []).map((b: any) => b?.c).filter((v: any) => v != null);
-                  setSparkData(allBars.slice(-90));
-                })
-                .catch(() => setSparkData([]))
-                .finally(() => setSparkLoading(false));
-            }
-          } else {
-            setShowChart(false);
-          }
-        }}
-        className={`inline-flex items-center gap-0.5 text-[9px] transition-colors ${showChart ? 'text-blue-400' : 'text-slate-500 ac-hover-text'}`}
-        title="Quick chart"
-      >
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-        </svg>
-        <span className="tracking-wide">chart</span>
-      </button>
-
-      {showChart && (
-        <div
-          className={`absolute top-full left-0 mt-1 z-40 ${th.sidebar} border ${th.border} rounded-xl shadow-2xl p-3`}
-          style={{ width: '280px' }}
-          onClick={e => e.stopPropagation()}
-        >
-          <div className="mb-2">
-            {sparkLoading && (
-              <div className="flex items-center justify-center h-16">
-                <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-              </div>
-            )}
-            {!sparkLoading && sparkData && sparkData.length > 1 && (() => {
-              const min = Math.min(...sparkData);
-              const max = Math.max(...sparkData);
-              const range = max - min || 1;
-              const w = 256, h = 56;
-              const pts = sparkData.map((v, i) => {
-                const x = (i / (sparkData.length - 1)) * w;
-                const y = h - ((v - min) / range) * h;
-                return `${x.toFixed(1)},${y.toFixed(1)}`;
-              }).join(' ');
-              const isUp = sparkData[sparkData.length - 1] >= sparkData[0];
-              const color = isUp ? '#10b981' : '#ef4444';
-              const lastPrice = sparkData[sparkData.length - 1];
-              const firstPrice = sparkData[0];
-              const changePct = ((lastPrice - firstPrice) / firstPrice * 100).toFixed(1);
-              return (
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{symbol}</span>
-                    <span className={`text-[10px] font-bold`} style={{ color }}>
-                      ${lastPrice.toFixed(2)} <span className="text-[9px]">{isUp ? '+' : ''}{changePct}% 30d</span>
-                    </span>
-                  </div>
-                  <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height: '56px' }}>
-                    <defs>
-                      <linearGradient id={`grad-pmcc-${symbol}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-                        <stop offset="100%" stopColor={color} stopOpacity="0" />
-                      </linearGradient>
-                    </defs>
-                    <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
-                    <polygon points={`0,${h} ${pts} ${w},${h}`} fill={`url(#grad-pmcc-${symbol})`} />
-                  </svg>
-                </div>
-              );
-            })()}
-            {!sparkLoading && sparkData && sparkData.length === 0 && (
-              <p className={`text-[9px] ${th.textFaint} text-center py-3`}>Chart data unavailable</p>
-            )}
-          </div>
-
-          <a
-            href={buildTradingViewWidgetUrl(symbol)}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={e => e.stopPropagation()}
-            className="flex items-center justify-center gap-2 w-full py-2 ac-bg-20 ac-hover-bg/30 border ac-border/40 rounded-lg text-[10px] text-blue-400 font-bold tracking-wider transition-colors"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-              <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
-            </svg>
-            Open chart with RSI
-          </a>
-        </div>
-      )}
-    </div>
+    <span onClick={e => e.stopPropagation()}>
+      <ChartLinkButton symbol={symbol} chartSymbol={YAHOO_INDEX_CHART_MAP[symbol.toUpperCase()] ?? symbol} instanceKey={`screener-${symbol}`}
+        th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData}
+        sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
+    </span>
   );
 }
 
@@ -5564,7 +5470,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-bold">{result.symbol}</span>
         <span className={th.textMuted}>{money(result.price)}</span>
-        <ChartLinkButton symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
+        <ScreenerChartLink symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
         <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] text-cyan-300">PMCC</span>
         {earningsRemovedNotice || deltaRemovedNotice
           ? <span className="rounded border border-neutral-700 px-2 py-0.5 text-[9px] font-bold text-neutral-400">Held LEAP · no short call offered</span>
@@ -5618,7 +5524,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
       <div className="flex flex-wrap items-center gap-2">
         {score && !heldRejected && <span className="rounded bg-cyan-500/10 px-2.5 py-0.5 text-[11px] font-bold text-cyan-300">PMCC Structure Quality {score.total}</span>}
         <span className="text-lg font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span>
-        <ChartLinkButton symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
+        <ScreenerChartLink symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
         <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300">{heldLong ? 'HELD LEAP · SHORT-CALL CANDIDATE' : 'PMCC'}</span>
         <span className={`text-[10px] ${th.textFaint}`}>Contract order {result.publishedOrder ?? 1}</span>
         {heldOutcome && <span className="rounded border border-amber-700 px-2 py-0.5 text-[9px] font-bold text-amber-300" data-testid="held-outcome-caption">{heldOutcome.caption}</span>}
@@ -6144,107 +6050,9 @@ const strategyScores = useMemo(() => {
               {result.symbol === 'SPX' || result.symbol === 'XSP' || result.symbol === 'NDX' || result.symbol === 'RUT' ? 'index' : 'etf'}
             </p>
           )}
-          <div className="relative mt-0.5">
-            <button
-              onClick={e => {
-                e.stopPropagation();
-                if (!showChart) {
-                  setShowChart(true);
-                  if (!sparkData) {
-                    setSparkLoading(true);
-                    fetch(`/api/chart?symbol=${encodeURIComponent(result.symbol)}`)
-                      .then(r => r.json())
-                      .then(d => {
-                        const allBars = (d?.bars ?? []).map((b: any) => b?.c).filter((v: any) => v != null);
-                        const closes = allBars.slice(-90);
-                        setSparkData(closes);
-                      })
-                      .catch(() => setSparkData([]))
-                      .finally(() => setSparkLoading(false));
-                  }
-                } else {
-                  setShowChart(false);
-                }
-              }}
-              className={`inline-flex items-center gap-0.5 text-[9px] transition-colors ${showChart ? 'text-blue-400' : 'text-slate-500 ac-hover-text'}`}
-              title="Quick chart"
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-              </svg>
-              <span className="tracking-wide">chart</span>
-            </button>
-
-            {showChart && (
-              <div
-                className={`absolute top-full left-0 mt-1 z-40 ${th.sidebar} border ${th.border} rounded-xl shadow-2xl p-3`}
-                style={{ width: '280px' }}
-                onClick={e => e.stopPropagation()}
-              >
-                {/* Sparkline */}
-                <div className="mb-2">
-                  {sparkLoading && (
-                    <div className="flex items-center justify-center h-16">
-                      <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                    </div>
-                  )}
-                  {!sparkLoading && sparkData && sparkData.length > 1 && (() => {
-                    const min = Math.min(...sparkData);
-                    const max = Math.max(...sparkData);
-                    const range = max - min || 1;
-                    const w = 256, h = 56;
-                    const pts = sparkData.map((v, i) => {
-                      const x = (i / (sparkData.length - 1)) * w;
-                      const y = h - ((v - min) / range) * h;
-                      return `${x.toFixed(1)},${y.toFixed(1)}`;
-                    }).join(' ');
-                    const isUp = sparkData[sparkData.length - 1] >= sparkData[0];
-                    const color = isUp ? '#10b981' : '#ef4444';
-                    const lastPrice = sparkData[sparkData.length - 1];
-                    const firstPrice = sparkData[0];
-                    const changePct = ((lastPrice - firstPrice) / firstPrice * 100).toFixed(1);
-                    return (
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className={`text-[10px] font-bold ${th.text}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{result.symbol}</span>
-                          <span className={`text-[10px] font-bold`} style={{ color }}>
-                            ${lastPrice.toFixed(2)} <span className="text-[9px]">{isUp ? '+' : ''}{changePct}% 30d</span>
-                          </span>
-                        </div>
-                        <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height: '56px' }}>
-                          <defs>
-                            <linearGradient id={`grad-${result.symbol}`} x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-                              <stop offset="100%" stopColor={color} stopOpacity="0" />
-                            </linearGradient>
-                          </defs>
-                          <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
-                          <polygon points={`0,${h} ${pts} ${w},${h}`} fill={`url(#grad-${result.symbol})`} />
-                        </svg>
-                      </div>
-                    );
-                  })()}
-                  {!sparkLoading && sparkData && sparkData.length === 0 && (
-                    <p className={`text-[9px] ${th.textFaint} text-center py-3`}>Chart data unavailable</p>
-                  )}
-                </div>
-
-                {/* Embedded TradingView widget: Bollinger Bands, RSI, and volume. */}
-                <a
-                  href={buildTradingViewWidgetUrl(result.symbol)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={e => e.stopPropagation()}
-                  className="flex items-center justify-center gap-2 w-full py-2 ac-bg-20 ac-hover-bg/30 border ac-border/40 rounded-lg text-[10px] text-blue-400 font-bold tracking-wider transition-colors"
-                >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                    <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
-                  </svg>
-                  Open chart with RSI
-                </a>
-              </div>
-            )}
+          <div className="mt-0.5">
+            <ScreenerChartLink symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
+              sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
           </div>
           <StockResearchButton research={research} th={th} />
         </div>

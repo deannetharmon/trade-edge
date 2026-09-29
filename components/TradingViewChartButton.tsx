@@ -54,7 +54,7 @@ export function TradingViewChartButton({
       className={className}
       aria-label={`Open ${symbol} chart with Bollinger Bands, RSI, and volume`}
     >
-      Open chart
+      Open TradingView
     </button>
     {open && typeof document !== 'undefined' && createPortal(
       <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/75 p-3" role="dialog" aria-modal="true" aria-label={`${symbol} technical chart`} onMouseDown={() => setOpen(false)}>
