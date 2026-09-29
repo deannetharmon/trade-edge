@@ -7194,7 +7194,7 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
                   className={`w-20 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
                 <span className={`text-[9px] ${th.textFaint}`}>%</span>
                 <div className="flex gap-1.5">
-                  {[0, 20, 30, 40, 50].map(v => (
+                  {[0, 10, 15, 20, 30, 40, 50].map(v => (
                     <button key={v} onClick={() => setTIvrMin(v)}
                       className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
                         tIvrMin === v ? 'border-teal-500 text-teal-300 bg-teal-500/15' : `${th.border} ${th.textFaint}`
@@ -7202,6 +7202,7 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
                   ))}
                 </div>
               </div>
+              <p className={`text-[8px] ${th.textFaint} mt-1`}>Guide: stocks 30%+ · ETFs and indexes 15%+ (their IV runs in a narrower range). One floor applies to every selected ticker, so 30% will filter out most ETFs and indexes; scan them separately at 15%.</p>
             </div>
           </div>
         )}
