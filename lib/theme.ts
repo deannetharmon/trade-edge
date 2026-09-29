@@ -100,6 +100,14 @@ const ACCENT_CSS = `
     /* Active nav */
     .active-nav { background-color: rgba(var(--accent-r),var(--accent-g),var(--accent-b),0.25) !important; border-bottom: 2px solid var(--accent) !important; }
 
+    /* Tailwind-style variant names (hover:ac-*, focus:ac-*) used in markup.
+       Tailwind can't generate these for non-Tailwind classes, so define them here. */
+    .hover\\:ac-text:hover { color: var(--accent) !important; }
+    .hover\\:ac-border-faint:hover { border-color: rgba(var(--accent-r),var(--accent-g),var(--accent-b),0.4) !important; }
+    .hover\\:ac-bg-10:hover { background-color: rgba(var(--accent-r),var(--accent-g),var(--accent-b),0.10) !important; }
+    .hover\\:ac-bg-20:hover { background-color: rgba(var(--accent-r),var(--accent-g),var(--accent-b),0.20) !important; }
+    .focus\\:ac-border:focus { border-color: var(--accent) !important; }
+
     /* Legacy accent-* names (home, portfolio, screener) */
     .accent-border { border-color: var(--accent) !important; }
     .accent-text { color: var(--accent) !important; }

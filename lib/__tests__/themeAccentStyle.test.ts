@@ -18,6 +18,19 @@ describe('injectAccentStyle', () => {
     }
   });
 
+  it('defines the hover:/focus: variant class names used in markup, and they match', () => {
+    injectAccentStyle();
+    for (const cls of ['hover:ac-text', 'hover:ac-border-faint', 'hover:ac-bg-10', 'hover:ac-bg-20', 'focus:ac-border']) {
+      const el = document.createElement('div');
+      el.className = cls;
+      document.body.appendChild(el);
+      const selector = `.${CSS.escape(cls)}`;
+      expect(sheet()).toContain(selector);
+      expect(document.querySelector(selector)).toBe(el);
+      el.remove();
+    }
+  });
+
   it('upgrades a partial sheet another page injected first under the same id', () => {
     const old = document.createElement('style');
     old.id = 'hunter-accent-style';

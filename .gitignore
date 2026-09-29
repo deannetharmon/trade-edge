@@ -5,6 +5,7 @@ node_modules
 .codex/
 .pnpm-store/
 *-deploy.sh
+*.tsbuildinfo
 
 # SEC-0001 S2: environment files with real credentials must never be tracked.
 .env
