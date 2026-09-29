@@ -1,6 +1,6 @@
 # IVR-0002 — Separate Min IVR floors for stocks and for ETFs/indexes in the targeted scan
 
-**Status:** DRAFT 2026-09-29. Needs Ian's sign-off (it changes which trades qualify) and Paul's scope approval before build. Owner: Dean Harmon.
+**Status:** DRAFT 2026-09-29. Ian: APPROVED WITH CHANGES 2026-09-29 (see "Ian's review"); awaiting Dean's confirmation, then Paul (scope) and Diane (mock) before build. Owner: Dean Harmon.
 **Related:** IVR-0001 (made Min IVR an explicit field), CSP-IVR-0001, WHEEL-SYSTEM-0002 (the wheel already uses different IVR floors for ETFs and stocks).
 
 ## Why
@@ -32,6 +32,31 @@ Dean wants one scan with the right floor for each type of underlying.
 2. Should indexes (SPX, NDX, RUT) share the ETF floor, or get a third field?
 3. Should `pending`/`unsupported` use the stock floor (proposed), or be excluded?
 4. What ETF/index floor should each preset use?
+
+## Ian's review (2026-09-29): APPROVE WITH CHANGES
+
+"Right fix. One floor for SPY and a single name was never going to work. Approve with four answers and one code correction."
+
+Code read: `runTargetedScan` gate at `app/screener/page.tsx` ~7688 (pre-filter) and ~7743 (per-symbol), `RULE_PRESETS` ~904, preset handler ~6884, `DEFAULT_ETF_RULES` / `INDEX_IVR_MIN` in `lib/scans/constants.ts`, `isLeveragedEtf` in `lib/wheel/capitalPlan.ts`.
+
+1. **ETF/index default: 15.** Keep the targeted scan at 15, matching the screener's own ETF rules and the index minimum. The wheel's 20 is deliberately different: a cash-secured put carries assignment risk, so it asks for more premium. Spreads are defined-risk. Both numbers stay; the ticket documents why.
+2. **Indexes share the ETF floor.** No third field. SPX and SPY sit in the same volatility regime, and a third row adds weight without a decision.
+3. **`pending` / `unsupported` use the stock floor.** When the type isn't known, apply the stricter floor. Unsupported tickers can't be scanned anyway.
+4. **Leveraged and inverse ETFs (TQQQ, SOXL, etc.) use the stock floor.** Their IVR swings like a single name's, not like a broad index. Reuse `isLeveragedEtf` (move it out of `lib/wheel` into a shared `lib/` module, not a copy).
+5. **Preset ETF/index values** (roughly half the stock floor, rounded to the chip steps):
+
+   | Preset | Stock | ETF / index |
+   |---|---|---|
+   | Strict | 40 | 20 |
+   | Course | 30 | 15 |
+   | Relaxed | 25 | 12 |
+   | Low Vol | 20 | 10 |
+   | Short Term | 35 | 18 |
+   | Intermediate | 35 | 18 |
+
+6. **Missing IVR still fails closed** at both floors (current `?? -1` behavior; consistent with CSP-IVR-0001). No change.
+
+**Code correction for Dane:** the IVR gate runs *before* `classifyUnderlying` (the pre-filter uses market metrics only), so the scan doesn't know the type when it gates. The floor must come from the watchlist's stored `classification` (already on every `WatchlistTicker`) passed into `runTargetedScan`, falling back to `classificationCache`, then to the stock floor. Do not add an extra classify call per symbol before the gate.
 
 ## Tests (Quinn)
 
