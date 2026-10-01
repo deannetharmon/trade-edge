@@ -256,6 +256,53 @@ function LeveragedExposureSummary({ rec, th }: { rec: OpportunityRecommendation;
   );
 }
 
+function OpportunityExpressionComparison({ recommendations, th }: { recommendations: OpportunityRecommendation[]; th: (typeof THEMES)[Theme] }) {
+  const groups = new Map<string, OpportunityRecommendation[]>();
+  for (const rec of recommendations) {
+    const key = (rec.economicUnderlying ?? rec.symbol).toUpperCase();
+    const group = groups.get(key) ?? [];
+    group.push(rec);
+    groups.set(key, group);
+  }
+  const comparableGroups = Array.from(groups.entries()).filter(([, recs]) => recs.length > 1);
+  if (comparableGroups.length === 0) return null;
+
+  return (
+    <div data-testid="opportunity-expression-comparison" className="space-y-2">
+      <p className={`text-[9px] ${th.textFaint} tracking-widest uppercase font-bold`}>Opportunity → Expression Comparison</p>
+      {comparableGroups.map(([underlying, recs]) => {
+        const underlyingScores = recs.map(r => r.opportunityScoreTotal).filter((v): v is number => v != null && Number.isFinite(v));
+        const opportunityScore = underlyingScores.length ? Math.max(...underlyingScores) : null;
+        return (
+          <div key={underlying} className={`rounded-xl border ${th.border} ${th.card} p-3 space-y-2`}>
+            <div className="flex flex-wrap items-baseline gap-3">
+              <span className={`text-sm font-semibold ${th.text}`}>{underlying} Opportunity</span>
+              <span className={`text-[10px] ${th.textFaint}`}>Underlying Opportunity Score: {opportunityScore ?? 'Unavailable'}</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-[10px]">
+                <thead><tr className={th.textFaint}><th className="py-1 pr-3">Expression</th><th className="py-1 pr-3">Score</th><th className="py-1 pr-3">Capital</th><th className="py-1 pr-3">Initial effective exposure</th><th className="py-1">Risk status</th></tr></thead>
+                <tbody>
+                  {recs.map(rec => (
+                    <tr key={rec.candidateId} className={`border-t ${th.border}`}>
+                      <td className={`py-1.5 pr-3 font-semibold ${th.text}`}>{rec.symbol} {rec.strategy}{rec.layeredLeverage ? ' · Layered Leverage' : ''}</td>
+                      <td className={`py-1.5 pr-3 ${th.textMuted}`}>{rec.opportunityScoreTotal ?? 'Unavailable'}</td>
+                      <td className={`py-1.5 pr-3 ${th.textMuted}`}>{formatMoney(rec.capitalRequired)}</td>
+                      <td className={`py-1.5 pr-3 ${th.textMuted}`}>{rec.normalizationAuthoritative === false ? 'Unavailable' : formatMoney(rec.initialEffectiveExposure, true)}</td>
+                      <td className={`py-1.5 ${th.textMuted}`}>{rec.normalizationAuthoritative === false ? 'NOT COMPARABLY RANKED — Normalization Incomplete' : rec.comparableRank == null ? DISPOSITION_LABEL[rec.disposition] : `Comparable #${rec.comparableRank}`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className={`text-[9px] ${th.textFaint} italic`}>Expression score and capital efficiency are not the underlying opportunity score and do not override hard risk gates.</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function RecommendationCard({
   rec,
   th,
@@ -469,6 +516,8 @@ export function BestOpportunitiesPanel({
           <p className={`text-[10px] ${th.textFaint} leading-relaxed`}>{CAPITAL_LIMITATION_NOTICE}</p>
         </div>
       )}
+
+      <OpportunityExpressionComparison recommendations={recommendations} th={th} />
 
       {recommendations.length === 0 ? (
         <div role="status" className={`border ${th.border} rounded-xl px-4 py-6 text-center`}>
