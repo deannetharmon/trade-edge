@@ -214,6 +214,7 @@ export function evaluateOpportunityCandidate(
       source: candidate.source,
       symbol: candidate.symbol,
       strategy: candidate.strategy,
+      capitalRequired: candidate.capitalRequired,
       disposition,
       opportunityScoreTotal: analysis.opportunityScore?.total ?? null,
       decisionConfidenceTotal: analysis.confidence.overall,
