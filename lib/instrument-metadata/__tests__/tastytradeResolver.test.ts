@@ -33,7 +33,7 @@ describe('Tastytrade instrument metadata integration', () => {
   it('keeps an uncovered broker ETF partial rather than calling it standard', async () => {
     const resolver = createTastytradeInstrumentMetadataResolver('token');
     await expect(resolver.resolve('SPY')).resolves.toMatchObject({
-      classification: 'STANDARD_ETF',
+      classification: 'UNKNOWN',
       confidence: 'PARTIAL',
     });
   });
