@@ -68,6 +68,19 @@ export interface CandidateFieldDef extends FieldDef {
   prop?: string;
 }
 
+export const LEVERAGE_CANDIDATE_FIELDS: readonly FieldDef[] = [
+  { key: 'leverageContextVersion', label: 'Leverage context version', format: 'text' },
+  { key: 'instrumentClassification', label: 'Instrument classification', format: 'text' },
+  { key: 'economicUnderlying', label: 'Economic underlying', format: 'text' },
+  { key: 'signedLeverageMultiplier', label: 'Signed leverage multiplier', format: 'number' },
+  { key: 'resetFrequency', label: 'Reset frequency', format: 'text' },
+  { key: 'metadataConfidence', label: 'Leverage metadata confidence', format: 'text' },
+  { key: 'leverageMetadataComplete', label: 'Leverage metadata complete', format: 'boolean' },
+  { key: 'pathRiskState', label: 'Reset and path risk state', format: 'text' },
+  { key: 'tradeRiskNormalizationState', label: 'Trade risk normalization state', format: 'text' },
+  { key: 'metadataCatalogVersion', label: 'Leverage metadata catalog version', format: 'text' },
+];
+
 export const CANDIDATE_FIELDS: readonly CandidateFieldDef[] = [
   { key: 'symbol', label: 'Symbol', format: 'text', from: 'result' },
   { key: 'strategy', label: 'Strategy', format: 'text', from: 'result' },
@@ -105,6 +118,7 @@ export const SCAN_REGISTRY: readonly CitableField[] = [
   ...toFields('/filters', FILTER_FIELDS),
   ...toFields('/outcomes/*', OUTCOME_FIELDS),
   ...toFields('/candidates/*', CANDIDATE_FIELDS),
+  ...toFields('/candidates/*', LEVERAGE_CANDIDATE_FIELDS),
 ];
 
 /** Bounds. The candidate-row cap N is per the ticket (proposed 25); outcomes are all included up to a hard limit. */
