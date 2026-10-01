@@ -203,6 +203,32 @@ describe('buildTodaysPrioritiesQueue: membership', () => {
   });
 });
 
+  it('Gate 8 appends leverage normalization exceptions as non-completable open items', () => {
+    const dashboard = makeDashboard();
+    const queue = buildTodaysPrioritiesQueue({
+      dashboard,
+      generatedAt: GENERATED_AT,
+      leverageExceptions: [{
+        id: 'lev-normalization::NVDA',
+        economicUnderlying: 'NVDA',
+        subjectId: 'position_1',
+        headline: 'NVDA — Leverage normalization incomplete',
+        detail: 'NVDU lacks required delta/price evidence.',
+      }],
+    });
+
+    expect(queue.orderedItems).toHaveLength(1);
+    expect(queue.orderedItems[0]).toMatchObject({
+      kind: 'leverage_exception',
+      stableKey: 'leverage::lev-normalization::NVDA',
+      subjectId: 'position_1',
+      completable: false,
+    });
+    const partition = partitionTodaysPrioritiesQueue(queue, {});
+    expect(partition.open).toHaveLength(1);
+    expect(partition.completed).toHaveLength(0);
+  });
+
 describe('getStableQueueKey', () => {
   it('produces attention::-namespaced output byte-identical to getPriorityWorkflowKey(objective), never a regenerated objective.id', () => {
     const objective = makeObjective({ ruleId: 'OBJ-WATCH-POSITION', subject: { type: 'position', id: 'AMD::2026-08-21', symbol: 'AMD', label: 'AMD' } });

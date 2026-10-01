@@ -55,11 +55,12 @@ import { useCurrentRecommendations } from '@/lib/recommendations';
 // so Mission Control's Attention summary can never drift from Today's
 // Priorities' own open count.
 import { loadPriorityWorkflowState, type PriorityWorkflowState } from '@/features/portfolio/priorities/priorityWorkflowState';
+import { buildLeveragedPositionExposureGroups, buildLeveragedPositionExposureExceptions } from '@/lib/portfolio/leveragedPositionExposure';
 
 export default function DashboardPage() {
   const th = THEMES[getSavedTheme()];
   const { tasks } = useTaskManager();
-  const { composition, loading, error, lastRefresh, refresh, refreshBalances, refreshDecisionReviews } = usePortfolioData();
+  const { composition, positions, snapshot, loading, error, lastRefresh, refresh, refreshBalances, refreshDecisionReviews } = usePortfolioData();
   const portfolioMode = usePortfolioMode();
 
   // Refresh on every visit to this page, same "fresh on every visit"
@@ -92,6 +93,16 @@ export default function DashboardPage() {
     [currentRecommendations],
   );
 
+
+  const leveragedPositionExposureExceptions = useMemo(
+    () => buildLeveragedPositionExposureExceptions(buildLeveragedPositionExposureGroups({
+      positions,
+      equities: snapshot?.equities ?? [],
+      equityCoverageComplete: snapshot?.dataQuality.status === 'ok',
+    })),
+    [positions, snapshot],
+  );
+
   const viewModel = useMemo(
     () =>
       buildMissionControlViewModel({
@@ -110,6 +121,7 @@ export default function DashboardPage() {
         opportunityError: currentRecommendations.error ?? undefined,
         lastRefreshedAt: lastRefresh ? lastRefresh.toISOString() : null,
         workflowState,
+        leverageExceptions: leveragedPositionExposureExceptions,
       }),
     [
       composition,
@@ -121,6 +133,7 @@ export default function DashboardPage() {
       currentRecommendations.error,
       lastRefresh,
       workflowState,
+      leveragedPositionExposureExceptions,
     ],
   );
 

@@ -26,7 +26,18 @@ Read docs/ROADMAP.md before starting any new ticket work.
 
 ## Session end
 
-Push any branch with local commits. Never leave work only in stash or a temp worktree.
+Push any branch with local commits, but batch the session's completed work into a single push whenever practical. Never leave work only in stash or a temp worktree.
+
+## Commit and deployment batching
+
+- Vercel creates a preview deployment from each pushed branch head. Treat pushes as deployment events, not as routine save points.
+- Make intermediate commits locally as needed for safety/history, but do not push after each small edit or commit.
+- Before the first push for an implementation slice, finish the related code, tests, sibling-defect search, targeted tests, and configured TypeScript check.
+- Push the completed slice once, producing one GitHub CI run and one Vercel preview whenever practical.
+- If CI or Vercel finds a defect, diagnose the full defect class and inspect touched/new sibling code for the same issue before pushing the correction. Consolidate all related corrections into one follow-up push.
+- Do not create extra commits/pushes merely to prod CI/Vercel, refresh a preview, or test whether a rate limit has cleared.
+- During LEV-0001 Gates 8-11, prefer one consolidated implementation push per gate or coherent corrective round. Additional pushes require a real code/test defect or a materially new approved change.
+- A green older preview does not validate a newer head. Frank may close a gate only after the current pushed head has required GitHub CI green and its own Vercel preview Ready.
 
 ## Build and verification
 

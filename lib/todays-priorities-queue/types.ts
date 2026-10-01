@@ -11,8 +11,9 @@
 import type { AttentionItem } from '@/lib/morning-briefing';
 import type { CoveredCallOpportunityInput } from '@/lib/todaysPriorities';
 import type { DecisionReview } from '@/lib/decision-review';
+import type { LeveragedPositionExposureException } from '@/lib/portfolio/leveragedPositionExposure';
 
-export type TodaysPrioritiesQueueItemKind = 'attention' | 'covered_call_opportunity' | 'needs_follow_up';
+export type TodaysPrioritiesQueueItemKind = 'attention' | 'covered_call_opportunity' | 'needs_follow_up' | 'leverage_exception';
 
 export interface TodaysPrioritiesQueueItem {
   kind: TodaysPrioritiesQueueItemKind;
@@ -35,10 +36,11 @@ export interface TodaysPrioritiesQueueItem {
   // false, structurally, for the other two kinds -- not a runtime check
   // that could be bypassed.
   completable: boolean;
-  // Exactly one of the following three is populated, matching `kind`.
+  // Exactly one of the following source fields is populated, matching `kind`.
   attentionItem?: AttentionItem;
   coveredCallOpportunity?: CoveredCallOpportunityInput;
   decisionReview?: DecisionReview;
+  leverageException?: LeveragedPositionExposureException;
 }
 
 export interface TodaysPrioritiesQueue {
