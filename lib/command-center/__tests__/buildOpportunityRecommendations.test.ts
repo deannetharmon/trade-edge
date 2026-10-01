@@ -73,4 +73,26 @@ describe('TC-0001B: buildOpportunityRecommendations', () => {
     // we additionally assert both fixture symbols made it through untouched.
     expect(symbolsInOrder.length).toBe(analyses.length - result.skipped.length);
   });
+  it('wires known leveraged underlyings into the production path and fails layered option leverage closed until Gate 6', () => {
+    const analyses = [
+      buildDecisionAnalysisFixture({ symbol: 'NVDU', opportunityScoreTotal: 99 }),
+      buildDecisionAnalysisFixture({ symbol: 'NVDA', opportunityScoreTotal: 80 }),
+    ];
+
+    const result = buildOpportunityRecommendations(analyses, CONTEXT);
+    const nvdu = result.recommendations.find(rec => rec.symbol === 'NVDU');
+    const nvda = result.recommendations.find(rec => rec.symbol === 'NVDA');
+
+    expect(nvdu).toMatchObject({
+      economicUnderlying: 'NVDA',
+      normalizationAuthoritative: false,
+      comparableRank: null,
+      initialEffectiveExposure: null,
+      layeredLeverage: true,
+      disposition: 'WATCH',
+    });
+    expect(nvdu?.portfolioConflicts.join(' ')).toMatch(/normalization incomplete/i);
+    expect(nvda?.normalizationAuthoritative).toBeUndefined();
+  });
+
 });
