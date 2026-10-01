@@ -1,9 +1,14 @@
+// lib/portfolio/__tests__/standaloneLeapsStop.test.ts
+
 import { describe, expect, it } from 'vitest';
 import { evaluateStandaloneLeapsStopEligibility, standaloneLeapsStopProposal } from '../standaloneLeapsStop';
 
 const base: any = { entryPriceEffect: 'Debit', entryEconomicsComplete: true, entryCredit: 2000, quantity: 1, identity: { structureType: 'NAKED' }, structureAmbiguous: false, legs: [{ direction: 'Long', optionType: 'C' }], pairedShortCallKey: null, dte: 365 };
-describe('standalone LEAPS stop policy', () => {
+describe('standalone long-call stop policy', () => {
   it('accepts only a complete standalone long call', () => expect(evaluateStandaloneLeapsStopEligibility(base)).toBe('ELIGIBLE'));
+  it('STOP-SLIDER-0001: a shorter-dated standalone long call is eligible too', () => expect(evaluateStandaloneLeapsStopEligibility({ ...base, dte: 45 })).toBe('ELIGIBLE'));
+  it('still rejects a long put', () => expect(evaluateStandaloneLeapsStopEligibility({ ...base, legs: [{ direction: 'Long', optionType: 'P' }] })).toBe('UNAVAILABLE'));
   it('keeps PMCC long legs out of the standalone workflow', () => expect(evaluateStandaloneLeapsStopEligibility({ ...base, pairedShortCallKey: 'short-call' })).toBe('PMCC_MANAGED'));
-  it.each([[25, 15], [35, 13], [50, 10]] as const)('calculates %s%% loss from a $20 debit as $%s', (loss, trigger) => expect(standaloneLeapsStopProposal(20, loss).triggerPrice).toBe(trigger));
+  it.each([[25, 15], [35, 13], [50, 10], [5, 19], [95, 1]] as const)('calculates %s%% loss from a $20 debit as $%s', (loss, trigger) => expect(standaloneLeapsStopProposal(20, loss).triggerPrice).toBe(trigger));
+  it.each([0, 4, 100, 150, NaN])('rejects a %s%% maximum loss', loss => expect(() => standaloneLeapsStopProposal(20, loss)).toThrow());
 });

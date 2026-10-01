@@ -88,7 +88,9 @@ import {
   classifyQuoteQuality,
   type StopSource,
 } from '@/lib/portfolio/stopLossPolicy';
-import { evaluateStandaloneLeapsStopEligibility, standaloneLeapsStopProposal, STANDALONE_LEAPS_STOP_LOSS_CHOICES, type StandaloneLeapsStopLossPct } from '@/lib/portfolio/standaloneLeapsStop';
+import { evaluateStandaloneLeapsStopEligibility, standaloneLeapsStopProposal, type StandaloneLeapsStopLossPct } from '@/lib/portfolio/standaloneLeapsStop';
+import { StopPctSlider } from '@/components/StopPctSlider';
+import { CREDIT_STOP_PCT_DEFAULT, CREDIT_STOP_PCT_MAX, CREDIT_STOP_PCT_MIN, CREDIT_STOP_PCT_STEP, DEBIT_STOP_LOSS_PCT_DEFAULT, DEBIT_STOP_LOSS_PCT_MAX, DEBIT_STOP_LOSS_PCT_MIN, DEBIT_STOP_LOSS_PCT_STEP, creditStopPctFromTrigger, creditStopTriggerFromPct, describeCreditStopPct, describeDebitStopLossPct } from '@/lib/portfolio/stopSlider';
 import {
   evaluateProfitProtectingStop,
   PROFIT_PROTECTING_STOP_POLICY_VERSION,
@@ -6311,7 +6313,7 @@ function PortfolioStopControl({ pos, th, onRetry }: { pos: Position; th: typeof 
 
 function StandaloneLeapsStopControl({ pos, th }: { pos: Position; th: typeof THEMES[Theme] }) {
   const eligibility = evaluateStandaloneLeapsStopEligibility(pos);
-  const [choice, setChoice] = useState<StandaloneLeapsStopLossPct | null>(null);
+  const [choice, setChoice] = useState<StandaloneLeapsStopLossPct>(DEBIT_STOP_LOSS_PCT_DEFAULT);
   const [review, setReview] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -6319,7 +6321,7 @@ function StandaloneLeapsStopControl({ pos, th }: { pos: Position; th: typeof THE
   const debit = pos.entryCredit != null && pos.quantity > 0 ? pos.entryCredit / (pos.quantity * 100) : null;
   if (eligibility === 'PMCC_MANAGED') return <span className="text-[10px] text-amber-300">PMCC-managed — this LEAPS supports a short call and is not stopped on its own.</span>;
   if (eligibility !== 'ELIGIBLE' || debit == null) return <DebitStopObservation position={pos} />;
-  const proposal = choice == null ? null : standaloneLeapsStopProposal(debit, choice);
+  const proposal = standaloneLeapsStopProposal(debit, choice);
   const submit = async () => {
     if (!proposal || !pos.identity) return;
     try { assertLiveContextReady(portfolioMode.status, portfolioMode.mode, 'set standalone LEAPS stop'); }
@@ -6331,20 +6333,20 @@ function StandaloneLeapsStopControl({ pos, th }: { pos: Position; th: typeof THE
       if (!quote || quote.netBid == null || quote.netAsk == null || quote.netAsk < quote.netBid || proposal.triggerPrice >= quote.netBid) throw new Error('A fresh executable quote above the proposed stop is required before submission.');
       const leg = pos.legs[0];
       const body = { 'order-type': 'Stop Limit', 'time-in-force': 'GTC', 'stop-trigger': proposal.triggerPrice.toFixed(2), price: Math.max(0.01, Number((proposal.triggerPrice * .9).toFixed(2))).toFixed(2), 'price-effect': 'Credit', legs: [{ symbol: leg.symbol, quantity: pos.quantity, action: 'Sell to Close', 'instrument-type': instrType(pos.symbol) }] };
-      const submission = await submitCloseOrderIfSafe({ identity: pos.identity, structureAmbiguous: pos.structureAmbiguous, structureBlockMessage: pos.structureBlockMessage }, { identity: pos.identity, requestedQuantity: pos.quantity, closeableQuantity: pos.quantity, pricingIntent: 'STOP_LOSS', requestedClosePriceEffect: 'Credit', closePricePointsPerUnit: proposal.triggerPrice, quote: { netBid: quote.netBid, netAsk: quote.netAsk, netMid: quote.netMid, fetchedAtMs: Date.now() }, actualOrder: { legs: [{ symbol: leg.symbol, quantity: pos.quantity, direction: 'Long' }], limitPricePointsPerUnit: proposal.triggerPrice, priceEffect: 'Credit', orderType: 'Stop Limit', timeInForce: 'GTC' }, displayedExpectedPnlDollars: -debit * (choice! / 100) * pos.quantity * 100 }, async () => ttPost(`/accounts/${pos.accountNumber}/orders`, token, body));
+      const submission = await submitCloseOrderIfSafe({ identity: pos.identity, structureAmbiguous: pos.structureAmbiguous, structureBlockMessage: pos.structureBlockMessage }, { identity: pos.identity, requestedQuantity: pos.quantity, closeableQuantity: pos.quantity, pricingIntent: 'STOP_LOSS', requestedClosePriceEffect: 'Credit', closePricePointsPerUnit: proposal.triggerPrice, quote: { netBid: quote.netBid, netAsk: quote.netAsk, netMid: quote.netMid, fetchedAtMs: Date.now() }, actualOrder: { legs: [{ symbol: leg.symbol, quantity: pos.quantity, direction: 'Long' }], limitPricePointsPerUnit: proposal.triggerPrice, priceEffect: 'Credit', orderType: 'Stop Limit', timeInForce: 'GTC' }, displayedExpectedPnlDollars: -debit * (choice / 100) * pos.quantity * 100 }, async () => ttPost(`/accounts/${pos.accountNumber}/orders`, token, body));
       if (!submission.submitted) throw new Error(`Blocked by safety gate: ${submission.reason}`);
       const orderId = String((submission.result as any)?.data?.order?.id ?? (submission.result as any)?.data?.id ?? 'submitted');
-      const policy = buildDebitStopPolicy({ originalDebitPerContract: debit, maximumLossPct: choice! / 100, createdAt: new Date().toISOString(), brokerOrderId: orderId });
+      const policy = buildDebitStopPolicy({ originalDebitPerContract: debit, maximumLossPct: choice / 100, createdAt: new Date().toISOString(), brokerOrderId: orderId });
       await postStopPolicies([{ positionKey: positionStopPolicyKey(pos.accountNumber, leg.symbol), policy: policy as any }]);
       setResult('✓ Stop submitted'); setReview(false);
     } catch (e: any) { setResult(e.message ?? 'Stop submission failed.'); }
     finally { setLoading(false); }
   };
   return <div className="max-w-[190px]">
-    <p className="text-[10px] text-slate-300">No stop set — choose your maximum loss.</p>
-    <div className="mt-1 flex gap-1">{STANDALONE_LEAPS_STOP_LOSS_CHOICES.map(loss => <button key={loss} onClick={() => { setChoice(loss); setReview(false); }} className={`rounded border px-1.5 py-0.5 text-[9px] ${choice === loss ? 'border-teal-500 text-teal-300' : `${th.borderLight} ${th.textFaint}`}`}>{loss}%</button>)}</div>
-    {proposal && <><p className="mt-1 text-[9px] text-teal-300">Stop ${proposal.triggerPrice.toFixed(2)} · {proposal.expectedPnlPct}% from entry debit</p><button onClick={() => setReview(true)} className="mt-1 rounded border border-teal-600 px-2 py-1 text-[9px] font-bold text-teal-300">Review Stop</button></>}
-    {review && proposal && <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4"><div className={`${th.sidebar} w-80 rounded-xl border ${th.border} p-4`}><p className="text-xs font-bold">Review LEAPS Stop — {pos.symbol}</p><p className={`mt-3 text-[10px] ${th.textFaint}`}>Entry debit ${debit.toFixed(2)} · maximum loss {choice!}%</p><p className="mt-1 text-sm font-bold text-teal-300">Stop ${proposal.triggerPrice.toFixed(2)} · {proposal.expectedPnlPct}%</p><p className={`mt-2 text-[9px] ${th.textFaint}`}>A fresh executable quote and the existing order-safety gate are required before submission.</p><div className="mt-4 flex gap-2"><button disabled={loading} onClick={submit} className="flex-1 rounded bg-teal-700 py-2 text-[10px] font-bold text-white disabled:opacity-50">{loading ? 'Submitting…' : 'Confirm & Submit'}</button><button onClick={() => setReview(false)} className={`rounded border ${th.border} px-3 text-[10px] ${th.textFaint}`}>Back</button></div></div></div>}
+    <p className="text-[10px] text-slate-300">No stop set — drag to choose your maximum loss.</p>
+    <div className="mt-1"><StopPctSlider accent="teal" ariaLabel="Maximum loss as a percent of entry debit" value={choice} min={DEBIT_STOP_LOSS_PCT_MIN} max={DEBIT_STOP_LOSS_PCT_MAX} step={DEBIT_STOP_LOSS_PCT_STEP} onChange={value => { setChoice(value); setReview(false); }} description={describeDebitStopLossPct(choice, proposal.triggerPrice)} /></div>
+    <button onClick={() => setReview(true)} className="mt-1 rounded border border-teal-600 px-2 py-1 text-[9px] font-bold text-teal-300">Review Stop — {choice}% max loss</button>
+    {review && proposal && <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4"><div className={`${th.sidebar} w-80 rounded-xl border ${th.border} p-4`}><p className="text-xs font-bold">Review Stop — {pos.symbol}</p><p className="mt-3 text-sm font-bold text-teal-300">Selected: {choice}% maximum loss</p><p className={`mt-1 text-[10px] ${th.textFaint}`}>Entry debit ${debit.toFixed(2)} per contract → stop trigger ${proposal.triggerPrice.toFixed(2)}</p><p className={`mt-1 text-[10px] ${th.textFaint}`}>If the stop fills at the trigger: about -${(debit * (choice / 100) * pos.quantity * 100).toFixed(2)} on {pos.quantity} contract{pos.quantity === 1 ? '' : 's'}</p><p className={`mt-2 text-[9px] ${th.textFaint}`}>A fresh executable quote and the existing order-safety gate are required before submission.</p><div className="mt-4 flex gap-2"><button disabled={loading} onClick={submit} className="flex-1 rounded bg-teal-700 py-2 text-[10px] font-bold text-white disabled:opacity-50">{loading ? 'Submitting…' : 'Confirm & Submit'}</button><button onClick={() => setReview(false)} className={`rounded border ${th.border} px-3 text-[10px] ${th.textFaint}`}>Back</button></div></div></div>}
     {result && <p title={result} className={`mt-1 text-[9px] ${result.startsWith('✓') ? 'text-emerald-400' : 'text-red-400'}`}>{result}</p>}
   </div>;
 }
@@ -7070,6 +7072,8 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   const stopParsed  = parseFloat(stopPrice || '0');
   const gtcParsed   = parseFloat(gtcPrice  || '0');
   const stopMultipleDisplay = creditPerContract > 0 ? (stopParsed / creditPerContract).toFixed(1) : '—';
+  // STOP-SLIDER-0001: the stop expressed as a percent of the original credit (200% = 2.0x).
+  const stopPctOfCredit = creditStopPctFromTrigger(creditPerContract, stopParsed);
   const gtcPctDisplay       = creditPerContract > 0 ? Math.round((1 - gtcParsed / creditPerContract) * 100) : 0;
   const effectiveLiveDisplay = livePrice ?? liveValuePerContract;
 
@@ -7356,6 +7360,29 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                   style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
                 />
               </div>
+              {creditPerContract > 0 && (
+                <div className="mt-2 ml-28">
+                  <StopPctSlider
+                    accent="orange"
+                    ariaLabel="Stop trigger as a percent of original credit"
+                    value={stopPctOfCredit ?? CREDIT_STOP_PCT_DEFAULT}
+                    min={CREDIT_STOP_PCT_MIN}
+                    max={CREDIT_STOP_PCT_MAX}
+                    step={CREDIT_STOP_PCT_STEP}
+                    minLabel={`${CREDIT_STOP_PCT_MIN}% (${(CREDIT_STOP_PCT_MIN / 100).toFixed(1)}×)`}
+                    maxLabel={`${CREDIT_STOP_PCT_MAX}% (${(CREDIT_STOP_PCT_MAX / 100).toFixed(1)}×)`}
+                    description={stopPctOfCredit != null ? describeCreditStopPct(stopPctOfCredit) : 'Drag to choose a stop'}
+                    onChange={pct => {
+                      setStopPrice(creditStopTriggerFromPct(creditPerContract, pct).toFixed(2));
+                      // Same provenance as typing a ×credit multiple: an explicit
+                      // choice anchored to the original credit.
+                      setStopPriceSource('MANUAL');
+                      setStopBasisOverride('ORIGINAL_CREDIT');
+                      setProfitProtectionStage(null);
+                    }}
+                  />
+                </div>
+              )}
               {!stopError && stopParsed > 0 && (
                 <p className="text-[11px] font-bold text-orange-400 mt-0.5 ml-28">
                   {protectiveStopOutcomeLabel(stopOutcomePnlDollars)} if stop fills
@@ -7365,11 +7392,6 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
               {!stopError && effectiveLiveDisplay != null && (
                 <p className={`text-[9px] ${th.textFaint} mt-0.5 ml-28`}>
                   valid range: ${Math.max(stopMin, effectiveLiveDisplay + 0.01).toFixed(2)} – ${stopMax.toFixed(2)}
-                </p>
-              )}
-              {!stopError && creditPerContract > 0 && stopParsed > 0 && (
-                <p className={`text-[9px] ${th.textFaint} ml-28`}>
-                  {Math.round((stopParsed / creditPerContract) * 100)}% from entry credit
                 </p>
               )}
               {!stopError && stopPctOfMaxRisk != null && (
@@ -7394,6 +7416,11 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                 {needsOco && ` profit target $${gtcParsed.toFixed(2)} (+$${gtcProfitDollars.toFixed(2)})`}
                 {needsOco && ' /'} stop trigger ${stopParsed.toFixed(2)} ({protectiveStopOutcomeLabel(stopOutcomePnlDollars)})
               </p>
+              {stopPctOfCredit != null && (
+                <p className="text-[10px] font-bold text-orange-200">
+                  Selected: {describeCreditStopPct(stopPctOfCredit)}
+                </p>
+              )}
               {profitProtectionStage && (
                 <p className="text-[9px] text-emerald-300">
                   Proposed protection: ${stopParsed.toFixed(2)} · {Math.round((1 - stopParsed / creditPerContract) * 100)}% of original credit locked. This tightens protection; it does not widen your stop.
