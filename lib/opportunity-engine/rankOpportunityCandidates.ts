@@ -65,7 +65,18 @@ function formatCurrency(value: number): string {
 // must always produce the same order. Used both to sequence evaluation
 // (score/capital order) and, unchanged, as the within-disposition
 // tie-break for final display order (see rankOpportunityCandidates()).
+function comparisonEligibilityRank(candidate: OpportunityCandidate): number {
+  const risk = candidate.normalizedRisk;
+  if (!risk) return 0; // ordinary legacy candidates preserve existing behavior
+  if (!risk.normalizationAuthoritative) return 2;
+  if (!risk.hardRiskGatePassed) return 3;
+  return 0;
+}
+
 function compareCandidates(a: OpportunityCandidate, b: OpportunityCandidate): number {
+  const eligibilityDelta = comparisonEligibilityRank(a) - comparisonEligibilityRank(b);
+  if (eligibilityDelta !== 0) return eligibilityDelta;
+
   const statusDelta = statusRank(a) - statusRank(b);
   if (statusDelta !== 0) return statusDelta;
 
@@ -198,8 +209,18 @@ export function rankOpportunityCandidates(
     return compareCandidates(a.candidate, b.candidate);
   });
 
-  return displayOrder.map((item, index) => ({
-    ...item.recommendation,
-    rank: index + 1,
-  }));
+  let comparableRank = 0;
+  return displayOrder.map((item, index) => {
+    const eligible = item.candidate.normalizedRisk == null
+      || (item.candidate.normalizedRisk.normalizationAuthoritative
+        && item.candidate.normalizedRisk.hardRiskGatePassed
+        && item.recommendation.disposition !== 'REJECTED');
+    if (eligible) comparableRank += 1;
+
+    return {
+      ...item.recommendation,
+      rank: index + 1,
+      comparableRank: eligible ? comparableRank : null,
+    };
+  });
 }
