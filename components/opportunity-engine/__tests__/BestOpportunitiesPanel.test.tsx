@@ -439,7 +439,7 @@ describe('BestOpportunitiesPanel', () => {
     render(<BestOpportunitiesPanel recommendations={recs} th={THEMES.dark} />);
     const comparison = screen.getByTestId('opportunity-expression-comparison');
     expect(comparison).toHaveTextContent('NVDA Opportunity');
-    expect(comparison).toHaveTextContent('Underlying Opportunity Score: 90');
+    expect(comparison).toHaveTextContent('Underlying Opportunity Score: Unavailable');
     expect(comparison).toHaveTextContent('NVDU BPS · Layered Leverage');
     expect(comparison).toHaveTextContent('NVDA CSP');
     expect(comparison).toHaveTextContent('NOT COMPARABLY RANKED — Normalization Incomplete');
