@@ -8,6 +8,7 @@ import { rsiSeries } from '../rsi';
 import { RSI_TURN_PARAMS } from '../rsiTurn';
 import {
   RSI_ENTRY_PARAMS,
+  describeEntryGateOverride,
   evaluateRsiEntryGate,
   evaluateRsiEntryGateFromSeries,
 } from '../rsiEntryGate';
@@ -191,5 +192,27 @@ describe('parameters', () => {
     const copy = [...w];
     evaluateRsiEntryGateFromSeries('CSP', w);
     expect(w).toEqual(copy);
+  });
+});
+
+describe('describeEntryGateOverride (order window line and audit text)', () => {
+  it('says nothing for a Pass or for no result', () => {
+    expect(describeEntryGateOverride(evaluateRsiEntryGate('CSP', G.cspPass))).toBeNull();
+    expect(describeEntryGateOverride(null)).toBeNull();
+    expect(describeEntryGateOverride(undefined)).toBeNull();
+  });
+  it('a Wait reads the way the approved mock does, with the reason and the rounded RSI', () => {
+    expect(describeEntryGateOverride(evaluateRsiEntryGate('CSP', G.cspNoDip))).toEqual({
+      line: 'RSI timing: Wait (no dip, RSI 52). Placing anyway.',
+      audit: 'Entered with RSI gate = Wait (no dip)',
+    });
+    expect(describeEntryGateOverride(evaluateRsiEntryGate('CC', G.ccRising))?.audit).toBe('Entered with RSI gate = Wait (still rising)');
+    expect(describeEntryGateOverride(evaluateRsiEntryGate('CSP', G.cspNotConf))?.line).toBe('RSI timing: Wait (turn not confirmed, RSI 44). Placing anyway.');
+  });
+  it('no usable RSI is n/a, not Wait', () => {
+    expect(describeEntryGateOverride(evaluateRsiEntryGate('CSP', [1, 2, 3]))).toEqual({
+      line: 'RSI timing: n/a (not enough price history). Placing anyway.',
+      audit: 'Entered with RSI gate = n/a',
+    });
   });
 });

@@ -137,3 +137,26 @@ export function evaluateRsiEntryGate(
   if (!series) return UNAVAILABLE;
   return evaluateRsiEntryGateFromSeries(strategy, series, params);
 }
+
+export interface EntryGateOverrideWording {
+  /** The one neutral line in the order window. */
+  line: string;
+  /** The audit text stored with the entry and shown in the Trade Log. */
+  audit: string;
+}
+
+/**
+ * Wording for placing a trade that is not a Pass (the trader proceeds anyway). Null for a Pass: nothing to say.
+ * Same words as the chip: Wait, and "n/a" for no usable RSI.
+ */
+export function describeEntryGateOverride(result: RsiEntryGateResult | null | undefined): EntryGateOverrideWording | null {
+  if (!result || result.verdict === 'PASS') return null;
+  if (result.verdict === 'UNAVAILABLE' || result.latest == null || result.reason === 'UNAVAILABLE') {
+    return { line: 'RSI timing: n/a (not enough price history). Placing anyway.', audit: 'Entered with RSI gate = n/a' };
+  }
+  const why = REASON_TEXT[result.reason as keyof typeof REASON_TEXT] ?? 'not turned';
+  return {
+    line: `RSI timing: Wait (${why}, RSI ${Math.round(result.latest)}). Placing anyway.`,
+    audit: `Entered with RSI gate = Wait (${why})`,
+  };
+}

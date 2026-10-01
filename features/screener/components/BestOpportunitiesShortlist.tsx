@@ -22,6 +22,11 @@ export interface BestOpportunitiesShortlistProps {
   // the same symbol can appear multiple times with different
   // strikes/DTE, as PLTR does in Dean's original screenshot).
   onJumpToCard?: (resultKey: string) => void;
+  /**
+   * RSI-ENTRY-0001: how many qualified candidates passed the entry timing check, when the scan ran with it On. When the
+   * list is empty because none passed, the empty state says so instead of "no qualified opportunities".
+   */
+  rsiTiming?: { pass: number; total: number } | null;
 }
 
 const REQUIRED_EMPTY_STATE_TEXT =
@@ -137,6 +142,7 @@ export function BestOpportunitiesShortlist({
   textFaintClassName = 'text-slate-500',
   textMutedClassName = 'text-slate-300',
   onJumpToCard,
+  rsiTiming = null,
 }: BestOpportunitiesShortlistProps) {
   const th = { border: borderClassName, textFaint: textFaintClassName, textMuted: textMutedClassName };
   const visible = rows.slice(0, maxVisible);
@@ -146,7 +152,13 @@ export function BestOpportunitiesShortlist({
       <h3 className={`text-[9px] tracking-widest uppercase font-bold ${th.textFaint}`}>Best Opportunities</h3>
       {visible.length === 0 ? (
         <div className={`border ${th.border} rounded-lg px-4 py-4 text-center`}>
-          <p className={`text-[11px] ${th.textFaint}`}>{REQUIRED_EMPTY_STATE_TEXT}</p>
+          {rsiTiming && rsiTiming.total > 0 && rsiTiming.pass === 0 ? (
+            <p data-testid="best-opportunities-rsi-empty" className={`text-[11px] ${th.textFaint}`}>
+              No Best Opportunity: 0 of {rsiTiming.total} pass the RSI timing check. They are still listed below and can be traded. To change the timing rule, use Edit / Run Again in Active rules.
+            </p>
+          ) : (
+            <p className={`text-[11px] ${th.textFaint}`}>{REQUIRED_EMPTY_STATE_TEXT}</p>
+          )}
         </div>
       ) : (
         <div className="space-y-1.5">

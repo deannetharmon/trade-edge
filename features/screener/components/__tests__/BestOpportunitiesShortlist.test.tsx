@@ -71,3 +71,27 @@ describe('BestOpportunitiesShortlist', () => {
     expect(screen.getByRole('button', { name: /view details/i })).toHaveFocus();
   });
 });
+
+// RSI-ENTRY-0001 slice A2b: the empty state names the RSI timing check when that is why the list is empty.
+describe('BestOpportunitiesShortlist RSI timing empty state', () => {
+  it('says 0 of N pass when nothing passed, and that the trades are still listed and tradeable', () => {
+    render(<BestOpportunitiesShortlist rows={[]} rsiTiming={{ pass: 0, total: 24 }} />);
+    const text = screen.getByTestId('best-opportunities-rsi-empty').textContent ?? '';
+    expect(text).toContain('No Best Opportunity: 0 of 24 pass the RSI timing check.');
+    expect(text).toContain('still listed below and can be traded');
+    expect(screen.queryByText(/No qualified opportunities for this scan/)).not.toBeInTheDocument();
+  });
+  it('keeps the standard empty text when the gate was Off, when nothing was evaluated, or when some passed', () => {
+    for (const rsiTiming of [null, { pass: 0, total: 0 }, { pass: 3, total: 24 }] as const) {
+      const { unmount } = render(<BestOpportunitiesShortlist rows={[]} rsiTiming={rsiTiming} />);
+      expect(screen.getByText(/No qualified opportunities for this scan/)).toBeInTheDocument();
+      expect(screen.queryByTestId('best-opportunities-rsi-empty')).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+  it('does not change the list when there are rows', () => {
+    render(<BestOpportunitiesShortlist rows={[row()]} rsiTiming={{ pass: 0, total: 5 }} />);
+    expect(screen.queryByTestId('best-opportunities-rsi-empty')).not.toBeInTheDocument();
+    expect(screen.getByText('AAPL')).toBeInTheDocument();
+  });
+});

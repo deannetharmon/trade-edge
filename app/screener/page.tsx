@@ -110,6 +110,7 @@ import { QualificationCounts, ScanProvenanceChip } from '@/features/screener/com
 import { QualificationBadge } from '@/features/screener/components/QualificationBadge';
 import { OrderOverrideAcknowledgment, qualificationGateBlocking, reasonText } from '@/features/screener/components/OrderOverrideAcknowledgment';
 import { buildEntryQualification } from '@/lib/entry-context/entryQualification';
+import { describeEntryGateOverride } from '@/lib/indicators/rsiEntryGate';
 import { entryEvidenceAsOf } from '@/lib/entry-context/evidenceAsOf';
 import type { QualificationDerivation } from '@/lib/scans/qualificationState';
 import { countQualificationStates, deriveCspQualification, deriveSpreadQualification } from '@/lib/scans/qualificationState';
@@ -2755,6 +2756,9 @@ function CspTradeModal({ result, th, onClose, qualification }: {
   const [qualAcknowledged, setQualAcknowledged] = useState(false);
   const qualGateBlocking = qualificationGateBlocking(qualification?.derivation, qualAcknowledged);
   const [entryNoteWarning, setEntryNoteWarning] = useState('');
+  // RSI-ENTRY-0001: a put whose daily RSI has not turned (scan run with entry timing On) can still be placed. One neutral
+  // line says so; no checkbox, no lock. The order itself is identical either way.
+  const rsiOverride = describeEntryGateOverride(result.rsiEntry);
   const [quantity, setQuantity] = useState(1);
   const [phase, setPhase] = useState<'confirm' | 'dryrun' | 'placing' | 'done' | 'error'>('confirm');
   const [dryRunResult, setDryRunResult] = useState<any>(null);
@@ -2879,6 +2883,9 @@ function CspTradeModal({ result, th, onClose, qualification }: {
                 acknowledged: qualAcknowledged,
                 at: new Date().toISOString(),
                 scanMode: null,
+                ...(rsiOverride && result.rsiEntry
+                  ? { rsiTiming: { verdict: result.rsiEntry.verdict === 'WAIT' ? 'WAIT' as const : 'UNAVAILABLE' as const, reason: result.rsiEntry.reason, text: rsiOverride.audit, at: new Date().toISOString() } }
+                  : {}),
               }),
             }),
           });
@@ -2977,6 +2984,9 @@ function CspTradeModal({ result, th, onClose, qualification }: {
 
         {qualification && phase !== 'done' && (
           <OrderOverrideAcknowledgment derivation={qualification.derivation} checks={qualification.checks} acknowledged={qualAcknowledged} onChange={setQualAcknowledged} />
+        )}
+        {rsiOverride && phase !== 'done' && (
+          <p data-testid="order-rsi-timing-line" className={`text-[10px] mb-3 ${th.textMuted}`}>{rsiOverride.line}</p>
         )}
         {freshCapital && (
           <p className={`text-[10px] mb-2 ${freshCapital.ok ? 'text-emerald-400' : 'text-red-400'}`}>{freshCapital.label}</p>
@@ -12246,6 +12256,7 @@ export default function Home() {
                   textFaintClassName={th.textFaint}
                   textMutedClassName={th.textMuted}
                   onJumpToCard={jumpToQualifiedCard}
+                  rsiTiming={activeSession?.requestedStrategy === 'csp' ? summarizeCspResults(results).rsi ?? null : activeSession?.requestedStrategy === 'cc' ? summarizeCcResults(results).rsi ?? null : null}
                 />
               )}
               {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && rankDisplayWidth != null && (

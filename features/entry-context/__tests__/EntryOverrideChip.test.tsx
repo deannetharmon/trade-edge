@@ -60,3 +60,30 @@ describe('qualificationForTrade', () => {
     expect(qualificationForTrade(trade, snapIndex([]), buildEntryNoteIndex([]))).toBeUndefined();
   });
 });
+
+describe('Trade Log RSI timing chip (RSI-ENTRY-0001)', () => {
+  const rsiTiming = { verdict: 'WAIT' as const, reason: 'NO_DIP', text: 'Entered with RSI gate = Wait (no dip)', at };
+  const qualified = () => buildEntryQualification({ state: 'qualified', failing: [], warning: [], reasonFor: () => '', acknowledged: false, at, scanMode: null, rsiTiming });
+  it('shows a neutral RSI chip on an otherwise Qualified entry, with the audit text in the tooltip', () => {
+    render(<EntryOverrideChip qualification={qualified()} />);
+    const chip = screen.getByTestId('entry-rsi-timing-chip');
+    expect(chip).toHaveTextContent('RSI: Wait');
+    expect(chip.getAttribute('title')).toContain('Entered with RSI gate = Wait (no dip)');
+    expect(chip.className).not.toMatch(/red|amber/);
+    expect(screen.queryByTestId('entry-override-chip')).not.toBeInTheDocument();
+  });
+  it('shows both chips when the trader also overrode the scan', () => {
+    const q = { ...rec('disqualified'), rsiTiming };
+    render(<EntryOverrideChip qualification={q} />);
+    expect(screen.getByTestId('entry-override-chip')).toHaveTextContent('Overrode scan');
+    expect(screen.getByTestId('entry-rsi-timing-chip')).toBeInTheDocument();
+  });
+  it('shows n/a for no usable RSI, and nothing at all when there is no RSI note', () => {
+    render(<EntryOverrideChip qualification={{ ...qualified(), rsiTiming: { ...rsiTiming, verdict: 'UNAVAILABLE' } }} />);
+    expect(screen.getByTestId('entry-rsi-timing-chip')).toHaveTextContent('RSI: n/a');
+  });
+  it('is invisible for a Qualified entry with no RSI note, as before', () => {
+    const { container } = render(<EntryOverrideChip qualification={rec('qualified')} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});

@@ -69,6 +69,27 @@ describe('sanitizeEntryQualification', () => {
   });
 });
 
+describe('RSI timing audit field (RSI-ENTRY-0001)', () => {
+  const rsiTiming = { verdict: 'WAIT' as const, reason: 'NO_DIP', text: 'Entered with RSI gate = Wait (no dip)', at };
+  const withRsi = () => buildEntryQualification({ state: 'qualified', failing: [], warning: [], reasonFor: () => '', acknowledged: false, at, scanMode: null, rsiTiming });
+  it('is carried by the record only when given, so every existing record is unchanged', () => {
+    expect(withRsi().rsiTiming).toEqual(rsiTiming);
+    expect('rsiTiming' in record()).toBe(false);
+  });
+  it('survives sanitizing, caps its text, and is dropped (not the whole record) when malformed', () => {
+    expect(sanitizeEntryQualification(withRsi())!.rsiTiming).toEqual(rsiTiming);
+    expect(sanitizeEntryQualification({ ...withRsi(), rsiTiming: { ...rsiTiming, text: 't'.repeat(500) } })!.rsiTiming!.text).toHaveLength(120);
+    for (const bad of [null, 5, 'x', {}, { ...rsiTiming, verdict: 'PASS' }, { ...rsiTiming, at: 5 }]) {
+      const out = sanitizeEntryQualification({ ...withRsi(), rsiTiming: bad });
+      expect(out).toBeDefined();
+      expect('rsiTiming' in out!).toBe(false);
+    }
+  });
+  it('travels on a pending credit entry like the rest of the record', () => {
+    expect(pending({ entryQualification: withRsi() }).entryQualification?.rsiTiming).toEqual(rsiTiming);
+  });
+});
+
 describe('order -> pending entry -> snapshot', () => {
   it('a pending entry keeps a valid record, drops a malformed one, and omits it when absent', () => {
     expect(pending({ entryQualification: record() }).entryQualification).toEqual(record());

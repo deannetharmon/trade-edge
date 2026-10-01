@@ -242,3 +242,56 @@ describe('buildBestOpportunityRows — CSP-WORKFLOW-0001 core-correction (BLOCKE
     expect(rows[0].strikeSummary).toBe('90/85');
   });
 });
+
+// RSI-ENTRY-0001 slice A2b: with entry timing On, only a CSP or CC whose RSI has turned (PASS) is a Best Opportunity.
+describe('RSI entry timing gate', () => {
+  const verdict = (v: 'PASS' | 'WAIT' | 'UNAVAILABLE') => ({
+    verdict: v, reason: v === 'PASS' ? 'TURNED_UP' : v === 'WAIT' ? 'NO_DIP' : 'UNAVAILABLE',
+    label: v === 'PASS' ? 'RSI 36 · turned up from 28, 2 bars ago' : v === 'WAIT' ? 'Wait · no dip (RSI 58)' : 'RSI n/a',
+    latest: 36, extreme: 28, extremeBarsAgo: 2,
+  }) as const;
+  const cc = (symbol: string, over: Partial<ScreenResult> = {}) => result({
+    symbol, strategy: 'CC', candidateId: `cc:${symbol}`,
+    bestCandidate: { strategy: 'CC', expiration: '2026-09-18', dte: 30, shortStrike: 110, longStrike: 0, shortDelta: 0.2, credit: 2, spreadWidth: 0, creditRatio: 0, roc: 3, pop: 70, shortOI: 300, longOI: 0 } as any,
+    ...over,
+  });
+  const recFor = (symbol: string, rank: number) => rec({ candidateId: `r-${symbol}`, screenerCandidateId: `cc:${symbol}`, symbol, strategy: 'CC', rank });
+
+  it('gate Off (no rsiEntry on any row) gives exactly the rows it gave before', () => {
+    const rows = buildBestOpportunityRows([cc('AAA'), cc('BBB')], [recFor('AAA', 1), recFor('BBB', 2)]);
+    expect(rows.map(r => r.symbol)).toEqual(['AAA', 'BBB']);
+    expect(rows.map(r => r.rank)).toEqual([1, 2]);
+  });
+  it('a Wait row is not a Best Opportunity, and the next row moves up (rank renumbered)', () => {
+    const rows = buildBestOpportunityRows(
+      [cc('AAA', { rsiEntry: verdict('WAIT') }), cc('BBB', { rsiEntry: verdict('PASS') })],
+      [recFor('AAA', 1), recFor('BBB', 2)],
+    );
+    expect(rows.map(r => r.symbol)).toEqual(['BBB']);
+    expect(rows[0].rank).toBe(1);
+  });
+  it('no usable RSI (UNAVAILABLE) fails closed like Wait', () => {
+    const rows = buildBestOpportunityRows([cc('AAA', { rsiEntry: verdict('UNAVAILABLE') })], [recFor('AAA', 1)]);
+    expect(rows).toEqual([]);
+  });
+  it('all Wait leaves the list empty without touching the qualified results', () => {
+    const results = [cc('AAA', { rsiEntry: verdict('WAIT') }), cc('BBB', { rsiEntry: verdict('WAIT') })];
+    expect(buildBestOpportunityRows(results, [recFor('AAA', 1), recFor('BBB', 2)])).toEqual([]);
+    expect(results.every(r => r.qualified)).toBe(true);
+  });
+  it('applies to a CSP row too, resolved by its canonical candidate id', () => {
+    const csp = (id: string, v: 'PASS' | 'WAIT', strike: number) => result({
+      symbol: 'AMD', strategy: 'CSP', candidateId: id, rsiEntry: verdict(v),
+      bestCandidate: { strategy: 'CSP', expiration: '2026-09-18', dte: 30, shortStrike: strike, longStrike: 0, shortDelta: -0.2, credit: 1.5, spreadWidth: 0, creditRatio: 0, roc: 5, pop: 80, shortOI: 500, longOI: 0 } as any,
+    });
+    const rows = buildBestOpportunityRows(
+      [csp('occ:A', 'WAIT', 95), csp('occ:B', 'PASS', 90)],
+      [rec({ candidateId: 'r1', screenerCandidateId: 'occ:A', symbol: 'AMD', strategy: 'CSP', rank: 1 }), rec({ candidateId: 'r2', screenerCandidateId: 'occ:B', symbol: 'AMD', strategy: 'CSP', rank: 2 })],
+    );
+    expect(rows.map(r => r.strikeSummary)).toEqual(['90']);
+  });
+  it('never filters other strategies, even if a stray rsiEntry were present', () => {
+    const bps = result({ symbol: 'AAPL', strategy: 'BPS', rsiEntry: verdict('WAIT'), bestCandidate: { strategy: 'BPS', expiration: '2026-09-18', dte: 30, shortStrike: 90, longStrike: 85, shortDelta: -0.2, credit: 1, spreadWidth: 5, creditRatio: 0.2, roc: 4, pop: 70, shortOI: 300, longOI: 100 } as any });
+    expect(buildBestOpportunityRows([bps], [rec({ strategy: 'BPS', screenerCandidateId: undefined })]).length).toBe(1);
+  });
+});

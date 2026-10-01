@@ -157,6 +157,12 @@ export function buildBestOpportunityRows(
         return null;
       }
     }
+    // RSI-ENTRY-0001: with entry timing On, a CSP or CC whose daily RSI has not turned (Wait, or no usable RSI) stays in
+    // the results and stays tradeable but is not a Best Opportunity. The setting travels with the data: rsiEntry is
+    // attached to a row only by a scan run with the gate On, so a scan with the gate Off is untouched by this line.
+    if (result?.rsiEntry && (result.strategy === 'CSP' || result.strategy === 'CC') && result.rsiEntry.verdict !== 'PASS') {
+      return null;
+    }
     const c = result?.bestCandidate ?? null;
 
     // BLOCKER-03 — for CSP rows only, prefer cspScore.total (rounded to a

@@ -48,11 +48,22 @@ export function entryQualificationCsv(q: EntryQualificationRecord | null | undef
 
 export function EntryOverrideChip({ qualification }: { qualification: EntryQualificationRecord | null | undefined }) {
   const summary = summarizeEntryQualification(qualification);
-  if (!summary) return null;
-  const tone = summary.tone === 'red' ? 'border-red-600 text-red-400 bg-red-500/10' : 'border-amber-500 text-amber-400 bg-amber-500/10';
+  const rsi = qualification?.rsiTiming;
+  if (!summary && !rsi) return null;
+  const tone = summary?.tone === 'red' ? 'border-red-600 text-red-400 bg-red-500/10' : 'border-amber-500 text-amber-400 bg-amber-500/10';
   return (
-    <span data-testid="entry-override-chip" title={summary.title} className={`ml-1.5 text-[9px] px-1.5 py-0.5 border rounded font-bold ${tone}`}>
-      {summary.label}
-    </span>
+    <>
+      {summary && (
+        <span data-testid="entry-override-chip" title={summary.title} className={`ml-1.5 text-[9px] px-1.5 py-0.5 border rounded font-bold ${tone}`}>
+          {summary.label}
+        </span>
+      )}
+      {/* RSI-ENTRY-0001: neutral, like the screener chip: a timing note, not a failed rule. */}
+      {rsi && (
+        <span data-testid="entry-rsi-timing-chip" title={`${rsi.text}\n${rsi.at}`} className="ml-1.5 text-[9px] px-1.5 py-0.5 border rounded font-bold border-neutral-600 text-neutral-300 bg-neutral-800/60">
+          {rsi.verdict === 'WAIT' ? 'RSI: Wait' : 'RSI: n/a'}
+        </span>
+      )}
+    </>
   );
 }

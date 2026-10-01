@@ -12,6 +12,16 @@ export interface EntryQualificationReason {
   text: string;
 }
 
+/** RSI-ENTRY-0001: the entry timing verdict when a trade was placed without a Pass. Optional, additive. */
+export interface EntryRsiTiming {
+  verdict: 'WAIT' | 'UNAVAILABLE';
+  /** The gate's reason code, e.g. NO_DIP. */
+  reason: string;
+  /** The audit sentence, e.g. "Entered with RSI gate = Wait (no dip)". */
+  text: string;
+  at: string;
+}
+
 export interface EntryQualificationRecord {
   state: QualificationState;
   failing: EntryQualificationReason[];
@@ -20,6 +30,7 @@ export interface EntryQualificationRecord {
   overridden: boolean;
   acknowledgedAt: string | null;
   scanMode: 'rank' | 'targeted' | null;
+  rsiTiming?: EntryRsiTiming;
 }
 
 export interface BuildEntryQualificationInput {
@@ -30,6 +41,7 @@ export interface BuildEntryQualificationInput {
   acknowledged: boolean;
   at: string;
   scanMode: 'rank' | 'targeted' | null;
+  rsiTiming?: EntryRsiTiming;
 }
 
 export function buildEntryQualification(input: BuildEntryQualificationInput): EntryQualificationRecord {
@@ -41,6 +53,7 @@ export function buildEntryQualification(input: BuildEntryQualificationInput): En
     overridden,
     acknowledgedAt: input.acknowledged ? input.at : null,
     scanMode: input.scanMode,
+    ...(input.rsiTiming ? { rsiTiming: input.rsiTiming } : {}),
   };
 }
 
@@ -58,6 +71,14 @@ function sanitizeReasons(value: unknown): EntryQualificationReason[] | null {
   return out;
 }
 
+function sanitizeRsiTiming(value: unknown): EntryRsiTiming | undefined {
+  if (value == null || typeof value !== 'object') return undefined;
+  const r = value as Record<string, unknown>;
+  if (r.verdict !== 'WAIT' && r.verdict !== 'UNAVAILABLE') return undefined;
+  if (typeof r.reason !== 'string' || typeof r.text !== 'string' || typeof r.at !== 'string') return undefined;
+  return { verdict: r.verdict, reason: r.reason.slice(0, 40), text: r.text.slice(0, 120), at: r.at.slice(0, 40) };
+}
+
 /** Keeps only a well-formed record; anything malformed is dropped (the order is already placed, so never throw). */
 export function sanitizeEntryQualification(input: unknown): EntryQualificationRecord | undefined {
   if (input == null || typeof input !== 'object') return undefined;
@@ -68,11 +89,13 @@ export function sanitizeEntryQualification(input: unknown): EntryQualificationRe
   if (!failing || !warning || typeof r.overridden !== 'boolean') return undefined;
   if (r.acknowledgedAt != null && typeof r.acknowledgedAt !== 'string') return undefined;
   const scanMode = r.scanMode === 'rank' || r.scanMode === 'targeted' ? r.scanMode : null;
+  const rsiTiming = sanitizeRsiTiming(r.rsiTiming);
   return {
     state: r.state as QualificationState,
     failing, warning,
     overridden: r.overridden,
     acknowledgedAt: typeof r.acknowledgedAt === 'string' ? r.acknowledgedAt : null,
     scanMode,
+    ...(rsiTiming ? { rsiTiming } : {}),
   };
 }
