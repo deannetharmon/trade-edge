@@ -6310,7 +6310,8 @@ function PortfolioStopControl({ pos, th, onRetry }: { pos: Position; th: typeof 
     // evidence is still there, collapsed, under "Exact prices and details".
     return <div><SetStopLossButton pos={pos} th={th} /></div>;
   }
-  return <div><SetStopLossButton pos={pos} th={th} /><StopEvidencePanel assessment={pos.stopAssessment} /></div>;
+  // STOP-DIALOG-SIMPLIFY-0001: evidence lives inside the dialog, not under every card's button.
+  return <div><SetStopLossButton pos={pos} th={th} /></div>;
 }
 
 function StandaloneLeapsStopControl({ pos, th }: { pos: Position; th: typeof THEMES[Theme] }) {
@@ -7435,7 +7436,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                     </p>
                   )}
                 </div>
-                {isFlaggedStop && <StopEvidencePanel assessment={pos.stopAssessment} />}
+                {pos.stopAssessment && <StopEvidencePanel assessment={pos.stopAssessment} />}
               </div>
             )}
           </div>
