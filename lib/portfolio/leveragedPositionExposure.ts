@@ -9,7 +9,7 @@ export interface LeveragedPositionExposureMember {
   economicUnderlying: string;
   leverageMultiplier: number;
   signedEffectiveExposure: number | null;
-  capitalDeployed: number | null;
+  maxCapitalLoss: number | null;
   normalizationAuthoritative: boolean;
   reason: string | null;
 }
@@ -26,11 +26,12 @@ export interface LeveragedPositionExposureGroup {
   economicUnderlying: string;
   members: LeveragedPositionExposureMember[];
   normalizationAuthoritative: boolean;
+  capitalRiskComplete: boolean;
   grossBullishExposure: number | null;
   grossBearishExposure: number | null;
   grossExposure: number | null;
   netDirectionalExposure: number | null;
-  capitalDeployed: number | null;
+  maxCapitalLoss: number | null;
 }
 
 /**
@@ -95,10 +96,10 @@ export function buildLeveragedPositionExposureGroups(
       signedEffectiveExposure: exposureComplete
         ? deltaShares * (price as number) * leverageMultiplier
         : null,
-      capitalDeployed: capitalComplete ? Math.abs(position.maxRisk) : null,
-      normalizationAuthoritative: exposureComplete && capitalComplete,
+      maxCapitalLoss: capitalComplete ? Math.abs(position.maxRisk) : null,
+      normalizationAuthoritative: exposureComplete,
       reason: exposureComplete
-        ? (capitalComplete ? null : 'Reliable capital-at-risk evidence is unavailable for this position.')
+        ? null
         : 'Broker-sourced net delta and current product price are required for authoritative effective exposure.',
     });
   }
@@ -112,30 +113,33 @@ export function buildLeveragedPositionExposureGroups(
 
   return Array.from(grouped.entries()).map(([economicUnderlying, groupMembers]) => {
     const normalizationAuthoritative = groupMembers.every(member => member.normalizationAuthoritative);
+    const capitalRiskComplete = groupMembers.every(member => member.maxCapitalLoss != null);
     if (!normalizationAuthoritative) {
       return {
         economicUnderlying,
         members: groupMembers,
         normalizationAuthoritative: false,
+        capitalRiskComplete,
         grossBullishExposure: null,
         grossBearishExposure: null,
         grossExposure: null,
         netDirectionalExposure: null,
-        capitalDeployed: null,
+        maxCapitalLoss: capitalRiskComplete ? groupMembers.reduce((sum, member) => sum + (member.maxCapitalLoss as number), 0) : null,
       };
     }
 
     const exposures = groupMembers.map(member => member.signedEffectiveExposure as number);
-    const capitals = groupMembers.map(member => member.capitalDeployed as number);
+    const capitals = groupMembers.map(member => member.maxCapitalLoss).filter((value): value is number => value != null);
     return {
       economicUnderlying,
       members: groupMembers,
       normalizationAuthoritative: true,
+      capitalRiskComplete,
       grossBullishExposure: exposures.filter(value => value >= 0).reduce((sum, value) => sum + value, 0),
       grossBearishExposure: exposures.filter(value => value < 0).reduce((sum, value) => sum + Math.abs(value), 0),
       grossExposure: exposures.reduce((sum, value) => sum + Math.abs(value), 0),
       netDirectionalExposure: exposures.reduce((sum, value) => sum + value, 0),
-      capitalDeployed: capitals.reduce((sum, value) => sum + value, 0),
+      maxCapitalLoss: capitalRiskComplete ? capitals.reduce((sum, value) => sum + value, 0) : null,
     };
   });
 }
