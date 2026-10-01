@@ -157,8 +157,8 @@ export function buildLeveragedPositionExposureExceptions(
         subjectId: incompleteMembers.length === 1 ? incompleteMembers[0].positionKey : null,
         headline: `${group.economicUnderlying} — Leverage normalization incomplete`,
         detail: incompleteMembers.length === 1
-          ? `${incompleteMembers[0].symbol} lacks required exposure or capital evidence; authoritative gross/net economic-underlying totals are unavailable.`
-          : `${incompleteMembers.length} related positions lack required exposure or capital evidence; authoritative gross/net economic-underlying totals are unavailable.`,
+          ? `${incompleteMembers[0].symbol} lacks required delta/price evidence; authoritative gross/net economic-underlying totals are unavailable.`
+          : `${incompleteMembers.length} related positions lack required delta/price evidence; authoritative gross/net economic-underlying totals are unavailable.`,
       };
     });
 }
