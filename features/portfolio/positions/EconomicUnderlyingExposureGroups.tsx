@@ -21,7 +21,7 @@ export function EconomicUnderlyingExposureGroups({ groups, th }: EconomicUnderly
     <section className="mb-6" aria-label="Economic Underlying Exposure">
       <div className="mb-2">
         <h2 className={`text-[12px] font-bold uppercase tracking-widest ${th.text}`}>Economic Underlying Exposure</h2>
-        <p className={`mt-1 text-[10px] ${th.textFaint}`}>Related direct and issuer-validated leveraged positions are rolled up to the same economic underlying. Gross and net are shown separately.</p>
+        <p className={`mt-1 text-[10px] ${th.textFaint}`}>Related direct and issuer-validated leveraged positions are rolled up to the same economic underlying. Gross and net are shown separately; max capital loss is shown separately from exposure.</p>
       </div>
       <div className="space-y-2">
         {groups.map(group => (
@@ -39,7 +39,7 @@ export function EconomicUnderlyingExposureGroups({ groups, th }: EconomicUnderly
                 <div><p className={`text-[9px] ${th.textFaint}`}>Gross bearish</p><p className={`text-[11px] font-semibold ${th.text}`}>{money(group.grossBearishExposure)}</p></div>
                 <div><p className={`text-[9px] ${th.textFaint}`}>Gross exposure</p><p className={`text-[11px] font-semibold ${th.text}`}>{money(group.grossExposure)}</p></div>
                 <div><p className={`text-[9px] ${th.textFaint}`}>Net directional</p><p className={`text-[11px] font-semibold ${th.text}`}>{money(group.netDirectionalExposure)}</p></div>
-                <div><p className={`text-[9px] ${th.textFaint}`}>Capital deployed</p><p className={`text-[11px] font-semibold ${th.text}`}>{money(group.capitalDeployed)}</p></div>
+                <div><p className={`text-[9px] ${th.textFaint}`}>Max capital loss</p><p className={`text-[11px] font-semibold ${th.text}`}>{money(group.maxCapitalLoss)}</p></div>
               </div>
             ) : (
               <p className="text-[10px] text-amber-400">Authoritative group totals are unavailable because at least one related position lacks required exposure or capital evidence.</p>
@@ -52,7 +52,7 @@ export function EconomicUnderlyingExposureGroups({ groups, th }: EconomicUnderly
                     {member.symbol} · {member.strategy} · {member.leverageMultiplier === 1 ? 'Direct' : `${member.leverageMultiplier}×`}
                   </span>
                   <span className={th.textFaint}>
-                    Effective {money(member.signedEffectiveExposure)} · Capital {money(member.capitalDeployed)}
+                    Effective {money(member.signedEffectiveExposure)} · Max loss {money(member.maxCapitalLoss)}
                     {!member.normalizationAuthoritative ? ' · Incomplete' : ''}
                   </span>
                 </li>
