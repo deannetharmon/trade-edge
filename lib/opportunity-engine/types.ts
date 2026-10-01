@@ -151,7 +151,7 @@ export interface OpportunityRecommendation {
   source: OpportunityCandidateSource;
   symbol: string;
   strategy: AutopilotStrategy;
-  capitalRequired: number;
+  capitalRequired?: number;
 
   rank: number;
   disposition: OpportunityDisposition;
