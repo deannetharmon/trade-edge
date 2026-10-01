@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { createBrokerBackedInstrumentMetadataResolver } from '../brokerBackedResolver';
 import type { BrokerEquityClassifier, InstrumentMetadata } from '..';
 

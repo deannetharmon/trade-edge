@@ -112,5 +112,5 @@ export function aggregateEconomicExposure(
     current.capitalDeployed += Math.abs(position.capitalDeployed);
     groups.set(key, current);
   }
-  return [...groups.values()];
+  return Array.from(groups.values());
 }
