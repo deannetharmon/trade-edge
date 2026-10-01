@@ -8,6 +8,7 @@ import type { LeveragedPositionExposureGroup } from '@/lib/portfolio/leveragedPo
 const complete: LeveragedPositionExposureGroup = {
   economicUnderlying: 'NVDA',
   normalizationAuthoritative: true,
+  capitalRiskComplete: true,
   grossBullishExposure: 7500,
   grossBearishExposure: 1000,
   grossExposure: 8500,
