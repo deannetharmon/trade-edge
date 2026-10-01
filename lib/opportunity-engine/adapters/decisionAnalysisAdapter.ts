@@ -81,6 +81,9 @@ function isWheelStrategy(strategy: AutopilotStrategy): boolean {
 export interface DecisionAnalysisAdapterOptions {
   now?: Date;
   pipelineId?: string;
+  // LEV-0001: canonical normalized evidence is resolved upstream by the
+  // metadata/risk domains and attached here. This adapter does not derive it.
+  normalizedRiskByCandidateId?: ReadonlyMap<string, OpportunityCandidate['normalizedRisk']>;
 }
 
 // Returns null (rather than throwing) when the supplied analysis has no
@@ -121,6 +124,7 @@ export function decisionAnalysisToOpportunityCandidate(
     sector: candidate.sector,
     earningsRisk: deriveEarningsRisk(analysis),
     wheelSuitable: isWheelStrategy(strategy),
+    normalizedRisk: options.normalizedRiskByCandidateId?.get(analysis.subject.id),
     navigationMetadata: {
       decisionAnalysisId: analysis.id,
       ...(options.pipelineId ? { pipelineId: options.pipelineId } : {}),

@@ -30,3 +30,6 @@ export type {
   OpportunityDisposition,
   OpportunityRecommendation,
 } from './types';
+
+export { groupRecommendationsByEconomicUnderlying } from './groupByEconomicUnderlying';
+export type { EconomicUnderlyingOpportunityGroup } from './groupByEconomicUnderlying';

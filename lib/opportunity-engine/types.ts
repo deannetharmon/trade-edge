@@ -90,6 +90,19 @@ export interface OpportunityCandidate {
   // originating source (e.g. a screener result key). Never inspected by
   // the ranking logic itself.
   navigationMetadata?: Record<string, unknown>;
+
+  // LEV-0001: canonical normalized comparison evidence. This module does not
+  // calculate these values; callers pass results from instrument-metadata /
+  // leverage-risk and the Decision Engine.
+  normalizedRisk?: {
+    economicUnderlying: string | null;
+    normalizationAuthoritative: boolean;
+    initialEffectiveExposure?: number | null;
+    capitalEfficiency?: number | null;
+    hardRiskGatePassed: boolean;
+    hardRiskGateReasons?: string[];
+    layeredLeverage?: boolean;
+  };
 }
 
 // Portfolio-level facts the comparison layer needs that a single-candidate
@@ -179,4 +192,15 @@ export interface OpportunityRecommendation {
   // recommendation was built from.
   decisionAnalysisId: string;
   ruleIds: string[];
+
+  // LEV-0001 comparison metadata. Rank remains the overall display rank;
+  // comparableRank is null when risk normalization is incomplete or a hard
+  // risk gate failed, so UI cannot present an ineligible expression as a
+  // directly comparable ranked choice.
+  economicUnderlying?: string | null;
+  normalizationAuthoritative?: boolean;
+  comparableRank?: number | null;
+  initialEffectiveExposure?: number | null;
+  capitalEfficiency?: number | null;
+  layeredLeverage?: boolean;
 }

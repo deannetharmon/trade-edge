@@ -132,7 +132,22 @@ export function evaluateOpportunityCandidate(
     portfolioConflicts.push(...conflictDescriptions);
   }
 
-  if (analysis.recommendation.status === 'not_recommended') {
+  const normalizedRisk = candidate.normalizedRisk;
+
+  if (normalizedRisk && !normalizedRisk.normalizationAuthoritative) {
+    disposition = 'WATCH';
+    ruleIds.push(OE_RULE_IDS.normalizationIncomplete);
+    portfolioConflicts.push('Risk normalization incomplete; this expression is not eligible for authoritative comparable ranking.');
+    whatWouldImprove.push('Complete validated instrument normalization is required before comparable ranking.');
+  } else if (normalizedRisk && !normalizedRisk.hardRiskGatePassed) {
+    disposition = 'REJECTED';
+    ruleIds.push(OE_RULE_IDS.normalizedHardRiskGateFailed);
+    rejectionReasons = normalizedRisk.hardRiskGateReasons?.length
+      ? normalizedRisk.hardRiskGateReasons
+      : ['A normalized hard risk gate failed.'];
+    portfolioConflicts.push(...rejectionReasons);
+    whatWouldImprove.push('The blocking portfolio risk condition must clear before this expression is rank-eligible.');
+  } else if (analysis.recommendation.status === 'not_recommended') {
     // Hard rejection from the existing Decision Engine is final. This
     // module never overrides it, never re-scores it, and never promotes it
     // -- see docs/design/OE-0001-Opportunity-Engine-Foundation.md section 5.
@@ -212,6 +227,12 @@ export function evaluateOpportunityCandidate(
       whatWouldImprove,
       decisionAnalysisId: analysis.id,
       ruleIds,
+      economicUnderlying: normalizedRisk?.economicUnderlying,
+      normalizationAuthoritative: normalizedRisk?.normalizationAuthoritative,
+      comparableRank: null,
+      initialEffectiveExposure: normalizedRisk?.initialEffectiveExposure,
+      capitalEfficiency: normalizedRisk?.capitalEfficiency,
+      layeredLeverage: normalizedRisk?.layeredLeverage,
     },
     capitalConsumed,
   };

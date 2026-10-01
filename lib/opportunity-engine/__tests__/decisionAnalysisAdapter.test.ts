@@ -115,6 +115,27 @@ describe('decisionAnalysisToOpportunityCandidate', () => {
     const result = decisionAnalysisToOpportunityCandidate(analysis);
     expect(result!.screenerCandidateId).toBeUndefined();
   });
+  it('attaches canonical normalized risk evidence supplied through the production adapter seam', () => {
+    const analysis = buildDecisionAnalysisFixture({ symbol: 'NVDU' });
+    const normalizedRisk = {
+      economicUnderlying: 'NVDA',
+      normalizationAuthoritative: true,
+      initialEffectiveExposure: 20_000,
+      capitalEfficiency: 2,
+      hardRiskGatePassed: true,
+    };
+    const result = decisionAnalysisToOpportunityCandidate(analysis, {
+      normalizedRiskByCandidateId: new Map([[analysis.subject.id, normalizedRisk]]),
+    });
+
+    expect(result!.normalizedRisk).toBe(normalizedRisk);
+  });
+
+  it('does not fabricate normalized risk evidence when upstream domains did not supply it', () => {
+    const analysis = buildDecisionAnalysisFixture({ symbol: 'NVDU' });
+    expect(decisionAnalysisToOpportunityCandidate(analysis)!.normalizedRisk).toBeUndefined();
+  });
+
 });
 
 describe('decisionAnalysesToOpportunityCandidates', () => {
