@@ -42,7 +42,7 @@ Seam design, deliver `docs/tickets/RSI-ENTRY-0001-A0-fetch-design.md`:
 - Tests as listed in the A0 doc section 4, including the `getTrend` golden. Touches scoring-adjacent code: Ian and Quinn review before the push; full suite after asking Dean.
 - Run A0 step 0 (close-adjustment check) on the A1b preview and record it in the A0 doc.
 
-## Slice A2: wiring (mock approved by Dean 2026-10-01; depends on A1b)
+## Slice A2: wiring (mock approved by Dean 2026-10-01; depends on A1b). Frank splits it into A2a and A2b, see A0 doc section 7
 - Scan controls: "Entry timing (RSI)" On/Off, dip level (CSP), peak level (CC), advanced window, lift, ceiling. Default Off at first release. Persist the last-used setting the same way the other scan controls persist (match the existing pattern; do not invent a store).
 - Receipt: add the RSI rule and "N of M pass" to the existing "Active CSP rules" and "Active CC rules" lines.
 - Row chips and the empty Best Opportunity message, exactly as the mock. Wait rows keep score and order; only Best Opportunity eligibility changes, and only while the gate is On. "RSI n/a" fails closed while On.

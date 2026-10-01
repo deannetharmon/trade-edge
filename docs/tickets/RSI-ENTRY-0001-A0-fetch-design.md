@@ -62,3 +62,18 @@ Dean: a very comprehensive tool for the best decisions, with as much simplicity 
 - The same words mean the same thing everywhere: "Wait", "Pass", "RSI n/a" are used identically in chip, receipt, order screen, and alert email.
 - Every number a trader sees must say what it is (RSI value, dip level) without a legend; if it cannot, it is cut.
 - Ian confirms that each added element helps a trade decision; anything that does not is cut or moved to advanced.
+
+## 7. A2 design addendum (Dane, 2026-10-01; found while mapping the existing code; Diane and Ian gate)
+
+Findings that shape A2, each checked in the repo:
+- **Receipt and controls are registry-driven.** CSP: `lib/screener/scanConfig/cspRegistry.ts` (criteria with card, control, lifecycle; `buildCspReceipt`, `valuesFromSnapshot`) feeding `CspScanModal` and `ActiveCspRules`. CC: `ccRegistry.ts` feeding `CcScanModal` and `ActiveCcRules` (takes `values`, no snapshot). The RSI control and its receipt line therefore go in as **registry criteria**, so the modal summary and the receipt cannot word it differently (Dean's consistency directive).
+- **CSP snapshot is persisted with strict validation.** `CspRuleSnapshot` is stored in the scan session (`SCHEMA_VERSION = 9`, `isValidCspRuleSnapshot` checks named fields and ignores extras). The RSI setting is added as an **optional** field `rsiEntry?: { on: boolean; low: number; window: number; lift: number; mid: number }`, validated when present. No schema bump, so cached sessions are not discarded. CC has no snapshot; its receipt reads the same setting from its config values.
+- **Best Opportunity eligibility** is joined in the pure `features/screener/lib/bestOpportunityRows.ts` (`buildBestOpportunityRows`, three call sites in `app/screener/page.tsx` near 12224, 12236, 12278). CSP rows already pass `isBestOpportunitiesEligible` there. The gate is one more filter in that function, driven by the row's own `ScreenResult.rsiEntry`, so it is unit-testable without the page and the recommendation engine, scores, and ranks upstream stay untouched (ranks are renumbered after the filter, as today).
+- **An override pattern already exists**: `OrderOverrideAcknowledgment` (QUAL-STATES-0001) blocks a not-Qualified order until a checkbox is ticked. An RSI Wait is **not** a qualification failure, so it must not reuse that red/amber blocking panel. It gets the single neutral line in the order window, no checkbox, no lock (as Dean approved in the mock), plus the audit entry. Same words as everywhere else: "Wait", "Pass", "RSI n/a".
+
+Evaluation timing: when the scan setting is On, the scan loop calls `getRsiEntryGate` once per symbol (after `getTrend`, so a memo hit) and attaches the result to every row of that symbol as `ScreenResult.rsiEntry?` (optional, additive, absent when Off). When Off, nothing is called and nothing is attached, so results are identical to today. The setting is applied at scan time like every other scan control (change it with "Edit / Run Again").
+
+Split of A2 into two pushes so each can be checked on a preview (Frank's call):
+- **A2a (visible, no eligibility change):** registry criterion and modal control, optional snapshot field and validator, persistence of last-used setting, receipt line with "N of M pass", scan-loop attach, row chip. With the gate On, chips and the receipt show; Best Opportunity is still unchanged.
+- **A2b (eligibility and order screen):** the `buildBestOpportunityRows` filter, the empty-slot message, the order-window line, and the audit entry; payload byte-identical test.
+Default stays Off through both; the flip to On is Paul's call after Ian's pass-rate check.
