@@ -13,6 +13,7 @@
 import { buildAttentionFeed } from '@/lib/morning-briefing';
 import type { AttentionItem } from '@/lib/morning-briefing';
 import type { TodaysPrioritiesDashboard } from '@/lib/todaysPriorities';
+import type { LeveragedPositionExposureException } from '@/lib/portfolio/leveragedPositionExposure';
 import {
   getPriorityWorkflowKey,
   isCompletable,
@@ -28,6 +29,7 @@ import type {
 export interface BuildTodaysPrioritiesQueueInput {
   dashboard: TodaysPrioritiesDashboard;
   generatedAt: string;
+  leverageExceptions?: LeveragedPositionExposureException[];
 }
 
 // Corrective ruling (CES section 7/13): the single derivation point for
@@ -55,6 +57,8 @@ export function getStableQueueKey(item: TodaysPrioritiesQueueItem): string {
       return `cc::${item.coveredCallOpportunity!.key}`;
     case 'needs_follow_up':
       return `review::${item.decisionReview!.id}`;
+    case 'leverage_exception':
+      return `leverage::${item.leverageException!.id}`;
   }
 }
 
@@ -75,11 +79,26 @@ function toAttentionQueueItem(attentionItem: AttentionItem): TodaysPrioritiesQue
 }
 
 export function buildTodaysPrioritiesQueue(input: BuildTodaysPrioritiesQueueInput): TodaysPrioritiesQueue {
-  const { dashboard, generatedAt } = input;
+  const { dashboard, generatedAt, leverageExceptions = [] } = input;
 
   const attentionFeed = buildAttentionFeed({ dashboard, generatedAt });
 
   const attentionItems = attentionFeed.orderedActionable.map(toAttentionQueueItem);
+
+  const leverageItems: TodaysPrioritiesQueueItem[] = leverageExceptions.map(exception => {
+    const item: TodaysPrioritiesQueueItem = {
+      kind: 'leverage_exception',
+      id: exception.id,
+      stableKey: '',
+      subjectId: exception.subjectId,
+      headline: exception.headline,
+      detail: exception.detail,
+      completable: false,
+      leverageException: exception,
+    };
+    item.stableKey = getStableQueueKey(item);
+    return item;
+  });
 
   // Covered-call opportunities: not PortfolioObjective-backed, never
   // completable (structural, not a runtime flag). Existing array order
@@ -118,7 +137,7 @@ export function buildTodaysPrioritiesQueue(input: BuildTodaysPrioritiesQueueInpu
     return item;
   });
 
-  const orderedItems = [...attentionItems, ...coveredCallItems, ...needsFollowUpItems];
+  const orderedItems = [...attentionItems, ...leverageItems, ...coveredCallItems, ...needsFollowUpItems];
 
   return {
     generatedAt,
