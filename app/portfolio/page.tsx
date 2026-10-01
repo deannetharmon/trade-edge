@@ -10362,8 +10362,12 @@ export default function PortfolioPage() {
     dailyBriefing,
   } = composition;
   const leveragedPositionExposureGroups = useMemo(
-    () => buildLeveragedPositionExposureGroups(positions),
-    [positions],
+    () => buildLeveragedPositionExposureGroups({
+      positions,
+      equities: snapshot?.equities ?? [],
+      equityCoverageComplete: snapshot?.dataQuality.status === 'ok',
+    }),
+    [positions, snapshot],
   );
   const leveragedPositionExposureExceptions = useMemo(
     () => buildLeveragedPositionExposureExceptions(leveragedPositionExposureGroups),

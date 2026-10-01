@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildLeveragedPositionExposureGroups } from '../leveragedPositionExposure';
 import type { Position } from '@/lib/portfolio-data/types';
+import type { EquityHolding } from '@/lib/portfolio-snapshot/types';
 
 function pos(overrides: Partial<Position>): Position {
   return {
@@ -61,15 +62,35 @@ function pos(overrides: Partial<Position>): Position {
   } as Position;
 }
 
+function equity(overrides: Partial<EquityHolding>): EquityHolding {
+  return {
+    accountNumber: 'acct',
+    symbol: 'NVDA',
+    direction: 'Long',
+    quantity: 100,
+    settledQuantity: null,
+    basis: 90,
+    basisComplete: true,
+    currentPrice: 100,
+    marketValue: 10000,
+    unrealizedPnl: 1000,
+    quoteAsOf: '2026-10-01T00:00:00.000Z',
+    staleQuote: false,
+    deliverable: 'standard',
+    dataQualityWarnings: [],
+    ...overrides,
+  };
+}
+
 describe('Gate 8 leveraged position exposure grouping', () => {
   it('groups direct and leveraged positions under the same economic underlying', () => {
-    const groups = buildLeveragedPositionExposureGroups([
+    const groups = buildLeveragedPositionExposureGroups({ positions: [
       pos({ key: 'direct', symbol: 'NVDA', netDelta: 0.5, stockPrice: 100, maxRisk: 500 }),
       pos({ key: 'lev', symbol: 'NVDU', netDelta: 0.25, stockPrice: 50, maxRisk: 400 }),
-    ]);
+    ] , equityCoverageComplete: true });
     expect(groups).toHaveLength(1);
     expect(groups[0].economicUnderlying).toBe('NVDA');
-    expect(groups[0].members.map(member => member.symbol)).toEqual(['NVDA', 'NVDU']);
+    expect(groups[0].members.map(member => member.symbol)).toEqual(['NVDA', 'NVDU'] , equityCoverageComplete: true });
     // NVDA: 0.5 * 100 contracts * $100 = $5,000.
     // NVDU: 0.25 * 100 * $50 * 2x = $2,500.
     expect(groups[0].grossBullishExposure).toBeCloseTo(7500);
@@ -78,20 +99,20 @@ describe('Gate 8 leveraged position exposure grouping', () => {
   });
 
   it('preserves inverse direction in gross bearish and net exposure', () => {
-    const groups = buildLeveragedPositionExposureGroups([
+    const groups = buildLeveragedPositionExposureGroups({ positions: [
       pos({ key: 'long', symbol: 'NVDU', netDelta: 0.25, stockPrice: 50, maxRisk: 400 }),
       pos({ key: 'inverse', symbol: 'NVDD', netDelta: 0.5, stockPrice: 20, maxRisk: 300 }),
-    ]);
+    ] , equityCoverageComplete: true });
     expect(groups[0].grossBullishExposure).toBeCloseTo(2500);
     expect(groups[0].grossBearishExposure).toBeCloseTo(1000);
     expect(groups[0].netDirectionalExposure).toBeCloseTo(1500);
   });
 
   it('fails the whole group closed when a related member lacks required delta evidence', () => {
-    const groups = buildLeveragedPositionExposureGroups([
+    const groups = buildLeveragedPositionExposureGroups({ positions: [
       pos({ key: 'lev', symbol: 'NVDU', netDelta: 0.25, stockPrice: 50 }),
       pos({ key: 'direct', symbol: 'NVDA', netDelta: null, stockPrice: 100 }),
-    ]);
+    ] , equityCoverageComplete: true });
     expect(groups[0].normalizationAuthoritative).toBe(false);
     expect(groups[0].grossExposure).toBeNull();
     expect(groups[0].netDirectionalExposure).toBeNull();
@@ -99,9 +120,45 @@ describe('Gate 8 leveraged position exposure grouping', () => {
   });
 
   it('does not invent a leveraged group when no issuer-catalog-confirmed leveraged product is held', () => {
-    expect(buildLeveragedPositionExposureGroups([
+    expect(buildLeveragedPositionExposureGroups({ positions: [
       pos({ symbol: 'NVDA' }),
       pos({ key: 'msft', symbol: 'MSFT' }),
-    ])).toEqual([]);
+    ])).toEqual([] , equityCoverageComplete: true });
   });
+  it('includes direct equity holdings with leveraged option exposure on the same economic underlying', () => {
+    const groups = buildLeveragedPositionExposureGroups({
+      positions: [pos({ key: 'lev', symbol: 'NVDU', netDelta: 0.25, stockPrice: 50, maxRisk: 400 })],
+      equities: [equity({ symbol: 'NVDA', quantity: 100, currentPrice: 100 })],
+      equityCoverageComplete: true,
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0].members.map(member => member.strategy)).toContain('SHARES');
+    expect(groups[0].grossBullishExposure).toBeCloseTo(12500);
+    expect(groups[0].netDirectionalExposure).toBeCloseTo(12500);
+  });
+
+  it('recognizes a leveraged product held as shares and rolls direct underlying shares into it', () => {
+    const groups = buildLeveragedPositionExposureGroups({
+      positions: [],
+      equities: [
+        equity({ symbol: 'NVDU', quantity: 100, currentPrice: 50 }),
+        equity({ symbol: 'NVDA', quantity: 20, currentPrice: 100 }),
+      ],
+      equityCoverageComplete: true,
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0].economicUnderlying).toBe('NVDA');
+    expect(groups[0].grossBullishExposure).toBeCloseTo(12000);
+    expect(groups[0].maxCapitalLoss).toBeCloseTo(7000);
+  });
+
+  it('fails group totals closed when canonical equity coverage is unavailable', () => {
+    const groups = buildLeveragedPositionExposureGroups({
+      positions: [pos({ key: 'lev', symbol: 'NVDU', netDelta: 0.25, stockPrice: 50 })],
+      equityCoverageComplete: false,
+    });
+    expect(groups[0].normalizationAuthoritative).toBe(false);
+    expect(groups[0].grossExposure).toBeNull();
+  });
+
 });

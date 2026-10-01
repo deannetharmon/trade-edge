@@ -60,7 +60,7 @@ import { buildLeveragedPositionExposureGroups, buildLeveragedPositionExposureExc
 export default function DashboardPage() {
   const th = THEMES[getSavedTheme()];
   const { tasks } = useTaskManager();
-  const { composition, positions, loading, error, lastRefresh, refresh, refreshBalances, refreshDecisionReviews } = usePortfolioData();
+  const { composition, positions, snapshot, loading, error, lastRefresh, refresh, refreshBalances, refreshDecisionReviews } = usePortfolioData();
   const portfolioMode = usePortfolioMode();
 
   // Refresh on every visit to this page, same "fresh on every visit"
@@ -95,8 +95,12 @@ export default function DashboardPage() {
 
 
   const leveragedPositionExposureExceptions = useMemo(
-    () => buildLeveragedPositionExposureExceptions(buildLeveragedPositionExposureGroups(positions)),
-    [positions],
+    () => buildLeveragedPositionExposureExceptions(buildLeveragedPositionExposureGroups({
+      positions,
+      equities: snapshot?.equities ?? [],
+      equityCoverageComplete: snapshot?.dataQuality.status === 'ok',
+    })),
+    [positions, snapshot],
   );
 
   const viewModel = useMemo(
