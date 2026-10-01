@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CSP Card Layout</title>
+<style>
+/* CSP-CARD-0001 mock (Diane). Example data from the AVL 52P screenshot (Oct 1, 2026) and an illustrative 35P. Tokens follow the app's existing dark mock palette. */
+:root{
+  --bg:#090a0b; --card:#171819; --line:#3a3d3f;
+  --text:#f5f6f6; --muted:#a1a6aa; --faint:#8a9094;
+  --good:#52e4d2; --warn:#f2b441; --bad:#ff6b6b; --chg:#9ecbff; --chg-bg:rgba(158,203,255,.12);
+  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f4f5f5; --card:#ffffff; --line:#d3d8da;
+    --text:#101314; --muted:#454c50; --faint:#667074;
+    --good:#0b7a6e; --warn:#9a6400; --bad:#b3261e; --chg:#1f5fbf; --chg-bg:rgba(31,95,191,.1);
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f4f5f5; --card:#ffffff; --line:#d3d8da;
+  --text:#101314; --muted:#454c50; --faint:#667074;
+  --good:#0b7a6e; --warn:#9a6400; --bad:#b3261e; --chg:#1f5fbf; --chg-bg:rgba(31,95,191,.1);
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);padding-inline:16px;padding-block:20px 48px}
+.wrap{max-width:1100px;margin-inline:auto;display:flex;flex-direction:column;gap:18px}
+.eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+h1{margin:0;font-size:20px;font-weight:650;text-wrap:balance}
+h2{margin:0;font-size:13px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.sub{margin:0;color:var(--muted);max-width:72ch}
+.panel{display:flex;flex-direction:column;gap:8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;overflow-x:auto}
+.row{display:flex;gap:18px;align-items:flex-start;padding:12px 14px;min-width:960px;font-size:12px}
+.sym b{font-size:14px}
+.l{color:var(--faint)}
+.col{display:flex;flex-direction:column;gap:2px;flex:none}
+.amb{padding:2px 14px 8px;font-size:11px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 14px;min-width:960px}
+.warnbar{border-top:1px solid var(--line);padding:6px 14px;font-size:11px;color:var(--warn);min-width:960px}
+.good{color:var(--good)} .warn{color:var(--warn)} .bad{color:var(--bad)} .num{font-weight:650}
+.chg{background:var(--chg-bg);outline:1px solid var(--chg);outline-offset:1px;border-radius:3px;padding:0 3px}
+.chip{display:inline-block;border:1px solid var(--warn);color:var(--warn);border-radius:4px;padding:0 5px;font-size:10px;margin-left:4px}
+.strike{text-decoration:line-through;opacity:.55}
+.legend{font-size:12px;color:var(--muted);margin:0}
+.legend span.k{display:inline-block;width:10px;height:10px;border:1px solid var(--chg);background:var(--chg-bg);border-radius:2px;margin-right:6px;vertical-align:-1px}
+ul.notes{margin:0;padding-left:18px;color:var(--muted);font-size:13px;display:flex;flex-direction:column;gap:3px}
+</style></head>
+<body><div class="wrap">
+
+<header>
+  <div class="eyebrow">CSP-CARD-0001 · Diane mock · example data</div>
+  <h1>CSP card: one premium basis, no repeated metrics</h1>
+  <p class="sub">Same AVL 52P contract before and after (stock $34.56, 15 DTE, bid 17.20, ask 18.40, mid 17.80). A near-the-money 35P follows, so the Mostly intrinsic label can be compared.</p>
+  <p class="legend"><span class="k"></span>Changed from today. Values marked "example" are illustrative.</p>
+</header>
+
+<section class="panel" aria-labelledby="b1">
+  <h2 id="b1">Before — AVL 52P (today)</h2>
+  <div class="card">
+    <div class="row">
+      <div class="col sym"><b>AVL</b><span class="l">$34.56 · etf</span></div>
+      <div class="col"><span><span class="l">Exp </span>2026-10-16 (15d)</span><span><span class="l">Put </span><b>52</b></span></div>
+      <div class="col" style="width:190px"><span><span class="l">Return by expiration </span>33.08%</span><span><span class="l">30-day comparison </span><span class="warn">66.15% — Look closer</span></span></div>
+      <div class="col"><span><span class="l">Premium </span><span class="good num">$1780.00</span></span><span><span class="l">Ann. Yield </span><span class="good">833%</span></span></div>
+      <div class="col"><span><span class="l">POP </span>0%</span><span><span class="l">ROC </span>34.2%</span></div>
+      <div class="col"><span><span class="l">Delta Exposure </span><span class="bad">100</span></span><span>1.00</span></div>
+      <div class="col"><span><span class="l">OTM </span><span class="bad num">-50.5%</span></span></div>
+      <div class="col"><span><span class="l">OI </span><span class="bad num">0</span></span><span class="bad">Below OI floor</span></div>
+      <div class="col"><span><span class="l">IVX </span><span class="good">67.7%</span></span><span><span class="l">EM </span>$4.74</span></div>
+    </div>
+    <div class="amb"><span>Δ 1.00</span><span>POP 0%</span><span>OTM -50.5%</span><span>Bid $17.20 · Ask $18.40</span><span>Credit $1780.00</span><span class="warn">OI 0</span><span>Cash Required $5,200</span><span>Breakeven Price $34.20</span></div>
+    <div class="amb warn" style="padding-top:0">Warning: OI 0 is below the preferred minimum of 250.</div>
+    <div class="warnbar">Quality warning — IVR 6.0% is below the preferred 30% premium environment. This contract remains eligible but is ranked lower.</div>
+  </div>
+  <ul class="notes">
+    <li>Return 33.08% (bid) beside ROC 34.2% (mid): two numbers for one concept.</li>
+    <li>Premium $1780 and Breakeven $34.20 are mid-based; Δ, POP, OTM, OI and Credit appear twice.</li>
+    <li>Ann. Yield 833% reads as income but $17.44 of the $17.80 is intrinsic value.</li>
+  </ul>
+</section>
+
+<section class="panel" aria-labelledby="a1">
+  <h2 id="a1">After — AVL 52P</h2>
+  <div class="card">
+    <div class="row">
+      <div class="col sym"><b>AVL</b><span class="l">$34.56 · etf</span></div>
+      <div class="col"><span><span class="l">Exp </span>2026-10-16 (15d)</span><span><span class="l">Put </span><b>52</b></span><span class="chg"><span class="l">Cash </span>$5,200</span></div>
+      <div class="col" style="width:190px"><span><span class="l">Return by expiration </span>33.08%<span class="chip chg" title="Intrinsic $17.44 of bid $17.20. The bid is below intrinsic, which signals a stale or illiquid quote.">Mostly intrinsic</span></span><span><span class="l">30-day comparison </span><span class="warn">66.15% — Look closer</span></span></div>
+      <div class="col"><span><span class="l">Premium </span><span class="good num chg">$1720.00</span></span><span><span class="l">Ann. Yield </span><span class="chg">805%</span></span></div>
+      <div class="col"><span><span class="l">POP </span>0%</span></div>
+      <div class="col"><span><span class="l">Delta Exposure </span><span class="bad">100</span></span><span>1.00</span></div>
+      <div class="col"><span><span class="l">OTM </span><span class="bad num">-50.5%</span></span><span class="chg"><span class="l">BE </span>$34.80</span></div>
+      <div class="col"><span><span class="l">OI </span><span class="bad num">0</span></span><span class="bad">Below OI floor</span></div>
+      <div class="col"><span><span class="l">IVX </span><span class="good">67.7%</span></span><span><span class="l">EM </span>$4.74</span></div>
+    </div>
+    <div class="amb chg" style="margin:0 14px 8px;padding:2px 4px;min-width:0;width:max-content"><span>Bid $17.20 · Ask $18.40</span></div>
+    <div class="warnbar">Quality warning — IVR 6.0% is below the preferred 30% premium environment. This contract remains eligible but is ranked lower.</div>
+  </div>
+  <ul class="notes">
+    <li>One basis (bid): Premium $1,720, BE $34.80, Return 33.08%, Ann. Yield 805%. ROC row removed (it equalled Return by expiration).</li>
+    <li>Cash Required moves under the strike; BE moves under OTM. Both visible without expanding the card.</li>
+    <li>The ambient line keeps only Bid · Ask. Ann. Yield loses the green yield coloring when the chip shows.</li>
+  </ul>
+</section>
+
+<section class="panel" aria-labelledby="a2">
+  <h2 id="a2">After — near-the-money 35P (example)</h2>
+  <div class="card">
+    <div class="row">
+      <div class="col sym"><b>AVL</b><span class="l">$34.56 · etf</span></div>
+      <div class="col"><span><span class="l">Exp </span>2026-10-16 (15d)</span><span><span class="l">Put </span><b>35</b></span><span><span class="l">Cash </span>$3,500</span></div>
+      <div class="col" style="width:190px"><span><span class="l">Return by expiration </span>4.86%</span><span><span class="l">30-day comparison </span><span class="warn">9.71% — Look closer</span></span></div>
+      <div class="col"><span><span class="l">Premium </span><span class="good num">$170.00</span></span><span><span class="l">Ann. Yield </span><span class="good">118%</span></span></div>
+      <div class="col"><span><span class="l">POP </span>48%</span></div>
+      <div class="col"><span><span class="l">Delta Exposure </span><span class="warn">52</span></span><span>0.52</span></div>
+      <div class="col"><span><span class="l">OTM </span><span class="warn num">-1.3%</span></span><span><span class="l">BE </span>$33.30</span></div>
+      <div class="col"><span><span class="l">OI </span><span class="good num">1,240</span></span></div>
+      <div class="col"><span><span class="l">IVX </span><span class="good">67.7%</span></span><span><span class="l">EM </span>$4.74</span></div>
+    </div>
+    <div class="amb" style="margin-top:-4px"><span>Bid $1.70 · Ask $1.90</span></div>
+  </div>
+  <ul class="notes">
+    <li>Intrinsic $0.44 is 26% of the $1.70 bid, so no Mostly intrinsic chip and normal yield coloring. Example values only.</li>
+    <li>The 30-day label here is illustrative; real status comes from the existing thresholds in <code>cspReturnThisCycle</code>.</li>
+  </ul>
+</section>
+
+</div></body></html>
