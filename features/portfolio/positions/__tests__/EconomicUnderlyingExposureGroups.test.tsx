@@ -12,7 +12,7 @@ const complete: LeveragedPositionExposureGroup = {
   grossBearishExposure: 1000,
   grossExposure: 8500,
   netDirectionalExposure: 6500,
-  capitalDeployed: 900,
+  maxCapitalLoss: 900,
   members: [
     {
       positionKey: 'nvda',
@@ -21,7 +21,7 @@ const complete: LeveragedPositionExposureGroup = {
       economicUnderlying: 'NVDA',
       leverageMultiplier: 1,
       signedEffectiveExposure: 5000,
-      capitalDeployed: 500,
+      maxCapitalLoss: 500,
       normalizationAuthoritative: true,
       reason: null,
     },
@@ -32,7 +32,7 @@ const complete: LeveragedPositionExposureGroup = {
       economicUnderlying: 'NVDA',
       leverageMultiplier: 2,
       signedEffectiveExposure: 2500,
-      capitalDeployed: 400,
+      maxCapitalLoss: 400,
       normalizationAuthoritative: true,
       reason: null,
     },
@@ -49,7 +49,7 @@ describe('Gate 8 EconomicUnderlyingExposureGroups', () => {
     expect(screen.getByText('$1,000')).toBeInTheDocument();
     expect(screen.getByText('Net directional')).toBeInTheDocument();
     expect(screen.getByText('$6,500')).toBeInTheDocument();
-    expect(screen.getByText('Capital deployed')).toBeInTheDocument();
+    expect(screen.getByText('Max capital loss')).toBeInTheDocument();
     expect(screen.getByText('$900')).toBeInTheDocument();
     expect(screen.getByText(/NVDU · BPS · 2×/)).toBeInTheDocument();
   });
@@ -62,7 +62,7 @@ describe('Gate 8 EconomicUnderlyingExposureGroups', () => {
       grossBearishExposure: null,
       grossExposure: null,
       netDirectionalExposure: null,
-      capitalDeployed: null,
+      maxCapitalLoss: null,
       members: [{ ...complete.members[0], normalizationAuthoritative: false, signedEffectiveExposure: null, reason: 'Missing delta.' }],
     }]} th={THEMES.dark} />);
 
