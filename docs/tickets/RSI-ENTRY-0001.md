@@ -1,6 +1,6 @@
 # RSI-ENTRY-0001 — Daily RSI "turn up off a dip" entry gate, override, and watch
 
-Status: v8 (2026-10-01). READY for Dane, delivered in slices; the order is `docs/tickets/RSI-ENTRY-0001-DANE-ORDER.md`. Approved by Ian, Alan, Quinn, Paul, and Diane (copy). Phase A0 and the helper slice may start once LEV-0001 Gate 10 closes. Phase A UI wiring (A2) waits for Dean to approve Diane's rendered mock: `docs/tickets/mockups/rsi-entry-0001-mock.html` (published: https://claude.ai/artifact/W2FwugQcwbFXruUN6FhgRq).
+Status: v8 (2026-10-01). READY for Dane, delivered in slices; the order is `docs/tickets/RSI-ENTRY-0001-DANE-ORDER.md`. Approved by Ian, Alan, Quinn, Paul, and Diane (copy). Phase A0 and the helper slice may start once LEV-0001 Gate 10 closes. Phase A UI wiring (A2) follows A1; Dean approved Diane's rendered mock on 2026-10-01: `docs/tickets/mockups/rsi-entry-0001-mock.html` (published: https://claude.ai/artifact/W2FwugQcwbFXruUN6FhgRq).
 Owner: Dane (build) | Reviewers: Ian (rules), Paul (scope and sequencing), Alan (RSI math), Quinn (QA), Diane (receipt and confirm-line copy)
 Supersedes: v1 to v7 of this ticket (v5 was committed as 91e97ce, v6 as 66b81e7, v7 as 2996cb3).
 
@@ -63,7 +63,7 @@ Visual weight: this is the ambient, informational tier. No red, no amber, no bla
 - Empty Best Opportunity slot while the gate is On: "No Best Opportunity: 0 of 24 pass the RSI timing check" with a plain link "Turn timing off".
 - Order screen, Wait trade: one neutral line, "RSI timing: Wait (no dip, RSI 58). Placing anyway." No checkbox and no second confirm.
 - Watch (Phase B): button "Watch for entry"; once armed it reads "Watching · alert when RSI turns up".
-- GATE: Diane's rendered mock is done (`docs/tickets/mockups/rsi-entry-0001-mock.html`; published at https://claude.ai/artifact/W2FwugQcwbFXruUN6FhgRq) and awaits Dean's approval. Dean approves it before slice A2 (UI wiring). Phase A0, slice P, and the pure logic in `lib/` (A1) do not wait for it.
+- GATE: Diane's rendered mock is done (`docs/tickets/mockups/rsi-entry-0001-mock.html`; published at https://claude.ai/artifact/W2FwugQcwbFXruUN6FhgRq) and Dean approved it on 2026-10-01, so slice A2 (UI wiring) is cleared once A1 ships. Phase A0, slice P, and the pure logic in `lib/` (A1) do not wait for it.
 
 ## Delivery slices and success measure (Paul)
 Each slice is its own batched push (one CI run, one Vercel preview):
@@ -162,4 +162,4 @@ v6 review (2026-10-01):
 - Paul (scope and sequencing): APPROVED. Default Off at first release (flipping to On after Ian's pass-rate check), sequencing after LEV-0001 Gate 10, the Phase A0 spike, and the three-slice delivery with a success measure. PMCC, LEAPS, and Spreads stay out of scope. The roadmap entry (item 16) matches.
 - Diane (UX): APPROVED the copy spec above. A rendered mock approved by Dean is required before Phase A UI code.
 - Alan, Ian, Quinn: re-checked the v7 changes (data section, copy spec, slices); their approvals above stand.
-- v8 (Frank's facilitation, 2026-10-01): Alan and Quinn re-checked the data-path findings (scans already fetch the bars through `getTrend`; `getTrend` has a separate simple-average RSI that stays untouched; the index map already exists; completed-bar helper becomes slice P). Alan's close-adjustment check moved into Phase A0 step 0 because Yahoo is unreachable from the planning environment. Diane's mock is published for Dean's approval and Dane's order is issued.
+- v8 (Frank's facilitation, 2026-10-01): Alan and Quinn re-checked the data-path findings (scans already fetch the bars through `getTrend`; `getTrend` has a separate simple-average RSI that stays untouched; the index map already exists; completed-bar helper becomes slice P). Alan's close-adjustment check moved into Phase A0 step 0 because Yahoo is unreachable from the planning environment. Diane's mock is published and Dean approved it on 2026-10-01; Dane's order is issued.

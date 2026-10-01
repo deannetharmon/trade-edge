@@ -1,12 +1,12 @@
 # RSI-ENTRY-0001: Implementation order for Dane
 
 Issued by: Frank (facilitator), 2026-10-01. Ticket: `docs/tickets/RSI-ENTRY-0001.md` (v8). Mock: `docs/tickets/mockups/rsi-entry-0001-mock.html` (published copy: https://claude.ai/artifact/W2FwugQcwbFXruUN6FhgRq).
-Approved by Ian, Alan, Quinn, Paul, Diane (copy). Dean approves the mock before slice A2.
+Approved by Ian, Alan, Quinn, Paul, Diane (copy). Dean approved the mock on 2026-10-01.
 
 ## Start triggers (nothing starts before its trigger)
 - Slice P and A0: LEV-0001 Gate 10 corrective round is closed (docs/ROADMAP.md, current status). Paul confirms the go.
 - Slice A1: after P. Alan supplies the golden fixtures; do not invent fixture values.
-- Slice A2 (UI wiring): after A1 and after Dean approves Diane's rendered mock.
+- Slice A2 (UI wiring): after A1 (Dean approved Diane's mock on 2026-10-01).
 - Slice B: after A2 ships and Ian has reviewed the pass-rate check.
 
 ## Rules for every slice
@@ -36,7 +36,7 @@ Seam design, deliver `docs/tickets/RSI-ENTRY-0001-A0-fetch-design.md`:
 - New `lib/indicators/rsiEntryGate.ts`: gate parameter constants (CSP `{ low: 40, high: 70, window: 8, lift: 3, mid: 50 }`, CC `{ low: 30, high: 60, window: 8, lift: 3, mid: 50 }`) and a mapping from `rsiSeries` + `rsiState` to PASS or WAIT with a reason computed from the same 8-value window (CSP: "no dip", "still falling", "turn not confirmed", "bounced"; CC: "no peak", "still rising", "turn not confirmed", "faded"; unavailable: "RSI n/a"). Chip text uses `describeRsiTurn` for Pass.
 - Tests (Alan's fixtures): truth table for CSP and CC; exact boundaries (window low exactly 40, lift exactly 3, latest RSI exactly 50, a flat bar in the rise run); fail closed on short, non-finite, or empty closes; `RSI_TURN_PARAMS` and its existing tests unchanged and green.
 
-## Slice A2: wiring (after Dean approves the mock)
+## Slice A2: wiring (mock approved by Dean 2026-10-01)
 - Scan controls: "Entry timing (RSI)" On/Off, dip level (CSP), peak level (CC), advanced window, lift, ceiling. Default Off at first release. Persist the last-used setting the same way the other scan controls persist (match the existing pattern; do not invent a store).
 - Receipt: add the RSI rule and "N of M pass" to the existing "Active CSP rules" and "Active CC rules" lines.
 - Row chips and the empty Best Opportunity message, exactly as the mock. Wait rows keep score and order; only Best Opportunity eligibility changes, and only while the gate is On. "RSI n/a" fails closed while On.
