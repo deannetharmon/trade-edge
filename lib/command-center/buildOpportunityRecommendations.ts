@@ -22,19 +22,54 @@ import {
   decisionAnalysesToOpportunityCandidates,
   rankOpportunityCandidates,
 } from '@/lib/opportunity-engine';
-import type { OpportunityContext, OpportunityRecommendation } from '@/lib/opportunity-engine';
+import type { OpportunityCandidate, OpportunityContext, OpportunityRecommendation } from '@/lib/opportunity-engine';
 import type { DecisionAnalysis } from '@/lib/decision-engine';
+import { DIREXION_GATE1_BOOTSTRAP, resolveCatalogInstrumentMetadata } from '@/lib/instrument-metadata';
 
 export interface BuildOpportunityRecommendationsResult {
   recommendations: OpportunityRecommendation[];
   skipped: { decisionAnalysisId: string; reason: string }[];
 }
 
+function buildGate5NormalizedRiskEvidence(
+  analyses: DecisionAnalysis[],
+): ReadonlyMap<string, OpportunityCandidate['normalizedRisk']> {
+  const evidence = new Map<string, OpportunityCandidate['normalizedRisk']>();
+
+  for (const analysis of analyses) {
+    const symbol = analysis.subject.symbol ?? analysis.candidate?.symbol;
+    if (!symbol) continue;
+
+    const metadata = resolveCatalogInstrumentMetadata(DIREXION_GATE1_BOOTSTRAP, symbol);
+    if (!metadata) continue;
+
+    // Gate 5 production recommendations are option expressions. A validated
+    // leveraged underlying establishes layered leverage and its economic
+    // underlying, but it does NOT make option exposure authoritative. Gate 6
+    // adds product Greeks/scenario analysis. Fail closed here rather than
+    // treating capitalRequired/theoreticalMaxLoss as share market value.
+    evidence.set(analysis.subject.id, {
+      economicUnderlying: metadata.economicUnderlyingSymbol ?? metadata.benchmark ?? null,
+      normalizationAuthoritative: false,
+      initialEffectiveExposure: null,
+      capitalEfficiency: null,
+      hardRiskGatePassed: false,
+      hardRiskGateReasons: [
+        'Layered leverage requires option Greeks and scenario analysis before authoritative normalized ranking.',
+      ],
+      layeredLeverage: true,
+    });
+  }
+
+  return evidence;
+}
+
 export function buildOpportunityRecommendations(
   analyses: DecisionAnalysis[],
   context: OpportunityContext,
 ): BuildOpportunityRecommendationsResult {
-  const { candidates, skipped } = decisionAnalysesToOpportunityCandidates(analyses);
+  const normalizedRiskByCandidateId = buildGate5NormalizedRiskEvidence(analyses);
+  const { candidates, skipped } = decisionAnalysesToOpportunityCandidates(analyses, { normalizedRiskByCandidateId });
   const recommendations = rankOpportunityCandidates(candidates, context);
   return { recommendations, skipped };
 }

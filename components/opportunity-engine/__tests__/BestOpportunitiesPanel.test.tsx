@@ -363,6 +363,36 @@ describe('BestOpportunitiesPanel', () => {
     expect(toggle.className).toMatch(/min-w-\[44px\]/);
   });
 
+  it('renders canonical leveraged exposure evidence without recalculating it', () => {
+    render(<BestOpportunitiesPanel recommendations={[makeRecommendation({
+      symbol: 'NVDU',
+      economicUnderlying: 'NVDA',
+      normalizationAuthoritative: true,
+      comparableRank: 1,
+      initialEffectiveExposure: 16000,
+    })]} th={THEMES.dark} />);
+
+    expect(screen.getByTestId('leveraged-exposure-summary')).toHaveTextContent('NVDA');
+    expect(screen.getByTestId('leveraged-exposure-summary')).toHaveTextContent('~16,000');
+    expect(screen.getByTestId('leveraged-exposure-summary')).toHaveTextContent('#1');
+    expect(screen.getByText(/first-order sizing approximation/i)).toBeInTheDocument();
+  });
+
+  it('shows incomplete normalization as not comparably ranked', () => {
+    render(<BestOpportunitiesPanel recommendations={[makeRecommendation({
+      symbol: 'XYZ',
+      economicUnderlying: null,
+      normalizationAuthoritative: false,
+      comparableRank: null,
+      initialEffectiveExposure: null,
+    })]} th={THEMES.dark} />);
+
+    const summary = screen.getByTestId('leveraged-exposure-summary');
+    expect(summary).toHaveTextContent('Risk normalization incomplete');
+    expect(summary).toHaveTextContent('Not comparably ranked');
+    expect(summary).toHaveTextContent('Unavailable');
+  });
+
   it('performs no fetch of any kind -- it is a pure function of its props', () => {
     const fetchSpy = vi.fn();
     const originalFetch = globalThis.fetch;

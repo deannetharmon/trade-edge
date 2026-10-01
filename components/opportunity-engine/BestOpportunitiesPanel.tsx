@@ -226,6 +226,36 @@ export function CandidateDetailTier({
   );
 }
 
+function formatMoney(value: number | null | undefined, approximate = false): string {
+  if (value == null || !Number.isFinite(value)) return 'Unavailable';
+  return `${approximate ? '~' : ''}${Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+function LeveragedExposureSummary({ rec, th }: { rec: OpportunityRecommendation; th: (typeof THEMES)[Theme] }) {
+  if (rec.normalizationAuthoritative === undefined) return null;
+
+  const complete = rec.normalizationAuthoritative === true;
+  return (
+    <div data-testid="leveraged-exposure-summary" className={`rounded-lg border ${th.border} p-2.5 space-y-1.5`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`text-[9px] font-bold uppercase tracking-wide ${th.textFaint}`}>Leveraged Exposure</span>
+        {rec.layeredLeverage && <span className="text-[9px] font-bold border border-amber-700 text-amber-400 rounded px-1.5 py-0.5">Layered Leverage</span>}
+        <span className={`text-[9px] ${complete ? th.textMuted : 'text-amber-400'}`}>
+          {complete ? 'Normalization Complete' : 'Risk normalization incomplete'}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+        <DetailRow label="Economic Underlying" th={th} value={rec.economicUnderlying ?? 'Unavailable'} />
+        <DetailRow label="Initial effective exposure" th={th} value={formatMoney(rec.initialEffectiveExposure, true)} />
+        <DetailRow label="Comparable rank" th={th} value={rec.comparableRank == null ? 'Not comparably ranked' : `#${rec.comparableRank}`} />
+      </div>
+      <p className={`text-[9px] ${th.textFaint} italic`}>
+        Initial effective exposure is a first-order sizing approximation; it is not capital at risk and does not model multi-day reset/path effects.
+      </p>
+    </div>
+  );
+}
+
 function RecommendationCard({
   rec,
   th,
@@ -271,6 +301,8 @@ function RecommendationCard({
           </p>
         </div>
       </div>
+
+      <LeveragedExposureSummary rec={rec} th={th} />
 
       <p className={`text-[11px] ${th.textMuted} leading-relaxed`}>{rec.primaryReason}</p>
 

@@ -36,6 +36,10 @@ Push any branch with local commits. Never leave work only in stash or a temp wor
 - Next.js App Router: page.tsx may only use allowed named exports. Extract non-page logic to `lib/`.
 - Before handing off any change, state (a) which sibling/adjacent code paths were checked for the same class of bug, and (b) that real tsc/test verification was actually run.
 - Scale verification to risk. Small display/copy changes: tsc plus affected existing tests only. Risky changes (security, shared logic, order paths, refactors): full suite and new tests. CI runs the full suite on every push.
+- Keep the developer loop fast: do not run a full production build after every small edit. Before push/handoff, run the targeted tests plus the configured TypeScript check appropriate to the change.
+- When CI or Vercel exposes a compiler/build-pattern defect, fix the reported instance and search the touched/new sibling code for the same construct before pushing again (for example Map/Set iterator spreads that differ across TypeScript targets). Do not wait for repeated deployments to discover identical occurrences one at a time.
+- Vercel preview is the authoritative production-build validation. A PR/ticket gate is not merge-ready or complete until required GitHub CI is green AND the current PR-head Vercel preview is Ready. Vercel should confirm the change, not be treated as optional after CI passes.
+- Dane may report implementation complete after the appropriate fast developer checks. Frank must not close a gate or authorize merge until the required CI and Vercel preview checks above are green.
 - Never patch blind: verify exact file content against the repo before writing patches.
 
 ## page.tsx working-file rule

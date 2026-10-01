@@ -15,7 +15,7 @@ export function groupRecommendationsByEconomicUnderlying(
     existing.push(recommendation);
     groups.set(key, existing);
   }
-  return [...groups.entries()].map(([economicUnderlying, grouped]) => ({
+  return Array.from(groups.entries()).map(([economicUnderlying, grouped]) => ({
     economicUnderlying,
     recommendations: grouped,
   }));
