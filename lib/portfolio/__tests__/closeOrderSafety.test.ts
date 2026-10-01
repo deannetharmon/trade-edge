@@ -520,6 +520,61 @@ describe('runLiveCloseOrderSafetyGate', () => {
     expect(result.issues.map(i => i.ruleId)).toContain('MATERIAL_PNL_DEVIATION');
   });
 
+  describe('STOP-TARGET-GATE-0001: resting stop / profit-target orders', () => {
+    const restingQuote = { netBid: 0.58, netAsk: 0.62, netMid: 0.60, fetchedAtMs: Date.now() };
+    const resting = (intent: 'STOP_LOSS' | 'PROFIT_TARGET', price: number, orderType: string, tif = 'GTC') => {
+      const base = validInput({ quote: restingQuote });
+      return validInput({
+        quote: restingQuote,
+        pricingIntent: intent,
+        closePricePointsPerUnit: price,
+        displayedExpectedPnlDollars: (0.60 - price) * 100 * 2,
+        actualOrder: { ...base.actualOrder, limitPricePointsPerUnit: price, orderType, timeInForce: tif },
+      });
+    };
+    it('a Stop Limit stop far above the market is allowed (no 30% drift block)', () => {
+      const result = runLiveCloseOrderSafetyGate(resting('STOP_LOSS', 1.20, 'Stop Limit'));
+      expect(result.issues.map(i => i.ruleId)).not.toContain('MATERIAL_PNL_DEVIATION');
+      expect(result.ok).toBe(true);
+    });
+    it('a GTC limit profit target far below the market is allowed', () => {
+      const result = runLiveCloseOrderSafetyGate(resting('PROFIT_TARGET', 0.30, 'Limit'));
+      expect(result.issues.map(i => i.ruleId)).not.toContain('MATERIAL_PNL_DEVIATION');
+      expect(result.ok).toBe(true);
+    });
+    it('a stop at or below the live mid is blocked as wrong-side', () => {
+      const result = runLiveCloseOrderSafetyGate(resting('STOP_LOSS', 0.60, 'Stop Limit'));
+      expect(result.ok).toBe(false);
+      expect(result.issues.map(i => i.ruleId)).toContain('RESTING_ORDER_WRONG_SIDE');
+    });
+    it('a target at or above the live mid is blocked as wrong-side', () => {
+      const result = runLiveCloseOrderSafetyGate(resting('PROFIT_TARGET', 0.60, 'Limit'));
+      expect(result.ok).toBe(false);
+      expect(result.issues.map(i => i.ruleId)).toContain('RESTING_ORDER_WRONG_SIDE');
+    });
+    it('a Cut Losses close (STOP_LOSS intent, plain Limit) keeps the drift check', () => {
+      const result = runLiveCloseOrderSafetyGate(resting('STOP_LOSS', 1.20, 'Limit', 'Day'));
+      expect(result.issues.map(i => i.ruleId)).toContain('MATERIAL_PNL_DEVIATION');
+    });
+    it('a non-GTC profit-target limit keeps the drift check', () => {
+      const result = runLiveCloseOrderSafetyGate(resting('PROFIT_TARGET', 0.30, 'Limit', 'Day'));
+      expect(result.issues.map(i => i.ruleId)).toContain('MATERIAL_PNL_DEVIATION');
+    });
+    it('every other check still applies to a resting order (stale quote still blocks)', () => {
+      const stale = { ...resting('STOP_LOSS', 1.20, 'Stop Limit'), quote: { ...restingQuote, fetchedAtMs: Date.now() - 10 * 60 * 1000 } };
+      expect(runLiveCloseOrderSafetyGate(stale).issues.map(i => i.ruleId)).toContain('QUOTE_STALE_UNCONFIRMED');
+      const noQuote = { ...resting('STOP_LOSS', 1.20, 'Stop Limit'), quote: null };
+      expect(runLiveCloseOrderSafetyGate(noQuote).issues.map(i => i.ruleId)).toContain('QUOTE_MISSING');
+    });
+    it('close, roll and marketable intents keep the 30% rule', () => {
+      for (const intent of ['CUSTOM', 'MARKETABLE', 'ROLL'] as const) {
+        const input = validInput({ quote: restingQuote, pricingIntent: intent, closePricePointsPerUnit: 1.20, displayedExpectedPnlDollars: (0.60 - 1.20) * 200 });
+        const result = runLiveCloseOrderSafetyGate({ ...input, actualOrder: { ...input.actualOrder, limitPricePointsPerUnit: 1.20, orderType: 'Limit', timeInForce: 'GTC' } });
+        expect(result.issues.map(i => i.ruleId)).toContain('MATERIAL_PNL_DEVIATION');
+      }
+    });
+  });
+
   it('does not flag MATERIAL_PNL_DEVIATION for a small deviation from the marketable price', () => {
     const result = runLiveCloseOrderSafetyGate(validInput({
       quote: { netBid: 0.28, netAsk: 0.32, netMid: 0.30, fetchedAtMs: Date.now() },

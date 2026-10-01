@@ -475,6 +475,7 @@ export type SafetyRuleId =
   | 'BREAK_EVEN_PNL_MISMATCH'
   | 'DISPLAY_PAYLOAD_ECONOMICS_MISMATCH'
   | 'MATERIAL_PNL_DEVIATION'
+  | 'RESTING_ORDER_WRONG_SIDE'
   | 'ENTRY_DEBIT_POSITIONS_UNSUPPORTED_LIVE';
 
 export interface SafetyCheckIssue {
@@ -686,10 +687,32 @@ export function runLiveCloseOrderSafetyGate(input: LiveCloseOrderSafetyInput): S
     }
   }
 
+  // STOP-TARGET-GATE-0001: a RESTING protective order (a Stop Limit stop, or a
+  // GTC limit profit target) is MEANT to sit away from the market, so the
+  // marketable-price drift check below does not apply to it. It is replaced by
+  // a direction check: a buy-to-close stop must sit ABOVE the live mid and a
+  // buy-to-close target BELOW it, or it would fill the moment it is placed.
+  // Cut Losses and Take Profit closes (Limit orders meant to fill now) are NOT
+  // exempt: they keep the drift check.
+  const restingStop = input.pricingIntent === 'STOP_LOSS' && input.actualOrder.orderType === 'Stop Limit';
+  const restingTarget = input.pricingIntent === 'PROFIT_TARGET'
+    && input.actualOrder.orderType === 'Limit' && input.actualOrder.timeInForce === 'GTC';
+  const isRestingOrder = restingStop || restingTarget;
+  if (isRestingOrder && input.requestedClosePriceEffect === 'Debit' && input.quote?.netMid != null && Number.isFinite(input.quote.netMid)) {
+    const mid = Math.abs(input.quote.netMid);
+    if (restingStop && plan.closePricePointsPerUnit <= mid) {
+      push('RESTING_ORDER_WRONG_SIDE', `Stop trigger ${plan.closePricePointsPerUnit} points is not above the live value ${mid.toFixed(2)} -- it would trigger immediately.`);
+    }
+    if (restingTarget && plan.closePricePointsPerUnit >= mid) {
+      push('RESTING_ORDER_WRONG_SIDE', `Profit target ${plan.closePricePointsPerUnit} points is not below the live value ${mid.toFixed(2)} -- it would fill immediately.`);
+    }
+  }
+
   // Marketable price-drift check -- ALWAYS runs for a live plan (no longer
   // gated behind an optional caller-supplied value), derived from the same
-  // required quote evidence validated above.
-  if (marketablePricePoints != null && marketablePricePoints > 0) {
+  // required quote evidence validated above. Resting stops/targets are exempt
+  // (see above).
+  if (!isRestingOrder && marketablePricePoints != null && marketablePricePoints > 0) {
     const threshold = input.materialDeviationThresholdPct ?? DEFAULT_MATERIAL_DEVIATION_THRESHOLD;
     const pctFromMarketable = Math.abs(plan.closePricePointsPerUnit - marketablePricePoints) / marketablePricePoints;
     if (pctFromMarketable > threshold) {
