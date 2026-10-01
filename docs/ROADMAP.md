@@ -1,12 +1,25 @@
 # TradeEdge Roadmap (maintained by Paul — update after every major decision)
 
-Last updated: 2026-09-25 (after `76da9cb`)
+Last updated: 2026-10-01 (LEV-0001 Gate 10 review)
+
+## Current status — 2026-10-01 (LEV-0001 Gate 10 review)
+
+- **Active work:** LEV-0001 v2, issue #52. Gates 0–9 implementation merged. Gate 9 PR #63 merged as `aa2fbe3`.
+- **Build evidence:** GitHub CI run 497 passed for Gate 9 head `b2bb7b3`; Dean confirmed clean branch checkout and Preview Ready deployment `dpl_7Ah6cy8YnqsBQKX3Fe5wnY91VdZF`. Vercel status for merged commit `aa2fbe3` returned success; Dean confirmed deployment on main.
+- **Regression evidence:** On clean checkout `aa2fbe3`, `npm test` passed **428 files / 6,146 tests**; `npx tsc --noEmit -p tsconfig.check.json` exited 0. No local production build was rerun; Vercel provides the actual build evidence.
+- **Gate 10: BLOCKED on integration findings; Gate 11: NOT ACCEPTED.** Passing existing tests is not proof the frozen scope is complete.
+- **G10-F1 (blocking):** `lib/command-center/buildOpportunityRecommendations.ts` assigns `hardRiskGatePassed: layered.normalizationAuthoritative`. Metadata/delta completeness is not a portfolio-risk-limit pass. A repository search finds `evaluateLeverageRiskGates` has no production callers. Connect canonical portfolio value, same-underlying gross/net exposure, scenario evidence, and reviewed configurable policy to actual hard-gate decisions before ranking. Missing evidence must withhold authoritative comparable rank; do not invent thresholds. Add production-entry integration fixtures for complete-but-over-limit candidates, safe candidates, and missing portfolio/policy evidence.
+- **G10-F2 (blocking):** Uncataloged symbols are skipped by that production evidence builder and receive legacy ranking behavior, although the broker metadata resolver deliberately keeps uncovered ETFs unknown/partial. Establish production classification coverage so unknown leveraged/ETF metadata cannot silently bypass normalized ranking requirements; preserve verified ordinary-instrument behavior.
+- **G10-F3 (validation gap):** Gate 6 currently supplies explicitly first-order delta stress, not option repricing with volatility/gamma/path effects. Assess its use against frozen material-risk requirements; do not treat supplemental sensitivity as validated full comparable option risk.
+- **Reviews:** Ian/Alan/Quinn lenses support Gate 9's limited server-derived metadata context and explicit unavailable trade-risk state. The integrated risk findings above prevent LEV-0001 acceptance. Diane's integrated runtime UX acceptance and authenticated AI smoke validation remain unverified.
+- **Next:** Frank coordinates Ian on risk policy/evidence, Alan on canonical integration, Quinn on adversarial production-path fixtures, Dane on one batched corrective implementation, then rerun affected checks and obtain current-head CI/Vercel Ready. Paul accepts only after Gate 10 findings and required domain reviews close.
+- The older sections below are historical planning; their “nothing building” and older ready/draft labels are superseded for this active ticket by this status. Other backlog entries still need ticket-specific reconciliation.
 
 ## Done this session (2026-09-24; all merged to main, production deploys green)
 
 SCAN-ALIGN-0001 slices A `PMCC-HELD-BREAKEVEN-0001` and 0001B-1 held-card outcomes (`c26c1b1`), B `PMCC-EARNINGS-PAST-0001` (`5ee2cfc`), C1 OI policy and C2 hybrid bid/ask with the $0.50 short-call ceiling (`a44b47c`), D earnings removal and after-expiry warning (`610bdd9`), E debit below width always on (`d0978b2`), F1 delta chips (`133c842`), F2 PMCC short delta hard filter, LEAPS-ADVISOR-0001B waived (`a34098d`); PMCC-RECEIPT-0001 part 2 (delta window on the status line, `bd49f63`) and part 1 (Active PMCC rules line, `116f47e`); SCAN-GUIDE-0001 part 3 (PMCC width help lines, `116f47e`). Permanent rule: a held LEAP with quantity != 1 fails closed (multi-lot broker averaging unverifiable; Dean holds single-contract LEAPs). All of SCAN-ALIGN-0001 is complete; the PMCC registry migration's prerequisites (A through F) are met.
 
-## Now (nothing building)
+## Previous planning snapshot (September 25–27)
 
 Merged since the last update (all production deploys green): small-ready bundle (`d63801a`: CC earnings re-screen button on disqualified rows, held pair lookup applies the breakeven floor, shared `warmScreenerPage` helper, readiness label from failing gates only, inline invalid-delta message); **EARNINGS-DATEBASIS-0001** (`50fab51`: New York basis for earnings/expiry-inclusion math at every earnings site; `scan-utils.daysUntil` untouched, so expiration-window DTE stays on the old basis: known temporary split, needs its own ticket); tiny hardening (`48649e0`: warm-up for `CspDefaultDeltaFilter`, strict-expiry boundary tests, 30 OTOCO guard tests, deleted the dead `ttPost` and `buildOpenSpreadOrder`). EARNINGS-PRECHECK-0001 is accepted (Ian ruled, coupling proven, Quinn CSP path confirmed).
 
