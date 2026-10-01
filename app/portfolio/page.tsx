@@ -7436,7 +7436,6 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                     </p>
                   )}
                 </div>
-                {pos.stopAssessment && <StopEvidencePanel assessment={pos.stopAssessment} />}
               </div>
             )}
           </div>
