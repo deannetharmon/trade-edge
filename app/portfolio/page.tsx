@@ -90,7 +90,7 @@ import {
 } from '@/lib/portfolio/stopLossPolicy';
 import { evaluateStandaloneLeapsStopEligibility, standaloneLeapsStopProposal, type StandaloneLeapsStopLossPct } from '@/lib/portfolio/standaloneLeapsStop';
 import { StopPctSlider } from '@/components/StopPctSlider';
-import { CREDIT_STOP_PCT_DEFAULT, CREDIT_STOP_PCT_MAX, CREDIT_STOP_PCT_MIN, CREDIT_STOP_PCT_STEP, DEBIT_STOP_LOSS_PCT_DEFAULT, DEBIT_STOP_LOSS_PCT_MAX, DEBIT_STOP_LOSS_PCT_MIN, DEBIT_STOP_LOSS_PCT_STEP, creditStopPctFromTrigger, creditStopTriggerFromPct, describeCreditStopPct, describeDebitStopLossPct } from '@/lib/portfolio/stopSlider';
+import { CREDIT_STOP_PCT_DEFAULT, CREDIT_STOP_PCT_MAX, CREDIT_STOP_PCT_MIN, CREDIT_STOP_PCT_STEP, DEBIT_STOP_LOSS_PCT_DEFAULT, DEBIT_STOP_LOSS_PCT_MAX, DEBIT_STOP_LOSS_PCT_MIN, DEBIT_STOP_LOSS_PCT_STEP, creditStopPctFromTrigger, creditStopTriggerFromPct, CREDIT_STOP_CUSTOM_LABEL, debitStopLossDollars, describeCreditStopReadout, describeDebitStopReadout, isCreditStopPctInSliderRange, stopDialogVerb } from '@/lib/portfolio/stopSlider';
 import {
   evaluateProfitProtectingStop,
   PROFIT_PROTECTING_STOP_POLICY_VERSION,
@@ -6308,21 +6308,41 @@ function PortfolioStopControl({ pos, th, onRetry }: { pos: Position; th: typeof 
   if (classification === 'UNSUPPORTED') return <div><button type="button" disabled className="cursor-not-allowed rounded border border-slate-700 px-2.5 py-1 text-[9px] font-bold text-slate-500">{STOP_CONTROL_LABELS.UNSUPPORTED}</button><StopEvidencePanel assessment={pos.stopAssessment} /></div>;
   if (classification === 'INVALID' || classification === 'UNKNOWN_PROVENANCE' || classification === 'TOO_TIGHT') {
     // STOP-DIALOG-SIMPLIFY-0001: one button straight into the dialog. The reason
-    // it was flagged is one line at the top of the dialog; the full broker
-    // evidence is still there, collapsed, under "Exact prices and details".
+    // it was flagged is one line at the top of the dialog.
     return <div><SetStopLossButton pos={pos} th={th} /></div>;
   }
-  // STOP-DIALOG-SIMPLIFY-0001: evidence lives inside the dialog, not under every card's button.
   return <div><SetStopLossButton pos={pos} th={th} /></div>;
 }
 
 function StandaloneLeapsStopControl({ pos, th }: { pos: Position; th: typeof THEMES[Theme] }) {
   const eligibility = evaluateStandaloneLeapsStopEligibility(pos);
   const [choice, setChoice] = useState<StandaloneLeapsStopLossPct>(DEBIT_STOP_LOSS_PCT_DEFAULT);
-  const [review, setReview] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const portfolioMode = usePortfolioMode();
+  // Same anchored popover as the credit Set Stop dialog (grows up or down, whichever has room).
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [modalPos, setModalPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number } | null>(null);
+  const positionModal = useCallback(() => {
+    const btn = btnRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    const modalWidth = 384; const margin = 8;
+    const spaceAbove = r.top - margin;
+    const spaceBelow = window.innerHeight - r.bottom - margin;
+    const left = Math.min(Math.max(r.left, margin), Math.max(margin, window.innerWidth - modalWidth - margin));
+    if (spaceAbove >= spaceBelow) setModalPos({ bottom: window.innerHeight - r.top + margin, left, maxHeight: Math.max(200, spaceAbove) });
+    else setModalPos({ top: r.bottom + margin, left, maxHeight: Math.max(200, spaceBelow) });
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    positionModal();
+    window.addEventListener('resize', positionModal);
+    window.addEventListener('scroll', positionModal, true);
+    return () => { window.removeEventListener('resize', positionModal); window.removeEventListener('scroll', positionModal, true); };
+  }, [open, positionModal]);
   const debit = pos.entryCredit != null && pos.quantity > 0 ? pos.entryCredit / (pos.quantity * 100) : null;
   if (eligibility === 'PMCC_MANAGED') return <span className="text-[10px] text-amber-300">PMCC-managed — this LEAPS supports a short call and is not stopped on its own.</span>;
   if (eligibility !== 'ELIGIBLE' || debit == null) return <DebitStopObservation position={pos} />;
@@ -6343,16 +6363,43 @@ function StandaloneLeapsStopControl({ pos, th }: { pos: Position; th: typeof THE
       const orderId = String((submission.result as any)?.data?.order?.id ?? (submission.result as any)?.data?.id ?? 'submitted');
       const policy = buildDebitStopPolicy({ originalDebitPerContract: debit, maximumLossPct: choice / 100, createdAt: new Date().toISOString(), brokerOrderId: orderId });
       await postStopPolicies([{ positionKey: positionStopPolicyKey(pos.accountNumber, leg.symbol), policy: policy as any }]);
-      setResult('✓ Stop submitted'); setReview(false);
+      setResult('✓ Stop submitted'); setConfirming(false); setOpen(false);
     } catch (e: any) { setResult(e.message ?? 'Stop submission failed.'); }
     finally { setLoading(false); }
   };
-  return <div className="max-w-[190px]">
-    <p className="text-[10px] text-slate-300">No stop set — drag to choose your maximum loss.</p>
-    <div className="mt-1"><StopPctSlider accent="teal" ariaLabel="Maximum loss as a percent of entry debit" value={choice} min={DEBIT_STOP_LOSS_PCT_MIN} max={DEBIT_STOP_LOSS_PCT_MAX} step={DEBIT_STOP_LOSS_PCT_STEP} onChange={value => { setChoice(value); setReview(false); }} description={describeDebitStopLossPct(choice, proposal.triggerPrice)} /></div>
-    <button onClick={() => setReview(true)} className="mt-1 rounded border border-teal-600 px-2 py-1 text-[9px] font-bold text-teal-300">Review Stop — {choice}% max loss</button>
-    {review && proposal && <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4"><div className={`${th.sidebar} w-80 rounded-xl border ${th.border} p-4`}><p className="text-xs font-bold">Review Stop — {pos.symbol}</p><p className="mt-3 text-sm font-bold text-teal-300">Selected: {choice}% maximum loss</p><p className={`mt-1 text-[10px] ${th.textFaint}`}>Entry debit ${debit.toFixed(2)} per contract → stop trigger ${proposal.triggerPrice.toFixed(2)}</p><p className={`mt-1 text-[10px] ${th.textFaint}`}>If the stop fills at the trigger: about -${(debit * (choice / 100) * pos.quantity * 100).toFixed(2)} on {pos.quantity} contract{pos.quantity === 1 ? '' : 's'}</p><p className={`mt-2 text-[9px] ${th.textFaint}`}>A fresh executable quote and the existing order-safety gate are required before submission.</p><div className="mt-4 flex gap-2"><button disabled={loading} onClick={submit} className="flex-1 rounded bg-teal-700 py-2 text-[10px] font-bold text-white disabled:opacity-50">{loading ? 'Submitting…' : 'Confirm & Submit'}</button><button onClick={() => setReview(false)} className={`rounded border ${th.border} px-3 text-[10px] ${th.textFaint}`}>Back</button></div></div></div>}
-    {result && <p title={result} className={`mt-1 text-[9px] ${result.startsWith('✓') ? 'text-emerald-400' : 'text-red-400'}`}>{result}</p>}
+  const lossDollars = debitStopLossDollars(debit, choice, pos.quantity);
+  const readout = describeDebitStopReadout(proposal.triggerPrice, choice, lossDollars);
+  return <div className="relative max-w-[190px]">
+    <button ref={btnRef} onClick={e => { e.stopPropagation(); if (open) { setOpen(false); } else { setConfirming(false); setOpen(true); } }}
+      className={`text-[9px] px-2.5 py-1 border rounded font-bold transition-colors ${open ? 'border-orange-500 text-orange-400 bg-orange-500/10' : 'border-red-700 text-red-400 hover:border-orange-500 hover:text-orange-400'}`}>Add Stop</button>
+    {open && <div className={`fixed z-[9999] ${th.sidebar} border ${th.border} rounded-xl shadow-2xl p-4 w-96 overflow-y-auto`} style={{ top: modalPos?.top, bottom: modalPos?.bottom, left: modalPos?.left ?? 0, maxHeight: modalPos?.maxHeight ?? '80vh', visibility: modalPos ? 'visible' : 'hidden' }} onClick={e => e.stopPropagation()}>
+      <div className="flex items-center justify-between mb-3">
+        <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>Add Stop</p>
+        <span className={`text-[9px] font-bold ${th.textFaint}`}>{pos.symbol} {pos.strategy}</span>
+      </div>
+      <div className={`flex items-center px-3 py-2 rounded-lg border ${th.borderLight} mb-3`}>
+        <span className={`text-[10px] ${th.textFaint}`}>Entry debit ${debit.toFixed(2)} · Qty {pos.quantity}</span>
+      </div>
+      <div className={`px-3 py-2 rounded-lg border ${th.borderLight} mb-3`} onKeyDown={e => { if (e.key === 'Enter' && !confirming) setConfirming(true); if (e.key === 'Escape') setOpen(false); }}>
+        <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>Stop loss % (of entry debit ${debit.toFixed(2)})</p>
+        <StopPctSlider accent="orange" ariaLabel="Maximum loss as a percent of entry debit" value={choice} min={DEBIT_STOP_LOSS_PCT_MIN} max={DEBIT_STOP_LOSS_PCT_MAX} step={DEBIT_STOP_LOSS_PCT_STEP} onChange={value => { setChoice(value); setConfirming(false); }} description={readout} />
+      </div>
+      {confirming ? <div className="mb-3 p-3 rounded-lg border border-orange-600/50 bg-orange-500/5 space-y-2">
+        <p className="text-[10px] text-orange-300 font-bold">Confirm order</p>
+        <p className="text-[11px] font-bold text-orange-200">Selected: {readout}</p>
+        <p className="text-[10px] text-orange-300">Place Stop Limit GTC: stop ${proposal.triggerPrice.toFixed(2)} (loss {signedDollar(-lossDollars)})</p>
+        <p className={`text-[9px] ${th.textFaint}`}>A fresh executable quote and the existing order-safety gate are required before submission.</p>
+        <div className="flex gap-2 pt-1">
+          <button disabled={loading} onClick={submit} className="flex-1 py-2 text-white text-[10px] font-bold rounded-lg transition-colors disabled:opacity-50 bg-orange-600 hover:bg-orange-500">{loading ? 'Submitting…' : 'Confirm & Submit'}</button>
+          <button onClick={() => setConfirming(false)} className={`px-3 text-[10px] rounded-lg border ${th.borderLight} ${th.textFaint}`}>Back</button>
+        </div>
+      </div> : <div className="flex gap-2">
+        <button onClick={() => setConfirming(true)} className="flex-1 py-2 text-white text-[10px] font-bold rounded-lg transition-colors bg-orange-600 hover:bg-orange-500">Review stop — loss {signedDollar(-lossDollars)}</button>
+        <button onClick={() => setOpen(false)} className={`px-3 text-[10px] rounded-lg border ${th.borderLight} ${th.textFaint}`}>Cancel</button>
+      </div>}
+      {result && !result.startsWith('✓') && <p className="mt-2 text-[10px] text-red-400">{result}</p>}
+    </div>}
+    {result && result.startsWith('✓') && <p className="mt-1 text-[9px] text-emerald-400">{result}</p>}
   </div>;
 }
 
@@ -7138,7 +7185,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
           {/* Header */}
           <div className="flex items-center justify-between mb-3">
             <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>
-              {needsOco ? 'Set Stop Loss — OCO' : 'Set Stop Loss'}
+              {stopDialogVerb(pos.stopLossClassification)} Stop{needsOco ? ' — OCO' : ''}
             </p>
             <span className={`text-[9px] font-bold ${th.textFaint}`}>{pos.symbol} {pos.strategy}</span>
           </div>
@@ -7248,7 +7295,8 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                 step={CREDIT_STOP_PCT_STEP}
                 minLabel={`${CREDIT_STOP_PCT_MIN}% (${(CREDIT_STOP_PCT_MIN / 100).toFixed(1)}×)`}
                 maxLabel={`${CREDIT_STOP_PCT_MAX}% (${(CREDIT_STOP_PCT_MAX / 100).toFixed(1)}×)`}
-                description={stopPctOfCredit != null ? describeCreditStopPct(stopPctOfCredit) : 'Drag to choose a stop'}
+                customLabel={stopPctOfCredit != null && !isCreditStopPctInSliderRange(stopPctOfCredit) ? CREDIT_STOP_CUSTOM_LABEL : undefined}
+                description={stopParsed > 0 ? describeCreditStopReadout(stopParsed, stopPctOfCredit, stopOutcomePnlDollars) : 'Drag to choose a stop'}
                 onChange={pct => {
                   setStopPrice(creditStopTriggerFromPct(creditPerContract, pct).toFixed(2));
                   // Same provenance as typing a ×credit multiple: an explicit
@@ -7258,11 +7306,6 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                   setProfitProtectionStage(null);
                 }}
               />
-            )}
-            {!stopError && stopParsed > 0 && (
-              <p className="mt-1 text-[11px] font-bold text-orange-400">
-                Trigger ${stopParsed.toFixed(2)} · {protectiveStopOutcomeLabel(stopOutcomePnlDollars)} if stop fills
-              </p>
             )}
             {stopError && <p className="mt-1 text-[10px] text-red-400">{stopError}</p>}
             {!stopError && stopParsed > 0 && stopProximityWarning(stopParsed, effectiveLiveDisplay) && (
@@ -7451,7 +7494,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
               <p className="text-[10px] text-orange-300 font-bold">Confirm order</p>
               {stopPctOfCredit != null && (
                 <p className="text-[11px] font-bold text-orange-200">
-                  Selected: {describeCreditStopPct(stopPctOfCredit)}
+                  Selected: {describeCreditStopReadout(stopParsed, stopPctOfCredit, stopOutcomePnlDollars)}
                 </p>
               )}
               <p className="text-[10px] text-orange-300">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
-import { buildCapitalViewModel, buildMoneynessMovementViewModel, buildMoneynessViewModel, comparisonTone, directionalMovementTone, stopPresentation } from '../model/presentation';
+import { buildCapitalViewModel, buildMoneynessMovementViewModel, buildMoneynessViewModel, comparisonTone, directionalMovementTone, stopPresentation, stopPresentationForPosition } from '../model/presentation';
 
 const leg = (optionType: 'P' | 'C', strikePrice: number, direction: 'Long' | 'Short'): PositionLeg => ({ symbol: 'X', optionType, strikePrice, direction, quantity: 1, avgOpenPrice: 1, currentPrice: 1 , currentDelta: null});
 
@@ -51,5 +51,13 @@ describe('position analysis presentation', () => {
     expect(stopPresentation('TOO_TIGHT').action).toBe('Verify/Adjust');
     expect(stopPresentation('UNKNOWN_PROVENANCE').action).toBe('Verify');
     expect(stopPresentation('INVALID').action).toBe('Repair Stop');
+  });
+
+  it('STOP-DIALOG-UNIFY-0001: an eligible long call with no matched stop reads "No stop", not "Unsupported"', () => {
+    const longCall = { stopLossClassification: 'UNSUPPORTED', entryPriceEffect: 'Debit', entryEconomicsComplete: true, entryCredit: 2000, quantity: 1, identity: { structureType: 'NAKED' }, structureAmbiguous: false, legs: [{ direction: 'Long', optionType: 'C' }], pairedShortCallKey: null, dte: 365, stopAssessment: { matchedOrderId: null } } as unknown as Position;
+    expect(stopPresentationForPosition(longCall).label).toBe('No stop');
+    expect(stopPresentationForPosition({ ...longCall, stopAssessment: { matchedOrderId: '123' } } as unknown as Position).label).toBe('Unsupported');
+    expect(stopPresentationForPosition({ ...longCall, legs: [{ direction: 'Long', optionType: 'P' }] } as unknown as Position).label).toBe('Unsupported');
+    expect(stopPresentationForPosition({ ...longCall, stopLossClassification: 'TOO_TIGHT' } as unknown as Position).label).toBe('Too tight');
   });
 });

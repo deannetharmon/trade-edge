@@ -13,6 +13,7 @@
 //   percent of the entry debit. A long option cannot lose more than 100%, and
 //   a 100% stop would have a $0 trigger, so the range stops short of it.
 
+import { protectiveStopOutcomeLabel, signedDollar } from './positionManagementPresentation';
 import {
   DEFAULT_ENTRY_STOP_MULTIPLE,
   MAX_EXPLICIT_CREDIT_STOP_MULTIPLE,
@@ -54,11 +55,24 @@ export function isCreditStopPctInSliderRange(pct: number): boolean {
   return Number.isFinite(pct) && pct >= CREDIT_STOP_PCT_MIN && pct <= CREDIT_STOP_PCT_MAX;
 }
 
-/** One-line plain-language description, e.g. "Stop at 200% of credit (2.0×) · loss = 100% of credit". */
-export function describeCreditStopPct(pctOfCredit: number): string {
-  const multiple = (pctOfCredit / 100).toFixed(1);
-  const lossPct = Math.round(pctOfCredit - 100);
-  return `Stop at ${Math.round(pctOfCredit)}% of credit (${multiple}×) · loss = ${lossPct}% of credit`;
+/** Custom-stop caption shown when the stop sits outside the slider's range. */
+export const CREDIT_STOP_CUSTOM_LABEL = `Custom stop — outside the ${CREDIT_STOP_PCT_MIN}–${CREDIT_STOP_PCT_MAX}% slider range`;
+
+/**
+ * One readout for every stop, dollars first: "Stop $4.02 · loss -$201.00 (100% of credit)".
+ * `pnlDollars` is the signed result if the stop fills (negative = loss).
+ */
+export function describeCreditStopReadout(triggerPrice: number, pctOfCredit: number | null, pnlDollars: number): string {
+  const pct = pctOfCredit != null ? ` (${Math.round(pctOfCredit)}% of credit)` : '';
+  return `Stop $${triggerPrice.toFixed(2)} · ${protectiveStopOutcomeLabel(pnlDollars)}${pct}`;
+}
+
+/** Add / Edit / Adjust / Review, matching the card's button, for the dialog title. */
+export function stopDialogVerb(classification: string | null | undefined): 'Add' | 'Edit' | 'Adjust' | 'Review' {
+  if (classification === 'NO_STOP') return 'Add';
+  if (classification === 'ALIGNED') return 'Edit';
+  if (classification === 'TOO_LOOSE') return 'Adjust';
+  return 'Review';
 }
 
 // ── Debit positions ──────────────────────────────────────────────────────
@@ -67,7 +81,12 @@ export function isDebitStopLossPctValid(pct: number): boolean {
   return Number.isFinite(pct) && pct >= DEBIT_STOP_LOSS_PCT_MIN && pct <= DEBIT_STOP_LOSS_PCT_MAX;
 }
 
-/** One-line plain-language description, e.g. "Max loss 50% of entry debit · stop $10.00". */
-export function describeDebitStopLossPct(maxLossPct: number, triggerPrice: number): string {
-  return `Max loss ${Math.round(maxLossPct)}% of entry debit · stop $${triggerPrice.toFixed(2)}`;
+/** Dollar loss if a debit stop fills at the trigger. */
+export function debitStopLossDollars(entryDebitPerContract: number, maxLossPct: number, quantity: number): number {
+  return Number(((entryDebitPerContract * maxLossPct) / 100 * quantity * 100).toFixed(2));
+}
+
+/** Same shape as the credit readout: "Stop $10.65 · loss -$1065.00 (50% of entry debit)". */
+export function describeDebitStopReadout(triggerPrice: number, maxLossPct: number, lossDollars: number): string {
+  return `Stop $${triggerPrice.toFixed(2)} · loss ${signedDollar(-Math.abs(lossDollars))} (${Math.round(maxLossPct)}% of entry debit)`;
 }

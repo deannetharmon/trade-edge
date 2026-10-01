@@ -19,9 +19,11 @@ interface StopPctSliderProps {
   accent: 'teal' | 'orange';
   minLabel?: string;
   maxLabel?: string;
+  /** Set when the value is outside [min, max]: greys the thumb and says so instead of pretending. */
+  customLabel?: string;
 }
 
-export function StopPctSlider({ value, min, max, step, onChange, description, ariaLabel, accent, minLabel, maxLabel }: StopPctSliderProps) {
+export function StopPctSlider({ value, min, max, step, onChange, description, ariaLabel, accent, minLabel, maxLabel, customLabel }: StopPctSliderProps) {
   const thumbValue = Math.min(Math.max(Number.isFinite(value) ? value : min, min), max);
   const accentText = accent === 'teal' ? 'text-teal-300' : 'text-orange-300';
   const accentColor = accent === 'teal' ? '#2dd4bf' : '#fb923c';
@@ -35,13 +37,14 @@ export function StopPctSlider({ value, min, max, step, onChange, description, ar
         step={step}
         value={thumbValue}
         onChange={e => onChange(Number(e.target.value))}
-        className="w-full cursor-pointer"
+        className={`w-full cursor-pointer ${customLabel ? 'opacity-40' : ''}`}
         style={{ accentColor }}
       />
       <div className="flex justify-between text-[9px] text-slate-500">
         <span>{minLabel ?? `${min}%`}</span>
         <span>{maxLabel ?? `${max}%`}</span>
       </div>
+      {customLabel && <p className="mt-0.5 text-[10px] font-semibold text-amber-300">{customLabel}</p>}
       <p className={`mt-0.5 text-[10px] font-bold ${accentText}`}>{description}</p>
     </div>
   );

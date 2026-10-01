@@ -1,4 +1,5 @@
 import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
+import { evaluateStandaloneLeapsStopEligibility } from '@/lib/portfolio/standaloneLeapsStop';
 
 export type SemanticTone = 'positive' | 'negative' | 'warning' | 'informational' | 'neutral';
 export type MoneynessState = 'OTM' | 'ATM' | 'ITM';
@@ -104,4 +105,16 @@ export function stopPresentation(
     case 'NOT_EVALUATED': return { label: 'Not evaluated', tone: 'neutral', action: 'Retry Stop Check' };
     case 'UNSUPPORTED': return { label: 'Unsupported', tone: 'neutral', action: 'Stop Workflow Unavailable' };
   }
+}
+
+// STOP-DIALOG-UNIFY-0001: an eligible standalone long call is classified
+// UNSUPPORTED by the evidence engine (observation only), but the app CAN set a
+// stop on it. When no working stop order was matched, say "No stop" instead of
+// "Unsupported" so the card agrees with the Add Stop button beside it.
+export function stopPresentationForPosition(p: Position, cspOptedOut = false): ReturnType<typeof stopPresentation> {
+  const canStopHere = p.stopLossClassification === 'UNSUPPORTED'
+    && p.entryPriceEffect === 'Debit'
+    && evaluateStandaloneLeapsStopEligibility(p) === 'ELIGIBLE'
+    && p.stopAssessment?.matchedOrderId == null;
+  return stopPresentation(canStopHere ? 'NO_STOP' : p.stopLossClassification, cspOptedOut);
 }

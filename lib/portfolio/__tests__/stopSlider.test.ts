@@ -5,7 +5,7 @@ import {
   CREDIT_STOP_PCT_DEFAULT, CREDIT_STOP_PCT_MAX, CREDIT_STOP_PCT_MIN,
   DEBIT_STOP_LOSS_PCT_DEFAULT, DEBIT_STOP_LOSS_PCT_MAX, DEBIT_STOP_LOSS_PCT_MIN,
   clampSliderValue, creditStopPctFromTrigger, creditStopTriggerFromPct,
-  describeCreditStopPct, describeDebitStopLossPct, isCreditStopPctInSliderRange, isDebitStopLossPctValid,
+  CREDIT_STOP_CUSTOM_LABEL, debitStopLossDollars, describeCreditStopReadout, describeDebitStopReadout, isCreditStopPctInSliderRange, isDebitStopLossPctValid, stopDialogVerb,
 } from '../stopSlider';
 import { classifyStopLossPolicy, buildOriginalCreditDefaultPolicy } from '../stopLossPolicy';
 
@@ -50,10 +50,13 @@ describe('credit stop conversions', () => {
     expect(isCreditStopPctInSliderRange(300)).toBe(true);
     expect(isCreditStopPctInSliderRange(301)).toBe(false);
   });
-  it('describes the stop in plain language', () => {
-    expect(describeCreditStopPct(200)).toBe('Stop at 200% of credit (2.0×) · loss = 100% of credit');
-    expect(describeCreditStopPct(150)).toBe('Stop at 150% of credit (1.5×) · loss = 50% of credit');
-    expect(describeCreditStopPct(300)).toBe('Stop at 300% of credit (3.0×) · loss = 200% of credit');
+  it('reads out price, dollars, then percent', () => {
+    expect(describeCreditStopReadout(4.02, 200, -201)).toBe('Stop $4.02 · loss -$201.00 (200% of credit)');
+    expect(describeCreditStopReadout(2.52, 125, -51)).toBe('Stop $2.52 · loss -$51.00 (125% of credit)');
+    expect(describeCreditStopReadout(1.5, null, 40)).toBe('Stop $1.50 · protected profit +$40.00');
+  });
+  it('labels a stop outside the slider range as custom', () => {
+    expect(CREDIT_STOP_CUSTOM_LABEL).toBe('Custom stop — outside the 150–300% slider range');
   });
 });
 
@@ -65,8 +68,20 @@ describe('debit stop validation', () => {
     expect(isDebitStopLossPctValid(100)).toBe(false);
     expect(isDebitStopLossPctValid(NaN)).toBe(false);
   });
-  it('describes the stop in plain language', () => {
-    expect(describeDebitStopLossPct(50, 10)).toBe('Max loss 50% of entry debit · stop $10.00');
+  it('computes the dollar loss and reads it out like the credit stop', () => {
+    expect(debitStopLossDollars(21.3, 50, 1)).toBe(1065);
+    expect(debitStopLossDollars(21.3, 50, 2)).toBe(2130);
+    expect(describeDebitStopReadout(10.65, 50, 1065)).toBe('Stop $10.65 · loss -$1065.00 (50% of entry debit)');
+  });
+});
+
+describe('stopDialogVerb', () => {
+  it('matches the card button', () => {
+    expect(stopDialogVerb('NO_STOP')).toBe('Add');
+    expect(stopDialogVerb('ALIGNED')).toBe('Edit');
+    expect(stopDialogVerb('TOO_LOOSE')).toBe('Adjust');
+    expect(stopDialogVerb('TOO_TIGHT')).toBe('Review');
+    expect(stopDialogVerb(undefined)).toBe('Review');
   });
 });
 
