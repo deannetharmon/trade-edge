@@ -3,16 +3,14 @@
 import type { TrendResult } from './types';
 import { normalizeTickerToken } from './scan-utils';
 import { YAHOO_INDEX_CHART_MAP } from './constants';
+import { fetchDailyBars } from './dailyBarsMemo';
 
 export async function getTrend(symbol: string, isIndexOrEtf?: boolean): Promise<TrendResult> {
   const cleanSymbol = normalizeTickerToken(symbol) ?? symbol.toUpperCase();
   const chartSymbol = YAHOO_INDEX_CHART_MAP[cleanSymbol] ?? cleanSymbol;
-  const res = await fetch(`/api/chart?symbol=${encodeURIComponent(chartSymbol)}`, { cache: 'no-store' });
-
-  if (!res.ok) throw new Error(`Yahoo chart fetch failed for ${cleanSymbol} (${res.status})`);
-
-  const data = await res.json();
-  const bars: { c: number }[] = data?.bars ?? [];
+  // RSI-ENTRY-0001 A1b: same request as before, now shared through a 60 s per-symbol memo so the RSI entry gate
+  // reads these bars instead of fetching them again. Error text and everything below this line are unchanged.
+  const bars = (await fetchDailyBars(chartSymbol, cleanSymbol)) as { c: number }[];
   const closes = bars.map(b => b.c).filter((c): c is number => Number.isFinite(c));
 
   const unknownResult = (reason: string): TrendResult => ({
