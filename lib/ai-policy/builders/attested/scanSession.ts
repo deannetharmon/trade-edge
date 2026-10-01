@@ -16,6 +16,7 @@ import { buildAnalysisInput } from '../../inputStore';
 import { CANDIDATE_FIELDS, MAX_CANDIDATE_ROWS, MAX_OUTCOME_ROWS, SCAN_REGISTRY } from '../../registries/scanSession';
 import type { CandidateFieldDef } from '../../registries/scanSession';
 import type { AnalysisInput } from '../../types';
+import { resolveCandidateLeverageAiContext } from './leverageContext';
 
 export const SCAN_SNAPSHOT_SCHEMA_VERSION = 'scan_summary.v1';
 /** ADR-0005: the client's stored DTE may differ from a re-derived one by the wall-clock rounding the scan itself uses. */
@@ -120,6 +121,8 @@ export function buildScanSessionInput(params: BuildScanSessionParams): BuildScan
         if (value !== undefined) row[def.key] = value;
       }
       if (typeof row.symbol !== 'string') throw new Reject('field:symbol');
+      const leverageContext = resolveCandidateLeverageAiContext(row.symbol);
+      if (leverageContext) Object.assign(row, leverageContext);
       return row;
     });
 

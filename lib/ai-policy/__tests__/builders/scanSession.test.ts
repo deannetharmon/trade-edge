@@ -52,6 +52,44 @@ describe('accepts a complete session', () => {
   });
 });
 
+describe('LEV-0001 Gate 9 leverage context', () => {
+  it('adds server-derived issuer metadata for a catalog-confirmed leveraged product', () => {
+    const session = makeSession({ symbols: ['NVDU'], withCandidates: ['NVDU'] });
+    const payload = must(build(session)).payload as Payload;
+    expect(payload.candidates[0]).toMatchObject({
+      symbol: 'NVDU',
+      instrumentClassification: 'LEVERAGED_SINGLE_STOCK_ETF_ETP',
+      economicUnderlying: 'NVDA',
+      signedLeverageMultiplier: 2,
+      resetFrequency: 'DAILY',
+      metadataConfidence: 'COMPLETE',
+      leverageMetadataComplete: true,
+      pathRiskState: 'DAILY_RESET_PATH_DEPENDENT',
+      tradeRiskNormalizationState: 'NOT_PROVIDED_BY_SCAN_SNAPSHOT',
+    });
+  });
+
+  it('ignores spoofed client leverage fields and uses canonical catalog values', () => {
+    const session = cloneSession(makeSession({ symbols: ['NVDU'], withCandidates: ['NVDU'] }));
+    Object.assign(session.results[0].bestCandidate as object, {
+      economicUnderlying: 'TSLA',
+      signedLeverageMultiplier: 99,
+      resetFrequency: 'MONTHLY',
+      leverageMetadataComplete: false,
+    });
+    const row = (must(build(session)).payload as Payload).candidates[0];
+    expect(row).toMatchObject({ economicUnderlying: 'NVDA', signedLeverageMultiplier: 2, resetFrequency: 'DAILY', leverageMetadataComplete: true });
+    expect(JSON.stringify(row)).not.toContain('TSLA');
+    expect(JSON.stringify(row)).not.toContain('99');
+  });
+
+  it('does not infer leverage for an uncataloged symbol', () => {
+    const payload = must(build(makeSession())).payload as Payload;
+    expect(payload.candidates[0]).not.toHaveProperty('signedLeverageMultiplier');
+    expect(payload.candidates[0]).not.toHaveProperty('economicUnderlying');
+  });
+});
+
 describe('acceptance 1: only registry fields are stored (deep-key test)', () => {
   it('every leaf of every accepted payload matches a registry pattern', () => {
     expect(firstUnregisteredLeaf(must(build(makeSession())).payload, SCAN_REGISTRY)).toBeNull();
