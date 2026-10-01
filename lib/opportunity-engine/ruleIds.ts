@@ -30,6 +30,8 @@ export const OE_RULE_IDS = {
   tickerExposureDisclosed: 'oe_ticker_exposure_disclosed',
   sectorExposureDisclosed: 'oe_sector_exposure_disclosed',
   recommendedTopPick: 'oe_recommended_top_pick',
+  normalizationIncomplete: 'oe_normalization_incomplete',
+  normalizedHardRiskGateFailed: 'oe_normalized_hard_risk_gate_failed',
 } as const;
 
 export type OpportunityRuleId = (typeof OE_RULE_IDS)[keyof typeof OE_RULE_IDS];
