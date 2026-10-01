@@ -48,12 +48,12 @@ export function createBrokerBackedInstrumentMetadataResolver(
 
         return {
           symbol,
-          classification: 'STANDARD_ETF',
+          classification: 'UNKNOWN',
           economicUnderlyingSymbol: symbol,
           resetFrequency: 'UNKNOWN',
           confidence: 'PARTIAL',
           confidenceReasons: [
-            'Broker confirms ETF status, but no validated product metadata source established whether the ETF is standard, leveraged, or inverse.',
+            'Broker confirms ETF status, but no validated product metadata source established whether the ETF is standard, leveraged, or inverse; classification remains unknown.',
           ],
           provenance: { provider: broker.provider, asOf },
         };
