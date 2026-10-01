@@ -20,6 +20,7 @@ import type { OpportunityRecommendation } from '@/lib/opportunity-engine';
 import type { ReviewNarrative } from '@/lib/review-conductor';
 import type { TodaysPrioritiesQueueItem } from '@/lib/todays-priorities-queue';
 import type { PriorityWorkflowState } from '@/features/portfolio/priorities/priorityWorkflowState';
+import type { LeveragedPositionExposureException } from '@/lib/portfolio/leveragedPositionExposure';
 
 // WA-0003: Mission Control's reduced Attention Required summary (CES section
 // 11) -- lead item, open count, and deep link, all derived from the SAME
@@ -160,4 +161,5 @@ export interface BuildMissionControlViewModelInput {
   // is the same honest "nothing completed yet" state loadPriorityWorkflowState()
   // itself returns before its first client read.
   workflowState?: PriorityWorkflowState;
+  leverageExceptions?: LeveragedPositionExposureException[];
 }
