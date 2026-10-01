@@ -226,7 +226,7 @@ import type { StockSellOrder } from '@/lib/portfolio/stockOrderBuilder';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { EquityHoldingsSection, isEquityDisplayEnabled, resolvePositionsWorkspaceState } from '@/components/portfolio-data/EquityHoldingsSection';
 import { PositionsWorkspace, isPositionsWorkspaceV2Enabled } from '@/features/portfolio/positions-workspace/PositionsWorkspace';
-import { DebitStopObservation, STOP_CONTROL_LABELS, StopEvidencePanel } from '@/components/portfolio-data/StopEvidencePanel';
+import { DebitStopObservation, STOP_CLASSIFICATION_COPY, STOP_CONTROL_LABELS, StopEvidencePanel } from '@/components/portfolio-data/StopEvidencePanel';
 import { buildPositionsWorkspaceModel } from '@/features/portfolio/positions-workspace/model/buildPositionsWorkspaceModel';
 import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, type PmccReviewHandoff } from '@/lib/scans/pmccReviewHandoff';
 // PT-0002B: this page now reads the global PortfolioMode and refuses to
@@ -6300,13 +6300,15 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
 }
 
 function PortfolioStopControl({ pos, th, onRetry }: { pos: Position; th: typeof THEMES[Theme]; onRetry: () => void }) {
-  const [reviewing, setReviewing] = useState(false);
   if (pos.entryPriceEffect === 'Debit') return <StandaloneLeapsStopControl pos={pos} th={th} />;
   const classification = pos.stopLossClassification;
   if (classification === 'NOT_EVALUATED') return <div><button type="button" onClick={onRetry} className="rounded border border-slate-500 px-2.5 py-1 text-[9px] font-bold text-slate-300">{STOP_CONTROL_LABELS.NOT_EVALUATED}</button><StopEvidencePanel assessment={pos.stopAssessment} /></div>;
   if (classification === 'UNSUPPORTED') return <div><button type="button" disabled className="cursor-not-allowed rounded border border-slate-700 px-2.5 py-1 text-[9px] font-bold text-slate-500">{STOP_CONTROL_LABELS.UNSUPPORTED}</button><StopEvidencePanel assessment={pos.stopAssessment} /></div>;
   if (classification === 'INVALID' || classification === 'UNKNOWN_PROVENANCE' || classification === 'TOO_TIGHT') {
-    return <div><button type="button" onClick={() => setReviewing(value => !value)} className="rounded border border-amber-600 px-2.5 py-1 text-[9px] font-bold text-amber-300">{STOP_CONTROL_LABELS[classification]}</button>{reviewing && <div className="mt-2"><StopEvidencePanel assessment={pos.stopAssessment} expanded /><div className="mt-2"><SetStopLossButton pos={pos} th={th} /></div></div>}</div>;
+    // STOP-DIALOG-SIMPLIFY-0001: one button straight into the dialog. The reason
+    // it was flagged is one line at the top of the dialog; the full broker
+    // evidence is still there, collapsed, under "Exact prices and details".
+    return <div><SetStopLossButton pos={pos} th={th} /></div>;
   }
   return <div><SetStopLossButton pos={pos} th={th} /><StopEvidencePanel assessment={pos.stopAssessment} /></div>;
 }
@@ -6426,6 +6428,8 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   // the checkbox is controlled; isCsp gates the checkbox's very existence --
   // BPS/BCS/IC positions never see it and their loss-stop stays mandatory.
   const isCsp = resolvePositionStrategyFilterKey(pos) === 'CSP';
+  // STOP-DIALOG-SIMPLIFY-0001: stops the app flagged for review (too tight, unverified, malformed).
+  const isFlaggedStop = pos.stopLossClassification === 'TOO_TIGHT' || pos.stopLossClassification === 'UNKNOWN_PROVENANCE' || pos.stopLossClassification === 'INVALID';
   const [cspOptOut, setCspOptOutState] = useState(() => isCsp && isCspLossStopOptedOut(pos.key));
 
   // Modal position — fixed + viewport-aware, computed from the trigger
@@ -7197,6 +7201,16 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
             <p className="text-[9px] text-yellow-400 mb-2">⚠ {livePriceError}</p>
           )}
 
+          {isFlaggedStop && (
+            <div className="mb-3 p-2.5 rounded-lg border border-amber-600/50 bg-amber-500/5">
+              <p className="text-[10px] text-amber-300 leading-relaxed">
+                <span className="font-bold">⚠ {STOP_CLASSIFICATION_COPY[pos.stopLossClassification]}</span>
+                {pos.stopAssessment?.derivedAssessment.actualTrigger != null && ` Working stop: $${pos.stopAssessment.derivedAssessment.actualTrigger.toFixed(2)}.`}
+                {' '}Choose a new stop below to replace it.
+              </p>
+            </div>
+          )}
+
           {/* POSITIONS-0004: advisory only. Applying it merely fills the
               reviewed OCO/stop form below; the existing confirmation and
               broker safety gate remain mandatory. */}
@@ -7421,6 +7435,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                     </p>
                   )}
                 </div>
+                {isFlaggedStop && <StopEvidencePanel assessment={pos.stopAssessment} />}
               </div>
             )}
           </div>
