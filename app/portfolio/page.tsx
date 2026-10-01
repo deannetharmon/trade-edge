@@ -6320,6 +6320,7 @@ function StandaloneLeapsStopControl({ pos, th }: { pos: Position; th: typeof THE
   const [choice, setChoice] = useState<StandaloneLeapsStopLossPct>(DEBIT_STOP_LOSS_PCT_DEFAULT);
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const portfolioMode = usePortfolioMode();
@@ -6375,7 +6376,7 @@ function StandaloneLeapsStopControl({ pos, th }: { pos: Position; th: typeof THE
       className={`text-[9px] px-2.5 py-1 border rounded font-bold transition-colors ${open ? 'border-orange-500 text-orange-400 bg-orange-500/10' : 'border-red-700 text-red-400 hover:border-orange-500 hover:text-orange-400'}`}>Add Stop</button>
     {open && <div className={`fixed z-[9999] ${th.sidebar} border ${th.border} rounded-xl shadow-2xl p-4 w-96 overflow-y-auto`} style={{ top: modalPos?.top, bottom: modalPos?.bottom, left: modalPos?.left ?? 0, maxHeight: modalPos?.maxHeight ?? '80vh', visibility: modalPos ? 'visible' : 'hidden' }} onClick={e => e.stopPropagation()}>
       <div className="flex items-center justify-between mb-3">
-        <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>Add Stop</p>
+        <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>{stopDialogVerb('NO_STOP')} Stop</p>
         <span className={`text-[9px] font-bold ${th.textFaint}`}>{pos.symbol} {pos.strategy}</span>
       </div>
       <div className={`flex items-center px-3 py-2 rounded-lg border ${th.borderLight} mb-3`}>
@@ -6385,6 +6386,25 @@ function StandaloneLeapsStopControl({ pos, th }: { pos: Position; th: typeof THE
         <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>Stop loss % (of entry debit ${debit.toFixed(2)})</p>
         <StopPctSlider accent="orange" ariaLabel="Maximum loss as a percent of entry debit" value={choice} min={DEBIT_STOP_LOSS_PCT_MIN} max={DEBIT_STOP_LOSS_PCT_MAX} step={DEBIT_STOP_LOSS_PCT_STEP} onChange={value => { setChoice(value); setConfirming(false); }} description={readout} />
       </div>
+      {/* Same two-row layout as the credit dialog. Long options have no approved profit-target rule yet, so the row is shown but off. */}
+      <div className={`px-3 py-2 rounded-lg border ${th.borderLight} mb-3 opacity-60`}>
+        <div className="flex items-center justify-between mb-1">
+          <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>Profit target</p>
+          <label className={`flex items-center gap-1 text-[9px] ${th.textFaint}`}><input type="checkbox" checked={false} disabled readOnly /> Include</label>
+        </div>
+        <p className={`text-[10px] ${th.textFaint}`}>Profit targets for long options are not available yet.</p>
+      </div>
+      <div className="mb-3">
+        <button type="button" onClick={() => setDetailsOpen(value => !value)} aria-expanded={detailsOpen} className={`text-[10px] ${th.textFaint} hover:text-orange-400 transition-colors`}>
+          {detailsOpen ? '▾' : '▸'} Exact prices and details
+        </button>
+        {detailsOpen && (
+          <div className={`mt-2 space-y-1 text-[10px] ${th.textFaint}`}>
+            <p>Entry debit ${debit.toFixed(2)} per contract · stop trigger ${proposal.triggerPrice.toFixed(2)} · Stop Limit GTC</p>
+            <p>If the stop fills at the trigger: {signedDollar(-lossDollars)} on {pos.quantity} contract{pos.quantity === 1 ? '' : 's'}</p>
+          </div>
+        )}
+      </div>
       {confirming ? <div className="mb-3 p-3 rounded-lg border border-orange-600/50 bg-orange-500/5 space-y-2">
         <p className="text-[10px] text-orange-300 font-bold">Confirm order</p>
         <p className="text-[11px] font-bold text-orange-200">Selected: {readout}</p>
@@ -6392,13 +6412,11 @@ function StandaloneLeapsStopControl({ pos, th }: { pos: Position; th: typeof THE
         <p className={`text-[9px] ${th.textFaint}`}>A fresh executable quote and the existing order-safety gate are required before submission.</p>
         <div className="flex gap-2 pt-1">
           <button disabled={loading} onClick={submit} className="flex-1 py-2 text-white text-[10px] font-bold rounded-lg transition-colors disabled:opacity-50 bg-orange-600 hover:bg-orange-500">{loading ? 'Submitting…' : 'Confirm & Submit'}</button>
-          <button onClick={() => setConfirming(false)} className={`px-3 text-[10px] rounded-lg border ${th.borderLight} ${th.textFaint}`}>Back</button>
+          <button onClick={() => setConfirming(false)} disabled={loading} className={`px-4 py-2 border ${th.border} ${th.textFaint} rounded-lg text-[10px] hover:border-white/30 transition-colors disabled:opacity-50`}>Back</button>
         </div>
-      </div> : <div className="flex gap-2">
-        <button onClick={() => setConfirming(true)} className="flex-1 py-2 text-white text-[10px] font-bold rounded-lg transition-colors bg-orange-600 hover:bg-orange-500">Review stop — loss {signedDollar(-lossDollars)}</button>
-        <button onClick={() => setOpen(false)} className={`px-3 text-[10px] rounded-lg border ${th.borderLight} ${th.textFaint}`}>Cancel</button>
-      </div>}
-      {result && !result.startsWith('✓') && <p className="mt-2 text-[10px] text-red-400">{result}</p>}
+      </div> : <button onClick={() => setConfirming(true)} className="w-full py-2 text-white text-[10px] font-bold rounded-lg transition-colors bg-orange-600 hover:bg-orange-500">Review Stop — loss {signedDollar(-lossDollars)}</button>}
+      {result && !result.startsWith('✓') && <p className="text-[9px] text-red-400 mt-2 leading-relaxed whitespace-pre-line">{result}</p>}
+      <button onClick={() => { setOpen(false); setConfirming(false); }} className={`w-full mt-2 text-[9px] ${th.textFaint} text-center`}>Cancel</button>
     </div>}
     {result && result.startsWith('✓') && <p className="mt-1 text-[9px] text-emerald-400">{result}</p>}
   </div>;
