@@ -373,7 +373,7 @@ describe('BestOpportunitiesPanel', () => {
     })]} th={THEMES.dark} />);
 
     expect(screen.getByTestId('leveraged-exposure-summary')).toHaveTextContent('NVDA');
-    expect(screen.getByTestId('leveraged-exposure-summary')).toHaveTextContent('~$16,000');
+    expect(screen.getByTestId('leveraged-exposure-summary')).toHaveTextContent('~16,000');
     expect(screen.getByTestId('leveraged-exposure-summary')).toHaveTextContent('#1');
     expect(screen.getByText(/first-order sizing approximation/i)).toBeInTheDocument();
   });
