@@ -56,6 +56,9 @@ function level2Href(item: TodaysPrioritiesQueueItem): string {
   if (item.kind === 'covered_call_opportunity') {
     return `?tab=positions&focus=${encodeURIComponent(item.coveredCallOpportunity!.key)}`;
   }
+  if (item.kind === 'leverage_exception') {
+    return item.subjectId ? `?tab=positions&focus=${encodeURIComponent(item.subjectId)}` : '?tab=positions';
+  }
   // kind === 'attention'
   if (item.subjectId) {
     return `?tab=positions&focus=${encodeURIComponent(item.subjectId)}`;
@@ -66,6 +69,7 @@ function level2Href(item: TodaysPrioritiesQueueItem): string {
 function level2Label(item: TodaysPrioritiesQueueItem): string {
   if (item.kind === 'needs_follow_up') return 'Open in Decision History →';
   if (item.kind === 'covered_call_opportunity') return 'Open Position →';
+  if (item.kind === 'leverage_exception') return item.subjectId ? 'Open Position →' : 'Open Positions →';
   if (item.subjectId) return 'Open Position →';
   return 'Open Positions →';
 }
@@ -100,6 +104,13 @@ function QueueItemRow({
         <div className={`rounded-xl border ${th.border} ${th.card} p-3`}>
           <CoveredCallOpportunityRow opp={item.coveredCallOpportunity} th={th} />
           <p className={`mt-2 text-[10px] ${th.textFaint}`}>{item.detail}</p>
+        </div>
+      )}
+      {item.kind === 'leverage_exception' && item.leverageException && (
+        <div className="rounded-xl border border-amber-700 bg-amber-500/5 p-3">
+          <p className={`text-[11px] font-semibold ${th.text}`}>{item.headline}</p>
+          <p className={`mt-1 text-[10px] ${th.textFaint}`}>{item.detail}</p>
+          <span className="mt-2 inline-flex text-[9px] font-bold text-amber-400">Leverage Risk Evidence Incomplete</span>
         </div>
       )}
       {item.kind === 'needs_follow_up' && item.decisionReview && (
