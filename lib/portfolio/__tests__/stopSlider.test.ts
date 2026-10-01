@@ -5,7 +5,7 @@ import {
   CREDIT_STOP_PCT_DEFAULT, CREDIT_STOP_PCT_MAX, CREDIT_STOP_PCT_MIN,
   DEBIT_STOP_LOSS_PCT_DEFAULT, DEBIT_STOP_LOSS_PCT_MAX, DEBIT_STOP_LOSS_PCT_MIN,
   clampSliderValue, creditStopPctFromTrigger, creditStopTriggerFromPct,
-  CREDIT_STOP_CUSTOM_LABEL, debitStopLossDollars, describeCreditStopReadout, describeDebitStopReadout, isCreditStopPctInSliderRange, isDebitStopLossPctValid, stopDialogVerb,
+  CREDIT_STOP_CUSTOM_LABEL, debitStopLossDollars, describeCreditStopReadout, describeDebitStopReadout, isCreditStopPctInSliderRange, ocoSplitPercent, isDebitStopLossPctValid, stopDialogVerb,
 } from '../stopSlider';
 import { classifyStopLossPolicy, buildOriginalCreditDefaultPolicy } from '../stopLossPolicy';
 
@@ -91,5 +91,19 @@ describe('clampSliderValue', () => {
     expect(clampSliderValue(400, 150, 300)).toBe(300);
     expect(clampSliderValue(200, 150, 300)).toBe(200);
     expect(clampSliderValue(NaN, 150, 300)).toBe(150);
+  });
+});
+
+describe('ocoSplitPercent', () => {
+  it('moves with the profit vs stop amounts', () => {
+    expect(ocoSplitPercent(76, -100)).toBe(43);
+    expect(ocoSplitPercent(76, -51)).toBe(60);
+    expect(ocoSplitPercent(100, -100)).toBe(50);
+  });
+  it('clamps and handles empty values', () => {
+    expect(ocoSplitPercent(1, -1000)).toBe(15);
+    expect(ocoSplitPercent(1000, -1)).toBe(85);
+    expect(ocoSplitPercent(0, 0)).toBe(50);
+    expect(ocoSplitPercent(NaN, -5)).toBe(50);
   });
 });

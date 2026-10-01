@@ -90,7 +90,7 @@ import {
 } from '@/lib/portfolio/stopLossPolicy';
 import { evaluateStandaloneLeapsStopEligibility, standaloneLeapsStopProposal, type StandaloneLeapsStopLossPct } from '@/lib/portfolio/standaloneLeapsStop';
 import { StopPctSlider } from '@/components/StopPctSlider';
-import { CREDIT_STOP_PCT_DEFAULT, CREDIT_STOP_PCT_MAX, CREDIT_STOP_PCT_MIN, CREDIT_STOP_PCT_STEP, DEBIT_STOP_LOSS_PCT_DEFAULT, DEBIT_STOP_LOSS_PCT_MAX, DEBIT_STOP_LOSS_PCT_MIN, DEBIT_STOP_LOSS_PCT_STEP, creditStopPctFromTrigger, creditStopTriggerFromPct, CREDIT_STOP_CUSTOM_LABEL, debitStopLossDollars, describeCreditStopReadout, describeDebitStopReadout, isCreditStopPctInSliderRange, stopDialogVerb } from '@/lib/portfolio/stopSlider';
+import { CREDIT_STOP_PCT_DEFAULT, CREDIT_STOP_PCT_MAX, CREDIT_STOP_PCT_MIN, CREDIT_STOP_PCT_STEP, DEBIT_STOP_LOSS_PCT_DEFAULT, DEBIT_STOP_LOSS_PCT_MAX, DEBIT_STOP_LOSS_PCT_MIN, DEBIT_STOP_LOSS_PCT_STEP, creditStopPctFromTrigger, creditStopTriggerFromPct, CREDIT_STOP_CUSTOM_LABEL, debitStopLossDollars, describeCreditStopReadout, describeDebitStopReadout, isCreditStopPctInSliderRange, ocoSplitPercent, stopDialogVerb } from '@/lib/portfolio/stopSlider';
 import {
   evaluateProfitProtectingStop,
   PROFIT_PROTECTING_STOP_POLICY_VERSION,
@@ -6655,8 +6655,11 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
         // is preserved untouched (Ian's constraint), not blindly rewritten.
         stopRationale: alignRationaleMultiplier(s.stopRationale, deterministicStopMultiple),
       });
-      setGtcPrice(safeGtc.toFixed(2));
-      setStopPrice(safeStop.toFixed(2));
+      // STOP-AI-USE-0001: do NOT write the suggestion into the form here. It used
+      // to, which made the "Use" button a silent no-op (the values were already
+      // in) and left the stop's provenance as DEFAULT while the price was the
+      // AI's. The suggestion now only applies when the trader clicks Use, which
+      // records AI_SUGGESTION / CURRENT_SPREAD_VALUE correctly.
     } catch (e: any) {
       if (!mountedRef.current) return;
       setSuggestionError(e.message ?? 'AI suggestion failed');
@@ -6802,6 +6805,11 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
       console.warn('Stop policy persist failed (non-blocking):', e);
     }
   };
+
+  // True once the suggestion's own prices are what is in the form.
+  const suggestionApplied = suggestion != null && stopPriceSource === 'AI_SUGGESTION'
+    && stopPrice === suggestion.stopPrice.toFixed(2)
+    && (!needsOco || gtcPrice === suggestion.gtcPrice.toFixed(2));
 
   const applySuggestion = () => {
     if (!suggestion) return;
@@ -7351,8 +7359,8 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
               </button>
               <div className="flex shrink-0 items-center gap-2">
                 {suggestion && !suggestionLoading && (
-                  <button onClick={applySuggestion} className="text-[9px] px-2 py-0.5 border border-indigo-600 text-indigo-400 rounded hover:bg-indigo-600/20 transition-colors font-bold">
-                    Use
+                  <button onClick={applySuggestion} disabled={suggestionApplied} className="text-[9px] px-2 py-0.5 border border-indigo-600 text-indigo-400 rounded hover:bg-indigo-600/20 transition-colors font-bold disabled:opacity-60">
+                    {suggestionApplied ? '✓ Applied' : 'Use'}
                   </button>
                 )}
                 {!suggestionLoading && (
@@ -7532,7 +7540,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
               disabled={hasErrors || livePriceLoading}
               onClick={() => setConfirming(true)}
               style={needsOco && !hasErrors && !livePriceLoading
-                ? { background: 'linear-gradient(90deg, #059669 0%, #059669 48%, #ea580c 52%, #ea580c 100%)' }
+                ? { background: `linear-gradient(90deg, #059669 0%, #059669 ${ocoSplitPercent(gtcProfitDollars, stopOutcomePnlDollars) - 2}%, #ea580c ${ocoSplitPercent(gtcProfitDollars, stopOutcomePnlDollars) + 2}%, #ea580c 100%)` }
                 : undefined}
               className={`w-full py-2 text-white text-[10px] font-bold rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                 needsOco && !hasErrors && !livePriceLoading ? 'hover:brightness-110' : needsOco ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-orange-600 hover:bg-orange-500'

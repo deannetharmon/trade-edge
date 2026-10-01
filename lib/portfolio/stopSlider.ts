@@ -90,3 +90,15 @@ export function debitStopLossDollars(entryDebitPerContract: number, maxLossPct: 
 export function describeDebitStopReadout(triggerPrice: number, maxLossPct: number, lossDollars: number): string {
   return `Stop $${triggerPrice.toFixed(2)} · loss ${signedDollar(-Math.abs(lossDollars))} (${Math.round(maxLossPct)}% of entry debit)`;
 }
+
+/**
+ * Where the green (profit target) / orange (stop) colors meet on the OCO button,
+ * as a percent from the left: profit's share of profit + |stop result|. Clamped
+ * to 15-85 so neither side disappears. 50 when there is nothing to compare.
+ */
+export function ocoSplitPercent(profitDollars: number, stopResultDollars: number): number {
+  const profit = Math.max(0, profitDollars);
+  const stop = Math.abs(stopResultDollars);
+  if (!Number.isFinite(profit) || !Number.isFinite(stop) || profit + stop <= 0) return 50;
+  return Math.round(Math.min(85, Math.max(15, (profit / (profit + stop)) * 100)));
+}
