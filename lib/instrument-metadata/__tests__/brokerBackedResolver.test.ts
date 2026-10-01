@@ -24,7 +24,7 @@ describe('broker-backed instrument metadata resolver', () => {
     const resolver = createBrokerBackedInstrumentMetadataResolver({ broker: broker('etf') });
     await expect(resolver.resolve('NVDU')).resolves.toMatchObject({
       symbol: 'NVDU',
-      classification: 'STANDARD_ETF',
+      classification: 'UNKNOWN',
       confidence: 'PARTIAL',
       resetFrequency: 'UNKNOWN',
     });
