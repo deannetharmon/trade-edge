@@ -156,6 +156,7 @@ export function buildMissionControlViewModel(input: BuildMissionControlViewModel
   const todaysPrioritiesQueue = buildTodaysPrioritiesQueue({
     dashboard: input.composition.todaysPrioritiesDashboard,
     generatedAt,
+    leverageExceptions: input.leverageExceptions ?? [],
   });
   const partition = partitionTodaysPrioritiesQueue(todaysPrioritiesQueue, input.workflowState ?? {});
   const todaysPriorities: MissionControlTodaysPrioritiesSummary = {
