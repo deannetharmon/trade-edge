@@ -213,6 +213,8 @@ import { buildTodaysPrioritiesQueue } from '@/lib/todays-priorities-queue';
 // new recommendation logic -- see lib/portfolioReview's own module docs and
 // docs/design/PI-0012-Portfolio-Review-Architecture.md.
 import { PositionCompositionCard } from '@/features/portfolio/positions/PositionCompositionCard';
+import { EconomicUnderlyingExposureGroups } from '@/features/portfolio/positions/EconomicUnderlyingExposureGroups';
+import { buildLeveragedPositionExposureGroups } from '@/lib/portfolio/leveragedPositionExposure';
 // PI-0013: Daily Briefing Dashboard -- an orchestration layer over Portfolio
 // Review (above) and Today's Priorities' dashboard. No new score, no new
 // ranking, no new recommendation logic, no AI -- see lib/dailyBriefing's own
@@ -10792,6 +10794,10 @@ export default function PortfolioPage() {
     pendingOrders,
     snapshotDataQuality,
   }), [snapshot, positions, pendingOrders, snapshotDataQuality]);
+  const leveragedPositionExposureGroups = useMemo(
+    () => buildLeveragedPositionExposureGroups(positions),
+    [positions],
+  );
 
 
   // PT-0002B: fail closed at the render boundary. LIVE account
@@ -11068,6 +11074,7 @@ export default function PortfolioPage() {
           owned by Mission Control (/dashboard, MB-0002). */}
       {!positionsWorkspaceV2Enabled && <div className="px-6">
         <PositionCompositionCard review={portfolioReview} loading={loading} th={th} />
+        <EconomicUnderlyingExposureGroups groups={leveragedPositionExposureGroups} th={th} />
       </div>}
 
       {/* WA-0003: Healthy-Monitoring Relocation (CES section 10) --
