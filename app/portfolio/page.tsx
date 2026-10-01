@@ -126,6 +126,7 @@ import {
   canonicalShortLegCreditPerContract,
   type PmccShortLegLike,
 } from '@/lib/portfolio/pmccLegEconomics';
+import { existingStopPromptContext, stopProximityWarning } from '@/lib/portfolio/stopPromptContext';
 import {
   buildStopGtcFlags,
   buildPmccShortLegStopGtcPrompt,
@@ -6177,6 +6178,7 @@ Earnings within expiry: ${isUpcomingEarningsRisk(pos.earningsDate, pos.expDate) 
 CURRENT ORDERS:
 GTC profit-target: ${pos.hasGtc ? 'Yes — at $' + (pos.gtcOrderPrice?.toFixed(2) ?? '?') + '/contract (' + currentGtcPct + '% profit)' : 'None set'}
 Stop loss: ${pos.stopLossStatus}${pos.stopLossPrice ? ' @ $' + pos.stopLossPrice.toFixed(2) + '/contract' : ''}
+${existingStopPromptContext(pos.stopAssessment)}
 
 FLAGS: ${buildStopGtcFlags({
   needsClose: pos.needsClose,
@@ -7263,6 +7265,9 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
               </p>
             )}
             {stopError && <p className="mt-1 text-[10px] text-red-400">{stopError}</p>}
+            {!stopError && stopParsed > 0 && stopProximityWarning(stopParsed, effectiveLiveDisplay) && (
+              <p className="mt-1 text-[10px] font-semibold text-amber-300">⚠ {stopProximityWarning(stopParsed, effectiveLiveDisplay)}</p>
+            )}
           </div>
 
           {/* Profit target: only when an existing GTC is being replaced by an OCO pair */}
