@@ -8,6 +8,8 @@ import { DeferredNumberInput } from './DeferredNumberInput';
 import { CriterionInput } from './scanConfig/CriterionInput';
 import { CriterionPills, type CriterionPill } from './scanConfig/CriterionPills';
 import { LifecycleTag } from './scanConfig/LifecycleTag';
+import { RsiEntryControl } from './scanConfig/RsiEntryControl';
+import { defaultRsiEntrySettings, isRsiEntryValid, type RsiEntrySettings } from '@/lib/indicators/rsiEntrySettings';
 import { ScanReceiptPanel } from './scanConfig/ScanReceiptPanel';
 import {
   CSP_CARD_ORDER, CSP_CARD_TITLE, buildCspReceipt, criteriaForCard,
@@ -27,6 +29,8 @@ export interface CspScanRequest {
   /** Optional lower per-CSP cash ceiling; blank uses verified account funds. */
   capitalLimit?: number | null;
   affordableOnly?: boolean;
+  /** RSI-ENTRY-0001: entry timing for this scan. Absent means Off with the default levels. */
+  rsiEntry?: RsiEntrySettings;
 }
 
 export type CspScanRequestsByMode = Record<CspScanRequest['mode'], CspScanRequest>;
@@ -120,6 +124,7 @@ const toValues = (request: CspScanRequest, mode: CspMode): CspConfigValues => ({
   rankSecondary: request.rankSecondary,
   affordableOnly: request.affordableOnly ?? false,
   capitalLimit: request.capitalLimit ?? null,
+  rsi: request.rsiEntry ?? defaultRsiEntrySettings('CSP'),
 });
 
 const INPUT_CLASS = 'mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white';
@@ -130,12 +135,14 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
   const defaultFor = (mode: CspMode): CspScanRequest => ({
     mode, preset: 'balanced', rules: { ...PRESETS[1].rules }, popMin: null,
     otmMin: null, rocMin: null, rankSecondary: 'none', capitalLimit: null, affordableOnly: false,
+    rsiEntry: defaultRsiEntrySettings('CSP'),
   });
   const normalizeRequest = (request: CspScanRequest, mode: CspMode): CspScanRequest => ({
     ...request,
     mode,
     capitalLimit: request.capitalLimit ?? null,
     affordableOnly: request.affordableOnly ?? false,
+    rsiEntry: request.rsiEntry ?? defaultRsiEntrySettings('CSP'),
   });
   // A caller may still hand in a request from the removed Filter mode (an older
   // cached session). It opens as a Rank draft with the same rules.
@@ -154,7 +161,7 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
 
   const values = useMemo(() => toValues(request, mode), [mode, request]);
   const errors = useMemo(() => cspFieldErrors(values), [values]);
-  const valid = useMemo(() => isCspConfigValid(values), [values]);
+  const valid = useMemo(() => isCspConfigValid(values) && isRsiEntryValid('CSP', values.rsi ?? defaultRsiEntrySettings('CSP')), [values]);
   const receipt = useMemo(() => buildCspReceipt(values), [values]);
 
   const updateDraft = (updater: (current: CspScanRequest) => CspScanRequest) => {
@@ -262,6 +269,8 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
         return (
           <fieldset className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300"><legend className="px-1 text-xs font-bold text-neutral-300">Capital</legend><label className="flex items-center gap-2"><input type="checkbox" checked={request.affordableOnly} onChange={event => updateDraft(prev => ({ ...prev, affordableOnly: event.target.checked }))} />Only show affordable CSPs</label>{request.affordableOnly && <label className="mt-3 flex flex-col gap-1">Cash cap <span className="text-neutral-500">(optional)</span><DeferredNumberInput aria-label="Cash cap per CSP" step="1" value={request.capitalLimit ?? 0} onValueChange={value => updateDraft(prev => ({ ...prev, capitalLimit: value || null }))} className="w-48 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>}<span role="status" aria-live="polite" className="block min-h-0 text-[9px] text-red-400">{errors.capitalLimit ?? ''}</span><p className="mt-2 text-neutral-400">Collateral = strike × 100 × contracts. Blank uses available account cash.</p></fieldset>
         );
+      case 'rsi-entry':
+        return <RsiEntryControl th={th} strategy="CSP" settings={request.rsiEntry ?? defaultRsiEntrySettings('CSP')} onChange={next => updateDraft(prev => ({ ...prev, rsiEntry: next }))} />;
       case 'info':
         return null;
       default:

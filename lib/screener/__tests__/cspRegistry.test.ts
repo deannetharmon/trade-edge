@@ -126,7 +126,7 @@ describe('receipts are built from the registry', () => {
     expect(groups.search.items).toEqual(['30–45 DTE']);
     expect(groups.search.label).toContain('rescan to change');
     expect(groups.gates.items).toEqual(['POP ≥ 70%', 'OTM ≥ 8%', 'ROC ≥ 1.5%', 'IVR ≤ 70%', 'bid/ask tiers (fixed)', 'earnings buffer after expiry: 10 days']);
-    expect(groups.advisory.items).toEqual(['Δ 0.15–0.25 preferred (outside it: not a Best Opportunity)', 'OI 500', 'IVR floor 30%']);
+    expect(groups.advisory.items).toEqual(['Δ 0.15–0.25 preferred (outside it: not a Best Opportunity)', 'OI 500', 'IVR floor 30%', 'RSI timing: Off']);
     expect(groups.capital.items).toEqual(['Affordable only off']);
     expect(groups.order).toBeUndefined();
     expect(groups.adjustable).toBeUndefined();

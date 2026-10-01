@@ -232,6 +232,8 @@ export interface ScreenResult {
   // Undefined for strategies not yet migrated to per-contract results.
   // PMCC and CSP use it to preserve every retained contract/pair identity.
   candidateId?: string;
+  /** RSI-ENTRY-0001: the daily-RSI entry-timing verdict for this symbol (CSP and CC scans run with the gate On only; absent when Off). Data on the row, never a score or qualification input. */
+  rsiEntry?: import('@/lib/indicators/rsiEntryGate').RsiEntryGateResult;
   /** Canonical PMCC pair. When present, PMCC presentation and audit logic
    * must use this structure rather than re-deriving diagonal semantics from
    * the legacy spread-shaped bestCandidate compatibility adapter. */

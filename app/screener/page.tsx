@@ -102,6 +102,8 @@ import { collectCoveredCallCapacityShadow } from '@/lib/portfolio-snapshot/shado
 import { runChecklist } from '@/lib/scans/checklist';
 import { scoreBuffer, scoreCandidate, exploreAllCandidatesForRank, getOtmWarningThreshold, getOiLiquidityLabel } from '@/lib/scans/rank-scoring';
 import { getTrend } from '@/lib/scans/trend';
+import { attachRsiEntry, getRsiEntryGate } from '@/lib/scans/rsiEntryForSymbol';
+import { defaultRsiEntrySettings, rsiEntryParams, type RsiEntrySettings } from '@/lib/indicators/rsiEntrySettings';
 import { useRankedScan } from '@/features/screener/hooks/useRankedScan';
 import { RankedScoreTierSummary } from '@/features/screener/components/RankedScoreTierSummary';
 import { QualificationCounts, ScanProvenanceChip } from '@/features/screener/components/ScanHeaderParts';
@@ -205,6 +207,7 @@ import { PmccScanModal, type PmccScanRequest } from '@/features/screener/compone
 import { LeapsScanModal, type LeapsScanRequest } from '@/features/screener/components/LeapsScanModal';
 import { DeferredNumberInput } from '@/features/screener/components/DeferredNumberInput';
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
+import { RsiEntryChip } from '@/features/screener/components/RsiEntryChip';
 import { evaluateCspIvr } from '@/lib/scans/cspIvrPolicy';
 import { summarizeCspResults } from '@/lib/screener/scanConfig/cspRegistry';
 import { summarizeCcResults } from '@/lib/screener/scanConfig/ccRegistry';
@@ -6059,6 +6062,7 @@ const strategyScores = useMemo(() => {
         {/* Col 2: Badges — fixed width */}
         <div className="w-52 shrink-0 flex items-center gap-1 flex-wrap">
           {qualDerivation && <QualificationBadge derivation={qualDerivation} checks={qualChecks} />}
+          {result.rsiEntry && <RsiEntryChip entry={result.rsiEntry} />}
           {isRankMode && scored && tierLight && (
             <span className={`text-[9px] px-2 py-0.5 border rounded shrink-0 font-bold ${tierLight.color} ${tierLight.border} ${tierLight.bg}`}>
               {disqualifiedHere ? `Score ${scored.score} · not eligible` : `${tierLight.emoji} ${scored.score} — ${tierLight.label}`}
@@ -8932,7 +8936,9 @@ export default function Home() {
   const [ccRules, setCcRules] = useState<CcRulesType>(DEFAULT_CC_RULES);
   // SCREENER-CONFIG-0001B: the rules a covered-call scan ran with, tied to that scan's session. A CC session carries no rule
   // snapshot, so a session restored from cache has none and shows no rules receipt rather than a guess.
-  const [ccReceipt, setCcReceipt] = useState<{ sessionId: string; rules: CcRulesType } | null>(null);
+  const [ccReceipt, setCcReceipt] = useState<{ sessionId: string; rules: CcRulesType; rsiEntry: RsiEntrySettings } | null>(null);
+  // RSI-ENTRY-0001: the covered-call entry timing setting, last used (in memory like the CC rules; Off after a reload).
+  const [ccRsiEntry, setCcRsiEntry] = useState<RsiEntrySettings>(() => defaultRsiEntrySettings('CC'));
   const [ccBypassUniverse, setCcBypassUniverse] = useState(false);
   const [showPmccPairLookup, setShowPmccPairLookup] = useState(false);
   const [leapsResults, setLeapsResults] = useState<Array<{
@@ -8990,6 +8996,7 @@ export default function Home() {
   const defaultCspRequest = (mode: CspScanRequest['mode']): CspScanRequest => ({
     mode, preset: 'balanced', rules: { ...DEFAULT_CSP_RULES },
     popMin: null, otmMin: null, rocMin: null, rankSecondary: 'none', capitalLimit: null, affordableOnly: false,
+    rsiEntry: defaultRsiEntrySettings('CSP'),
   });
   // FILTER-MODE-REMOVAL-0002 left this defaulted to 'filter' when Spreads'
   // equivalent (RunModeModal's lastMode) was coerced away from it -- CSP's
@@ -10528,6 +10535,7 @@ export default function Home() {
         source: 'user', mode: request.mode, preset: request.preset,
         popMin: request.popMin, otmMin: request.otmMin, rocMin: request.rocMin,
         rankSecondary: request.rankSecondary,
+        rsiEntry: request.rsiEntry,
       }),
     });
     const loopSymbols = session.plannedScanSymbols;
@@ -10571,6 +10579,11 @@ export default function Home() {
           ]);
           let trendResult: TrendResult | undefined;
           try { trendResult = await getTrend(symbol, isEtf); } catch {}
+          // RSI-ENTRY-0001: with entry timing On, one verdict per symbol (reads the bars getTrend just fetched; never throws,
+          // a failure is "RSI n/a"). Off: nothing is fetched or attached, so results are exactly as before.
+          const rsiEntry = request.rsiEntry?.on
+            ? await getRsiEntryGate(symbol, 'CSP', new Date(), rsiEntryParams('CSP', request.rsiEntry))
+            : undefined;
           // CSP-WORKFLOW-0001 — one or more ScreenResults per symbol now
           // (one per discovered contract); recordSymbolEvaluated already
           // accepts an array and reconciles candidateCount against its
@@ -10601,9 +10614,10 @@ export default function Home() {
           // explicitly requests the affordable-only view, apply that
           // deliberate filter here; otherwise account eligibility remains a
           // visible decision aid rather than a reason to hide a contract.
+          const resultsWithRsi = attachRsiEntry(results, rsiEntry);
           const displayedResults = request.affordableOnly
-            ? results.filter(result => result.bestCandidate?.cspAccountEligibility === 'ELIGIBLE')
-            : results;
+            ? resultsWithRsi.filter(result => result.bestCandidate?.cspAccountEligibility === 'ELIGIBLE')
+            : resultsWithRsi;
           session = recordSymbolEvaluated(session, symbol, displayedResults);
         } catch (e: any) {
           session = recordSymbolFailed(session, symbol, 'MARKET_DATA_REQUEST_FAILED');
@@ -10721,7 +10735,7 @@ export default function Home() {
     }
   };
 
-  const runCcScan = async (bypassUniverse = false, rules: CcRulesType = ccRules) => {
+  const runCcScan = async (bypassUniverse = false, rules: CcRulesType = ccRules, rsiEntrySetting: RsiEntrySettings = ccRsiEntry) => {
     clearResultsCache();
     setError('');
     setScreenMode('filter');
@@ -10823,7 +10837,7 @@ export default function Home() {
         scopeExclusionReasonCode,
       });
       session = s;
-      setCcReceipt({ sessionId: s.sessionId, rules });
+      setCcReceipt({ sessionId: s.sessionId, rules, rsiEntry: rsiEntrySetting });
       const loopSymbols = s.plannedScanSymbols;
 
       pushStatus('Fetching market metrics...');
@@ -10844,13 +10858,17 @@ export default function Home() {
           ]);
           let trendResult: TrendResult | undefined;
           try { trendResult = await getTrend(symbol, isEtf); } catch {}
+          // RSI-ENTRY-0001: see runCspScan. One verdict per symbol when On; nothing when Off.
+          const rsiEntry = rsiEntrySetting.on
+            ? await getRsiEntryGate(symbol, 'CC', new Date(), rsiEntryParams('CC', rsiEntrySetting))
+            : undefined;
           // capacityReport.bySymbol[symbol] IS already a CoveredCallCapacity --
           // no need to reconstruct it field-by-field from the flattened
           // eligibleHoldings array (that reconstruction was dead weight left
           // over from the old server-route response shape).
           const capacity: CoveredCallCapacity = capacityBySymbolMap[symbol];
-          const result = runCcChecklist(symbol, chainData, price, metrics, rules, capacity, trendResult);
-          s = recordSymbolEvaluated(s, symbol, [result]);
+          const ccChecklistResult = runCcChecklist(symbol, chainData, price, metrics, rules, capacity, trendResult);
+          s = recordSymbolEvaluated(s, symbol, attachRsiEntry([ccChecklistResult], rsiEntry));
         } catch (e: any) {
           s = recordSymbolFailed(s, symbol, 'MARKET_DATA_REQUEST_FAILED');
         }
@@ -11866,7 +11884,7 @@ export default function Home() {
 
               {activeSession?.requestedStrategy === 'cc' && ccReceipt?.sessionId === activeSession.sessionId && (
                 <ActiveCcRules
-                  values={{ rules: ccReceipt.rules }}
+                  values={{ rules: ccReceipt.rules, rsi: ccReceipt.rsiEntry }}
                   counts={summarizeCcResults(results)}
                   onEdit={() => { setCcBypassUniverse(opportunityUniverse.length === 0); setShowCcScanModal(true); void loadCcCapacity(); }}
                 />
@@ -11897,6 +11915,8 @@ export default function Home() {
                       // explicit cash ceiling is never silently discarded.
                       capitalLimit: cspRequestsByMode[s.mode].capitalLimit ?? null,
                       affordableOnly: cspRequestsByMode[s.mode].affordableOnly ?? false,
+                      // Older sessions carry no RSI setting: they ran Off.
+                      rsiEntry: s.rsiEntry ?? defaultRsiEntrySettings('CSP'),
                     };
                     setLastCspMode(s.mode);
                     setCspRequestsByMode(prev => ({ ...prev, [s.mode]: restored }));
@@ -13294,7 +13314,7 @@ export default function Home() {
           hiddenSymbols={ccHiddenSymbols}
           onToggleSymbol={toggleCcSymbol}
           holdingsLoading={ccHoldingsLoading}
-          initial={{ rules: ccRules }}
+          initial={{ rules: ccRules, rsiEntry: ccRsiEntry }}
           onClose={() => {
             setShowCcScanModal(false);
             requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('button[aria-label="FIND CCs"]')?.focus());
@@ -13302,7 +13322,9 @@ export default function Home() {
           onRun={(request) => {
             setShowCcScanModal(false);
             setCcRules(request.rules);
-            void runCcScan(ccBypassUniverse, request.rules);
+            const nextRsiEntry = request.rsiEntry ?? defaultRsiEntrySettings('CC');
+            setCcRsiEntry(nextRsiEntry);
+            void runCcScan(ccBypassUniverse, request.rules, nextRsiEntry);
           }}
         />
       )}

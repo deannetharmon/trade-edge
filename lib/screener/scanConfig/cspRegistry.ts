@@ -28,6 +28,7 @@
 import type { CspRulesType } from '@/lib/scans/constants';
 import type { CspRankSort, CspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
 import { isMarketQualified, isModeQualified, type CspMarketQualification, type CspModeQualification } from '@/lib/scans/cspQualification';
+import { defaultRsiEntrySettings, rsiEntrySummary, type RsiEntryCounts, type RsiEntrySettings } from '@/lib/indicators/rsiEntrySettings';
 import { oiPresets } from './presets';
 import {
   SUMMARY_GROUP_LABEL,
@@ -50,17 +51,20 @@ export interface CspConfigValues {
   rankSecondary: CspRankSort;
   affordableOnly: boolean;
   capitalLimit: number | null;
+  /** RSI-ENTRY-0001: entry timing. Absent on an older session, which is reported as Off. */
+  rsi?: RsiEntrySettings;
 }
 
-export type CspCard = 'search' | 'preference' | 'gates' | 'ordering' | 'advisory' | 'always' | 'capital';
+export type CspCard = 'search' | 'preference' | 'gates' | 'ordering' | 'timing' | 'advisory' | 'always' | 'capital';
 
-export const CSP_CARD_ORDER: readonly CspCard[] = ['search', 'preference', 'gates', 'ordering', 'advisory', 'always', 'capital'];
+export const CSP_CARD_ORDER: readonly CspCard[] = ['search', 'preference', 'gates', 'ordering', 'timing', 'advisory', 'always', 'capital'];
 
 export const CSP_CARD_TITLE: Record<CspCard, string> = {
   search: 'Search range',
   preference: 'Preferred delta band',
   gates: 'Targeted gates',
   ordering: 'Ordering',
+  timing: 'Entry timing (RSI)',
   advisory: 'Open interest',
   always: 'Always applied',
   capital: 'Capital',
@@ -72,6 +76,7 @@ export type CspControl =
   | { kind: 'target'; field: CspTargetField; label: string; ariaLabel: string; title: string; step: string; presets: ScalarPreset[] }
   | { kind: 'secondary-sort'; ariaLabel: string; options: Array<{ value: CspRankSort; label: string }> }
   | { kind: 'capital' }
+  | { kind: 'rsi-entry' }
   | { kind: 'info' };
 
 export interface CspCriterion {
@@ -93,7 +98,7 @@ export interface CspCriterion {
   off: string | null;
   control: CspControl;
   /** Summary text for the receipt, or null when nothing applies (off state, other mode). */
-  summary: (values: CspConfigValues) => string | null;
+  summary: (values: CspConfigValues, counts?: CspResultCounts | null) => string | null;
 }
 
 const ALL: readonly CspReceiptMode[] = ['rank', 'targeted', 'filter'];
@@ -337,6 +342,21 @@ export const CSP_CRITERIA: readonly CspCriterion[] = [
     summary: () => 'earnings buffer after expiry: 10 days',
   },
   {
+    id: 'rsiTiming',
+    label: 'Entry timing (RSI)',
+    unit: 'daily RSI(14)',
+    lifecycle: 'rank',
+    fixed: false,
+    modes: ALL,
+    rescan: true,
+    card: 'timing',
+    summaryGroup: 'advisory',
+    hint: 'When On, only a put whose underlying has turned up off an RSI dip is eligible for Best Opportunities. Every other put stays in the results labelled Wait and can still be traded. No usable RSI counts as Wait.',
+    off: 'Off',
+    control: { kind: 'rsi-entry' },
+    summary: (v, counts) => rsiEntrySummary('CSP', v.rsi ?? defaultRsiEntrySettings('CSP'), counts?.rsi ?? null),
+  },
+  {
     id: 'capital',
     label: 'Affordable only',
     unit: 'USD cash per put',
@@ -380,6 +400,8 @@ export interface CspResultCounts {
   disqualified: number;
   /** Distinct symbols whose IV rank was unavailable, so the IVR cap could not be checked. */
   symbolsIvrUnavailable: number;
+  /** RSI-ENTRY-0001: qualified candidates that passed the entry timing gate, out of those evaluated. Absent when the gate was Off. */
+  rsi?: RsiEntryCounts | null;
 }
 
 export interface CspReceipt {
@@ -394,7 +416,7 @@ export interface CspReceipt {
 export function buildCspReceipt(values: CspConfigValues, counts: CspResultCounts | null = null): CspReceipt {
   const byGroup = new Map<SummaryGroup, { items: string[]; rescan: boolean }>();
   for (const criterion of criteriaForMode(values.mode)) {
-    const text = criterion.summary(values);
+    const text = criterion.summary(values, counts);
     if (text == null) continue;
     const entry = byGroup.get(criterion.summaryGroup) ?? { items: [], rescan: false };
     entry.items.push(text);
@@ -427,6 +449,7 @@ export function valuesFromSnapshot(
     rankSecondary: snapshot.rankSecondary,
     affordableOnly: capital.affordableOnly ?? false,
     capitalLimit: capital.capitalLimit ?? null,
+    rsi: snapshot.rsiEntry,
   };
 }
 
@@ -439,6 +462,8 @@ export interface CspCountableResult {
     cspMarketQualification?: CspMarketQualification;
     cspModeQualification?: CspModeQualification;
   } | null;
+  /** RSI-ENTRY-0001: present only on a scan run with the gate On. */
+  rsiEntry?: { verdict: string } | null;
 }
 
 /**
@@ -450,8 +475,11 @@ export function summarizeCspResults(results: readonly CspCountableResult[]): Csp
   let targetedNearMisses = 0;
   let disqualified = 0;
   const noIvr = new Set<string>();
+  let rsiTotal = 0;
+  let rsiPass = 0;
   for (const r of results) {
     if (r.ivr == null) noIvr.add(r.symbol);
+    if (r.qualified && r.rsiEntry) { rsiTotal++; if (r.rsiEntry.verdict === 'PASS') rsiPass++; }
     if (r.qualified) { qualified++; continue; }
     const c = r.bestCandidate;
     const market = c?.cspMarketQualification;
@@ -459,5 +487,8 @@ export function summarizeCspResults(results: readonly CspCountableResult[]): Csp
     if (market != null && mode != null && isMarketQualified(market) && !isModeQualified(mode)) targetedNearMisses++;
     else disqualified++;
   }
-  return { qualified, targetedNearMisses, disqualified, symbolsIvrUnavailable: noIvr.size };
+  return {
+    qualified, targetedNearMisses, disqualified, symbolsIvrUnavailable: noIvr.size,
+    ...(rsiTotal > 0 ? { rsi: { pass: rsiPass, total: rsiTotal } } : {}),
+  };
 }

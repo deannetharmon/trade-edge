@@ -36,6 +36,8 @@ import { ScanModalShell, type ScanModalTheme } from './ScanModalShell';
 import { CriterionInput } from './scanConfig/CriterionInput';
 import { CriterionPills, type CriterionPill } from './scanConfig/CriterionPills';
 import { LifecycleTag } from './scanConfig/LifecycleTag';
+import { RsiEntryControl } from './scanConfig/RsiEntryControl';
+import { defaultRsiEntrySettings, isRsiEntryValid, type RsiEntrySettings } from '@/lib/indicators/rsiEntrySettings';
 import { CcReceiptPanel } from './scanConfig/ScanReceiptPanel';
 import {
   CC_CARD_ORDER, CC_CARD_TITLE, buildCcReceipt, ccCriteriaForCard, ccFieldErrors,
@@ -52,6 +54,8 @@ import { matchRangePreset, sameNumber } from '@/lib/screener/scanConfig/presets'
 
 export interface CcScanRequest {
   rules: CcRulesType;
+  /** RSI-ENTRY-0001: entry timing for this scan. Absent means Off with the default level. */
+  rsiEntry?: RsiEntrySettings;
 }
 
 export interface CcEligibleHoldingSummary {
@@ -88,20 +92,21 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
   const contractsAvailable = useMemo(() => selected.reduce((sum, h) => sum + h.availableCoveredContracts, 0), [selected]);
 
   const errors = useMemo(() => ccFieldErrors(draft.rules), [draft.rules]);
+  const rsiEntry = draft.rsiEntry ?? defaultRsiEntrySettings('CC');
   const valid = useMemo(
-    () => Object.keys(errors).length === 0 && !holdingsLoading && selectedCount > 0,
-    [errors, selectedCount, holdingsLoading],
+    () => Object.keys(errors).length === 0 && isRsiEntryValid('CC', rsiEntry) && !holdingsLoading && selectedCount > 0,
+    [errors, rsiEntry, selectedCount, holdingsLoading],
   );
   const values: CcConfigValues = useMemo(
-    () => ({ rules: draft.rules, positionsSelected: holdingsLoading ? null : selectedCount, contractsAvailable: holdingsLoading ? null : contractsAvailable }),
-    [draft.rules, holdingsLoading, selectedCount, contractsAvailable],
+    () => ({ rules: draft.rules, rsi: rsiEntry, positionsSelected: holdingsLoading ? null : selectedCount, contractsAvailable: holdingsLoading ? null : contractsAvailable }),
+    [draft.rules, rsiEntry, holdingsLoading, selectedCount, contractsAvailable],
   );
   const receipt = useMemo(() => buildCcReceipt(values), [values]);
 
   const setRule = (key: keyof CcRulesType, value: number) =>
-    setDraft(prev => ({ rules: { ...prev.rules, [key]: value } }));
+    setDraft(prev => ({ ...prev, rules: { ...prev.rules, [key]: value } }));
   const setRules = (patch: Partial<CcRulesType>) =>
-    setDraft(prev => ({ rules: { ...prev.rules, ...patch } }));
+    setDraft(prev => ({ ...prev, rules: { ...prev.rules, ...patch } }));
 
   // Renders the control of one registry criterion. The kind decides the widget; the registry
   // supplies every label, title, step, and quick-select value.
@@ -137,6 +142,9 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
           <CriterionPills th={th} groupLabel={`${criterion.label} quick select`} pills={pills} />
         </>
       );
+    }
+    if (control.kind === 'rsi-entry') {
+      return <RsiEntryControl th={th} strategy="CC" settings={rsiEntry} onChange={next => setDraft(prev => ({ ...prev, rsiEntry: next }))} />;
     }
     return null;
   };

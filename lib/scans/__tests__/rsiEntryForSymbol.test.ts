@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearDailyBarsMemo } from '../dailyBarsMemo';
-import { getRsiEntryGate } from '../rsiEntryForSymbol';
+import { attachRsiEntry, getRsiEntryGate } from '../rsiEntryForSymbol';
 import { getTrend } from '../trend';
 
 // Same closes as the indicator golden "CSP pass" (31 closes, RSI tail ends 48.8, a turn up from 29.37).
@@ -88,5 +88,25 @@ describe('getRsiEntryGate', () => {
     await expect(getTrend('AAPL')).rejects.toThrow('Yahoo chart fetch failed for AAPL (500)');
     expect((await getRsiEntryGate('AAPL', 'CSP', afterClose)).verdict).toBe('PASS');
     expect(fn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('attachRsiEntry', () => {
+  const entry = { verdict: 'WAIT', reason: 'NO_DIP', label: 'Wait · no dip (RSI 58)', latest: 58, extreme: 55, extremeBarsAgo: 2 } as const;
+  it('with no verdict (gate Off) returns the very same array, untouched', () => {
+    const rows = [{ symbol: 'AAPL' }, { symbol: 'AAPL' }];
+    expect(attachRsiEntry(rows, undefined)).toBe(rows);
+    expect(rows[0]).toEqual({ symbol: 'AAPL' });
+  });
+  it('with a verdict adds it to every row of the symbol without mutating the originals', () => {
+    const rows = [{ symbol: 'AAPL', a: 1 }, { symbol: 'AAPL', a: 2 }];
+    const out = attachRsiEntry(rows, entry);
+    expect(out).toHaveLength(2);
+    expect(out.every((r) => r.rsiEntry === entry)).toBe(true);
+    expect(out[1]).toMatchObject({ symbol: 'AAPL', a: 2 });
+    expect('rsiEntry' in rows[0]).toBe(false);
+  });
+  it('an empty list stays empty', () => {
+    expect(attachRsiEntry([], entry)).toEqual([]);
   });
 });

@@ -55,9 +55,10 @@ describe('registry lifecycles match the engine: the pinned map', () => {
     expect(ids('advisory')).toEqual(['oi']);
     expect(ids('read-only')).toEqual(['capacity']);
     expect(ids('result-filter')).toEqual(['resultChips']);
-    // Covered calls have no gate that leaves a near-miss, and no rank-only preference.
+    // Covered calls have no gate that leaves a near-miss. The one preference is RSI entry timing (RSI-ENTRY-0001):
+    // candidates stay and only Best Opportunities eligibility depends on it.
     expect(ids('gate')).toEqual([]);
-    expect(ids('rank')).toEqual([]);
+    expect(ids('rank')).toEqual(['rsiTiming']);
   });
 
   it('the fixed criteria are exactly the ones the trader cannot change', () => {

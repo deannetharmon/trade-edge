@@ -15,6 +15,7 @@
 // Deliberately pure and framework-free.
 
 import type { CspRulesType } from './constants';
+import { isRsiEntrySettings, type RsiEntrySettings } from '@/lib/indicators/rsiEntrySettings';
 
 export type CspRuleSnapshotSource = 'default' | 'user';
 export type CspRankSort = 'score' | 'creditDollars' | 'rocPct' | 'otmPct' | 'pop' | 'relevantLegOI' | 'dte' | 'none';
@@ -41,6 +42,8 @@ export interface CspRuleSnapshot {
    * cache (which fails closed on schemaVersion mismatch before this field
    * would ever need to be reconstructed -- see validateSessionData()). */
   capturedAt: string;
+  /** RSI-ENTRY-0001: the entry timing setting this scan ran with. Optional so older stored sessions stay valid (read as Off). */
+  rsiEntry?: RsiEntrySettings;
   /** 'default' for every session built from DEFAULT_CSP_RULES today;
    * 'user' reserved for the future CSP configuration modal, which should
    * populate this same type rather than requiring another schema bump. */
@@ -62,6 +65,7 @@ export function buildCspRuleSnapshot(
     otmMin?: number | null;
     rocMin?: number | null;
     rankSecondary?: CspRankSort;
+    rsiEntry?: RsiEntrySettings;
   } = {},
 ): CspRuleSnapshot {
   return {
@@ -83,6 +87,7 @@ export function buildCspRuleSnapshot(
     earningsPolicy: 'disqualify-within-expiration',
     capturedAt: (options.now ?? new Date()).toISOString(),
     source: options.source ?? 'default',
+    ...(options.rsiEntry ? { rsiEntry: { ...options.rsiEntry } } : {}),
   };
 }
 
@@ -117,5 +122,6 @@ export function isValidCspRuleSnapshot(value: unknown): value is CspRuleSnapshot
   if (v.earningsPolicy !== 'disqualify-within-expiration') return false;
   if (typeof v.capturedAt !== 'string' || v.capturedAt.length === 0) return false;
   if (v.source !== 'default' && v.source !== 'user') return false;
+  if (v.rsiEntry !== undefined && !isRsiEntrySettings(v.rsiEntry)) return false;
   return true;
 }

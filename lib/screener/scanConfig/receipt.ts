@@ -7,24 +7,25 @@
 
 import { SUMMARY_GROUP_LABEL, type ReceiptGroup, type SummaryGroup } from './types';
 
-export interface ReceiptCriterion<V> {
+export interface ReceiptCriterion<V, C = unknown> {
   summaryGroup: SummaryGroup;
   rescan: boolean;
-  summary: (values: V) => string | null;
+  summary: (values: V, counts?: C | null) => string | null;
 }
 
 /**
  * Builds the grouped receipt rows for the criteria that apply. A criterion whose summary is
  * null (an off state, another mode) is left out, and an empty group is left out.
  */
-export function buildReceiptGroups<V>(
-  criteria: readonly ReceiptCriterion<V>[],
+export function buildReceiptGroups<V, C = unknown>(
+  criteria: readonly ReceiptCriterion<V, C>[],
   values: V,
   groupOrder: readonly SummaryGroup[],
+  counts: C | null = null,
 ): ReceiptGroup[] {
   const byGroup = new Map<SummaryGroup, { items: string[]; rescan: boolean }>();
   for (const criterion of criteria) {
-    const text = criterion.summary(values);
+    const text = criterion.summary(values, counts);
     if (text == null) continue;
     const entry = byGroup.get(criterion.summaryGroup) ?? { items: [], rescan: false };
     entry.items.push(text);

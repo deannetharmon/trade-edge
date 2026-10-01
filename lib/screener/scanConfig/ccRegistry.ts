@@ -25,6 +25,7 @@
 
 import type { CcRulesType } from '@/lib/scans/constants';
 import { validateCc } from '@/lib/scans/hybridSpread';
+import { defaultRsiEntrySettings, rsiEntrySummary, type RsiEntryCounts, type RsiEntrySettings } from '@/lib/indicators/rsiEntrySettings';
 import { oiPresets } from './presets';
 import { buildReceiptGroups } from './receipt';
 import type { Lifecycle, RangePreset, ReceiptGroup, ScalarPreset, SummaryGroup } from './types';
@@ -38,15 +39,18 @@ export interface CcConfigValues {
   positionsSelected?: number | null;
   /** Covered contracts available across those positions, when known. */
   contractsAvailable?: number | null;
+  /** RSI-ENTRY-0001: entry timing. Absent on a stored receipt that predates it, which is reported as Off. */
+  rsi?: RsiEntrySettings;
 }
 
-export type CcCard = 'holdings' | 'search' | 'advisory' | 'always';
+export type CcCard = 'holdings' | 'search' | 'timing' | 'advisory' | 'always';
 
-export const CC_CARD_ORDER: readonly CcCard[] = ['search', 'advisory', 'always'];
+export const CC_CARD_ORDER: readonly CcCard[] = ['search', 'timing', 'advisory', 'always'];
 
 export const CC_CARD_TITLE: Record<CcCard, string> = {
   holdings: 'Eligible positions',
   search: 'Search range',
+  timing: 'Entry timing (RSI)',
   advisory: 'Open interest',
   always: 'Always applied',
 };
@@ -54,6 +58,7 @@ export const CC_CARD_TITLE: Record<CcCard, string> = {
 export type CcControl =
   | { kind: 'range'; minKey: CcRuleKey; maxKey: CcRuleKey; minLabel: string; maxLabel: string; minTitle: string; maxTitle: string; step: string; presets: RangePreset[] }
   | { kind: 'rule'; key: CcRuleKey; label: string; title: string; step: string; presets: ScalarPreset[]; unit: string }
+  | { kind: 'rsi-entry' }
   | { kind: 'info' };
 
 export interface CcCriterion {
@@ -69,7 +74,7 @@ export interface CcCriterion {
   summaryGroup: SummaryGroup;
   hint: string;
   control: CcControl;
-  summary: (values: CcConfigValues) => string | null;
+  summary: (values: CcConfigValues, counts?: CcResultCounts | null) => string | null;
 }
 
 const num = (n: number) => String(n);
@@ -221,6 +226,19 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
     },
   },
   {
+    id: 'rsiTiming',
+    label: 'Entry timing (RSI)',
+    unit: 'daily RSI(14)',
+    lifecycle: 'rank',
+    fixed: false,
+    rescan: true,
+    card: 'timing',
+    summaryGroup: 'advisory',
+    hint: 'When On, only a call whose underlying has turned down off an RSI peak is eligible for Best Opportunities. Every other call stays in the results labelled Wait and can still be traded. No usable RSI counts as Wait.',
+    control: { kind: 'rsi-entry' },
+    summary: (v, counts) => rsiEntrySummary('CC', v.rsi ?? defaultRsiEntrySettings('CC'), counts?.rsi ?? null),
+  },
+  {
     id: 'resultChips',
     label: 'After the scan',
     unit: '',
@@ -253,6 +271,8 @@ const CC_GROUP_ORDER: readonly SummaryGroup[] = ['search', 'always', 'advisory',
 export interface CcResultCounts {
   symbolsWithCandidate: number;
   symbolsWithNone: number;
+  /** RSI-ENTRY-0001: qualified symbols that passed the entry timing gate, out of those evaluated. Absent when the gate was Off. */
+  rsi?: RsiEntryCounts | null;
 }
 
 export interface CcReceipt {
@@ -262,17 +282,24 @@ export interface CcReceipt {
 
 /** Builds the scan summary (before a run) or the result receipt (after) from the registry. */
 export function buildCcReceipt(values: CcConfigValues, counts: CcResultCounts | null = null): CcReceipt {
-  return { groups: buildReceiptGroups(CC_CRITERIA, values, CC_GROUP_ORDER), counts };
+  return { groups: buildReceiptGroups(CC_CRITERIA, values, CC_GROUP_ORDER, counts), counts };
 }
 
 /** The minimum a result needs for the receipt counts. */
 export interface CcCountableResult {
   qualified: boolean;
+  /** RSI-ENTRY-0001: present only on a scan run with the gate On. */
+  rsiEntry?: { verdict: string } | null;
 }
 
 export function summarizeCcResults(results: readonly CcCountableResult[]): CcResultCounts {
   const symbolsWithCandidate = results.filter((r) => r.qualified).length;
-  return { symbolsWithCandidate, symbolsWithNone: results.length - symbolsWithCandidate };
+  const evaluated = results.filter((r) => r.qualified && r.rsiEntry);
+  return {
+    symbolsWithCandidate,
+    symbolsWithNone: results.length - symbolsWithCandidate,
+    ...(evaluated.length > 0 ? { rsi: { pass: evaluated.filter((r) => r.rsiEntry?.verdict === 'PASS').length, total: evaluated.length } } : {}),
+  };
 }
 
 /** Same validation the CC modal always enforced (holdings are checked separately). */

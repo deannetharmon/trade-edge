@@ -50,7 +50,7 @@ describe('registry lifecycles match the engine: the pinned map', () => {
     const ids = (lifecycle: string) => CSP_CRITERIA.filter((c) => c.lifecycle === lifecycle).map((c) => c.id).sort();
     expect(ids('fetch')).toEqual(['dte']);
     expect(ids('gate')).toEqual(['capital', 'earnings', 'ivrCap', 'liquidity', 'otm', 'pop', 'roc']);
-    expect(ids('rank')).toEqual(['delta', 'ivrFloor', 'rankSecondary']);
+    expect(ids('rank')).toEqual(['delta', 'ivrFloor', 'rankSecondary', 'rsiTiming']);
     expect(ids('advisory')).toEqual(['oi']);
     expect(ids('result-filter')).toEqual(['resultChips']);
   });

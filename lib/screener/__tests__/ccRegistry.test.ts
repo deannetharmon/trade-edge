@@ -68,7 +68,7 @@ describe('registry structure: every criterion declares what it is', () => {
   });
 
   it('cards group the criteria in the order the modal renders them, with the receipt-only line left out', () => {
-    expect(CC_CARD_ORDER).toEqual(['search', 'advisory', 'always']);
+    expect(CC_CARD_ORDER).toEqual(['search', 'timing', 'advisory', 'always']);
     expect(ccCriteriaForCard('search').map((c) => c.id)).toEqual(['dte', 'delta', 'width', 'widthCeiling']);
     expect(ccCriteriaForCard('advisory').map((c) => c.id)).toEqual(['oi']);
     expect(ccCriteriaForCard('always').map((c) => c.id)).toEqual(['minStrike', 'quoteValidity', 'earnings', 'capacity']);
@@ -81,7 +81,7 @@ describe('receipts are built from the registry', () => {
     expect(groups.search.items).toEqual(['21–45 DTE', 'Δ 0.20–0.35', 'width ≤ 10% of mid (min $0.05)', 'cap $0.50']);
     expect(groups.search.label).toContain('rescan to change');
     expect(groups.always.items).toEqual(['strike ≥ stock price (and cost basis when known)', 'two-sided quotes', 'expires 10+ days before earnings']);
-    expect(groups.advisory.items).toEqual(['OI 100']);
+    expect(groups.advisory.items).toEqual(['OI 100', 'RSI timing: Off']);
     expect(groups.adjustable.items).toEqual(['POP · OTM · IVR · Call OI chips · sort']);
     expect(groups.capacity.items).toEqual(['3 positions selected · up to 7 contracts']);
   });
@@ -98,7 +98,7 @@ describe('receipts are built from the registry', () => {
   it('reflects the configured rules', () => {
     const groups = byKey(buildCcReceipt(values({ rules: { ...DEFAULT_CC_RULES, DTE_MIN: 14, DTE_MAX: 21, WIDTH_PCT_MAX: 5, WIDTH_CEILING: 0.3, OI_MIN: 500 } })));
     expect(groups.search.items).toEqual(['14–21 DTE', 'Δ 0.20–0.35', 'width ≤ 5% of mid (min $0.05)', 'cap $0.30']);
-    expect(groups.advisory.items).toEqual(['OI 500']);
+    expect(groups.advisory.items).toEqual(['OI 500', 'RSI timing: Off']);
   });
 
   it('leaves the capacity line out when the positions are not known (a stored receipt, or holdings still loading)', () => {
