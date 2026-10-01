@@ -16,7 +16,8 @@ export interface LongInstrumentExposure {
   capitalRequired: number;
   initialUnderlyingEquivalentExposure: number | null;
   capitalEfficiency: number | null;
-  authoritative: boolean;
+  maxCapitalLoss: number | null;
+  normalizationAuthoritative: boolean;
   reasons: string[];
 }
 
@@ -31,7 +32,7 @@ export interface LongInstrumentStressResult {
   estimatedPnl: number | null;
   estimatedLoss: number | null;
   approximation: true;
-  authoritative: boolean;
+  normalizationAuthoritative: boolean;
   reasons: string[];
 }
 
