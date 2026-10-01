@@ -1,8 +1,8 @@
 # RSI-ENTRY-0001 — Daily RSI "turn up off a dip" entry gate, override, and watch
 
-Status: v6 (2026-10-01). Reconciled with RSI-TURN-0001 after the v5 push. Approved by Ian, Alan, and Quinn. Paul to re-confirm the changes from v5 (gate ships default Off, sequencing after LEV-0001 Gate 10). NOT ready to hand to Dane until Paul re-confirms.
+Status: v7 (2026-10-01). READY for Dane, delivered in slices. Approved by Ian, Alan, Quinn, Paul, and Diane (copy). Phase A0 (fetch-cost spike) may start once LEV-0001 Gate 10 closes. Phase A UI code waits for Diane's rendered mock approved by Dean.
 Owner: Dane (build) | Reviewers: Ian (rules), Paul (scope and sequencing), Alan (RSI math), Quinn (QA), Diane (receipt and confirm-line copy)
-Supersedes: v1 to v5 of this ticket (v5 was committed as 91e97ce).
+Supersedes: v1 to v6 of this ticket (v5 was committed as 91e97ce, v6 as 66b81e7).
 
 ## Problem
 Dean wants to enter premium-selling trades as RSI starts to rise off a dip: not while the stock is still falling, and not after the bounce has run. The app already classifies RSI turns (RSI-TURN-0001, information only, in the chart popups and order windows), but scan results do not use it, so the screener cannot tell a good-timing trade from a poor-timing one and cannot wait for a better entry. TastyTrade order calls are browser-side only (Vercel server IPs blocked, token ~15 min), so the app cannot send orders unattended.
@@ -37,9 +37,11 @@ Dip level (40) and the CC peak level (60) are scan controls. Window, lift, and c
 Missing data: fewer closes than `rsiSeries` and the 8-value window require, or any non-finite value, fails closed. The candidate stays visible, labelled "RSI unavailable", and cannot be Best Opportunity while the gate is On (consistent with CSP-IVR-0001).
 
 ## Data (Alan)
-- Use the same daily closes the chart popups use (about 90 bars). Alan's validated spec: 90 closes is enough (seed influence 0.39%, last-bar difference at most 0.15 RSI points), so the screener and the popup agree. The v5 requirement of 100 closes is withdrawn.
-- OPEN, Alan to verify before build: whether the chart endpoint returns split-adjusted closes and not dividend-adjusted closes (to match TradingView's default). Do not assume.
-- Completed bars only. The popups do not keep bar timestamps today (RSI-TURN-0001 open item, "live-bar timestamp fix"). That fix is a PREREQUISITE. Interim rule if the gate must run before it lands: drop a bar dated today while the market is open, so the gate does not flicker intraday.
+- Source: `GET /api/chart?symbol=` (`app/api/chart/route.ts`): Yahoo daily bars, `range=6mo`, about 125 bars, each with a timestamp `t`. Alan's validated minimum is 90 closes (the v5 figure of 100 is withdrawn); using all returned bars puts the seed's weight at about 0.03%.
+- The gate and the popups must consume the IDENTICAL close array from the same fetch, so a boundary value (exactly 40, 50, or a lift of 3) cannot read Pass in one place and Wait in the other.
+- Adjustment: the route reads `quote.close` and never `adjclose`. As Alan understands Yahoo's response, that is split-adjusted but not dividend-adjusted, which matches TradingView's default. Alan's remaining check, not yet run: one live AAPL fetch compared with TradingView on a few dates.
+- Completed bars only. The endpoint already returns `t`, so the fix is consumer-side (RSI-TURN-0001 "live-bar timestamp fix"): drop a bar whose New York date is today while the market is open. That fix is a PREREQUISITE, shared by the gate and the popups.
+- Index symbols need `YAHOO_INDEX_MAP` before they can be gated; until then they show "RSI unavailable".
 
 ## Override (Ian approved)
 Two layers; neither touches the order path.
@@ -51,6 +53,24 @@ Rules for the override:
 - Taking a Wait trade writes an audit trail entry: "Entered with RSI gate = Wait (reason)", so the effect of bypassing the gate can be reviewed later.
 - An override does not disarm or alter any watch on that ticker.
 
+## UI copy and mock (Diane)
+Visual weight: this is the ambient, informational tier. No red, no amber, no blaring commands (the same calm principle as DECIDE-0001). A Wait chip is neutral grey; a Pass chip is the existing positive tone used for a passing check. Wording rule inherited from RSI-TURN-0001: it is an "entry timing hint", never a "signal" or a "reversal".
+- Scan control: "Entry timing (RSI)" with On / Off. Advanced: dip level, peak level (CC), window, lift, ceiling.
+- Receipt ("Active rules") line: "RSI timing: On · dip at or below 40 · 6 of 24 pass" and "RSI timing: Off".
+- Row chip, Pass: reuse `describeRsiTurn`, for example "RSI 36 · turned up from 28, 2 bars ago".
+- Row chip, Wait: "Wait · still falling (RSI 28)", "Wait · no dip (RSI 58)", "Wait · turn not confirmed (RSI 34)", "Wait · bounced (RSI 52)"; CC mirrors: "no peak", "still rising", "turn not confirmed", "faded". Unavailable: "RSI n/a" (matches `describeRsiTurn`).
+- Empty Best Opportunity slot while the gate is On: "No Best Opportunity: 0 of 24 pass the RSI timing check" with a plain link "Turn timing off".
+- Order screen, Wait trade: one neutral line, "RSI timing: Wait (no dip, RSI 58). Placing anyway." No checkbox and no second confirm.
+- Watch (Phase B): button "Watch for entry"; once armed it reads "Watching · alert when RSI turns up".
+- GATE: Diane produces a RENDERED mock (HTML artifact or screenshot; Dean cannot review ASCII) of the scan controls, receipt, row chips, empty-slot message, order-screen line, and Watch button. Dean approves it before any Phase A UI code. Phase A0 and the pure logic in `lib/` do not wait for the mock.
+
+## Delivery slices and success measure (Paul)
+Each slice is its own batched push (one CI run, one Vercel preview):
+1. A0: fetch-cost spike and design doc (no gate code).
+2. A: `lib/indicators/rsiEntryGate.ts` and its tests, then the scan wiring, controls, receipt, chips, and order-screen line (UI after Diane's mock is approved). Ships default Off.
+3. B: Watch and alert, after A ships and the pass-rate check is reviewed.
+Success measure: once the gate is switched on, the Trade Log's audit entries ("Entered with RSI gate = Pass/Wait") give Dean and Ian a record to review after about 30 entries per strategy, which is also the calibration set RSI-TURN-0001 already calls for. Scope guard: PMCC, LEAPS, and Spreads stay out of this ticket.
+
 ## Prerequisites and sequencing
 1. LEV-0001 Gate 10 corrective round closes first (active work per docs/ROADMAP.md, 2026-10-01). This ticket does not start before that.
 2. RSI-TURN-0001 live-bar timestamp fix (completed-bar rule above).
@@ -59,7 +79,7 @@ Rules for the override:
 ## Scope
 
 ### Phase A0 — Fetch design spike (before any gate code)
-- RSI was kept off scan result cards because it needs about 90 daily bars per candidate. Measure the real cost on a typical CSP and CC scan, and design a batched, cached, deduplicated bar fetch (Alan sizes it; Dane implements the measurement). Output is a short doc, no gate code. Quinn reviews failure handling: one failed fetch marks that row "RSI unavailable" and never breaks the scan.
+- RSI was kept off scan result cards because it needs about 125 daily bars per symbol. Bars are per underlying symbol, not per contract, so cost scales with the tickers scanned. Measure the real cost on a typical CSP and CC scan, and design a fetch deduplicated by symbol with a short cache (completed daily bars do not change after the close; the route is `no-store` today), with Yahoo's 401/429 behavior in mind (Alan sizes it; Dane implements the measurement). Output is a short doc, no gate code. Quinn reviews failure handling: one failed fetch marks that row "RSI unavailable" and never breaks the scan.
 - Dane has not yet confirmed the scan's data path for bars; the spike names the endpoint.
 
 ### Phase A — Gate, override, and receipt (needs Paul re-confirmation; Ian ruling recorded below)
@@ -120,7 +140,7 @@ A missing earnings date passing the earnings check is Ian's ruling of 2026-09-24
 
 ## Risks
 - Provisional thresholds: Alan's values were set for an information display, and moving the dip level from 30 to 40 widens the pass set. Mitigated by default Off and the pass-rate check.
-- Fetch cost and rate limits at roughly 90 bars per candidate (Phase A0).
+- Fetch cost and Yahoo rate limits at about 125 bars per scanned symbol (Phase A0).
 - Intraday flicker if the completed-bar fix is skipped.
 - Daily RSI lags: a fast gap (like AAPL on Oct 1) can move price well before the next completed bar updates the gate. The gate improves entry timing but does not replace the protective stop.
 - On a strong tape few tickers pass; the pass count in the receipt makes this visible.
@@ -134,5 +154,6 @@ v6 review (2026-10-01):
 - Alan (math and architecture): APPROVED with changes. Reuse `rsiSeries` and `rsiState`; boundaries follow the existing code; 90 closes, withdrawing the v5 figure of 100; golden fixtures at a dip level of 40; verify close adjustment before build; completed-bar prerequisite, with the interim drop-today's-bar rule.
 - Ian (rules): APPROVED with changes. Gate on Best Opportunity eligibility is a qualification change and is approved, shipping default Off until the pass-rate check (30 versus 40) is shared; keep Alan's two-rise and lift-of-3 confirmation; CC mirror at 60; earnings wording corrected to his 2026-09-24 ruling.
 - Quinn (QA): APPROVED with changes. Gate has its own parameter constants and existing consumers stay unchanged (test); boundary, gate-Off snapshot, and byte-identical order payload tests; per-candidate fail-closed with cached, deduplicated fetches; Phase A0 spike before gate code; full suite plus FIND CSPs and FIND CCs preview check.
-- Paul (scope and sequencing): RE-CONFIRMATION PENDING for default Off at first release, sequencing after LEV-0001 Gate 10, and the Phase A0 spike. His v5 approval covered default On and no spike.
-- Diane: receipt and confirm-line copy still to be reviewed before Phase A build.
+- Paul (scope and sequencing): APPROVED. Default Off at first release (flipping to On after Ian's pass-rate check), sequencing after LEV-0001 Gate 10, the Phase A0 spike, and the three-slice delivery with a success measure. PMCC, LEAPS, and Spreads stay out of scope. The roadmap entry (item 16) matches.
+- Diane (UX): APPROVED the copy spec above. A rendered mock approved by Dean is required before Phase A UI code.
+- Alan, Ian, Quinn: re-checked the v7 changes (data section, copy spec, slices); their approvals above stand.
