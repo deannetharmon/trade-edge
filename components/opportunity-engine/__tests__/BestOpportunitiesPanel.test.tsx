@@ -29,6 +29,7 @@ function makeRecommendation(overrides: Partial<OpportunityRecommendation> = {}):
     source: 'screener',
     symbol: 'AAPL',
     strategy: 'BPS',
+    capitalRequired: 500,
     rank: 1,
     disposition: 'RECOMMENDED',
     opportunityScoreTotal: 72,
@@ -429,4 +430,25 @@ describe('BestOpportunitiesPanel', () => {
     expect(screen.getByText('#1')).toBeInTheDocument();
     expect(screen.getByText('#2')).toBeInTheDocument();
   });
+  it('Gate 7 groups multiple expressions by economic underlying without re-ranking them', () => {
+    const recs = [
+      makeRecommendation({ candidateId: 'nvdu', symbol: 'NVDU', strategy: 'BPS', economicUnderlying: 'NVDA', capitalRequired: 500, opportunityScoreTotal: 88, normalizationAuthoritative: true, comparableRank: 1, initialEffectiveExposure: 3000, layeredLeverage: true }),
+      makeRecommendation({ candidateId: 'nvda', symbol: 'NVDA', strategy: 'CSP', economicUnderlying: 'NVDA', capitalRequired: 17000, opportunityScoreTotal: 81, normalizationAuthoritative: true, comparableRank: 2, initialEffectiveExposure: 17000 }),
+      makeRecommendation({ candidateId: 'unknown', symbol: 'NVXX', strategy: 'BPS', economicUnderlying: 'NVDA', capitalRequired: 600, opportunityScoreTotal: 90, normalizationAuthoritative: false, comparableRank: null, initialEffectiveExposure: null }),
+    ];
+    render(<BestOpportunitiesPanel recommendations={recs} th={THEMES.dark} />);
+    const comparison = screen.getByTestId('opportunity-expression-comparison');
+    expect(comparison).toHaveTextContent('NVDA Opportunity');
+    expect(comparison).toHaveTextContent('Underlying Opportunity Score: 90');
+    expect(comparison).toHaveTextContent('NVDU BPS · Layered Leverage');
+    expect(comparison).toHaveTextContent('NVDA CSP');
+    expect(comparison).toHaveTextContent('NOT COMPARABLY RANKED — Normalization Incomplete');
+    expect(comparison).toHaveTextContent('17,000');
+  });
+
+  it('Gate 7 does not fabricate a comparison when only one expression exists for an underlying', () => {
+    render(<BestOpportunitiesPanel recommendations={[makeRecommendation()]} th={THEMES.dark} />);
+    expect(screen.queryByTestId('opportunity-expression-comparison')).not.toBeInTheDocument();
+  });
+
 });
