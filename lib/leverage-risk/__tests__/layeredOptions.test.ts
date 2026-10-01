@@ -38,5 +38,12 @@ describe('LEV-0001 Gate 6 layered option exposure', () => {
     expect(result.economicUnderlyingDeltaExposure).toBeCloseTo(3000);
     expect(result.capitalEfficiency).toBeCloseTo(7.5);
     expect(result.normalizationAuthoritative).toBe(true);
+    expect(result.stressScenarios).toHaveLength(8);
+    expect(result.stressScenarios.find(s => s.underlyingMovePct === -10)).toMatchObject({
+      estimatedProductMovePct: -20,
+      estimatedPnl: -300,
+      estimatedLoss: 300,
+      approximation: true,
+    });
   });
 });
