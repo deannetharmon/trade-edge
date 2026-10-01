@@ -102,3 +102,44 @@ export function ocoSplitPercent(profitDollars: number, stopResultDollars: number
   if (!Number.isFinite(profit) || !Number.isFinite(stop) || profit + stop <= 0) return 50;
   return Math.round(Math.min(85, Math.max(15, (profit / (profit + stop)) * 100)));
 }
+
+// ── Profit target (credit positions) ─────────────────────────────────────
+// The slider is PROFIT CAPTURED as a percent of the original credit. 50% is the
+// standard exit; the target price is credit x (1 - pct).
+
+export const TARGET_PCT_MIN = 10;
+export const TARGET_PCT_MAX = 90;
+export const TARGET_PCT_DEFAULT = 50;
+export const TARGET_PCT_STEP = 5;
+export const TARGET_CUSTOM_LABEL = `Custom target — outside the ${TARGET_PCT_MIN}–${TARGET_PCT_MAX}% slider range`;
+
+/** Target buy-back price (per contract) for a profit-captured percent. */
+export function targetPriceFromPct(creditPerContract: number, pctCaptured: number): number {
+  if (!Number.isFinite(creditPerContract) || creditPerContract <= 0) throw new Error('Original credit must be positive.');
+  if (!Number.isFinite(pctCaptured)) throw new Error('Target percentage must be a number.');
+  return Number(((creditPerContract * (100 - pctCaptured)) / 100).toFixed(2));
+}
+
+/** Profit-captured percent that a target price represents (rounded). Null if not computable. */
+export function targetPctFromPrice(creditPerContract: number, targetPrice: number): number | null {
+  if (!Number.isFinite(creditPerContract) || creditPerContract <= 0) return null;
+  if (!Number.isFinite(targetPrice) || targetPrice <= 0) return null;
+  return Math.round((1 - targetPrice / creditPerContract) * 100);
+}
+
+export function isTargetPctInSliderRange(pct: number): boolean {
+  return Number.isFinite(pct) && pct >= TARGET_PCT_MIN && pct <= TARGET_PCT_MAX;
+}
+
+/** Same shape as the stop readout: "Target $1.00 · profit +$100.00 (50% of credit)". */
+export function describeTargetReadout(targetPrice: number, pctCaptured: number | null, profitDollars: number): string {
+  const pct = pctCaptured != null ? ` (${Math.round(pctCaptured)}% of credit)` : '';
+  return `Target $${targetPrice.toFixed(2)} · profit ${signedDollar(profitDollars)}${pct}`;
+}
+
+/** "0.8 : 1" when a target and a losing stop are both set; null otherwise. */
+export function rewardToRiskLabel(profitDollars: number, stopResultDollars: number): string | null {
+  if (!Number.isFinite(profitDollars) || !Number.isFinite(stopResultDollars)) return null;
+  if (profitDollars <= 0 || stopResultDollars >= 0) return null;
+  return `${(profitDollars / Math.abs(stopResultDollars)).toFixed(1)} : 1`;
+}

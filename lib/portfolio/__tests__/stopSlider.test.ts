@@ -5,7 +5,7 @@ import {
   CREDIT_STOP_PCT_DEFAULT, CREDIT_STOP_PCT_MAX, CREDIT_STOP_PCT_MIN,
   DEBIT_STOP_LOSS_PCT_DEFAULT, DEBIT_STOP_LOSS_PCT_MAX, DEBIT_STOP_LOSS_PCT_MIN,
   clampSliderValue, creditStopPctFromTrigger, creditStopTriggerFromPct,
-  CREDIT_STOP_CUSTOM_LABEL, debitStopLossDollars, describeCreditStopReadout, describeDebitStopReadout, isCreditStopPctInSliderRange, ocoSplitPercent, isDebitStopLossPctValid, stopDialogVerb,
+  CREDIT_STOP_CUSTOM_LABEL, debitStopLossDollars, describeCreditStopReadout, describeDebitStopReadout, isCreditStopPctInSliderRange, ocoSplitPercent, TARGET_CUSTOM_LABEL, TARGET_PCT_DEFAULT, TARGET_PCT_MAX, TARGET_PCT_MIN, describeTargetReadout, isTargetPctInSliderRange, rewardToRiskLabel, targetPctFromPrice, targetPriceFromPct, isDebitStopLossPctValid, stopDialogVerb,
 } from '../stopSlider';
 import { classifyStopLossPolicy, buildOriginalCreditDefaultPolicy } from '../stopLossPolicy';
 
@@ -105,5 +105,40 @@ describe('ocoSplitPercent', () => {
     expect(ocoSplitPercent(1000, -1)).toBe(85);
     expect(ocoSplitPercent(0, 0)).toBe(50);
     expect(ocoSplitPercent(NaN, -5)).toBe(50);
+  });
+});
+
+describe('profit target slider', () => {
+  it('range 10-90% with a 50% default', () => {
+    expect([TARGET_PCT_MIN, TARGET_PCT_MAX, TARGET_PCT_DEFAULT]).toEqual([10, 90, 50]);
+  });
+  it.each([[10, 1.81], [50, 1.0], [90, 0.2]] as const)('%s%% of a $2.01 credit targets $%s', (pct, price) => {
+    expect(targetPriceFromPct(2.01, pct)).toBeCloseTo(price, 1);
+    expect(targetPriceFromPct(2, pct)).toBe(Number((2 * (100 - pct) / 100).toFixed(2)));
+  });
+  it('round-trips price to percent and rejects bad inputs', () => {
+    expect(targetPctFromPrice(2, 1)).toBe(50);
+    expect(targetPctFromPrice(0, 1)).toBeNull();
+    expect(targetPctFromPrice(2, 0)).toBeNull();
+    expect(() => targetPriceFromPct(0, 50)).toThrow();
+    expect(() => targetPriceFromPct(2, NaN)).toThrow();
+  });
+  it('knows which percents the slider can show and labels a custom one', () => {
+    expect(isTargetPctInSliderRange(9)).toBe(false);
+    expect(isTargetPctInSliderRange(10)).toBe(true);
+    expect(isTargetPctInSliderRange(90)).toBe(true);
+    expect(isTargetPctInSliderRange(91)).toBe(false);
+    expect(TARGET_CUSTOM_LABEL).toBe('Custom target — outside the 10–90% slider range');
+  });
+  it('reads out price, dollars, then percent', () => {
+    expect(describeTargetReadout(1, 50, 100)).toBe('Target $1.00 · profit +$100.00 (50% of credit)');
+    expect(describeTargetReadout(1, null, 100)).toBe('Target $1.00 · profit +$100.00');
+  });
+  it('reward:risk only when there is both a profit and a losing stop', () => {
+    expect(rewardToRiskLabel(76, -100)).toBe('0.8 : 1');
+    expect(rewardToRiskLabel(100, -50)).toBe('2.0 : 1');
+    expect(rewardToRiskLabel(76, 40)).toBeNull();
+    expect(rewardToRiskLabel(0, -100)).toBeNull();
+    expect(rewardToRiskLabel(NaN, -100)).toBeNull();
   });
 });

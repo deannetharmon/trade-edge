@@ -90,7 +90,7 @@ import {
 } from '@/lib/portfolio/stopLossPolicy';
 import { evaluateStandaloneLeapsStopEligibility, standaloneLeapsStopProposal, type StandaloneLeapsStopLossPct } from '@/lib/portfolio/standaloneLeapsStop';
 import { StopPctSlider } from '@/components/StopPctSlider';
-import { CREDIT_STOP_PCT_DEFAULT, CREDIT_STOP_PCT_MAX, CREDIT_STOP_PCT_MIN, CREDIT_STOP_PCT_STEP, DEBIT_STOP_LOSS_PCT_DEFAULT, DEBIT_STOP_LOSS_PCT_MAX, DEBIT_STOP_LOSS_PCT_MIN, DEBIT_STOP_LOSS_PCT_STEP, creditStopPctFromTrigger, creditStopTriggerFromPct, CREDIT_STOP_CUSTOM_LABEL, debitStopLossDollars, describeCreditStopReadout, describeDebitStopReadout, isCreditStopPctInSliderRange, ocoSplitPercent, stopDialogVerb } from '@/lib/portfolio/stopSlider';
+import { CREDIT_STOP_PCT_DEFAULT, CREDIT_STOP_PCT_MAX, CREDIT_STOP_PCT_MIN, CREDIT_STOP_PCT_STEP, DEBIT_STOP_LOSS_PCT_DEFAULT, DEBIT_STOP_LOSS_PCT_MAX, DEBIT_STOP_LOSS_PCT_MIN, DEBIT_STOP_LOSS_PCT_STEP, creditStopPctFromTrigger, creditStopTriggerFromPct, CREDIT_STOP_CUSTOM_LABEL, debitStopLossDollars, describeCreditStopReadout, describeDebitStopReadout, isCreditStopPctInSliderRange, isTargetPctInSliderRange, ocoSplitPercent, rewardToRiskLabel, stopDialogVerb, describeTargetReadout, targetPctFromPrice, targetPriceFromPct, TARGET_CUSTOM_LABEL, TARGET_PCT_DEFAULT, TARGET_PCT_MAX, TARGET_PCT_MIN, TARGET_PCT_STEP } from '@/lib/portfolio/stopSlider';
 import {
   evaluateProfitProtectingStop,
   PROFIT_PROTECTING_STOP_POLICY_VERSION,
@@ -127,6 +127,7 @@ import {
   type PmccShortLegLike,
 } from '@/lib/portfolio/pmccLegEconomics';
 import { existingStopPromptContext, stopProximityWarning } from '@/lib/portfolio/stopPromptContext';
+import { buildOcoBody, buildStopLimitBody, buildTargetLimitBody, protectionActionLabel, resolveProtectionKind, validateProtectionDirection } from '@/lib/portfolio/protectionOrders';
 import {
   buildStopGtcFlags,
   buildPmccShortLegStopGtcPrompt,
@@ -6532,6 +6533,9 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   // STOP-DIALOG-SIMPLIFY-0001: the AI block and the exact-price inputs start collapsed.
   const [aiOpen, setAiOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // STOP-TARGET-DIALOG-0001: which orders to place when no GTC exists yet. With an existing GTC both are locked on.
+  const [includeTarget, setIncludeTarget] = useState(false);
+  const [includeStop, setIncludeStop] = useState(true);
 
   // Mounted guard — prevents state updates after unmount
   const mountedRef = useRef(true);
@@ -6541,6 +6545,9 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   }, []);
 
   const needsOco = pos.hasGtc && !!pos.gtcOrderId;
+  const targetOn = needsOco || includeTarget;
+  const stopOn = needsOco || includeStop;
+  const kind = resolveProtectionKind({ hasExistingGtc: needsOco, includeTarget, includeStop });
   const existingGtcPrice = pos.gtcOrderPrice
     ?? parseFloat((creditPerContract * (1 - pos.profitTarget)).toFixed(2));
   const positionStrategyKey = resolvePositionStrategyFilterKey(pos);
@@ -6574,9 +6581,9 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
     return null;
   }
 
-  const gtcError  = needsOco ? validateGtc(parseFloat(gtcPrice || '0'))  : null;
-  const stopError = validateStop(parseFloat(stopPrice || '0'));
-  const hasErrors = !!stopError || (needsOco && !!gtcError);
+  const gtcError  = targetOn ? validateGtc(parseFloat(gtcPrice || '0'))  : null;
+  const stopError = stopOn ? validateStop(parseFloat(stopPrice || '0')) : null;
+  const hasErrors = kind == null || !!stopError || !!gtcError;
 
   // ── Live price fetch ──────────────────────────────────────────────────────
   const fetchLivePrice = async () => {
@@ -6689,6 +6696,8 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
     setSuggestion(null);
     setSuggestionError(null);
     setConfirming(false);
+    setIncludeTarget(false);
+    setIncludeStop(true);
     setLivePrice(null);
     setLivePriceError(null);
     setProfitProtectionStage(null);
@@ -6809,7 +6818,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   // True once the suggestion's own prices are what is in the form.
   const suggestionApplied = suggestion != null && stopPriceSource === 'AI_SUGGESTION'
     && stopPrice === suggestion.stopPrice.toFixed(2)
-    && (!needsOco || gtcPrice === suggestion.gtcPrice.toFixed(2));
+    && (!targetOn || gtcPrice === suggestion.gtcPrice.toFixed(2));
 
   const applySuggestion = () => {
     if (!suggestion) return;
@@ -6847,6 +6856,11 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
       return;
     }
 
+    if (!kind) {
+      setResult('error');
+      setResultMsg('Select a stop, a profit target, or both.');
+      return;
+    }
     const stopTrigger = parseFloat(stopPrice);
     const gtcLimit    = parseFloat(gtcPrice);
     let preflightContext = '';
@@ -6866,28 +6880,18 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
         setLivePrice(freshPerContract);
         preflightContext = [
           `Symbol: ${pos.symbol} ${pos.strategy}`,
-          `Action: ${needsOco ? 'Replace existing GTC with OCO profit + stop' : 'Place stop order'}`,
+          `Action: ${protectionActionLabel(kind)}`,
           `Live spread value: $${freshPerContract.toFixed(2)} debit`,
-          needsOco ? `Profit GTC limit: $${gtcLimit.toFixed(2)} debit` : null,
-          `Stop trigger: $${stopTrigger.toFixed(2)} debit`,
+          targetOn ? `Profit GTC limit: $${gtcLimit.toFixed(2)} debit` : null,
+          stopOn ? `Stop trigger: $${stopTrigger.toFixed(2)} debit` : null,
           `Original credit: $${creditPerContract.toFixed(2)} | Qty: ${qty}`,
         ].filter(Boolean).join('\n');
 
         // Hard stop: block if prices violate bounds against fresh price
-        if (needsOco && gtcLimit >= freshPerContract) {
+        const directionError = validateProtectionDirection({ kind: kind!, liveValue: freshPerContract, stopTrigger, targetLimit: gtcLimit });
+        if (directionError) {
           setResult('error');
-          setResultMsg(
-            `GTC $${gtcLimit.toFixed(2)} ≥ live spread value $${freshPerContract.toFixed(2)}. ` +
-            `Spread has moved — profit target already hit. Use Take Profit instead.`
-          );
-          return;
-        }
-        if (stopTrigger <= freshPerContract) {
-          setResult('error');
-          setResultMsg(
-            `Stop $${stopTrigger.toFixed(2)} ≤ live spread value $${freshPerContract.toFixed(2)}. ` +
-            `Spread has moved — stop would execute immediately. Raise the stop trigger.`
-          );
+          setResultMsg(`${directionError} The spread has moved — adjust the price and retry.`);
           return;
         }
       }
@@ -6944,8 +6948,26 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
         },
         displayedExpectedPnlDollars: stopDisplayedPnlDollars,
       };
+      // STOP-TARGET-DIALOG-0001: gate input for a target-only order (a resting GTC limit).
+      const targetLiveGateInput: LiveCloseOrderSafetyInput = {
+        ...stopLiveGateInput,
+        pricingIntent: 'PROFIT_TARGET',
+        closePricePointsPerUnit: gtcLimit,
+        actualOrder: {
+          legs: stopActualLegs,
+          limitPricePointsPerUnit: gtcLimit,
+          priceEffect: 'Debit',
+          orderType: 'Limit',
+          timeInForce: 'GTC',
+        },
+        displayedExpectedPnlDollars: pos.identity
+          ? (pos.identity.entryPricePointsPerUnit - gtcLimit) * pos.identity.quantity * 100
+          : 0,
+      };
 
-      if (needsOco) {
+      if (kind === 'OCO_REPLACE' || kind === 'OCO_NEW') {
+        let cancelSucceeded = false;
+        if (kind === 'OCO_REPLACE') {
         setPhase('Cancelling existing GTC order...');
         console.log('CANCEL EXISTING GTC ORDER:', pos.gtcOrderId);
         // Cancel via complex order endpoint if this is part of an OCO
@@ -6957,7 +6979,6 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
         // has no atomic "replace" operation for resting orders — cancel and place
         // are always two separate calls — so this is the closest we can get to
         // not leaving a position genuinely unprotected on a partial failure.
-        let cancelSucceeded = false;
         try {
           if (complexId) {
             console.log(`Cancelling complex order ${complexId}`);
@@ -6975,28 +6996,10 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
 
         console.log(`Cancel complete, waiting 500ms...`);
         await new Promise(r => setTimeout(r, 500));
+        }
 
         setPhase('Placing OCO order...');
-        const ocoBody = {
-          type: 'OCO',
-          orders: [
-            {
-              'order-type': 'Limit',
-              'time-in-force': 'GTC',
-              price: Math.max(gtcLimit, 0.01).toFixed(2),
-              'price-effect': 'Debit',
-              legs,
-            },
-            {
-              'order-type': 'Stop Limit',
-              'time-in-force': 'GTC',
-              'stop-trigger': Math.max(stopTrigger, 0.01).toFixed(2),
-              price: Math.max(parseFloat((stopTrigger * 1.10).toFixed(2)), 0.01).toFixed(2),  // 10% above trigger for fill room
-              'price-effect': 'Debit',
-              legs,
-            },
-          ],
-        };
+        const ocoBody = buildOcoBody(legs, gtcLimit, stopTrigger);
 
         try {
           const ocoSubmission = await submitCloseOrderIfSafe(stopStructureGuardInput, stopLiveGateInput, async () =>
@@ -7042,14 +7045,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
           if (!cancelSucceeded) throw placeErr;
           setPhase('OCO placement failed — restoring original order...');
           try {
-            const restoreBody = {
-              'order-type': 'Stop Limit',
-              'time-in-force': 'GTC',
-              'stop-trigger': Math.max(stopTrigger, 0.01).toFixed(2),
-              price: Math.max(parseFloat((stopTrigger * 1.10).toFixed(2)), 0.01).toFixed(2),
-              'price-effect': 'Debit',
-              legs,
-            };
+            const restoreBody = buildStopLimitBody(legs, stopTrigger);
             const restoreSubmission = await submitCloseOrderIfSafe(stopStructureGuardInput, stopLiveGateInput, async () =>
               ttPost(`/accounts/${pos.accountNumber}/orders`, token, restoreBody)
             );
@@ -7081,16 +7077,9 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
           }
           return;
         }
-      } else {
+      } else if (kind === 'STOP_ONLY') {
         setPhase('Placing stop order...');
-        const stopBody = {
-          'order-type': 'Stop Limit',
-          'time-in-force': 'GTC',
-          'stop-trigger': Math.max(stopTrigger, 0.01).toFixed(2),
-          price: Math.max(parseFloat((stopTrigger * 1.10).toFixed(2)), 0.01).toFixed(2),
-          'price-effect': 'Debit',
-          legs,
-        };
+        const stopBody = buildStopLimitBody(legs, stopTrigger);
         const stopSubmission = await submitCloseOrderIfSafe(stopStructureGuardInput, stopLiveGateInput, async () =>
           ttPost(`/accounts/${pos.accountNumber}/orders`, token, stopBody)
         );
@@ -7107,6 +7096,22 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
         // Plain (non-complex) order -- orderId IS the individual stop
         // order's own id, no complex-order envelope involved.
         await persistStopPolicy({ orderId, complexOrderId: null }, stopTrigger);
+      } else {
+        // TARGET_ONLY: a resting GTC limit profit target; no stop, so no stop policy to persist.
+        setPhase('Placing profit target...');
+        const targetBody = buildTargetLimitBody(legs, gtcLimit);
+        const targetSubmission = await submitCloseOrderIfSafe(stopStructureGuardInput, targetLiveGateInput, async () =>
+          ttPost(`/accounts/${pos.accountNumber}/orders`, token, targetBody)
+        );
+        if (!targetSubmission.submitted) {
+          setResult('error');
+          setResultMsg(`Blocked by safety gate: ${targetSubmission.reason}`);
+          return;
+        }
+        const targetRes = targetSubmission.result as any;
+        const targetOrderId = String(targetRes?.data?.order?.id ?? targetRes?.data?.id ?? 'submitted');
+        setResult('success');
+        setResultMsg(`Profit target placed @ $${gtcLimit.toFixed(2)} (ID #${targetOrderId})`);
       }
       setOpen(false);
       setConfirming(false);
@@ -7140,6 +7145,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   // STOP-SLIDER-0001: the stop expressed as a percent of the original credit (200% = 2.0x).
   const stopPctOfCredit = creditStopPctFromTrigger(creditPerContract, stopParsed);
   const gtcPctDisplay       = creditPerContract > 0 ? Math.round((1 - gtcParsed / creditPerContract) * 100) : 0;
+  const targetPctCaptured = targetPctFromPrice(creditPerContract, gtcParsed);
   const effectiveLiveDisplay = livePrice ?? liveValuePerContract;
 
   // Dollar P/L — the actual $ result if each order fills, so the trader never
@@ -7193,7 +7199,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
           {/* Header */}
           <div className="flex items-center justify-between mb-3">
             <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>
-              {stopDialogVerb(pos.stopLossClassification)} Stop{needsOco ? ' — OCO' : ''}
+              {stopDialogVerb(pos.stopLossClassification)} Stop{targetOn ? ' + Target' : ''}{needsOco ? ' — OCO' : ''}
             </p>
             <span className={`text-[9px] font-bold ${th.textFaint}`}>{pos.symbol} {pos.strategy}</span>
           </div>
@@ -7292,8 +7298,14 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
           <div
             className={`px-3 py-2 rounded-lg border ${th.borderLight} mb-3`}
             onKeyDown={e => { if (e.key === 'Enter' && !hasErrors && !confirming) setConfirming(true); if (e.key === 'Escape') setOpen(false); }}>
-            <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>Stop loss % (of original credit ${creditPerContract.toFixed(2)})</p>
-            {creditPerContract > 0 && (
+            <div className="flex items-center justify-between mb-1">
+              <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>Stop loss % (of original credit ${creditPerContract.toFixed(2)})</p>
+              <label className={`flex items-center gap-1 text-[9px] ${th.textFaint}`} title={needsOco ? 'An existing profit target is replaced by an OCO pair, so both stay on.' : undefined}>
+                <input type="checkbox" checked={stopOn} disabled={needsOco} onChange={e => setIncludeStop(e.target.checked)} /> Include
+              </label>
+            </div>
+            {!stopOn && <p className={`text-[10px] ${th.textFaint}`}>No stop will be placed. Check Include to add one.</p>}
+            {stopOn && creditPerContract > 0 && (
               <StopPctSlider
                 accent="orange"
                 ariaLabel="Stop trigger as a percent of original credit"
@@ -7316,33 +7328,43 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
               />
             )}
             {stopError && <p className="mt-1 text-[10px] text-red-400">{stopError}</p>}
-            {!stopError && stopParsed > 0 && stopProximityWarning(stopParsed, effectiveLiveDisplay) && (
+            {stopOn && !stopError && stopParsed > 0 && stopProximityWarning(stopParsed, effectiveLiveDisplay) && (
               <p className="mt-1 text-[10px] font-semibold text-amber-300">⚠ {stopProximityWarning(stopParsed, effectiveLiveDisplay)}</p>
             )}
           </div>
 
-          {/* Profit target: only when an existing GTC is being replaced by an OCO pair */}
-          {needsOco && (
-            <div className={`px-3 py-2 rounded-lg border ${th.borderLight} mb-3`}>
-              <div className="flex items-center gap-2">
-                <span className={`text-[10px] ${th.textFaint} w-28 shrink-0`}>Profit target $</span>
-                <input
-                  type="number" min={gtcMin} max={gtcMax} step="0.01" value={gtcPrice}
-                  onChange={e => setGtcPrice(e.target.value)}
-                  className={`flex-1 text-[11px] px-2 py-1.5 rounded border ${
-                    gtcError ? 'border-red-500' : th.inputBorder
-                  } ${th.input} text-emerald-400 outline-none focus:border-emerald-500`}
-                  style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
-                />
-                {gtcPctDisplay > 0 && <span className={`text-[9px] ${th.textFaint} w-12 shrink-0`}>{gtcPctDisplay}%</span>}
-                {!gtcError && gtcParsed > 0 && (
-                  <span className="text-[11px] font-bold text-emerald-400 shrink-0">+${gtcProfitDollars.toFixed(2)}</span>
-                )}
-              </div>
-              {gtcError && <p className="mt-1 text-[10px] text-red-400">{gtcError}</p>}
-              <p className="mt-1 text-[10px] text-yellow-300">⚠ Replaces existing GTC (${existingGtcPrice.toFixed(2)}). It is cancelled, then an OCO pair is placed — one fills, the other cancels.</p>
+          {/* Profit target: same anatomy as the stop row (checkbox, slider, one readout) */}
+          <div className={`px-3 py-2 rounded-lg border ${th.borderLight} mb-3`}>
+            <div className="flex items-center justify-between mb-1">
+              <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>Profit target % (of original credit ${creditPerContract.toFixed(2)})</p>
+              <label className={`flex items-center gap-1 text-[9px] ${th.textFaint}`} title={needsOco ? 'Your existing profit target is replaced, so this stays on.' : undefined}>
+                <input type="checkbox" checked={targetOn} disabled={needsOco} onChange={e => setIncludeTarget(e.target.checked)} /> Include
+              </label>
             </div>
-          )}
+            {!targetOn && <p className={`text-[10px] ${th.textFaint}`}>No profit target will be placed. Check Include to add one.</p>}
+            {targetOn && creditPerContract > 0 && (
+              <StopPctSlider
+                accent="teal"
+                ariaLabel="Profit target as a percent of original credit captured"
+                value={targetPctCaptured ?? TARGET_PCT_DEFAULT}
+                min={TARGET_PCT_MIN}
+                max={TARGET_PCT_MAX}
+                step={TARGET_PCT_STEP}
+                minLabel={`${TARGET_PCT_MIN}% profit`}
+                maxLabel={`${TARGET_PCT_MAX}% profit`}
+                customLabel={targetPctCaptured != null && !isTargetPctInSliderRange(targetPctCaptured) ? TARGET_CUSTOM_LABEL : undefined}
+                description={gtcParsed > 0 ? describeTargetReadout(gtcParsed, targetPctCaptured, gtcProfitDollars) : 'Drag to choose a target'}
+                onChange={pct => setGtcPrice(targetPriceFromPct(creditPerContract, pct).toFixed(2))}
+              />
+            )}
+            {gtcError && <p className="mt-1 text-[10px] text-red-400">{gtcError}</p>}
+            {needsOco && (
+              <p className="mt-1 text-[10px] text-yellow-300">⚠ Replaces existing GTC (${existingGtcPrice.toFixed(2)}). It is cancelled, then an OCO pair is placed — one fills, the other cancels.</p>
+            )}
+            {targetOn && stopOn && !gtcError && !stopError && rewardToRiskLabel(gtcProfitDollars, stopOutcomePnlDollars) && (
+              <p className={`mt-1 text-[10px] ${th.textFaint}`}>Target {signedDollar(gtcProfitDollars)} · Stop {signedDollar(stopOutcomePnlDollars)} · reward:risk {rewardToRiskLabel(gtcProfitDollars, stopOutcomePnlDollars)}</p>
+            )}
+          </div>
 
           {/* AI suggestion: collapsed to one line */}
           <div className={`mb-3 rounded-lg border ${th.borderLight} overflow-hidden`}>
@@ -7353,7 +7375,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                 <span className="text-[9px] text-indigo-400 font-bold uppercase tracking-widest shrink-0">AI suggestion</span>
                 {suggestionLoading && <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin shrink-0" />}
                 {!suggestionLoading && suggestion && (
-                  <span className={`truncate text-[9px] ${th.textFaint}`}>stop ${suggestion.stopPrice.toFixed(2)}{needsOco ? ` · target $${suggestion.gtcPrice.toFixed(2)}` : ''}</span>
+                  <span className={`truncate text-[9px] ${th.textFaint}`}>stop ${suggestion.stopPrice.toFixed(2)}{targetOn ? ` · target $${suggestion.gtcPrice.toFixed(2)}` : ''}</span>
                 )}
                 {!suggestionLoading && !suggestion && suggestionError && <span className="text-[9px] text-red-400">unavailable</span>}
               </button>
@@ -7435,11 +7457,26 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
             </button>
             {advancedOpen && (
               <div className="space-y-2 mt-2">
-                {needsOco && !gtcError && effectiveLiveDisplay != null && (
+                {targetOn && !gtcError && effectiveLiveDisplay != null && (
                   <p className={`text-[9px] ${th.textFaint}`}>
                     Profit target valid range: ${gtcMin.toFixed(2)} – ${Math.min(gtcMax, effectiveLiveDisplay - 0.01).toFixed(2)}
                   </p>
                 )}
+                {targetOn && (
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] ${th.textFaint} w-28 shrink-0`}>Profit target $</span>
+                    <input
+                      type="number" min={gtcMin} max={gtcMax} step="0.01" value={gtcPrice}
+                      onChange={e => setGtcPrice(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && !hasErrors && !confirming) setConfirming(true); if (e.key === 'Escape') setOpen(false); }}
+                      className={`flex-1 text-[11px] px-2 py-1.5 rounded border ${
+                        gtcError ? 'border-red-500' : th.inputBorder
+                      } ${th.input} text-emerald-400 outline-none focus:border-emerald-500`}
+                      style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
+                    />
+                  </div>
+                )}
+                {stopOn && (
                 <div>
                   <div className="flex items-center gap-2">
                     <span className={`text-[10px] ${th.textFaint} w-28 shrink-0`}>Stop trigger</span>
@@ -7492,6 +7529,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                     </p>
                   )}
                 </div>
+                )}
               </div>
             )}
           </div>
@@ -7500,14 +7538,23 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
           {confirming && !hasErrors && (
             <div className="mb-3 p-3 rounded-lg border border-orange-600/50 bg-orange-500/5 space-y-2">
               <p className="text-[10px] text-orange-300 font-bold">Confirm order</p>
-              {stopPctOfCredit != null && (
+              {targetOn && gtcParsed > 0 && (
+                <p className="text-[11px] font-bold text-emerald-300">
+                  Selected: {describeTargetReadout(gtcParsed, targetPctCaptured, gtcProfitDollars)}
+                </p>
+              )}
+              {stopOn && stopPctOfCredit != null && (
                 <p className="text-[11px] font-bold text-orange-200">
                   Selected: {describeCreditStopReadout(stopParsed, stopPctOfCredit, stopOutcomePnlDollars)}
                 </p>
               )}
               <p className="text-[10px] text-orange-300">
-                {needsOco
+                {kind === 'OCO_REPLACE'
                   ? `Cancel GTC #${pos.gtcOrderId} ($${existingGtcPrice.toFixed(2)}), then place OCO: profit target $${gtcParsed.toFixed(2)} (+$${gtcProfitDollars.toFixed(2)}) / stop $${stopParsed.toFixed(2)} (${protectiveStopOutcomeLabel(stopOutcomePnlDollars)})`
+                  : kind === 'OCO_NEW'
+                  ? `Place OCO: profit target $${gtcParsed.toFixed(2)} (+$${gtcProfitDollars.toFixed(2)}) / stop $${stopParsed.toFixed(2)} (${protectiveStopOutcomeLabel(stopOutcomePnlDollars)}) — one fills, the other cancels`
+                  : kind === 'TARGET_ONLY'
+                  ? `Place Limit GTC profit target: $${gtcParsed.toFixed(2)} (+$${gtcProfitDollars.toFixed(2)})`
                   : `Place Stop Limit GTC: stop $${stopParsed.toFixed(2)} (${protectiveStopOutcomeLabel(stopOutcomePnlDollars)})`}
               </p>
               {profitProtectionStage && (
@@ -7539,18 +7586,22 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
             <button
               disabled={hasErrors || livePriceLoading}
               onClick={() => setConfirming(true)}
-              style={needsOco && !hasErrors && !livePriceLoading
+              style={(kind === 'OCO_REPLACE' || kind === 'OCO_NEW') && !hasErrors && !livePriceLoading
                 ? { background: `linear-gradient(90deg, #059669 0%, #059669 ${ocoSplitPercent(gtcProfitDollars, stopOutcomePnlDollars) - 2}%, #ea580c ${ocoSplitPercent(gtcProfitDollars, stopOutcomePnlDollars) + 2}%, #ea580c 100%)` }
                 : undefined}
               className={`w-full py-2 text-white text-[10px] font-bold rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                needsOco && !hasErrors && !livePriceLoading ? 'hover:brightness-110' : needsOco ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-orange-600 hover:bg-orange-500'
+                (kind === 'OCO_REPLACE' || kind === 'OCO_NEW') && !hasErrors && !livePriceLoading ? 'hover:brightness-110' : needsOco ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-orange-600 hover:bg-orange-500'
               }`}>
               {livePriceLoading
                 ? 'Fetching live price...'
+                : kind == null
+                ? 'Select a stop or a profit target'
                 : hasErrors
                 ? 'Fix errors above to continue'
-                : needsOco
+                : kind === 'OCO_REPLACE' || kind === 'OCO_NEW'
                 ? `Review OCO — profit ${signedDollar(gtcProfitDollars)} / stop ${signedDollar(stopOutcomePnlDollars)}`
+                : kind === 'TARGET_ONLY'
+                ? `Review Target — profit ${signedDollar(gtcProfitDollars)}`
                 : `Review Stop — ${protectiveStopOutcomeLabel(stopOutcomePnlDollars)}`}
             </button>
           )}
@@ -7566,7 +7617,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
 
       {result === 'success' && resultMsg && (
         <p aria-live="polite" title={resultMsg} className="mt-1 max-w-[92px] truncate text-[8px] font-semibold text-emerald-400">
-          ✓ Stop updated
+          ✓ Updated
         </p>
       )}
     </div>
