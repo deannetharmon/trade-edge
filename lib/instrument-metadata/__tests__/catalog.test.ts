@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { createCatalogResolver } from '../catalog';
 import { DIREXION_GATE1_BOOTSTRAP } from '../direxionBootstrap';
 
