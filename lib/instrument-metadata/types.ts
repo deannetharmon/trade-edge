@@ -39,3 +39,14 @@ export interface InstrumentMetadata {
 export interface InstrumentMetadataResolver {
   resolve(symbol: string): Promise<InstrumentMetadata>;
 }
+
+export interface BrokerEquityClassification {
+  symbol: string;
+  kind: 'stock' | 'etf' | 'index' | 'unsupported' | 'unavailable';
+  provider: string;
+  asOf: string;
+}
+
+export interface BrokerEquityClassifier {
+  classify(symbol: string): Promise<BrokerEquityClassification>;
+}
