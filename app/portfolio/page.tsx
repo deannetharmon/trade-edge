@@ -7166,6 +7166,31 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
             </div>
           ) : (
           <>
+          {/* STOP-SLIDER-0001: stop percentage slider, first thing in the dialog so it is never below the fold */}
+          {creditPerContract > 0 && (
+            <div className={`px-3 py-2 rounded-lg border ${th.borderLight} mb-3`}>
+              <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>Stop loss % (of original credit ${creditPerContract.toFixed(2)})</p>
+              <StopPctSlider
+                accent="orange"
+                ariaLabel="Stop trigger as a percent of original credit"
+                value={stopPctOfCredit ?? CREDIT_STOP_PCT_DEFAULT}
+                min={CREDIT_STOP_PCT_MIN}
+                max={CREDIT_STOP_PCT_MAX}
+                step={CREDIT_STOP_PCT_STEP}
+                minLabel={`${CREDIT_STOP_PCT_MIN}% (${(CREDIT_STOP_PCT_MIN / 100).toFixed(1)}×)`}
+                maxLabel={`${CREDIT_STOP_PCT_MAX}% (${(CREDIT_STOP_PCT_MAX / 100).toFixed(1)}×)`}
+                description={stopPctOfCredit != null ? describeCreditStopPct(stopPctOfCredit) : 'Drag to choose a stop'}
+                onChange={pct => {
+                  setStopPrice(creditStopTriggerFromPct(creditPerContract, pct).toFixed(2));
+                  // Same provenance as typing a ×credit multiple: an explicit
+                  // choice anchored to the original credit.
+                  setStopPriceSource('MANUAL');
+                  setStopBasisOverride('ORIGINAL_CREDIT');
+                  setProfitProtectionStage(null);
+                }}
+              />
+            </div>
+          )}
           {/* Live price bar */}
           <div className={`flex items-center justify-between px-3 py-2 rounded-lg border ${th.borderLight} mb-3`}>
             <div className="flex items-center gap-2">
@@ -7360,29 +7385,6 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                   style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
                 />
               </div>
-              {creditPerContract > 0 && (
-                <div className="mt-2 ml-28">
-                  <StopPctSlider
-                    accent="orange"
-                    ariaLabel="Stop trigger as a percent of original credit"
-                    value={stopPctOfCredit ?? CREDIT_STOP_PCT_DEFAULT}
-                    min={CREDIT_STOP_PCT_MIN}
-                    max={CREDIT_STOP_PCT_MAX}
-                    step={CREDIT_STOP_PCT_STEP}
-                    minLabel={`${CREDIT_STOP_PCT_MIN}% (${(CREDIT_STOP_PCT_MIN / 100).toFixed(1)}×)`}
-                    maxLabel={`${CREDIT_STOP_PCT_MAX}% (${(CREDIT_STOP_PCT_MAX / 100).toFixed(1)}×)`}
-                    description={stopPctOfCredit != null ? describeCreditStopPct(stopPctOfCredit) : 'Drag to choose a stop'}
-                    onChange={pct => {
-                      setStopPrice(creditStopTriggerFromPct(creditPerContract, pct).toFixed(2));
-                      // Same provenance as typing a ×credit multiple: an explicit
-                      // choice anchored to the original credit.
-                      setStopPriceSource('MANUAL');
-                      setStopBasisOverride('ORIGINAL_CREDIT');
-                      setProfitProtectionStage(null);
-                    }}
-                  />
-                </div>
-              )}
               {!stopError && stopParsed > 0 && (
                 <p className="text-[11px] font-bold text-orange-400 mt-0.5 ml-28">
                   {protectiveStopOutcomeLabel(stopOutcomePnlDollars)} if stop fills
