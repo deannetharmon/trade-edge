@@ -106,6 +106,7 @@ Portfolio chart popup: `position: fixed`, `z-[9999]`, anchored via `cardRef.getB
 
 - Technical failures block before a modal; verified empty results open the modal with an in-modal banner.
 - Three-tier visual weight: decision / risk-context / ambient. Visual weight must match decision weight.
+- Comprehensive for decisions, but as simple and consistent as possible (Dean, 2026-10-01). Diane gatekeeps with Ian: reuse existing controls, chips and wording; one name per concept; cut anything that does not help a trade decision.
 - "Trust the qualified realm": traders adjust criteria via scan controls; do not override disqualified results with warnings.
 
 ## Trading methodology

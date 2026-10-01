@@ -10,6 +10,7 @@ Approved by Ian, Alan, Quinn, Paul, Diane (copy). Dean approved the mock on 2026
 - Slice B: after A2 ships and Ian has reviewed the pass-rate check.
 
 ## Rules for every slice
+- Simplicity and consistency directive (Dean, 2026-10-01): comprehensive for decisions, but as simple and consistent as possible. Diane gatekeeps with Ian; see A0 doc section 6.
 - Read `docs/ROADMAP.md` first. Run `git status; git branch -vv; git stash list` and flag issues in 1 or 2 lines.
 - Read only the ranges you need. Do not read `app/screener/page.tsx` in full (about 12.6k lines); grep for the symbol. No new named exports from any `page.tsx`; logic lives in `lib/`.
 - Do not change `RSI_TURN_PARAMS` or any existing RSI consumer's behavior (popups, order-window `RsiLine`, `lib/wheel/candidateRank.ts`). Do not change `getTrend`'s own `calcRsi` (a simple 14-change average returned as `rsi14` in `TrendResult` and consumed downstream; it is a different number from Wilder RSI).
@@ -36,7 +37,12 @@ Seam design, deliver `docs/tickets/RSI-ENTRY-0001-A0-fetch-design.md`:
 - New `lib/indicators/rsiEntryGate.ts`: gate parameter constants (CSP `{ low: 40, high: 70, window: 8, lift: 3, mid: 50 }`, CC `{ low: 30, high: 60, window: 8, lift: 3, mid: 50 }`) and a mapping from `rsiSeries` + `rsiState` to PASS or WAIT with a reason computed from the same 8-value window (CSP: "no dip", "still falling", "turn not confirmed", "bounced"; CC: "no peak", "still rising", "turn not confirmed", "faded"; unavailable: "RSI n/a"). Chip text uses `describeRsiTurn` for Pass.
 - Tests (Alan's fixtures): truth table for CSP and CC; exact boundaries (window low exactly 40, lift exactly 3, latest RSI exactly 50, a flat bar in the rise run); fail closed on short, non-finite, or empty closes; `RSI_TURN_PARAMS` and its existing tests unchanged and green.
 
-## Slice A2: wiring (mock approved by Dean 2026-10-01)
+## Slice A1b: bars memo seam (after A1; design in `RSI-ENTRY-0001-A0-fetch-design.md`)
+- New `lib/scans/dailyBarsMemo.ts` (`fetchDailyBars`, 60 s per-symbol memo, failures not cached) and `lib/scans/rsiEntryForSymbol.ts` (`getRsiEntryGate`, never throws). One edit to `lib/scans/trend.ts`: lines 10-14 call `fetchDailyBars`; nothing else in `getTrend` changes.
+- Tests as listed in the A0 doc section 4, including the `getTrend` golden. Touches scoring-adjacent code: Ian and Quinn review before the push; full suite after asking Dean.
+- Run A0 step 0 (close-adjustment check) on the A1b preview and record it in the A0 doc.
+
+## Slice A2: wiring (mock approved by Dean 2026-10-01; depends on A1b)
 - Scan controls: "Entry timing (RSI)" On/Off, dip level (CSP), peak level (CC), advanced window, lift, ceiling. Default Off at first release. Persist the last-used setting the same way the other scan controls persist (match the existing pattern; do not invent a store).
 - Receipt: add the RSI rule and "N of M pass" to the existing "Active CSP rules" and "Active CC rules" lines.
 - Row chips and the empty Best Opportunity message, exactly as the mock. Wait rows keep score and order; only Best Opportunity eligibility changes, and only while the gate is On. "RSI n/a" fails closed while On.
