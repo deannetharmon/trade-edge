@@ -4,7 +4,7 @@
 >
 > This document captures the frozen LEV-0001 v2 specification so the implementation contract is available with project source. If this file and Issue #52 diverge before implementation, reconcile them explicitly rather than silently choosing one.
 >
-> **Frozen 2026-10-01.** Routine execution is owned by Paul (Product Owner), facilitated by Frank (Scrum Master), with Ian (investment/derivatives), Quinn (architecture/controls/QA), Diane (UX), and Dane (engineering). Dean is sponsor-only and is not in the routine approval chain.
+> **Frozen 2026-10-01.** Routine execution is owned by Paul (Product Owner), facilitated by Frank (Scrum Master), with Ian (investment/derivatives), Alan (architecture), Quinn (test/controls/QA), Diane (UX), and Dane (engineering). Dean is sponsor-only and is not in the routine approval chain.
 
 # LEV-0001 v2 — Leveraged & Inverse Instrument Risk, Normalization & Ranking
 
@@ -15,7 +15,8 @@
 - **Product Owner — Paul:** product/scope decisions, priority, final acceptance.
 - **Scrum Master / Facilitator — Frank:** drives sequencing, reviews, blockers, findings, remediation, and gate closure through Done.
 - **Investment & Derivatives Authority — Ian:** portfolio methodology, options/derivatives mechanics, leverage treatment, risk normalization, sizing, stress methodology, investment validation.
-- **Architecture / Controls / QA — Quinn:** architecture integrity, calculation consistency, model controls, fail-closed behavior, QA challenge.
+- **Chief Architect — Alan:** architecture integrity, domain boundaries, canonical-service placement, and technical-debt avoidance.
+- **Software Test Engineer — Quinn:** testability, calculation/control verification, fail-closed coverage, regression strategy, and QA challenge.
 - **UX — Diane:** focused UX specification/mocks and UX acceptance.
 - **Engineering — Dane:** implementation, automated tests, technical delivery.
 
@@ -153,23 +154,23 @@ AI receives canonical structured leverage/risk context and must not infer levera
 ## Execution Gates
 ### Gate 0 — Frozen specification baseline
 **Facilitator:** Frank  
-**Required:** Ian + Quinn; Paul resolves product/scope ambiguity.  
+**Required:** Ian + Alan + Quinn; Paul resolves product/scope ambiguity.  
 Confirm terminology, risk concepts, layered leverage, fail-closed behavior, versioning, configurable policy.
 
 ### Gate 1 — Instrument classification & metadata
-**Build:** Dane | **Review:** Quinn  
+**Build:** Dane | **Architecture:** Alan | **Test/controls:** Quinn  
 Implement canonical metadata/relationship model, freshness/confidence, and fail-closed state.
 
 ### Gate 2 — Exposure & risk foundation
-**Build:** Dane | **Review:** Ian + Quinn  
+**Build:** Dane | **Review:** Ian + Alan + Quinn  
 Implement capital/exposure separation, UEE, gross/net same-underlying aggregation, capital efficiency, basic stress framework, portfolio stress impact, hard-risk-gate framework.
 
 ### Gate 3 — UX design gate
-**Owner:** Diane | **Review:** Ian + Quinn | **Engineering consult:** Dane  
+**Owner:** Diane | **Review:** Ian + Alan + Quinn | **Engineering consult:** Dane  
 Deliver the four UX specifications. Dane must not invent unresolved product behavior while coding.
 
 ### Gate 4 — Scanner normalization & ranking
-**Build:** Dane | **Review:** Ian + Quinn  
+**Build:** Dane | **Review:** Ian + Alan + Quinn  
 Common candidate model, normalization confidence, hard gates, Opportunity Score, Expression Score, portfolio fit, global ranking. Validate cases where leverage legitimately wins and loses.
 
 ### Gate 5 — User-facing scanner & trade detail
@@ -177,23 +178,23 @@ Common candidate model, normalization confidence, hard gates, Opportunity Score,
 Implement approved scanner/trade-detail leverage context and risk states.
 
 ### Gate 6 — Options / Layered Leverage
-**Build:** Dane | **Review:** Ian + Quinn  
+**Build:** Dane | **Review:** Ian + Alan + Quinn  
 Actual Greeks + validated supplemental underlying-equivalent sensitivity + scenario-based stress behavior.
 
 ### Gate 7 — Opportunity / Expression UX
-**Build:** Dane | **Acceptance:** Diane + Ian + Quinn  
+**Build:** Dane | **Acceptance:** Diane + Ian + Alan + Quinn  
 Implement grouping/comparison while preserving opportunity-vs-expression distinction.
 
 ### Gate 8 — Positions / Mission Control / Today’s Priorities
-**Build:** Dane | **Review:** Ian + Diane + Quinn  
+**Build:** Dane | **Review:** Ian + Diane + Alan + Quinn  
 Integrate effective exposure/direct-underlying aggregation. Surface leveraged risk in Mission Control/Priorities only when actionable.
 
 ### Gate 9 — AI integration
-**Build:** Dane | **Review:** Ian + Quinn  
+**Build:** Dane | **Review:** Ian + Alan + Quinn  
 Supply canonical structured leverage/risk context to applicable AI workflows.
 
 ### Gate 10 — Validation & regression
-**Build/QA:** Dane + Quinn | **Investment/derivatives:** Ian | **UX:** Diane  
+**Build:** Dane | **Architecture:** Alan | **QA/controls:** Quinn | **Investment/derivatives:** Ian | **UX:** Diane  
 Cover ordinary instruments; +1.5×/+2×/+3×; −1×/−2×/−3×; index vs single-stock leverage; missing/stale/changed metadata; splits; related/offsetting positions; options on leveraged products; longer holds; hard-gate failures; incomplete normalization; leveraged product legitimately outranking and underperforming ordinary alternatives; ordinary-trade regression.
 
 ### Gate 11 — Integrated closure
@@ -203,7 +204,8 @@ Frank verifies all findings closed and required domain approvals present. **Paul
 ## Execution Governance
 - Frank drives the ticket through the gates; he does not substitute his judgment for domain owners.
 - Ian owns investment and derivatives decisions.
-- Quinn owns architecture/control correctness.
+- Alan owns architecture correctness and domain boundaries.
+- Quinn owns testability, control verification, and QA challenge.
 - Diane owns UX decisions.
 - Dane owns implementation.
 - Paul owns product/scope decisions and final acceptance.
