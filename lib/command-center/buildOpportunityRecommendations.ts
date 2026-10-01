@@ -25,6 +25,7 @@ import {
 import type { OpportunityCandidate, OpportunityContext, OpportunityRecommendation } from '@/lib/opportunity-engine';
 import type { DecisionAnalysis } from '@/lib/decision-engine';
 import { DIREXION_GATE1_BOOTSTRAP, resolveCatalogInstrumentMetadata } from '@/lib/instrument-metadata';
+import { calculateLayeredOptionExposure } from '@/lib/leverage-risk';
 
 export interface BuildOpportunityRecommendationsResult {
   recommendations: OpportunityRecommendation[];
@@ -43,20 +44,18 @@ function buildGate5NormalizedRiskEvidence(
     const metadata = resolveCatalogInstrumentMetadata(DIREXION_GATE1_BOOTSTRAP, symbol);
     if (!metadata) continue;
 
-    // Gate 5 production recommendations are option expressions. A validated
-    // leveraged underlying establishes layered leverage and its economic
-    // underlying, but it does NOT make option exposure authoritative. Gate 6
-    // adds product Greeks/scenario analysis. Fail closed here rather than
-    // treating capitalRequired/theoreticalMaxLoss as share market value.
+    const candidate = analysis.candidate;
+    if (!candidate) continue;
+    const capitalRequired = analysis.expectedOutcome.capitalRequired ?? candidate.theoreticalMaxLoss ?? 0;
+    const layered = calculateLayeredOptionExposure({ candidate, metadata, capitalRequired });
+
     evidence.set(analysis.subject.id, {
-      economicUnderlying: metadata.economicUnderlyingSymbol ?? metadata.benchmark ?? null,
-      normalizationAuthoritative: false,
-      initialEffectiveExposure: null,
-      capitalEfficiency: null,
-      hardRiskGatePassed: false,
-      hardRiskGateReasons: [
-        'Layered leverage requires option Greeks and scenario analysis before authoritative normalized ranking.',
-      ],
+      economicUnderlying: layered.economicUnderlying,
+      normalizationAuthoritative: layered.normalizationAuthoritative,
+      initialEffectiveExposure: layered.economicUnderlyingDeltaExposure,
+      capitalEfficiency: layered.capitalEfficiency,
+      hardRiskGatePassed: layered.normalizationAuthoritative,
+      hardRiskGateReasons: layered.normalizationAuthoritative ? [] : layered.reasons,
       layeredLeverage: true,
     });
   }

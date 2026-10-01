@@ -73,7 +73,7 @@ describe('TC-0001B: buildOpportunityRecommendations', () => {
     // we additionally assert both fixture symbols made it through untouched.
     expect(symbolsInOrder.length).toBe(analyses.length - result.skipped.length);
   });
-  it('wires known leveraged underlyings into the production path and fails layered option leverage closed until Gate 6', () => {
+  it('wires known leveraged underlyings into the production path and fails layered option leverage closed when required leg delta is missing', () => {
     const analyses = [
       buildDecisionAnalysisFixture({ symbol: 'NVDU', opportunityScoreTotal: 99 }),
       buildDecisionAnalysisFixture({ symbol: 'NVDA', opportunityScoreTotal: 80 }),
@@ -93,6 +93,22 @@ describe('TC-0001B: buildOpportunityRecommendations', () => {
     });
     expect(nvdu?.portfolioConflicts.join(' ')).toMatch(/normalization incomplete/i);
     expect(nvda?.normalizationAuthoritative).toBeUndefined();
+  });
+
+  it('makes layered leverage comparable when every option leg has authoritative delta', () => {
+    const analysis = buildDecisionAnalysisFixture({ symbol: 'NVDU', opportunityScoreTotal: 90 });
+    if (!analysis.candidate || analysis.candidate.legs.length < 2) throw new Error('fixture requires two option legs');
+    analysis.candidate.underlyingPrice = 100;
+    analysis.candidate.legs[0].delta = -0.25;
+    analysis.candidate.legs[1].delta = -0.10;
+
+    const result = buildOpportunityRecommendations([analysis], CONTEXT);
+    expect(result.recommendations[0]).toMatchObject({
+      symbol: 'NVDU', economicUnderlying: 'NVDA', normalizationAuthoritative: true,
+      layeredLeverage: true,
+    });
+    expect(result.recommendations[0].initialEffectiveExposure).not.toBeNull();
+    expect(result.recommendations[0].comparableRank).toBe(1);
   });
 
 });
