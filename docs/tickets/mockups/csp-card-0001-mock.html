@@ -86,12 +86,12 @@ ul.notes{margin:0;padding-left:18px;color:var(--muted);font-size:13px;display:fl
   <div class="card">
     <div class="row">
       <div class="col sym"><b>AVL</b><span class="l">$34.56 · etf</span></div>
-      <div class="col"><span><span class="l">Exp </span>2026-10-16 (15d)</span><span><span class="l">Put </span><b>52</b></span><span class="chg"><span class="l">Cash </span>$5,200</span></div>
-      <div class="col" style="width:190px"><span><span class="l">Return by expiration </span>33.08%<span class="chip chg" title="Intrinsic $17.44 of bid $17.20. The bid is below intrinsic, which signals a stale or illiquid quote.">Mostly intrinsic</span></span><span><span class="l">30-day comparison </span><span class="warn">66.15% — Look closer</span></span></div>
-      <div class="col"><span><span class="l">Premium </span><span class="good num chg">$1720.00</span></span><span><span class="l">Ann. Yield </span><span class="chg">805%</span></span></div>
+      <div class="col"><span><span class="l">Exp </span>2026-10-16 (15d)</span><span><span class="l">Put </span><b>52</b></span><span class="chg"><span class="l">Cash Req. </span>$5,200</span></div>
+      <div class="col" style="width:190px"><span><span class="l">Return by expiration </span>33.08%<span class="chip chg" title="Intrinsic $17.44 of bid $17.20. The bid is below intrinsic, which signals a stale or illiquid quote.">Mostly intrinsic</span></span><span class="warn">Bid below intrinsic ($17.20 &lt; $17.44)</span><span><span class="l">30-day comparison </span><span class="warn">66.15% — Look closer</span></span></div>
+      <div class="col"><span><span class="l">Premium </span><span class="num chg">$1720.00</span></span><span><span class="l">Ann. Yield </span><span class="chg">805%</span></span></div>
       <div class="col"><span><span class="l">POP </span>0%</span></div>
       <div class="col"><span><span class="l">Delta Exposure </span><span class="bad">100</span></span><span>1.00</span></div>
-      <div class="col"><span><span class="l">OTM </span><span class="bad num">-50.5%</span></span><span class="chg"><span class="l">BE </span>$34.80</span></div>
+      <div class="col"><span><span class="l">OTM </span><span class="bad num">-50.5%</span></span><span class="chg warn" title="Breakeven is above the current price: assignment starts underwater."><span class="l">BE </span>$34.80</span></div>
       <div class="col"><span><span class="l">OI </span><span class="bad num">0</span></span><span class="bad">Below OI floor</span></div>
       <div class="col"><span><span class="l">IVX </span><span class="good">67.7%</span></span><span><span class="l">EM </span>$4.74</span></div>
     </div>
@@ -110,7 +110,7 @@ ul.notes{margin:0;padding-left:18px;color:var(--muted);font-size:13px;display:fl
   <div class="card">
     <div class="row">
       <div class="col sym"><b>AVL</b><span class="l">$34.56 · etf</span></div>
-      <div class="col"><span><span class="l">Exp </span>2026-10-16 (15d)</span><span><span class="l">Put </span><b>35</b></span><span><span class="l">Cash </span>$3,500</span></div>
+      <div class="col"><span><span class="l">Exp </span>2026-10-16 (15d)</span><span><span class="l">Put </span><b>35</b></span><span><span class="l">Cash Req. </span>$3,500</span></div>
       <div class="col" style="width:190px"><span><span class="l">Return by expiration </span>4.86%</span><span><span class="l">30-day comparison </span><span class="warn">9.71% — Look closer</span></span></div>
       <div class="col"><span><span class="l">Premium </span><span class="good num">$170.00</span></span><span><span class="l">Ann. Yield </span><span>118%</span></span></div>
       <div class="col"><span><span class="l">POP </span>48%</span></div>
@@ -152,15 +152,20 @@ ul.notes{margin:0;padding-left:18px;color:var(--muted);font-size:13px;display:fl
       <div class="col"><span class="l">Returns need whole-number DTE &gt; 0.</span></div>
     </div>
   </div>
+  <ul class="notes">
+    <li>Missing underlying: no chip, other cells unchanged. Two contracts at bid 1.70: Premium $340.00, BE and returns unchanged.</li>
+    <li>Capital blocked: Cash Req. renders red as it does today. The disqualified audit card uses the same cells and Bid · Ask line.</li>
+    <li>52P above: BE $34.80 is amber because it is above the $34.56 stock price; Premium loses its green emphasis while the chip shows.</li>
+  </ul>
 </section>
 
 <section class="panel" aria-labelledby="x1">
   <h2 id="x1">Expanded section, AVL 52P (after)</h2>
   <div class="card">
     <div class="row" style="flex-direction:column;gap:3px;min-width:0">
-      <span><span class="l">Credit: </span><span class="good num chg">$1,720.00</span> <span class="l">(1 contract)</span></span>
+      <span><span class="l">Credit: </span><span class="good num chg">$1720.00</span> <span class="l">(1 contract)</span></span>
       <span><span class="l">Cash Required: </span><b>$5,200</b> <span class="l">(strike × 100, no margin)</span></span>
-      <span><span class="l">Breakeven Price: </span><span class="chg">$34.80</span> <span class="l">(assignment basis: strike − bid; the assignment-price note is unchanged)</span></span>
+      <span><span class="l">Breakeven Price: </span><span class="chg warn">$34.80</span> <span class="l">(assignment basis: strike − bid; the assignment-price note is unchanged)</span></span>
       <span><span class="l">Annualized Return: </span><span class="chg">805%</span></span>
     </div>
   </div>
