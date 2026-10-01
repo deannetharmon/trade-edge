@@ -214,7 +214,7 @@ import { buildTodaysPrioritiesQueue } from '@/lib/todays-priorities-queue';
 // docs/design/PI-0012-Portfolio-Review-Architecture.md.
 import { PositionCompositionCard } from '@/features/portfolio/positions/PositionCompositionCard';
 import { EconomicUnderlyingExposureGroups } from '@/features/portfolio/positions/EconomicUnderlyingExposureGroups';
-import { buildLeveragedPositionExposureGroups } from '@/lib/portfolio/leveragedPositionExposure';
+import { buildLeveragedPositionExposureGroups, buildLeveragedPositionExposureExceptions } from '@/lib/portfolio/leveragedPositionExposure';
 // PI-0013: Daily Briefing Dashboard -- an orchestration layer over Portfolio
 // Review (above) and Today's Priorities' dashboard. No new score, no new
 // ranking, no new recommendation logic, no AI -- see lib/dailyBriefing's own
@@ -10361,13 +10361,26 @@ export default function PortfolioPage() {
     portfolioReview,
     dailyBriefing,
   } = composition;
-  // WA-0003: the one additive, canonical queue composition (lib/todays-
-  // priorities-queue) -- memoized on the same todaysPrioritiesDashboard this
-  // page already computes, so it recomputes only when the underlying
-  // dashboard actually changes, not on every unrelated re-render.
+  const leveragedPositionExposureGroups = useMemo(
+    () => buildLeveragedPositionExposureGroups(positions),
+    [positions],
+  );
+  const leveragedPositionExposureExceptions = useMemo(
+    () => buildLeveragedPositionExposureExceptions(leveragedPositionExposureGroups),
+    [leveragedPositionExposureGroups],
+  );
+
+  // WA-0003 + LEV-0001 Gate 8: one shared queue remains the source for
+  // Today's Priorities and Mission Control. Leverage items are appended only
+  // when canonical held-position evidence is incomplete; healthy leveraged
+  // exposure remains informational on Positions and never becomes a task.
   const todaysPrioritiesQueue = useMemo(
-    () => buildTodaysPrioritiesQueue({ dashboard: todaysPrioritiesDashboard, generatedAt: new Date().toISOString() }),
-    [todaysPrioritiesDashboard],
+    () => buildTodaysPrioritiesQueue({
+      dashboard: todaysPrioritiesDashboard,
+      generatedAt: new Date().toISOString(),
+      leverageExceptions: leveragedPositionExposureExceptions,
+    }),
+    [todaysPrioritiesDashboard, leveragedPositionExposureExceptions],
   );
   const [cancellingOrderIds, setCancellingOrderIds] = useState<Set<string>>(new Set());
   const [replacingOrderIds, setReplacingOrderIds] = useState<Set<string>>(new Set());
@@ -10794,10 +10807,7 @@ export default function PortfolioPage() {
     pendingOrders,
     snapshotDataQuality,
   }), [snapshot, positions, pendingOrders, snapshotDataQuality]);
-  const leveragedPositionExposureGroups = useMemo(
-    () => buildLeveragedPositionExposureGroups(positions),
-    [positions],
-  );
+
 
 
   // PT-0002B: fail closed at the render boundary. LIVE account
