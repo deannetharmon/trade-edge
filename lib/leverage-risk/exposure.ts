@@ -42,7 +42,8 @@ export function calculateLongInstrumentExposure(
       initialUnderlyingEquivalentExposure != null && capitalRequired > 0
         ? Math.abs(initialUnderlyingEquivalentExposure) / capitalRequired
         : null,
-    authoritative: canNormalize,
+    maxCapitalLoss: capitalDeployed,
+    normalizationAuthoritative: canNormalize,
     reasons: canNormalize
       ? ['Initial underlying-equivalent exposure is a first-order sizing approximation.']
       : [
@@ -57,7 +58,7 @@ export function stressLongInstrument(
   scenario: UnderlyingStressScenario,
 ): LongInstrumentStressResult {
   const exposure = calculateLongInstrumentExposure(input);
-  if (!exposure.authoritative || exposure.initialUnderlyingEquivalentExposure == null) {
+  if (!exposure.normalizationAuthoritative || exposure.initialUnderlyingEquivalentExposure == null) {
     return {
       modelVersion: LEVERAGE_RISK_MODEL_VERSION,
       underlyingMovePct: scenario.underlyingMovePct,
@@ -65,7 +66,7 @@ export function stressLongInstrument(
       estimatedPnl: null,
       estimatedLoss: null,
       approximation: true,
-      authoritative: false,
+      normalizationAuthoritative: false,
       reasons: ['Stress approximation unavailable because normalized exposure is incomplete.'],
     };
   }
@@ -83,7 +84,7 @@ export function stressLongInstrument(
     estimatedPnl,
     estimatedLoss: Math.max(0, -estimatedPnl),
     approximation: true,
-    authoritative: true,
+    normalizationAuthoritative: true,
     reasons: [
       'Simple multiplier stress is a first-order approximation only; it does not model multi-day reset/path effects.',
     ],
