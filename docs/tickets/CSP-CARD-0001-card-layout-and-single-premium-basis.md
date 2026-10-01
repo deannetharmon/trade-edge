@@ -16,6 +16,8 @@
 
 Reports from Ian are advice, not approval. Dean is the final decision-maker.
 
+Mock review (inline lenses, not independent): Ian approve; Quinn approve with changes, now folded in (edge states, expanded section and order-modal pre-fill added to the mock). Diane's mock still needs Dean's approval before any UI goes to code.
+
 ## Problem
 
 1. **Two premium bases on one card.** `csp-finder.ts` builds `credit`, `roc`, `annualizedRoc` and `breakeven` from the option **mid** (`c.mid * 100`, `strike - mid`). `calculateCspReturnThisCycle` builds "Return by expiration" and "30-day comparison" from the executable **bid**. Example (AVL 52P, bid 17.20, mid 17.80): Return by expiration 33.08% (17.20 / 52) beside ROC 34.2% (17.80 / 52); Breakeven $34.20 where the bid-based figure is $34.80. A seller fills near the bid, so the mid figures overstate.
