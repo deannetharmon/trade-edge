@@ -74,7 +74,7 @@ describe('Gate 8 leveraged position exposure grouping', () => {
     // NVDU: 0.25 * 100 * $50 * 2x = $2,500.
     expect(groups[0].grossBullishExposure).toBeCloseTo(7500);
     expect(groups[0].netDirectionalExposure).toBeCloseTo(7500);
-    expect(groups[0].capitalDeployed).toBeCloseTo(900);
+    expect(groups[0].maxCapitalLoss).toBeCloseTo(900);
   });
 
   it('preserves inverse direction in gross bearish and net exposure', () => {
