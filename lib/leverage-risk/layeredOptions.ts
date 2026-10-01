@@ -3,6 +3,14 @@ import type { InstrumentMetadata } from '@/lib/instrument-metadata';
 import { evaluateInstrumentNormalizationReadiness } from '@/lib/instrument-metadata';
 import { LEVERAGE_RISK_MODEL_VERSION } from './types';
 
+export interface LayeredOptionStressResult {
+  underlyingMovePct: number;
+  estimatedProductMovePct: number;
+  estimatedPnl: number;
+  estimatedLoss: number;
+  approximation: true;
+}
+
 export interface LayeredOptionExposure {
   modelVersion: typeof LEVERAGE_RISK_MODEL_VERSION;
   symbol: string;
@@ -12,6 +20,7 @@ export interface LayeredOptionExposure {
   productDeltaExposure: number | null;
   economicUnderlyingDeltaExposure: number | null;
   capitalEfficiency: number | null;
+  stressScenarios: LayeredOptionStressResult[];
   reasons: string[];
 }
 
@@ -48,6 +57,7 @@ export function calculateLayeredOptionExposure(input: {
       productDeltaExposure: null,
       economicUnderlyingDeltaExposure: null,
       capitalEfficiency: null,
+      stressScenarios: [],
       reasons: [
         ...readiness.missingCriticalFields,
         ...(missingDelta ? ['Authoritative layered option exposure requires delta for every option leg; missing Greeks are not estimated.'] : []),
@@ -63,6 +73,15 @@ export function calculateLayeredOptionExposure(input: {
   }, 0);
   const economicUnderlyingDeltaExposure = productDeltaExposure * (leverage as number);
   const capital = Math.abs(input.capitalRequired);
+  // Scenario P/L uses the option position's actual product delta exposure as
+  // the local sensitivity anchor. The issuer multiplier maps an economic-
+  // underlying move to the leveraged product move. This remains explicitly
+  // first-order: gamma/volatility/path effects require richer market inputs.
+  const stressScenarios = [-20, -15, -10, -5, 5, 10, 15, 20].map(underlyingMovePct => {
+    const estimatedProductMovePct = underlyingMovePct * (leverage as number);
+    const estimatedPnl = productDeltaExposure * (estimatedProductMovePct / 100);
+    return { underlyingMovePct, estimatedProductMovePct, estimatedPnl, estimatedLoss: Math.max(0, -estimatedPnl), approximation: true as const };
+  });
 
   return {
     modelVersion: LEVERAGE_RISK_MODEL_VERSION,
@@ -73,10 +92,11 @@ export function calculateLayeredOptionExposure(input: {
     productDeltaExposure,
     economicUnderlyingDeltaExposure,
     capitalEfficiency: capital > 0 ? Math.abs(economicUnderlyingDeltaExposure) / capital : null,
+    stressScenarios,
     reasons: [
       'Product-level option delta is authoritative for the option position.',
       'Economic-underlying delta exposure is supplemental first-order sensitivity: product delta exposure multiplied by validated issuer leverage.',
-      'Delta exposure is not maximum loss and does not replace scenario analysis for material layered-leverage decisions.',
+      'Stress scenarios are first-order delta approximations; they do not model gamma, volatility repricing, multi-day reset/path effects, or replace theoretical maximum loss.',
     ],
   };
 }
