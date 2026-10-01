@@ -271,8 +271,11 @@ function OpportunityExpressionComparison({ recommendations, th }: { recommendati
     <div data-testid="opportunity-expression-comparison" className="space-y-2">
       <p className={`text-[9px] ${th.textFaint} tracking-widest uppercase font-bold`}>Opportunity → Expression Comparison</p>
       {comparableGroups.map(([underlying, recs]) => {
-        const underlyingScores = recs.map(r => r.opportunityScoreTotal).filter((v): v is number => v != null && Number.isFinite(v));
-        const opportunityScore = underlyingScores.length ? Math.max(...underlyingScores) : null;
+        // Gate 7 keeps underlying-opportunity quality distinct from expression
+        // quality. The current recommendation contract does not yet provide a
+        // canonical underlying-level score, so never manufacture one from the
+        // best expression score.
+        const opportunityScore = null;
         return (
           <div key={underlying} className={`rounded-xl border ${th.border} ${th.card} p-3 space-y-2`}>
             <div className="flex flex-wrap items-baseline gap-3">
