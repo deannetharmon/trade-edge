@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RSI Entry Timing</title>
+<style>
+/* Layout: one framed screener panel at a time, switched by tabs; example data throughout. Tokens follow the app's existing dark mock palette (docs/mockups). */
+:root{
+  --bg:#090a0b; --card:#171819; --input:#0f1112; --line:#3a3d3f;
+  --text:#f5f6f6; --muted:#a1a6aa; --faint:#8a9094;
+  --pass:#52e4d2; --pass-bg:rgba(82,228,210,.12); --wait-bg:#232628; --focus:#9ecbff;
+  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f4f5f5; --card:#ffffff; --input:#eef0f0; --line:#d3d8da;
+    --text:#101314; --muted:#454c50; --faint:#667074;
+    --pass:#0b7a6e; --pass-bg:rgba(11,122,110,.1); --wait-bg:#eceff0; --focus:#1f5fbf;
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f4f5f5; --card:#ffffff; --input:#eef0f0; --line:#d3d8da;
+  --text:#101314; --muted:#454c50; --faint:#667074;
+  --pass:#0b7a6e; --pass-bg:rgba(11,122,110,.1); --wait-bg:#eceff0; --focus:#1f5fbf;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);padding-inline:16px;padding-block:20px 48px}
+.wrap{max-width:980px;margin-inline:auto;display:flex;flex-direction:column;gap:16px}
+.top{display:flex;flex-direction:column;gap:4px}
+.eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+h1{margin:0;font-size:20px;font-weight:650;letter-spacing:.02em;text-wrap:balance}
+.sub{margin:0;color:var(--muted);max-width:68ch}
+.tabs{display:flex;flex-wrap:wrap;gap:8px}
+.tabs button{font:inherit;color:var(--muted);background:transparent;border:1px solid var(--line);border-radius:6px;padding:7px 12px;cursor:pointer}
+.tabs button[aria-pressed="true"]{color:var(--text);border-color:var(--text)}
+button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.frame{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:18px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.note{font-size:12px;color:var(--faint);margin:0}
+.sec{display:flex;flex-direction:column;gap:8px;min-width:0}
+.label{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.switch{display:inline-flex;align-items:center;gap:10px;font:inherit;color:var(--text);background:none;border:0;padding:0;cursor:pointer}
+.track{width:38px;height:22px;border-radius:11px;border:1px solid var(--line);background:var(--input);position:relative;flex:none}
+.track::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--faint)}
+.switch[aria-checked="true"] .track{border-color:var(--pass);background:var(--pass-bg)}
+.switch[aria-checked="true"] .track::after{left:18px;background:var(--pass)}
+.field{display:flex;flex-direction:column;gap:4px}
+.field input{width:96px;font:inherit;font-family:var(--mono);color:var(--text);background:var(--input);border:1px solid var(--line);border-radius:6px;padding:7px 9px}
+details{border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+summary{cursor:pointer;color:var(--muted)}
+details .row{margin-top:10px}
+.receipt{font-size:12px;color:var(--muted);background:var(--input);border:1px solid var(--line);border-radius:6px;padding:9px 11px}
+.receipt b{color:var(--text);font-weight:600}
+.best{border:1px solid var(--pass);background:var(--pass-bg);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.best.empty{border-color:var(--line);background:var(--input)}
+.best .label{color:var(--pass)}
+.best.empty .label{color:var(--faint)}
+.link{font:inherit;color:var(--focus);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}
+.list{display:flex;flex-direction:column;gap:8px}
+.cand{border:1px solid var(--line);border-radius:8px;padding:11px 13px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.cand.is-best{border-color:var(--pass)}
+.cand .head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
+.sym{font-weight:650;font-size:15px}
+.metrics{display:flex;flex-wrap:wrap;gap:4px 16px;color:var(--muted);font-variant-numeric:tabular-nums}
+.metrics span b{color:var(--text);font-weight:550}
+.chip{align-self:flex-start;font-family:var(--mono);font-size:12px;border-radius:5px;padding:3px 8px;border:1px solid var(--line);background:var(--wait-bg);color:var(--muted);max-width:100%}
+.chip.pass{background:var(--pass-bg);border-color:var(--pass);color:var(--pass)}
+.chip.na{background:transparent;color:var(--faint)}
+.chiprow{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.btn{font:inherit;color:var(--text);background:transparent;border:1px solid var(--line);border-radius:6px;padding:5px 11px;cursor:pointer}
+.btn[aria-pressed="true"]{border-color:var(--pass);color:var(--pass);background:var(--pass-bg)}
+.order{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.order .cell{background:var(--input);border:1px solid var(--line);border-radius:6px;padding:9px 11px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.order .cell b{font-variant-numeric:tabular-nums;font-weight:600}
+.tradeline{font-size:12px;color:var(--muted)}
+.mail{background:var(--input);border:1px solid var(--line);border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;font-size:13px}
+.mail .subj{font-weight:600}
+.spec{display:flex;flex-direction:column;gap:4px;margin:0;padding-left:18px;color:var(--muted);font-size:13px}
+@media (prefers-reduced-motion: no-preference){.track::after{transition:left .12s ease}}
+</style>
+</head><body>
+<main class="wrap">
+  <header class="top">
+    <div class="eyebrow">SCREENER / CASH-SECURED PUT / ENTRY TIMING</div>
+    <h1>RSI-ENTRY-0001 · Entry timing (RSI)</h1>
+    <p class="sub">Mock for Dean's approval before Phase A UI code. All tickers, prices and scores are example data, not live.</p>
+  </header>
+  <nav class="tabs" aria-label="Mock screens">
+    <button type="button" data-v="controls" aria-pressed="true">Scan controls</button>
+    <button type="button" data-v="results" aria-pressed="false">Results</button>
+    <button type="button" data-v="order" aria-pressed="false">Order screen</button>
+    <button type="button" data-v="watch" aria-pressed="false">Watch (Phase B)</button>
+  </nav>
+  <section id="host" aria-live="polite"></section>
+</main>
+
+<script>
+(function(){
+  var host = document.getElementById('host');
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tabs button'));
+  var state = { view: 'controls', gate: true, scen: 'mixed', watching: false };
+
+  var base = [
+    { sym:'MRVL', strike:'$72 put', dte:38, credit:'$1.46', roc:'31%', delta:'0.22', otm:'9.4%', score:91, kind:'wait', txt:'Wait · no dip (RSI 58)' },
+    { sym:'AMD',  strike:'$158 put', dte:38, credit:'$3.10', roc:'27%', delta:'0.21', otm:'8.8%', score:88, kind:'wait', txt:'Wait · still falling (RSI 27)' },
+    { sym:'XLU',  strike:'$78 put', dte:37, credit:'$0.92', roc:'19%', delta:'0.20', otm:'6.1%', score:84, kind:'pass', txt:'RSI 36 · turned up from 28, 2 bars ago' },
+    { sym:'AAPL', strike:'$300 put', dte:38, credit:'$4.35', roc:'18%', delta:'0.19', otm:'7.2%', score:82, kind:'wait', txt:'Wait · turn not confirmed (RSI 34)' },
+    { sym:'KO',   strike:'$66 put', dte:37, credit:'$0.58', roc:'14%', delta:'0.20', otm:'5.3%', score:79, kind:'wait', txt:'Wait · bounced (RSI 52)' },
+    { sym:'ORCL', strike:'$210 put', dte:38, credit:'$3.80', roc:'22%', delta:'0.21', otm:'8.0%', score:76, kind:'na',   txt:'RSI n/a' },
+    { sym:'XLF',  strike:'$49 put', dte:37, credit:'$0.55', roc:'16%', delta:'0.18', otm:'5.9%', score:74, kind:'pass', txt:'RSI 41 · turned up from 31, 3 bars ago' }
+  ];
+
+  function rows(){
+    if (state.scen === 'none') {
+      return base.map(function(r){
+        if (r.sym === 'XLU') return Object.assign({}, r, { kind:'wait', txt:'Wait · no dip (RSI 55)' });
+        if (r.sym === 'XLF') return Object.assign({}, r, { kind:'wait', txt:'Wait · still falling (RSI 29)' });
+        return r;
+      });
+    }
+    return base;
+  }
+  function passCount(list){ return list.filter(function(r){ return r.kind === 'pass'; }).length; }
+
+  function switchEl(id, on, label){
+    return '<button type="button" class="switch" role="switch" id="'+id+'" aria-checked="'+on+'"><span class="track"></span><span>'+label+'</span></button>';
+  }
+
+  function controls(){
+    return '<div class="frame">'
+      + '<div class="sec"><div class="label">Cash-secured put · scan controls</div>'
+      + '<div class="row">'+ switchEl('gateCtl', state.gate, 'Entry timing (RSI): ' + (state.gate ? 'On' : 'Off')) +'</div>'
+      + '<p class="note">Marks a trade Wait until daily RSI has dipped and turned up. Wait trades stay visible and tradeable. Only Best Opportunity is affected. Daily RSI(14), completed bars only. An entry timing hint, not a signal.</p></div>'
+      + '<div class="row"><div class="field"><label class="label" for="dip">Dip level</label><input id="dip" type="number" value="40" min="10" max="50" step="1"></div>'
+      + '<div class="field"><label class="label" for="peak">Peak level (covered calls)</label><input id="peak" type="number" value="60" min="50" max="90" step="1" disabled></div></div>'
+      + '<details><summary>Advanced</summary><div class="row">'
+      + '<div class="field"><label class="label" for="win">Window (bars)</label><input id="win" type="number" value="8"></div>'
+      + '<div class="field"><label class="label" for="lift">Lift (points)</label><input id="lift" type="number" value="3"></div>'
+      + '<div class="field"><label class="label" for="ceil">Ceiling</label><input id="ceil" type="number" value="50"></div></div></details>'
+      + '<p class="note">Defaults come from the team (Ian, Alan). The gate ships Off and is switched on here. The covered-call scan shows the peak level instead of the dip level.</p>'
+      + '</div>';
+  }
+
+  function results(){
+    var list = rows();
+    var n = passCount(list);
+    var best;
+    if (state.gate) best = list.filter(function(r){ return r.kind === 'pass'; })[0];
+    else best = list[0];
+    var receipt = '<div class="receipt"><b>Active CSP rules</b> · DTE 30 to 45 · Put delta 0.15 to 0.25 · Bid/ask liquidity · '
+      + (state.gate ? '<b>RSI timing: On</b>, dip at or below 40 · <b>'+n+' of '+list.length+' pass</b>' : '<b>RSI timing: Off</b>') + '</div>';
+    var bestHtml;
+    if (best) {
+      bestHtml = '<div class="best"><div class="label">Best opportunity</div><div><span class="sym">'+best.sym+'</span> · '+best.strike+' · '+best.dte+' DTE · credit '+best.credit+' · annual ROC '+best.roc+'</div></div>';
+    } else {
+      bestHtml = '<div class="best empty"><div class="label">Best opportunity</div><div>No Best Opportunity: 0 of '+list.length+' pass the RSI timing check. <button type="button" class="link" id="gateOff">Turn timing off</button></div></div>';
+    }
+    var cards = list.map(function(r){
+      var isBest = best && r.sym === best.sym;
+      var chip = state.gate ? '<span class="chip '+(r.kind==='pass'?'pass':(r.kind==='na'?'na':''))+'">'+r.txt+'</span>' : '';
+      return '<article class="cand'+(isBest?' is-best':'')+'"><div class="head"><span class="sym">'+r.sym+'</span><span>'+r.strike+' · '+r.dte+' DTE</span></div>'
+        + '<div class="metrics"><span>Credit <b>'+r.credit+'</b></span><span>Annual ROC <b>'+r.roc+'</b></span><span>Delta <b>'+r.delta+'</b></span><span>OTM <b>'+r.otm+'</b></span><span>Score <b>'+r.score+'</b></span></div>'
+        + (chip ? '<div class="chiprow">'+chip+'</div>' : '') + '</article>';
+    }).join('');
+    return '<div class="frame">'
+      + '<div class="row">'+ switchEl('gateRes', state.gate, 'Entry timing (RSI): ' + (state.gate ? 'On' : 'Off'))
+      + '<span class="note">Example:</span>'
+      + '<button type="button" class="btn" id="scenA" aria-pressed="'+(state.scen==='mixed')+'">Some pass</button>'
+      + '<button type="button" class="btn" id="scenB" aria-pressed="'+(state.scen==='none')+'">None pass</button></div>'
+      + receipt + bestHtml
+      + '<div class="list">'+cards+'</div>'
+      + '<p class="note">Order and scores never change. With the gate On, Wait trades stay in the list and tradeable; only the Best Opportunity slot skips them.</p>'
+      + '</div>';
+  }
+
+  function order(){
+    return '<div class="frame"><div class="sec"><div class="label">Order screen · sell to open</div>'
+      + '<div><span class="sym">MRVL</span> · $72 put · 38 DTE · 1 contract</div></div>'
+      + '<div class="order">'
+      + '<div class="cell"><span class="label">Order type</span><b>Limit</b></div>'
+      + '<div class="cell"><span class="label">Credit</span><b>$1.46</b></div>'
+      + '<div class="cell"><span class="label">Cash required</span><b>$7,200</b></div>'
+      + '<div class="cell"><span class="label">Expected move (1 SD)</span><b>±$6.20</b></div></div>'
+      + '<div class="tradeline" id="rsiLine">RSI timing: Wait (no dip, RSI 58). Placing anyway.</div>'
+      + '<div class="row"><button type="button" class="btn">Place order</button></div>'
+      + '<p class="note">One neutral line, shown only for a Wait trade. No checkbox and no second confirm. Placing the order writes an audit entry, "Entered with RSI gate = Wait (no dip)". The order itself is identical with the gate On or Off.</p></div>';
+  }
+
+  function watch(){
+    var on = state.watching;
+    return '<div class="frame"><div class="sec"><div class="label">Watch · Phase B</div>'
+      + '<article class="cand"><div class="head"><span class="sym">AMD</span><span>$158 put · 38 DTE</span></div>'
+      + '<div class="chiprow"><span class="chip">Wait · still falling (RSI 27)</span>'
+      + '<button type="button" class="btn" id="watchBtn" aria-pressed="'+on+'">'+(on ? 'Watching · alert when RSI turns up' : 'Watch for entry')+'</button></div></article></div>'
+      + '<div class="sec"><div class="label">Email when it turns up (sent once per turn, after the close)</div>'
+      + '<div class="mail"><span class="subj">AMD: RSI turned up from 26 (entry timing)</span>'
+      + '<span>Daily RSI 31, up 2 bars in a row from a low of 26. Last close $171.40.</span>'
+      + '<span><button type="button" class="link">Open the scan for AMD</button> to re-run it on the live chain.</span></div>'
+      + '<p class="note">The server checks after the close and never touches TastyTrade. You place the order yourself.</p></div></div>';
+  }
+
+  function render(){
+    host.innerHTML = state.view === 'controls' ? controls() : state.view === 'results' ? results() : state.view === 'order' ? order() : watch();
+    tabs.forEach(function(b){ b.setAttribute('aria-pressed', String(b.getAttribute('data-v') === state.view)); });
+    var g = document.getElementById('gateCtl') || document.getElementById('gateRes');
+    if (g) g.addEventListener('click', function(){ state.gate = !state.gate; render(); });
+    var off = document.getElementById('gateOff');
+    if (off) off.addEventListener('click', function(){ state.gate = false; render(); });
+    var a = document.getElementById('scenA'), b = document.getElementById('scenB');
+    if (a) a.addEventListener('click', function(){ state.scen = 'mixed'; render(); });
+    if (b) b.addEventListener('click', function(){ state.scen = 'none'; render(); });
+    var w = document.getElementById('watchBtn');
+    if (w) w.addEventListener('click', function(){ state.watching = !state.watching; render(); });
+  }
+  tabs.forEach(function(b){ b.addEventListener('click', function(){ state.view = b.getAttribute('data-v'); render(); }); });
+  render();
+})();
+</script>
+</body></html>
