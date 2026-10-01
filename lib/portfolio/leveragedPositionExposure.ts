@@ -14,6 +14,14 @@ export interface LeveragedPositionExposureMember {
   reason: string | null;
 }
 
+export interface LeveragedPositionExposureException {
+  id: string;
+  economicUnderlying: string;
+  subjectId: string | null;
+  headline: string;
+  detail: string;
+}
+
 export interface LeveragedPositionExposureGroup {
   economicUnderlying: string;
   members: LeveragedPositionExposureMember[];
@@ -130,4 +138,23 @@ export function buildLeveragedPositionExposureGroups(
       capitalDeployed: capitals.reduce((sum, value) => sum + value, 0),
     };
   });
+}
+
+export function buildLeveragedPositionExposureExceptions(
+  groups: LeveragedPositionExposureGroup[],
+): LeveragedPositionExposureException[] {
+  return groups
+    .filter(group => !group.normalizationAuthoritative)
+    .map(group => {
+      const incompleteMembers = group.members.filter(member => !member.normalizationAuthoritative);
+      return {
+        id: `lev-normalization::${group.economicUnderlying}`,
+        economicUnderlying: group.economicUnderlying,
+        subjectId: incompleteMembers.length === 1 ? incompleteMembers[0].positionKey : null,
+        headline: `${group.economicUnderlying} — Leverage normalization incomplete`,
+        detail: incompleteMembers.length === 1
+          ? `${incompleteMembers[0].symbol} lacks required exposure or capital evidence; authoritative gross/net economic-underlying totals are unavailable.`
+          : `${incompleteMembers.length} related positions lack required exposure or capital evidence; authoritative gross/net economic-underlying totals are unavailable.`,
+      };
+    });
 }
