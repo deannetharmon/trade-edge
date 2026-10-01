@@ -25,35 +25,39 @@ export interface LeveragedProductCatalogSnapshot {
   entries: LeveragedProductCatalogEntry[];
 }
 
-export function createCatalogResolver(snapshot: LeveragedProductCatalogSnapshot) {
-  const bySymbol = new Map(snapshot.entries.map(entry => [entry.symbol.toUpperCase(), entry]));
+export function resolveCatalogInstrumentMetadata(
+  snapshot: LeveragedProductCatalogSnapshot,
+  rawSymbol: string,
+): InstrumentMetadata | null {
+  const symbol = rawSymbol.trim().toUpperCase();
+  const entry = snapshot.entries.find(item => item.symbol.toUpperCase() === symbol);
+  if (!entry) return null;
 
-  return async (rawSymbol: string): Promise<InstrumentMetadata | null> => {
-    const symbol = rawSymbol.trim().toUpperCase();
-    const entry = bySymbol.get(symbol);
-    if (!entry) return null;
+  const hasUnderlying = Boolean(entry.economicUnderlyingSymbol || entry.benchmark);
+  const validMultiplier = Number.isFinite(entry.signedLeverageMultiplier) && entry.signedLeverageMultiplier !== 0;
+  const complete = hasUnderlying && validMultiplier;
 
-    const hasUnderlying = Boolean(entry.economicUnderlyingSymbol || entry.benchmark);
-    const validMultiplier = Number.isFinite(entry.signedLeverageMultiplier) && entry.signedLeverageMultiplier !== 0;
-    const complete = hasUnderlying && validMultiplier;
-
-    return {
-      symbol,
-      classification: entry.classification,
-      economicUnderlyingSymbol: entry.economicUnderlyingSymbol,
-      benchmark: entry.benchmark,
-      signedLeverageMultiplier: entry.signedLeverageMultiplier,
-      resetFrequency: entry.resetFrequency,
-      confidence: complete ? 'COMPLETE' : 'INCOMPLETE',
-      confidenceReasons: complete
-        ? [`Validated issuer catalog entry (${entry.issuer}); catalog ${snapshot.catalogVersion}.`]
-        : ['Issuer catalog entry is missing critical normalization fields.'],
-      provenance: {
-        provider: entry.issuer,
-        sourceId: entry.sourceId,
-        asOf: snapshot.generatedAt,
-        sourceUpdatedAt: entry.sourceUpdatedAt,
-      },
-    };
+  return {
+    symbol,
+    classification: entry.classification,
+    economicUnderlyingSymbol: entry.economicUnderlyingSymbol,
+    benchmark: entry.benchmark,
+    signedLeverageMultiplier: entry.signedLeverageMultiplier,
+    resetFrequency: entry.resetFrequency,
+    confidence: complete ? 'COMPLETE' : 'INCOMPLETE',
+    confidenceReasons: complete
+      ? [`Validated issuer catalog entry (${entry.issuer}); catalog ${snapshot.catalogVersion}.`]
+      : ['Issuer catalog entry is missing critical normalization fields.'],
+    provenance: {
+      provider: entry.issuer,
+      sourceId: entry.sourceId,
+      asOf: snapshot.generatedAt,
+      sourceUpdatedAt: entry.sourceUpdatedAt,
+    },
   };
+}
+
+export function createCatalogResolver(snapshot: LeveragedProductCatalogSnapshot) {
+  return async (rawSymbol: string): Promise<InstrumentMetadata | null> =>
+    resolveCatalogInstrumentMetadata(snapshot, rawSymbol);
 }
