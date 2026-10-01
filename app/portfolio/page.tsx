@@ -228,7 +228,7 @@ import type { StockSellOrder } from '@/lib/portfolio/stockOrderBuilder';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { EquityHoldingsSection, isEquityDisplayEnabled, resolvePositionsWorkspaceState } from '@/components/portfolio-data/EquityHoldingsSection';
 import { PositionsWorkspace, isPositionsWorkspaceV2Enabled } from '@/features/portfolio/positions-workspace/PositionsWorkspace';
-import { DebitStopObservation, STOP_CLASSIFICATION_COPY, STOP_CONTROL_LABELS, StopEvidencePanel } from '@/components/portfolio-data/StopEvidencePanel';
+import { DebitStopObservation, STOP_CLASSIFICATION_COPY, STOP_CONTROL_LABELS, StopReasonLine } from '@/components/portfolio-data/StopEvidencePanel';
 import { buildPositionsWorkspaceModel } from '@/features/portfolio/positions-workspace/model/buildPositionsWorkspaceModel';
 import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, type PmccReviewHandoff } from '@/lib/scans/pmccReviewHandoff';
 // PT-0002B: this page now reads the global PortfolioMode and refuses to
@@ -6305,8 +6305,8 @@ function SetStopLossButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme
 function PortfolioStopControl({ pos, th, onRetry }: { pos: Position; th: typeof THEMES[Theme]; onRetry: () => void }) {
   if (pos.entryPriceEffect === 'Debit') return <StandaloneLeapsStopControl pos={pos} th={th} />;
   const classification = pos.stopLossClassification;
-  if (classification === 'NOT_EVALUATED') return <div><button type="button" onClick={onRetry} className="rounded border border-slate-500 px-2.5 py-1 text-[9px] font-bold text-slate-300">{STOP_CONTROL_LABELS.NOT_EVALUATED}</button><StopEvidencePanel assessment={pos.stopAssessment} /></div>;
-  if (classification === 'UNSUPPORTED') return <div><button type="button" disabled className="cursor-not-allowed rounded border border-slate-700 px-2.5 py-1 text-[9px] font-bold text-slate-500">{STOP_CONTROL_LABELS.UNSUPPORTED}</button><StopEvidencePanel assessment={pos.stopAssessment} /></div>;
+  if (classification === 'NOT_EVALUATED') return <div><button type="button" onClick={onRetry} className="rounded border border-slate-500 px-2.5 py-1 text-[9px] font-bold text-slate-300">{STOP_CONTROL_LABELS.NOT_EVALUATED}</button><div className="mt-1"><StopReasonLine assessment={pos.stopAssessment} /></div></div>;
+  if (classification === 'UNSUPPORTED') return <StopReasonLine assessment={pos.stopAssessment} />;
   if (classification === 'INVALID' || classification === 'UNKNOWN_PROVENANCE' || classification === 'TOO_TIGHT') {
     // STOP-DIALOG-SIMPLIFY-0001: one button straight into the dialog. The reason
     // it was flagged is one line at the top of the dialog.

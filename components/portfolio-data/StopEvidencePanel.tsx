@@ -63,13 +63,20 @@ export function StopEvidencePanel({ assessment, expanded = false }: { assessment
   );
 }
 
+/** One plain sentence saying why there is no stop control. Replaces the raw
+ *  evidence panel on the position cards (STOP-CARD-SIMPLIFY-0001). */
+export function stopReasonText(assessment: StopAssessment | null | undefined): string {
+  if (!assessment) return STOP_CLASSIFICATION_COPY.NOT_EVALUATED;
+  if (assessment.reasonCode === 'DEBIT_STRUCTURE_UNSUPPORTED') return 'Stops are not available for this position type yet.';
+  return STOP_CLASSIFICATION_COPY[assessment.classification];
+}
+
+export function StopReasonLine({ assessment }: { assessment: StopAssessment | null | undefined }) {
+  return <p className="max-w-[190px] text-[10px] text-white/50">{stopReasonText(assessment)}</p>;
+}
+
 /** Observation only by construction: no callbacks, broker client, or mutation
  * controls are accepted by this component. */
 export function DebitStopObservation({ position }: { position: Position }) {
-  return (
-    <div className="max-w-md">
-      <span className="text-[10px] text-white/50">Debit stop observation only — create, replace, cancel, and submit are unavailable in V1.</span>
-      <StopEvidencePanel assessment={position.stopAssessment} />
-    </div>
-  );
+  return <StopReasonLine assessment={position.stopAssessment} />;
 }
