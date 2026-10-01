@@ -25,7 +25,8 @@ describe('LEV-0001 exposure foundation', () => {
       capitalRequired: 8_000,
       initialUnderlyingEquivalentExposure: 16_000,
       capitalEfficiency: 2,
-      authoritative: true,
+      maxCapitalLoss: 8_000,
+      normalizationAuthoritative: true,
     });
   });
 
@@ -40,7 +41,7 @@ describe('LEV-0001 exposure foundation', () => {
     expect(calculateLongInstrumentExposure({
       metadata: base({ signedLeverageMultiplier: undefined, confidence: 'PARTIAL' }),
       marketValue: 8_000,
-    })).toMatchObject({ initialUnderlyingEquivalentExposure: null, authoritative: false });
+    })).toMatchObject({ initialUnderlyingEquivalentExposure: null, normalizationAuthoritative: false });
   });
 
   it('labels simple underlying stress as an approximation', () => {
@@ -52,7 +53,7 @@ describe('LEV-0001 exposure foundation', () => {
       estimatedPnl: -1_600,
       estimatedLoss: 1_600,
       approximation: true,
-      authoritative: true,
+      normalizationAuthoritative: true,
     });
   });
 
