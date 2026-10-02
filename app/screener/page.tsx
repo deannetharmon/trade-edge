@@ -186,7 +186,7 @@ import { ScanIdentityHeader } from '@/features/screener/components/ScanIdentityH
 import { AccountingSummaryBar } from '@/features/screener/components/AccountingSummaryBar';
 import { FilteredResultControls, type FilterStrategy } from '@/features/screener/components/FilteredResultControls';
 import { BestOpportunitiesShortlist, pickTopOpportunityIds } from '@/features/screener/components/BestOpportunitiesShortlist';
-import { buildBestOpportunityRows } from '@/features/screener/lib/bestOpportunityRows';
+import { buildBestOpportunityRows, excludeHiddenSymbols } from '@/features/screener/lib/bestOpportunityRows';
 import { DisqualifiedSection } from '@/features/screener/components/DisqualifiedSection';
 import { CspFundamentalsRow } from '@/features/screener/components/CspFundamentalsRow';
 import { SymbolOutcomesDisclosure } from '@/features/screener/components/SymbolOutcomesDisclosure';
@@ -8706,7 +8706,7 @@ function TargetedScanResultsPanel({
                           </button>
             <button onClick={() => setHiddenSymbols([])}
                             className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-teal-500/50`}>
-                            Show all
+                            Reset ticker filter
                           </button>
           </div>
         )}
@@ -12219,7 +12219,7 @@ export default function Home() {
                           </button>
                           <button onClick={() => setFilterHiddenSymbols([])}
                             className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-amber-500/50`}>
-                            Show all
+                            Reset ticker filter
                           </button>
                         </div>
                       );
@@ -12277,7 +12277,7 @@ export default function Home() {
                   excluded, not merely deferred. */}
               {!activePmccSession && (results.length > 0 || hasCompletedScanForCurrentMode) && (screenMode === 'filter' || activeSession?.requestedStrategy === 'csp') && (
                 <BestOpportunitiesShortlist
-                  rows={buildBestOpportunityRows(filteredQualified, opportunityRecommendations)}
+                  rows={buildBestOpportunityRows(filteredQualified, excludeHiddenSymbols(opportunityRecommendations, filterHiddenSymbols))}
                   borderClassName={th.border}
                   textFaintClassName={th.textFaint}
                   textMutedClassName={th.textMuted}
@@ -12287,9 +12287,9 @@ export default function Home() {
               {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && rankDisplayWidth != null && (
                 <p className={`mb-3 text-xs ${th.textFaint}`}>Best Opportunities uses the full scan. The selected-width results below have their own candidate scores; show all scanned widths to see the full-scan shortlist.</p>
               )}
-              {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && rankDisplayWidth == null && (
+              {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && activeSession?.requestedStrategy !== 'csp' && rankDisplayWidth == null && (
                 <BestOpportunitiesShortlist
-                  rows={buildBestOpportunityRows(results.filter(r => r.qualified), opportunityRecommendations)}
+                  rows={buildBestOpportunityRows(results.filter(r => r.qualified && !rankHiddenSymbols.includes(r.symbol)), excludeHiddenSymbols(opportunityRecommendations, rankHiddenSymbols))}
                   borderClassName={th.border}
                   textFaintClassName={th.textFaint}
                   textMutedClassName={th.textMuted}
@@ -12331,7 +12331,7 @@ export default function Home() {
                   )}
                 </>
               ) : screenMode === 'filter' || activeSession?.requestedStrategy === 'csp' ? (() => {
-                const topOpportunityRows = buildBestOpportunityRows(filteredQualified, opportunityRecommendations);
+                const topOpportunityRows = buildBestOpportunityRows(filteredQualified, excludeHiddenSymbols(opportunityRecommendations, filterHiddenSymbols));
                 const topOpportunityIds = pickTopOpportunityIds(topOpportunityRows);
                 // CSP-WORKFLOW-0001 — match back to the ScreenResult being
                 // rendered via each row's `resultKey` (the ScreenResult's
@@ -12912,7 +12912,7 @@ export default function Home() {
                           </button>
                         <button onClick={() => setRankHiddenSymbols([])}
                             className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-purple-500/50`}>
-                            Show all
+                            Reset ticker filter
                           </button>
                       </div>
                     );
@@ -13177,7 +13177,7 @@ export default function Home() {
                             className={chip(!leapsHiddenSymbols.includes(sym))}>{sym}</button>
                         ))}
                         <button onClick={() => setLeapsHiddenSymbols([...allSymbols])} className={chip(false)}>Hide all</button>
-                        <button onClick={() => setLeapsHiddenSymbols([])} className={chip(false)}>Show all</button>
+                        <button onClick={() => setLeapsHiddenSymbols([])} className={chip(false)}>Reset ticker filter</button>
                       </div>
                     )}
                   </div>

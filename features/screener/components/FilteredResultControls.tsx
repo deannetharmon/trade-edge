@@ -280,10 +280,6 @@ export function FilteredResultControls({
             className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-amber-500/50`}>
             Hide all
           </button>
-          <button type="button" onClick={() => setHiddenSymbols([])}
-            className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-amber-500/50`}>
-            Show all
-          </button>
         </div>
       )}
 
@@ -312,6 +308,15 @@ export function FilteredResultControls({
                 className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-red-500 hover:text-red-400`}
               >
                 Reset result filters
+              </button>
+            )}
+            {hiddenSymbols.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setHiddenSymbols([])}
+                className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-red-500 hover:text-red-400`}
+              >
+                Reset ticker filter
               </button>
             )}
           </div>

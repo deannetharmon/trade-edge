@@ -53,12 +53,18 @@ function renderControls(props: Partial<ComponentProps<typeof FilteredResultContr
 
 describe('FilteredResultControls', () => {
   // FILTER-LAYOUT-0001: scan wide, then keep a few -- Hide all, then click the ones to keep.
-  it('Hide all hides every ticker and Show all restores them', () => {
-    const { setHiddenSymbols } = renderControls();
+  it('Hide all hides every ticker; Reset ticker filter restores only the tickers and leaves other filters alone', () => {
+    const { setHiddenSymbols, setPopMin } = renderControls({ hiddenSymbols: ['MSFT'] });
     fireEvent.click(screen.getByRole('button', { name: 'Hide all' }));
     expect(setHiddenSymbols).toHaveBeenLastCalledWith(['AAPL', 'MSFT']);
-    fireEvent.click(screen.getByRole('button', { name: 'Show all' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset ticker filter' }));
     expect(setHiddenSymbols).toHaveBeenLastCalledWith([]);
+    expect(setPopMin).not.toHaveBeenCalled();
+  });
+
+  it('hides Reset ticker filter when no ticker is hidden', () => {
+    renderControls();
+    expect(screen.queryByRole('button', { name: 'Reset ticker filter' })).not.toBeInTheDocument();
   });
 
   it('puts Tickers on their own line, apart from the filter lines', () => {

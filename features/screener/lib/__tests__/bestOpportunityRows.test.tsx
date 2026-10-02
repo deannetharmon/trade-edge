@@ -9,7 +9,7 @@
 // inventing those fields at all).
 
 import { describe, expect, it } from 'vitest';
-import { buildBestOpportunityRows } from '../bestOpportunityRows';
+import { buildBestOpportunityRows, excludeHiddenSymbols } from '../bestOpportunityRows';
 import type { ScreenResult } from '@/lib/scans/types';
 import type { OpportunityRecommendation } from '@/lib/opportunity-engine';
 
@@ -240,5 +240,21 @@ describe('buildBestOpportunityRows — CSP-WORKFLOW-0001 core-correction (BLOCKE
     const rows = buildBestOpportunityRows(results, [rec({ strategy: 'BPS', screenerCandidateId: undefined })]);
     expect(rows.length).toBe(1);
     expect(rows[0].strikeSummary).toBe('90/85');
+  });
+});
+
+describe('excludeHiddenSymbols (FILTER-LAYOUT-0001: Best Opportunities obeys the Tickers filter)', () => {
+  const recs = [{ symbol: 'SOXL', rank: 1 }, { symbol: 'TQQQ', rank: 2 }, { symbol: 'SOXL', rank: 3 }];
+
+  it('drops every recommendation for a hidden ticker and keeps the rest in order', () => {
+    expect(excludeHiddenSymbols(recs, ['SOXL'])).toEqual([{ symbol: 'TQQQ', rank: 2 }]);
+  });
+
+  it('returns the same list when nothing is hidden', () => {
+    expect(excludeHiddenSymbols(recs, [])).toBe(recs);
+  });
+
+  it('returns an empty list when every ticker is hidden', () => {
+    expect(excludeHiddenSymbols(recs, ['SOXL', 'TQQQ'])).toEqual([]);
   });
 });

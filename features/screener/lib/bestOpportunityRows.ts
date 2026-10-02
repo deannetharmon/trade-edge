@@ -217,3 +217,19 @@ export function buildBestOpportunityRows(
 
   return rows.map(({ __isCsp, __isCspUnscored, __candidateIdUnresolved, ...row }) => row);
 }
+
+/**
+ * FILTER-LAYOUT-0001: Best Opportunities must obey the Tickers filter. A
+ * recommendation for a hidden ticker is dropped before rows are built (so the
+ * remaining rows are re-ranked 1..n by buildBestOpportunityRows). Without this,
+ * non-CSP recommendations whose result was filtered out still came through as
+ * blank rows, and Ranked mode ignored the filter entirely.
+ */
+export function excludeHiddenSymbols<T extends { symbol: string }>(
+  recommendations: T[],
+  hiddenSymbols: readonly string[],
+): T[] {
+  if (hiddenSymbols.length === 0) return recommendations;
+  const hidden = new Set(hiddenSymbols);
+  return recommendations.filter(rec => !hidden.has(rec.symbol));
+}
