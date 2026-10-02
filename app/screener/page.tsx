@@ -5854,9 +5854,25 @@ function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade,
         portfolioRisk.sectorCount >= SECTOR_LIMIT ? `${portfolioRisk.sectorCount} open positions in ${portfolioRisk.sectorName} sector.` : null,
       ].filter(Boolean).join(' ')
     : undefined;
-  const researchTradeContext = result.bestCandidate
+  // CSP-ASK-AI-0001: a CSP is a single short put with no long leg, so the
+  // spread-shaped context below ("shortStrike/longStrike", credit/ROC/POP)
+  // would misdescribe it. Give the AI the full CSP candidate: strike, DTE,
+  // delta, premium, cash required, breakeven, yields, CSP score, IVR/IVX,
+  // trend, per-check results, and portfolio risk (risk goes in separately).
+  const cspAiContext = (c && c.strategy === 'CSP')
+    ? [
+        `CSP (cash-secured put) on ${result.symbol}${result.price ? ` at $${result.price.toFixed(2)}` : ''}: sell ${c.shortStrike}P exp ${c.expiration} (${c.dte}d), delta ${c.shortDelta?.toFixed(2) ?? 'n/a'}, premium $${c.credit.toFixed(2)}/contract`,
+        `cash required ${c.requiredCash != null ? `$${c.requiredCash.toLocaleString()}` : 'n/a'}${c.capitalBlocked ? ` (BLOCKED: ${c.capitalWarning ?? 'insufficient capital'})` : ''}, breakeven ${c.breakeven != null ? `$${c.breakeven.toFixed(2)}` : 'n/a'}, assignment price ${c.assignmentPrice != null ? `$${c.assignmentPrice.toFixed(2)}` : 'n/a'}`,
+        `return this cycle ${c.roc.toFixed(1)}%, annualized ${c.annualizedRoc != null ? `${c.annualizedRoc.toFixed(0)}%` : 'n/a'}${c.cspScore?.scoreStatus === 'AVAILABLE' ? `, CSP score ${Math.round(c.cspScore.total as number)}` : ''}`,
+        `IVR ${result.ivr != null ? `${result.ivr.toFixed(0)}%` : 'unavailable'}, expiration IVX ${result.ivx != null ? `${result.ivx.toFixed(1)}%` : 'unavailable'}`,
+        t ? `Trend: ${t.trend} (${t.reason})` : null,
+        `Scan checks: ${Object.entries(result.checks).map(([k, ck]) => `${k} ${ck.status} (${ck.value}${ck.reason ? `; ${ck.reason}` : ''})`).join('; ')}`,
+        'Assignment is an acceptable outcome (wheel entry); the 21-DTE management rule does not apply to CSPs.',
+      ].filter(Boolean).join('. ')
+    : null;
+  const researchTradeContext = cspAiContext ?? (result.bestCandidate
     ? `${result.strategy} ${result.bestCandidate.shortStrike}/${result.bestCandidate.longStrike}${result.strategy === 'IC' ? ` · ${result.bestCandidate.shortCallStrike}/${result.bestCandidate.longCallStrike}` : ''} exp ${result.bestCandidate.expiration} (${result.bestCandidate.dte}d) · credit $${(result.bestCandidate.totalCredit ?? result.bestCandidate.credit).toFixed(2)} · ROC ${result.bestCandidate.roc.toFixed(0)}% · POP ${result.bestCandidate.pop?.toFixed(0)}% · IVR ${result.ivr?.toFixed(1)}%`
-    : `${result.strategy} on ${result.symbol}`;
+    : `${result.strategy} on ${result.symbol}`);
   const research = useStockResearch(result.symbol, researchTradeContext, researchRiskContext);
   // Opening Research expands the card so the full-width panel at the bottom
   // is immediately visible; closing Research does not force a collapse.
@@ -6430,7 +6446,14 @@ const strategyScores = useMemo(() => {
 
           {c && c.strategy === 'CSP' && (
             <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
-              <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest font-medium`}>CSP — Wheel Entry</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest font-medium`}>CSP — Wheel Entry</p>
+                {/* CSP-ASK-AI-0001: same Research chat as the header button, seeded with the full CSP context. */}
+                <button type="button" onClick={research.handleToggle} data-testid="csp-ask-ai"
+                  className={`rounded-lg border px-3 py-1 text-[10px] font-bold transition-colors ${research.open ? 'border-violet-400 bg-violet-500/20 text-violet-200' : 'border-violet-500 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20'}`}>
+                  {research.open ? 'Hide AI' : 'Ask AI'}
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div><span className={th.label}>Put: </span><span className={th.text}>{c.shortStrike}P exp {c.expiration} ({c.dte}d) · Δ{c.shortDelta.toFixed(2)}</span></div>
                 <div><span className={th.label}>Credit: </span><span className="text-emerald-400 font-bold">${c.credit.toFixed(2)}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(1 contract)</span></div>
