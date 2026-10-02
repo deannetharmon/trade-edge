@@ -42,6 +42,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { THEMES, getSavedTheme } from '@/lib/theme';
 import { useTaskManager } from '@/hooks/useTaskManager';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
+import { useSuggestedActions } from '@/lib/suggested-actions/useSuggestedActions';
 import { usePortfolioMode } from '@/components/portfolio-mode/PortfolioModeProvider';
 import { PortfolioModeGateNotice } from '@/components/portfolio-mode/PortfolioModeGateNotice';
 import { buildOpportunityRecommendations } from '@/lib/command-center/buildOpportunityRecommendations';
@@ -60,8 +61,13 @@ import { buildLeveragedPositionExposureGroups, buildLeveragedPositionExposureExc
 export default function DashboardPage() {
   const th = THEMES[getSavedTheme()];
   const { tasks } = useTaskManager();
-  const { composition, positions, snapshot, loading, error, lastRefresh, refresh, refreshBalances, refreshDecisionReviews } = usePortfolioData();
+  const { composition, positions, pendingOrders, snapshot, snapshotDataQuality, loading, error, lastRefresh, refresh, refreshBalances, refreshDecisionReviews } = usePortfolioData();
   const portfolioMode = usePortfolioMode();
+  // SUGGESTED-ACTIONS-0001: PMCC short-call cards (rendered by the Suggested Actions card, slice 4). LIVE mode only.
+  const suggestedActions = useSuggestedActions({
+    enabled: portfolioMode.status === 'ready' && portfolioMode.mode === 'LIVE',
+    positions, pendingOrders, snapshot, snapshotDataQuality, lastRefresh,
+  });
 
   // Refresh on every visit to this page, same "fresh on every visit"
   // behavior app/portfolio/page.tsx has always had -- unchanged from

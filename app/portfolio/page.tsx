@@ -232,7 +232,7 @@ import { EquityHoldingsSection, isEquityDisplayEnabled, resolvePositionsWorkspac
 import { PositionsWorkspace, isPositionsWorkspaceV2Enabled } from '@/features/portfolio/positions-workspace/PositionsWorkspace';
 import { DebitStopObservation, STOP_CLASSIFICATION_COPY, STOP_CONTROL_LABELS, StopEvidencePanel } from '@/components/portfolio-data/StopEvidencePanel';
 import { buildPositionsWorkspaceModel } from '@/features/portfolio/positions-workspace/model/buildPositionsWorkspaceModel';
-import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, type PmccReviewHandoff } from '@/lib/scans/pmccReviewHandoff';
+import { launchPmccShortCallReview } from '@/lib/scans/pmccReviewHandoff';
 // PT-0002B: this page now reads the global PortfolioMode and refuses to
 // render LIVE portfolio content unless it is resolved and confirmed LIVE
 // (see docs/design/PT-0002B-Portfolio-Context-Integration.md §3.2). The
@@ -10503,15 +10503,7 @@ export default function PortfolioPage() {
   const findPmccShortCall = useCallback((opportunity: {
     accountNumber: string | null; positionKey: string | null; symbol: string; exactContract: string | null;
   }) => {
-    if (!opportunity.accountNumber || !opportunity.positionKey || !opportunity.exactContract) return;
-    const handoff: PmccReviewHandoff = {
-      accountNumber: opportunity.accountNumber,
-      positionKey: opportunity.positionKey,
-      underlyingSymbol: opportunity.symbol,
-      occSymbol: opportunity.exactContract,
-    };
-    sessionStorage.setItem(PMCC_REVIEW_HANDOFF_STORAGE_KEY, JSON.stringify(handoff));
-    window.location.assign('/screener?launch=pmcc-held');
+    launchPmccShortCallReview(opportunity);
   }, []);
 
   useEffect(() => {

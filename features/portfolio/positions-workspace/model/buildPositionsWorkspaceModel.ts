@@ -18,7 +18,7 @@ function snapshotFreshness(input: PositionsWorkspaceInput): string {
   return input.snapshot?.dataQuality.unavailableReason ?? input.snapshotDataQuality.unavailableReason ?? 'Broker evidence is unavailable or not current';
 }
 
-function buildIncomeOpportunities(input: PositionsWorkspaceInput): ExistingIncomeOpportunity[] {
+export function buildIncomeOpportunities(input: PositionsWorkspaceInput): ExistingIncomeOpportunity[] {
   const snapshot = input.snapshot;
   const snapshotReady = snapshot?.freshness === 'current' && snapshot.dataQuality.status === 'ok' && Boolean(snapshot.accountNumber);
   const freshness = snapshotFreshness(input);
