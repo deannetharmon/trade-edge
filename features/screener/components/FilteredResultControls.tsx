@@ -18,8 +18,15 @@
 // here — the page renders it via the oiAndSortControls render slot so this
 // component stays decoupled from page.tsx internals per ADR-0004.
 
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { ScreenResult } from '@/lib/scans/types';
+import {
+  formatStrikeRangeLabel,
+  isStrikeRangeNarrowing,
+  parseStrikeInput,
+  type StrikeBounds,
+  type StrikeRange,
+} from '@/lib/screener/cspStrikeRange';
 
 export type FilterStrategy = 'BPS' | 'BCS' | 'IC' | 'CSP' | 'CC' | 'PMCC';
 
@@ -63,6 +70,12 @@ export interface FilteredResultControlsProps {
    * meaningful decision filter rather than a spread-only configuration. */
   deltaRange?: [number, number] | null;
   setDeltaRange?: (v: [number, number] | null) => void;
+  /** CSP-STRIKE-RANGE-0001 -- shown only when strikeBounds is non-null
+   * (exactly one ticker). strikeRange null means untouched: the inputs show
+   * the scan's own lowest/highest strike and nothing is excluded. */
+  strikeBounds?: StrikeBounds | null;
+  strikeRange?: StrikeRange | null;
+  setStrikeRange?: (v: StrikeRange | null) => void;
   strategies: FilterStrategy[];
   toggleStrategy: (s: FilterStrategy) => void;
 
@@ -135,6 +148,9 @@ export function FilteredResultControls({
   setDteMin,
   deltaRange = null,
   setDeltaRange,
+  strikeBounds = null,
+  strikeRange = null,
+  setStrikeRange,
   strategies,
   toggleStrategy,
   hiddenSymbols,
@@ -148,6 +164,26 @@ export function FilteredResultControls({
   popLabel = 'POP',
 }: FilteredResultControlsProps) {
   const allFilterSymbols = Array.from(new Set(results.map(r => r.symbol))).sort();
+  const showStrike = !!(setStrikeRange && strikeBounds);
+  // Local text keeps partial entries such as "75." editable; the parsed
+  // number is what filters. Untouched (null) or new bounds re-seed the inputs.
+  const [strikeMinText, setStrikeMinText] = useState('');
+  const [strikeMaxText, setStrikeMaxText] = useState('');
+  const boundsMin = strikeBounds?.min ?? null;
+  const boundsMax = strikeBounds?.max ?? null;
+  const strikeUntouched = strikeRange === null;
+  useEffect(() => {
+    if (!strikeUntouched) return;
+    setStrikeMinText(boundsMin == null ? '' : String(boundsMin));
+    setStrikeMaxText(boundsMax == null ? '' : String(boundsMax));
+  }, [boundsMin, boundsMax, strikeUntouched]);
+  function updateStrike(side: 'min' | 'max', text: string) {
+    if (!setStrikeRange) return;
+    const minText = side === 'min' ? text : strikeMinText;
+    const maxText = side === 'max' ? text : strikeMaxText;
+    if (side === 'min') setStrikeMinText(text); else setStrikeMaxText(text);
+    setStrikeRange({ min: parseStrikeInput(minText), max: parseStrikeInput(maxText) });
+  }
 
   const activeChips: ActiveChip[] = [];
   if (popMin > 0) activeChips.push({ key: 'pop', label: `${popLabel} ≥ ${popMin}%`, onRemove: () => setPopMin(0) });
@@ -157,6 +193,9 @@ export function FilteredResultControls({
   if (showCreditRatio && creditRatioMin > 0) activeChips.push({ key: 'cr', label: `Cr Ratio ≥ ${creditRatioMin}%`, onRemove: () => setCreditRatioMin(0) });
   if (setDteMin && dteMin > 0) activeChips.push({ key: 'dte', label: `DTE ≥ ${dteMin}`, onRemove: () => setDteMin(0) });
   if (setDeltaRange && deltaRange) activeChips.push({ key: 'delta', label: `Δ ${deltaRange[0].toFixed(2)}–${deltaRange[1].toFixed(2)}`, onRemove: () => setDeltaRange(null) });
+  if (showStrike && strikeRange && isStrikeRangeNarrowing(strikeRange, strikeBounds)) {
+    activeChips.push({ key: 'strike', label: formatStrikeRangeLabel(strikeRange), onRemove: () => setStrikeRange!(null) });
+  }
   if (showStrategyToggle) {
     for (const s of strategies) {
       activeChips.push({ key: `strat-${s}`, label: s, onRemove: () => toggleStrategy(s) });
@@ -176,6 +215,7 @@ export function FilteredResultControls({
     if (showCreditRatio) setCreditRatioMin(0);
     if (setDteMin) setDteMin(0);
     if (setDeltaRange) setDeltaRange(null);
+    if (setStrikeRange) setStrikeRange(null);
     if (showStrategyToggle) for (const s of [...strategies]) toggleStrategy(s);
     setHiddenSymbols([]);
   }
@@ -228,6 +268,21 @@ export function FilteredResultControls({
                   </button>
                 );
               })}
+            </div>
+            <div className={`w-px h-4 ${th.border} border-l`} />
+          </>
+        )}
+        {showStrike && (
+          <>
+            <div className="flex items-center gap-1.5" data-testid="csp-strike-range">
+              <span title="Short put strike, inclusive. Leave a side blank for no limit on that side." className={`text-[9px] ${th.textFaint} shrink-0`}>Strike $</span>
+              <input aria-label="Minimum strike" inputMode="decimal" value={strikeMinText}
+                onChange={e => updateStrike('min', e.target.value)}
+                className={`w-14 text-[9px] px-1.5 py-0.5 rounded border bg-transparent font-bold ${th.border} ${th.textFaint} focus:border-amber-500 focus:outline-none`} />
+              <span className={`text-[9px] ${th.textFaint}`}>–</span>
+              <input aria-label="Maximum strike" inputMode="decimal" value={strikeMaxText}
+                onChange={e => updateStrike('max', e.target.value)}
+                className={`w-14 text-[9px] px-1.5 py-0.5 rounded border bg-transparent font-bold ${th.border} ${th.textFaint} focus:border-amber-500 focus:outline-none`} />
             </div>
             <div className={`w-px h-4 ${th.border} border-l`} />
           </>

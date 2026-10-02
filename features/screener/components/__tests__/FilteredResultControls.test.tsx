@@ -133,3 +133,38 @@ describe('FilteredResultControls', () => {
     expect(screen.queryByRole('button', { name: '0.15–0.25' })).not.toBeInTheDocument();
   });
 });
+
+describe('CSP-STRIKE-RANGE-0001: single-ticker strike range review filter', () => {
+  const bounds = { min: 70, max: 80 };
+
+  it('is hidden without single-ticker bounds', () => {
+    renderControls({ strikeBounds: null, strikeRange: null, setStrikeRange: vi.fn() });
+    expect(screen.queryByTestId('csp-strike-range')).not.toBeInTheDocument();
+  });
+
+  it('starts filled with the scan strike bounds and shows no active chip', () => {
+    renderControls({ strikeBounds: bounds, strikeRange: null, setStrikeRange: vi.fn() });
+    expect(screen.getByLabelText('Minimum strike')).toHaveValue('70');
+    expect(screen.getByLabelText('Maximum strike')).toHaveValue('80');
+    expect(screen.queryByRole('button', { name: /Remove filter: Strike/ })).not.toBeInTheDocument();
+  });
+
+  it('editing one side keeps the other; clearing a side makes it open', () => {
+    const setStrikeRange = vi.fn();
+    renderControls({ strikeBounds: bounds, strikeRange: null, setStrikeRange });
+    fireEvent.change(screen.getByLabelText('Minimum strike'), { target: { value: '75.5' } });
+    expect(setStrikeRange).toHaveBeenLastCalledWith({ min: 75.5, max: 80 });
+    fireEvent.change(screen.getByLabelText('Maximum strike'), { target: { value: '' } });
+    expect(setStrikeRange).toHaveBeenLastCalledWith({ min: 75.5, max: null });
+  });
+
+  it('a narrowing range shows a removable chip, and Reset clears it', () => {
+    const setStrikeRange = vi.fn();
+    renderControls({ strikeBounds: bounds, strikeRange: { min: 72, max: null }, setStrikeRange });
+    fireEvent.click(screen.getByRole('button', { name: /Remove filter: Strike ≥ \$72/ }));
+    expect(setStrikeRange).toHaveBeenCalledWith(null);
+    setStrikeRange.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset result filters' }));
+    expect(setStrikeRange).toHaveBeenCalledWith(null);
+  });
+});

@@ -36,6 +36,8 @@ import {
   findBestSpreadUnfiltered, findBestICUnfiltered, findBestTargetedICWithCreditRatioFloor, calculateTargetedConservativeCredit,
 } from '@/lib/scans/spread-finder';
 import { findBestCsp, findAllCsp } from '@/lib/scans/csp-finder';
+import { candidateOtmPct } from '@/lib/screener/candidateOtm';
+import { deriveSingleTickerStrikeBounds, passesStrikeRange, type StrikeRange } from '@/lib/screener/cspStrikeRange';
 import { MAX_OCR_IMAGES, extractTickerCandidatesFromImages, describeOcrBatch, describeOcrProgress, progressPercent, type OcrPhase, type OcrStatus } from '@/lib/screener/ocrBatch';
 import { DEFAULT_PMCC_DTE_RANGES, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
 import { LEAP_ENTRY_DTE_TARGET, LEAPS_DTE_MAX_CHIPS, LEAPS_DTE_MIN_CHIPS } from '@/lib/scans/leapsEntryTargets';
@@ -10969,6 +10971,15 @@ export default function Home() {
       : null;
   const effectiveCspDeltaRange = filterCspDeltaTouched ? filterCspDeltaRange : cspDefaultDeltaRange;
 
+  // CSP-STRIKE-RANGE-0001 -- review-only strike filter, offered only when the
+  // CSP scan returned exactly one ticker. null = untouched (inputs show the
+  // scan's own strike bounds). A new ticker or new bounds clears it so a
+  // stale range never hides a fresh scan's results.
+  const cspStrikeBounds = activeSession?.requestedStrategy === 'csp' ? deriveSingleTickerStrikeBounds(results) : null;
+  const [cspStrikeRange, setCspStrikeRange] = useState<StrikeRange | null>(null);
+  const cspStrikeBoundsKey = cspStrikeBounds ? `${results[0]?.symbol}:${cspStrikeBounds.min}:${cspStrikeBounds.max}` : '';
+  useEffect(() => { setCspStrikeRange(null); }, [cspStrikeBoundsKey]);
+
   const applyFilterModeChips = (list: ScreenResult[]) => list.filter(r => {
     if (filterHiddenSymbols.includes(r.symbol)) return false;
     if (activeSession?.requestedStrategy === 'pmcc') return true;
@@ -10989,15 +11000,12 @@ export default function Home() {
       if ((c.pop ?? 0) < filterPopMin) return false;
       if ((c.creditRatio ?? 0) * 100 < filterCreditRatioMin) return false;
       if (filterOtmMin > 0) {
-        const price = r.price;
-        if (price == null || price <= 0) return false;
-        const otmPct = c.strategy === 'BPS' ? ((price - c.shortStrike) / price) * 100
-          : c.strategy === 'BCS' ? ((c.shortStrike - price) / price) * 100
-          : c.strategy === 'IC' && c.shortCallStrike != null
-            ? Math.min(((price - c.shortStrike) / price) * 100, ((c.shortCallStrike - price) / price) * 100)
-            : null;
+        // CSP-STRIKE-RANGE-0001: shared definition; CSP and CC were missing
+        // here, so any OTM floor hid every CSP and CC result.
+        const otmPct = candidateOtmPct(c, r.price);
         if (otmPct == null || otmPct < filterOtmMin) return false;
       }
+      if (cspStrikeBounds && c.strategy === 'CSP' && !passesStrikeRange(c.shortStrike, cspStrikeRange)) return false;
     }
     return true;
   });
@@ -11068,18 +11076,7 @@ export default function Home() {
   // eligibility filters first, followed by the selected ordering." The
   // disqualified section is left as-is: it's an audit trail of *why*
   // something didn't qualify, not a ranked results list.
-  const calcFilteredOtmPct = (r: ScreenResult): number | null => {
-    const c = r.bestCandidate;
-    const price = r.price;
-    if (!c || price == null || price <= 0) return null;
-    if (c.strategy === 'BPS') return ((price - c.shortStrike) / price) * 100;
-    if (c.strategy === 'BCS') return ((c.shortStrike - price) / price) * 100;
-    if (c.strategy === 'IC' && c.shortCallStrike != null) {
-      return Math.min(((price - c.shortStrike) / price) * 100, ((c.shortCallStrike - price) / price) * 100);
-    }
-    if (c.strategy === 'CSP' && c.breakeven != null && price > 0) return ((price - c.shortStrike) / price) * 100;
-    return null;
-  };
+  const calcFilteredOtmPct = (r: ScreenResult): number | null => candidateOtmPct(r.bestCandidate, r.price);
   const filteredOiByResult = new Map<ScreenResult, OiEligibilityResult>();
   // Targeted CSP is fully defined by its immutable launch snapshot. It must
   // not inherit the mutable Filter/Rank result controls that happen to live
@@ -11249,7 +11246,7 @@ export default function Home() {
     activeSession?.status === 'running' ? activeSession.requestedStrategy : null;
 
   return (
-    <div className={`min-h-screen ${th.bg} text-slate-100 transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
+    <div className={`h-screen flex flex-col overflow-hidden ${th.bg} text-slate-100 transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       <CcCapacityShadowSnapshotBridge onPortfolioData={captureCcCapacityShadowSnapshot} />
       <span role="status" aria-live="polite" className="sr-only">{scanLiveMessage}</span>
       {/* Header */}
@@ -11293,7 +11290,10 @@ export default function Home() {
         
         </div>
 
-      <div className="flex h-[calc(100vh-57px)]">
+      {/* SCREENER-SCROLL-0001: fill the space under the header instead of a
+          hard-coded 57px; the two-row header is taller, so the panes ran
+          past the window and the page scrolled as well as the results. */}
+      <div className="flex flex-1 min-h-0">
         {/* Sidebar */}
         <div className={`w-80 border-r ${th.border} ${th.sidebar} p-4 overflow-auto flex flex-col gap-3 shrink-0`}>
           {/* TE-0007: Opportunity Universe — the ONE canonical ticker list.
@@ -11435,6 +11435,18 @@ export default function Home() {
                 FIND LEAPS
               </LauncherButton>
             </div>
+            {/* SCREENER-SCROLL-0001: was rendered outside the layout shell,
+                below both panes, adding page height and a second scrollbar. */}
+            <label className="mt-2 flex items-center gap-2 text-[10px] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={excludeHeldPositions}
+                onChange={e => setExcludeHeldPositions(e.target.checked)}
+              />
+              <span className={th.textMuted} title="Applies to CSP and spreads (Filter/Rank/Targeted) scans only -- not offered on CC or PMCC, which scan holdings by design.">
+                Exclude tickers where a current position exists
+              </span>
+            </label>
 
           </div>
 
@@ -11972,6 +11984,9 @@ export default function Home() {
                       setDteMin={setFilterDteMin}
                       deltaRange={effectiveCspDeltaRange}
                       setDeltaRange={setFilterCspDeltaRange}
+                      strikeBounds={cspStrikeBounds}
+                      strikeRange={cspStrikeRange}
+                      setStrikeRange={setCspStrikeRange}
                       creditRatioMin={filterCreditRatioMin}
                       setCreditRatioMin={setFilterCreditRatioMin}
                       strategies={filterStrategies as FilterStrategy[]}
@@ -13238,16 +13253,6 @@ export default function Home() {
           }}
         />
       )}
-      <label className="flex items-center gap-2 mb-2 text-[10px] cursor-pointer select-none">
-        <input
-          type="checkbox"
-          checked={excludeHeldPositions}
-          onChange={e => setExcludeHeldPositions(e.target.checked)}
-        />
-        <span className={th.textMuted} title="Applies to CSP and spreads (Filter/Rank/Targeted) scans only -- not offered on CC or PMCC, which scan holdings by design.">
-          Exclude tickers where a current position exists
-        </span>
-      </label>
       {showCspRunModal && (
         <CspScanModal
           th={th}
