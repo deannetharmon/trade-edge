@@ -8263,7 +8263,7 @@ function SortRow({
 // (purple=Ranked, teal=Targeted, amber=Filtered).
 function OiAndSortControls({
   th, minOi, setMinOi, sort, setSort, accent, sortFields = SORT_FIELDS, oiLabel = MIN_OI_LABEL, oiHelper, sortLabels,
-  minCreditRatio, setMinCreditRatio, creditRatioLabel = MIN_CREDIT_RATIO_LABEL, creditRatioHelper,
+  minCreditRatio, setMinCreditRatio, creditRatioLabel = MIN_CREDIT_RATIO_LABEL, creditRatioHelper, part = 'all',
 }: {
   th: typeof THEMES[Theme];
   minOi: number;
@@ -8281,6 +8281,9 @@ function OiAndSortControls({
   setMinCreditRatio?: (n: number) => void;
   creditRatioLabel?: string;
   creditRatioHelper?: string;
+  // CSP-FILTER-LAYOUT-0001 -- 'oi' / 'sort' render only that half with no
+  // wrapper box, so a compact parent can place each on its own filter line.
+  part?: 'all' | 'oi' | 'sort';
 }) {
   const [customOi, setCustomOi] = useState<string>('');
   const [customCreditRatio, setCustomCreditRatio] = useState<string>('');
@@ -8293,8 +8296,11 @@ function OiAndSortControls({
     : accent === 'teal' ? 'hover:border-teal-500/50'
     : 'hover:border-amber-500/50';
 
+  const sortRow = <SortRow th={th} sort={sort} setSort={setSort} accent={accent} sortFields={sortFields} sortLabels={sortLabels} />;
+  if (part === 'sort') return sortRow;
+
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className={part === 'oi' ? 'contents' : 'flex flex-col gap-1.5'}>
       <div className="flex items-center gap-1.5 flex-wrap">
         <span title={oiHelper ?? MIN_OI_HELPER_TEXT} className={`text-[9px] ${th.textFaint} shrink-0`}>{oiLabel}</span>
         {OI_PRESETS.map(p => (
@@ -8346,7 +8352,7 @@ function OiAndSortControls({
           />
         </div>
       )}
-      <SortRow th={th} sort={sort} setSort={setSort} accent={accent} sortFields={sortFields} sortLabels={sortLabels} />
+      {part !== 'oi' && sortRow}
     </div>
   );
 }
@@ -8521,15 +8527,9 @@ function TargetedScanResultsPanel({
             too easy to miss — see the RANKED/TARGETED mixup this was built to fix). */}
         <div className="flex items-center gap-2 flex-wrap"><p className="text-sm font-bold tracking-wide text-teal-400">⊕ TARGETED SCAN</p>
           {scanCreditRatioFloorPct > 0 && <span className="text-[9px] px-2 py-0.5 rounded border border-teal-500/50 text-teal-300">Scan minimum credit/risk: {scanCreditRatioFloorPct}%</span>}
-          <label className={`text-[10px] ${th.textFaint}`}>Show width <select aria-label="Show Targeted spread width" value={activeWidth ?? 'all'} onChange={e => setActiveWidth(e.target.value === 'all' ? null : Number(e.target.value))} className={`ml-1 rounded border ${th.border} ${th.input} p-1`}><option value="all">All scanned</option>{SPREAD_WIDTH_CHOICES.map(width => <option key={width} value={width}>${width} only</option>)}</select></label>
-        </div>
-
-        {/* Row 1: count + sort + show top */}
-        <div className="flex items-center gap-3 flex-wrap">
           <p className="text-[9px] text-teal-400 tracking-widest font-medium shrink-0">
             {display.length} of {totalVisible} SHOWN
           </p>
-          <SortRow th={th} sort={activeSort} setSort={changeSort} accent="teal" sortFields={SPREAD_SORT_FIELDS} sortLabels={{ pop: 'POP %' }} />
           <div className="flex items-center gap-1.5">
             <span className={`text-[9px] ${th.textFaint}`}>Show</span>
             {[25, 50, 100, 999].map(n => (
@@ -8543,9 +8543,13 @@ function TargetedScanResultsPanel({
               </button>
             ))}
           </div>
+          <label className={`text-[10px] ${th.textFaint}`}>Show width <select aria-label="Show Targeted spread width" value={activeWidth ?? 'all'} onChange={e => setActiveWidth(e.target.value === 'all' ? null : Number(e.target.value))} className={`ml-1 rounded border ${th.border} ${th.input} p-1`}><option value="all">All scanned</option>{SPREAD_WIDTH_CHOICES.map(width => <option key={width} value={width}>${width} only</option>)}</select></label>
         </div>
 
-        {/* Row 2: POP + strategy + trend filters */}
+        {/* FILTER-LAYOUT-0001 (Ian): same shape on every result screen, three lines max.
+            Line 1 = which contract and can I trade it (POP, Score, OTM, Cr Ratio, Leg OI);
+            line 2 = tenor, volatility, structure, then ordering (DTE, IVR, Strategy, Trend, Sort);
+            line 3 = Tickers. Count, Show N and Show width sit with the scan title. */}
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-1.5">
             <span className={`text-[9px] ${th.textFaint} shrink-0`}>POP ≥</span>
@@ -8590,20 +8594,6 @@ function TargetedScanResultsPanel({
           </div>
           <div className={`w-px h-4 ${th.border} border-l`} />
           <div className="flex items-center gap-1.5">
-            <span className={`text-[9px] ${th.textFaint} shrink-0`}>DTE ≥</span>
-            {[0, 21, 30, 45].map(v => (
-              <button key={v} onClick={() => setActiveDteMin(v)}
-                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                  activeDteMin === v
-                    ? 'border-teal-500 text-teal-300 bg-teal-500/15'
-                    : `${th.border} ${th.textFaint} hover:border-teal-500/50`
-                }`}>
-                {v === 0 ? 'Any' : v}
-              </button>
-            ))}
-          </div>
-          <div className={`w-px h-4 ${th.border} border-l`} />
-          <div className="flex items-center gap-1.5">
             <span className={`text-[9px] ${th.textFaint} shrink-0`}>Cr Ratio ≥</span>
             {scanCreditRatioFloorPct > 0 && <span className="text-[9px] px-2 py-0.5 rounded border border-teal-500/50 text-teal-300 font-bold">{scanCreditRatioFloorPct}% scan floor</span>}
             {[0, 15, 20, 25, 33, 35].filter(v => scanCreditRatioFloorPct > 0 ? v > scanCreditRatioFloorPct : true).map(v => (
@@ -8625,6 +8615,22 @@ function TargetedScanResultsPanel({
               <button key={v} onClick={() => setActiveOiMin(v)}
                 className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
                   activeOiMin === v
+                    ? 'border-teal-500 text-teal-300 bg-teal-500/15'
+                    : `${th.border} ${th.textFaint} hover:border-teal-500/50`
+                }`}>
+                {v === 0 ? 'Any' : v}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <span className={`text-[9px] ${th.textFaint} shrink-0`}>DTE ≥</span>
+            {[0, 21, 30, 45].map(v => (
+              <button key={v} onClick={() => setActiveDteMin(v)}
+                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                  activeDteMin === v
                     ? 'border-teal-500 text-teal-300 bg-teal-500/15'
                     : `${th.border} ${th.textFaint} hover:border-teal-500/50`
                 }`}>
@@ -8673,9 +8679,11 @@ function TargetedScanResultsPanel({
             }`}>
             ↑✓ Trend aligned only
           </button>
+          <div className={`w-px h-4 ${th.border} border-l`} />
+          <SortRow th={th} sort={activeSort} setSort={changeSort} accent="teal" sortFields={SPREAD_SORT_FIELDS} sortLabels={{ pop: 'POP %' }} />
         </div>
 
-        {/* Row 3: Ticker toggles */}
+        {/* Line 3: Ticker toggles */}
         {allSymbols.length > 1 && (
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className={`text-[9px] ${th.textFaint} shrink-0`}>Tickers</span>
@@ -8692,12 +8700,14 @@ function TargetedScanResultsPanel({
                 </button>
               );
             })}
-            {hiddenSymbols.length > 0 && (
-              <button onClick={() => setHiddenSymbols([])}
-                className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-teal-500/50`}>
-                Show all
-              </button>
-            )}
+            <button onClick={() => setHiddenSymbols(allSymbols)}
+                            className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-teal-500/50`}>
+                            Hide all
+                          </button>
+            <button onClick={() => setHiddenSymbols([])}
+                            className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-teal-500/50`}>
+                            Show all
+                          </button>
           </div>
         )}
       </div>
@@ -12003,9 +12013,9 @@ export default function Home() {
                       showStrategyToggle={false}
                       showCreditRatio={false}
                       popLabel="POP Est."
-                      oiAndSortControls={
-                        <OiAndSortControls th={th} minOi={cspMinOi} setMinOi={setCspMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Put OI" oiHelper="Open interest on the short put. Missing OI does not pass a positive floor." sortLabels={{ rocPct: 'Cash Return', creditDollars: 'Premium $', relevantLegOI: 'Put OI', pop: 'POP Est.' }} sortFields={['score','rocPct','creditDollars','otmPct','pop','relevantLegOI','dte']} />
-                      }
+                      oiAndSortControls={part => (
+                        <OiAndSortControls part={part} th={th} minOi={cspMinOi} setMinOi={setCspMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Put OI" oiHelper="Open interest on the short put. Missing OI does not pass a positive floor." sortLabels={{ rocPct: 'Cash Return', creditDollars: 'Premium $', relevantLegOI: 'Put OI', pop: 'POP Est.' }} sortFields={['score','rocPct','creditDollars','otmPct','pop','relevantLegOI','dte']} />
+                      )}
                     />
                     {cspTargetedSession && <div className="mt-2 flex items-center gap-2">
                       <span className={`text-[9px] ${th.textFaint}`}>Targeted CSP order</span>
@@ -12083,9 +12093,9 @@ export default function Home() {
                       th={th}
                       showStrategyToggle={false}
                       showCreditRatio={false}
-                      oiAndSortControls={
-                        <OiAndSortControls th={th} minOi={ccMinOi} setMinOi={setCcMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Call OI" oiHelper="Open interest on the short call. Missing OI does not pass a positive floor." sortLabels={{ relevantLegOI: 'Call OI' }} />
-                      }
+                      oiAndSortControls={part => (
+                        <OiAndSortControls part={part} th={th} minOi={ccMinOi} setMinOi={setCcMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Call OI" oiHelper="Open interest on the short call. Missing OI does not pass a positive floor." sortLabels={{ relevantLegOI: 'Call OI' }} />
+                      )}
                     />
                   </section>
                 ) : activeSession?.requestedStrategy === 'pmcc' ? (
@@ -12129,36 +12139,51 @@ export default function Home() {
                         })}
                       />
                     )}
-                    <div className="mb-2 flex items-center gap-1.5 flex-wrap">
-                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>Best fit</span>
-                      {(['balanced', 'income', 'upside'] as const).map(profile => (
-                        <button key={profile} onClick={() => { setPmccBestFitProfile(profile); setFilteredSort({ primary: 'score', secondary: 'none' }); }}
-                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                            pmccBestFitProfile === profile ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
-                          }`}>
-                          {profile[0].toUpperCase() + profile.slice(1)}
-                        </button>
-                      ))}
-                      <span className={`text-[9px] ${th.textFaint}`}>Ranks qualified PMCCs; it never relaxes eligibility.</span>
-                    </div>
-                    <p className={`mb-2 text-[9px] ${th.textFaint}`}>The Quality badge measures qualification health. Selecting Score ranks by the active Best Fit profile.</p>
-                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Leg OI" oiHelper="The lower open interest of the held LEAPS call and short call. Missing OI does not pass a positive floor." sortLabels={{ creditDollars: 'Premium $', relevantLegOI: 'Leg OI' }} sortFields={['score', 'creditDollars', 'widthMinusDebitPct', 'annualizedRoiPct', 'breakevenPct', 'relevantLegOI', 'dte']} minCreditRatio={filteredMinCreditRatio} setMinCreditRatio={setFilteredMinCreditRatio} />
-                    {/* PMCC-VIEW-MODE-0001 -- flat is the true cross-ticker
-                        rank (Diane's original score mockup); grouped is
-                        Ian's per-ticker triage view (PmccTickerDisclosure).
-                        Both real, both wanted -- this is an explicit either/
-                        or, not a replacement of one by the other. */}
-                    <div className="mt-2 flex items-center gap-1.5">
-                      <span className={`text-[9px] ${th.textFaint} shrink-0`}>View</span>
-                      {(['flat', 'grouped'] as const).map(mode => (
-                        <button key={mode} onClick={() => setPmccViewMode(mode)}
-                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                            pmccViewMode === mode ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
-                          }`}>
-                          {mode === 'flat' ? 'Flat ranked list' : 'Grouped by ticker'}
-                        </button>
-                      ))}
-                    </div>
+                    {/* FILTER-LAYOUT-0001 (Ian): same shape on every result screen, three lines max.
+                        Line 1 = what to rank by and can I trade it (Best fit, Leg OI, credit floor);
+                        line 2 = ordering and view (Sort, View); line 3 = Tickers. The two explanatory
+                        sentences moved into the Best fit tooltip. */}
+                    {((renderOiSort: (part: 'oi' | 'sort') => React.ReactNode) => (
+                      <>
+                        <div className="mb-2 flex items-center gap-3 flex-wrap">
+                          <div className="flex items-center gap-1.5">
+                            <span title="Ranks qualified PMCCs; it never relaxes eligibility. The Quality badge measures qualification health. Selecting Score ranks by the active Best Fit profile." className={`text-[9px] ${th.textFaint} shrink-0`}>Best fit</span>
+                            {(['balanced', 'income', 'upside'] as const).map(profile => (
+                              <button key={profile} onClick={() => { setPmccBestFitProfile(profile); setFilteredSort({ primary: 'score', secondary: 'none' }); }}
+                                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                                  pmccBestFitProfile === profile ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
+                                }`}>
+                                {profile[0].toUpperCase() + profile.slice(1)}
+                              </button>
+                            ))}
+                          </div>
+                          <div className={`w-px h-4 ${th.border} border-l`} />
+                          {renderOiSort('oi')}
+                        </div>
+                        {/* PMCC-VIEW-MODE-0001 -- flat is the true cross-ticker
+                            rank (Diane's original score mockup); grouped is
+                            Ian's per-ticker triage view (PmccTickerDisclosure).
+                            Both real, both wanted -- this is an explicit either/
+                            or, not a replacement of one by the other. */}
+                        <div className="mb-2 flex items-center gap-3 flex-wrap">
+                          {renderOiSort('sort')}
+                          <div className={`w-px h-4 ${th.border} border-l`} />
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-[9px] ${th.textFaint} shrink-0`}>View</span>
+                            {(['flat', 'grouped'] as const).map(mode => (
+                              <button key={mode} onClick={() => setPmccViewMode(mode)}
+                                className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                                  pmccViewMode === mode ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
+                                }`}>
+                                {mode === 'flat' ? 'Flat ranked list' : 'Grouped by ticker'}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    ))((part) => (
+                      <OiAndSortControls part={part} th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Leg OI" oiHelper="The lower open interest of the held LEAPS call and short call. Missing OI does not pass a positive floor." sortLabels={{ creditDollars: 'Premium $', relevantLegOI: 'Leg OI' }} sortFields={['score', 'creditDollars', 'widthMinusDebitPct', 'annualizedRoiPct', 'breakevenPct', 'relevantLegOI', 'dte']} minCreditRatio={filteredMinCreditRatio} setMinCreditRatio={setFilteredMinCreditRatio} />
+                    ))}
                     {/* TE-0007H — reuses the exact filterHiddenSymbols/
                         toggleFilterSymbol state and interaction pattern
                         already real and working in FilteredResultControls's
@@ -12188,6 +12213,14 @@ export default function Home() {
                               </button>
                             );
                           })}
+                          <button onClick={() => setFilterHiddenSymbols(pmccAllSymbols)}
+                            className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-amber-500/50`}>
+                            Hide all
+                          </button>
+                          <button onClick={() => setFilterHiddenSymbols([])}
+                            className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-amber-500/50`}>
+                            Show all
+                          </button>
                         </div>
                       );
                     })()}
@@ -12210,9 +12243,9 @@ export default function Home() {
                   toggleSymbol={toggleFilterSymbol}
                   setHiddenSymbols={setFilterHiddenSymbols}
                   th={th}
-                  oiAndSortControls={
-                    <OiAndSortControls th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" />
-                  }
+                  oiAndSortControls={part => (
+                    <OiAndSortControls part={part} th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" />
+                  )}
                 />
               )}
 
@@ -12734,56 +12767,18 @@ export default function Home() {
                 // sort here, never grouped/tolerance-based -- unchanged).
                 filtered = sortItems(filtered, rankSort, getRankedMetrics);
                 const display = filtered.slice(0, rankTopN);
+                const rankOiAndSort = (part: 'oi' | 'sort') => (
+                  <OiAndSortControls part={part} th={th} minOi={rankMinOi} setMinOi={setRankMinOi} sort={rankSort} setSort={setRankSort} accent="purple" />
+                );
 
                 return (
                 <div>
                   <p className="text-sm font-bold tracking-wide text-purple-400 mb-2">⬡ RANKED SCAN</p>
+                  {/* FILTER-LAYOUT-0001 (Ian): same shape on every result screen, three lines max.
+                      Line 1 = which contract and can I trade it (POP, OTM, Cr Ratio, Strategy, OI);
+                      line 2 = tenor and display/ordering (count, DTE, Sort, Show top, Show width);
+                      line 3 = Tickers. */}
                   <div className="flex items-center gap-3 mb-2 flex-wrap">
-                    <p className="text-[9px] text-purple-400 tracking-widest font-medium shrink-0">
-                      {display.length} of {filtered.length} SHOWN
-                    </p>
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-[9px] ${th.textFaint}`}>Show top</span>
-                      {[10, 20, 50, 999].map(n => (
-                        <button key={n} onClick={() => setRankTopN(n)}
-                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                            rankTopN === n
-                              ? 'border-purple-500 text-purple-300 bg-purple-500/15'
-                              : `${th.border} ${th.textFaint} hover:border-purple-500/50`
-                          }`}>
-                          {n === 999 ? 'All' : n}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-[9px] ${th.textFaint}`}>DTE</span>
-                      {[
-                        { label: 'All', min: 0, max: 999 },
-                        { label: '< 21', min: 0, max: 20 },
-                        { label: '21-45', min: 21, max: 45 },
-                        { label: '30-45', min: 30, max: 45 },
-                        { label: '> 45', min: 46, max: 999 },
-                      ].map(d => (
-                        <button key={d.label} onClick={() => { setRankDteMin(d.min); setRankDteMax(d.max); }}
-                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                            rankDteMin === d.min && rankDteMax === d.max
-                              ? 'border-blue-500 text-blue-300 bg-blue-500/15'
-                              : `${th.border} ${th.textFaint} hover:border-blue-500/50`
-                          }`}>
-                          {d.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* SCREENER-OI-0001 — canonical minimum relevant-leg OI + two-level sort */}
-                  <div className="mb-3">
-                    <OiAndSortControls th={th} minOi={rankMinOi} setMinOi={setRankMinOi} sort={rankSort} setSort={setRankSort} accent="purple" />
-                    <label className={`ml-2 text-[10px] ${th.textFaint}`}>Show width <select aria-label="Show Ranked spread width" value={rankDisplayWidth ?? 'all'} onChange={e => setRankDisplayWidth(e.target.value === 'all' ? null : Number(e.target.value))} className={`ml-1 rounded border ${th.border} ${th.input} p-1`}><option value="all">All scanned</option>{SPREAD_WIDTH_CHOICES.map(width => <option key={width} value={width}>${width} only</option>)}</select></label>
-                  </div>
-
-                  {/* Filter row 2 — POP / OTM / Credit Ratio / Strategy, same pattern as Targeted */}
-                  <div className="flex items-center gap-3 mb-3 flex-wrap">
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] ${th.textFaint} shrink-0`}>POP ≥</span>
                       {[0, 50, 60, 70, 80].map(v => (
@@ -12843,6 +12838,52 @@ export default function Home() {
                         );
                       })}
                     </div>
+                    <div className={`w-px h-4 ${th.border} border-l`} />
+                    {/* SCREENER-OI-0001 — canonical minimum relevant-leg OI (sort half is on line 2) */}
+                    {rankOiAndSort('oi')}
+                  </div>
+
+                  <div className="flex items-center gap-3 mb-3 flex-wrap">
+                    <p className="text-[9px] text-purple-400 tracking-widest font-medium shrink-0">
+                      {display.length} of {filtered.length} SHOWN
+                    </p>
+                    <div className={`w-px h-4 ${th.border} border-l`} />
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textFaint}`}>DTE</span>
+                      {[
+                        { label: 'All', min: 0, max: 999 },
+                        { label: '< 21', min: 0, max: 20 },
+                        { label: '21-45', min: 21, max: 45 },
+                        { label: '30-45', min: 30, max: 45 },
+                        { label: '> 45', min: 46, max: 999 },
+                      ].map(d => (
+                        <button key={d.label} onClick={() => { setRankDteMin(d.min); setRankDteMax(d.max); }}
+                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                            rankDteMin === d.min && rankDteMax === d.max
+                              ? 'border-blue-500 text-blue-300 bg-blue-500/15'
+                              : `${th.border} ${th.textFaint} hover:border-blue-500/50`
+                          }`}>
+                          {d.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className={`w-px h-4 ${th.border} border-l`} />
+                    {rankOiAndSort('sort')}
+                    <div className={`w-px h-4 ${th.border} border-l`} />
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] ${th.textFaint}`}>Show top</span>
+                      {[10, 20, 50, 999].map(n => (
+                        <button key={n} onClick={() => setRankTopN(n)}
+                          className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+                            rankTopN === n
+                              ? 'border-purple-500 text-purple-300 bg-purple-500/15'
+                              : `${th.border} ${th.textFaint} hover:border-purple-500/50`
+                          }`}>
+                          {n === 999 ? 'All' : n}
+                        </button>
+                      ))}
+                    </div>
+                    <label className={`text-[10px] ${th.textFaint}`}>Show width <select aria-label="Show Ranked spread width" value={rankDisplayWidth ?? 'all'} onChange={e => setRankDisplayWidth(e.target.value === 'all' ? null : Number(e.target.value))} className={`ml-1 rounded border ${th.border} ${th.input} p-1`}><option value="all">All scanned</option>{SPREAD_WIDTH_CHOICES.map(width => <option key={width} value={width}>${width} only</option>)}</select></label>
                   </div>
 
                   {/* Filter row 3 -- per-ticker breakdown/toggle, same pattern as Targeted mode */}
@@ -12865,12 +12906,14 @@ export default function Home() {
                             </button>
                           );
                         })}
-                        {rankHiddenSymbols.length > 0 && (
-                          <button onClick={() => setRankHiddenSymbols([])}
+                        <button onClick={() => setRankHiddenSymbols(allRankSymbols)}
+                            className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-purple-500/50`}>
+                            Hide all
+                          </button>
+                        <button onClick={() => setRankHiddenSymbols([])}
                             className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-purple-500/50`}>
                             Show all
                           </button>
-                        )}
                       </div>
                     );
                   })()}
@@ -13016,9 +13059,41 @@ export default function Home() {
             }`;
             return (
               <div>
-                <div className="mb-3">
-                  <h2 className={`text-sm font-bold ${th.text}`}>LEAPS CANDIDATES</h2>
-                  <p className={`mt-1 text-[10px] ${th.textMuted}`}>New long-call candidates only; review before opening a trade.</p>
+                <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className={`text-sm font-bold ${th.text}`}>LEAPS CANDIDATES</h2>
+                    <p className={`mt-1 text-[10px] ${th.textMuted}`}>New long-call candidates only; review before opening a trade.</p>
+                  </div>
+                  {/* FILTER-LAYOUT-0001: actions live with the title so the filter panel is filters only. */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowLeapsAdvisorPanel(v => !v)}
+                      disabled={opportunityUniverse.length < 2}
+                      title={opportunityUniverse.length < 2 ? 'Add at least 2 tickers to your Opportunity Universe first.' : undefined}
+                      className="text-[9px] px-2 py-0.5 rounded border font-bold transition-colors border-violet-500 text-violet-300 bg-violet-500/10 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {showLeapsAdvisorPanel ? 'Hide Recommendation' : 'Get Recommendation'}
+                    </button>
+                    {canExportPdf && (
+                      <div className="relative">
+                        <button type="button" aria-haspopup="menu" aria-expanded={showPdfExportMenu} onClick={() => setShowPdfExportMenu(open => !open)} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors tracking-wider`}>
+                          ↓ Export PDF
+                        </button>
+                        {showPdfExportMenu && (
+                          <div role="menu" aria-label="PDF export scope" className={`absolute right-0 top-full mt-1 z-40 w-72 border ${th.border} rounded-lg ${th.card} shadow-xl p-2 text-left`}>
+                            <div role="group" aria-label="PDF layout" className="flex gap-1 px-1 pb-2">
+                              {([['summary', 'Summary table'], ['cards', 'Detailed cards']] as const).map(([value, label]) => (
+                                <button key={value} type="button" role="menuitemradio" aria-checked={leapsPdfLayout === value} onClick={() => setLeapsPdfLayout(value)} className={`flex-1 rounded border px-2 py-1 text-[10px] font-bold ${leapsPdfLayout === value ? 'border-emerald-400 text-emerald-300' : `${th.border} ${th.textMuted}`}`}>{label}</button>
+                              ))}
+                            </div>
+                            <button type="button" role="menuitem" onClick={() => exportPdf('full')} className={`w-full rounded p-2 text-left ${th.textMuted} ac-hover-bg`}><span className="block text-xs font-bold">Full completed scan</span><span className={`block text-[10px] ${th.textFaint}`}>Recommended — includes all completed scan results.</span></button>
+                            <button type="button" role="menuitem" onClick={() => exportPdf('current-view')} className={`w-full rounded p-2 text-left ${th.textMuted} ac-hover-bg`}><span className="block text-xs font-bold">Current filtered view</span><span className={`block text-[10px] ${th.textFaint}`}>Exports only the results currently shown.</span></button>
+                            <p className={`px-2 pt-2 text-[10px] ${th.textFaint}`}>Opens print preview. Choose Save as PDF to create your report.</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="leaps-result-controls">
@@ -13056,6 +13131,9 @@ export default function Home() {
                         <button key={v} onClick={() => setLeapsDteMax(v)} className={chip(leapsDteMax === v)}>{v}</button>
                       ))}
                     </div>
+                  </div>
+                  {/* FILTER-LAYOUT-0001 (Ian): three lines max. Line 1 = delta and tenor window; line 2 = liquidity, extrinsic, then Sort; line 3 = Tickers. */}
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] font-bold ${th.text} shrink-0`}>OI ≥</span>
                       {[0, 50, 100, 250, 500].map(v => (
@@ -13070,35 +13148,6 @@ export default function Home() {
                         <button key={v} onClick={() => setLeapsExtrinsicPctMax(v)} className={chip(leapsExtrinsicPctMax === v)}>{v === 0 ? 'Any' : `${v}%`}</button>
                       ))}
                     </div>
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-3">
-                    {canExportPdf && (
-                      <div className="relative order-last ml-auto">
-                        <button type="button" aria-haspopup="menu" aria-expanded={showPdfExportMenu} onClick={() => setShowPdfExportMenu(open => !open)} className={`text-[10px] px-3 py-1.5 border ${th.border} rounded-lg ${th.textMuted} ac-hover-border ac-hover-text transition-colors tracking-wider`}>
-                          ↓ Export PDF
-                        </button>
-                        {showPdfExportMenu && (
-                          <div role="menu" aria-label="PDF export scope" className={`absolute right-0 top-full mt-1 z-40 w-72 border ${th.border} rounded-lg ${th.card} shadow-xl p-2 text-left`}>
-                            <div role="group" aria-label="PDF layout" className="flex gap-1 px-1 pb-2">
-                              {([['summary', 'Summary table'], ['cards', 'Detailed cards']] as const).map(([value, label]) => (
-                                <button key={value} type="button" role="menuitemradio" aria-checked={leapsPdfLayout === value} onClick={() => setLeapsPdfLayout(value)} className={`flex-1 rounded border px-2 py-1 text-[10px] font-bold ${leapsPdfLayout === value ? 'border-emerald-400 text-emerald-300' : `${th.border} ${th.textMuted}`}`}>{label}</button>
-                              ))}
-                            </div>
-                            <button type="button" role="menuitem" onClick={() => exportPdf('full')} className={`w-full rounded p-2 text-left ${th.textMuted} ac-hover-bg`}><span className="block text-xs font-bold">Full completed scan</span><span className={`block text-[10px] ${th.textFaint}`}>Recommended — includes all completed scan results.</span></button>
-                            <button type="button" role="menuitem" onClick={() => exportPdf('current-view')} className={`w-full rounded p-2 text-left ${th.textMuted} ac-hover-bg`}><span className="block text-xs font-bold">Current filtered view</span><span className={`block text-[10px] ${th.textFaint}`}>Exports only the results currently shown.</span></button>
-                            <p className={`px-2 pt-2 text-[10px] ${th.textFaint}`}>Opens print preview. Choose Save as PDF to create your report.</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    <button
-                      onClick={() => setShowLeapsAdvisorPanel(v => !v)}
-                      disabled={opportunityUniverse.length < 2}
-                      title={opportunityUniverse.length < 2 ? 'Add at least 2 tickers to your Opportunity Universe first.' : undefined}
-                      className="text-[9px] px-2 py-0.5 rounded border font-bold transition-colors border-violet-500 text-violet-300 bg-violet-500/10 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      {showLeapsAdvisorPanel ? 'Hide Recommendation' : 'Get Recommendation'}
-                    </button>
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] font-bold ${th.text} shrink-0`}>Sort</span>
                       {([['score', 'Score'], ['delta', 'Delta'], ['dte', 'DTE'], ['openInterest', 'OI'], ['spreadPct', 'Spread %'], ['extrinsicValue', 'Extrinsic $'], ['extrinsicPctOfCost', 'Extrinsic % Cost']] as const).map(([field, label]) => (
@@ -13118,6 +13167,8 @@ export default function Home() {
                         </button>
                       ))}
                     </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
                     {allSymbols.length > 1 && (
                       <div className="flex items-center gap-1.5">
                         <span className={`text-[9px] font-bold ${th.text} shrink-0`}>Tickers</span>
@@ -13125,6 +13176,8 @@ export default function Home() {
                           <button key={sym} onClick={() => setLeapsHiddenSymbols(prev => prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym])}
                             className={chip(!leapsHiddenSymbols.includes(sym))}>{sym}</button>
                         ))}
+                        <button onClick={() => setLeapsHiddenSymbols([...allSymbols])} className={chip(false)}>Hide all</button>
+                        <button onClick={() => setLeapsHiddenSymbols([])} className={chip(false)}>Show all</button>
                       </div>
                     )}
                   </div>

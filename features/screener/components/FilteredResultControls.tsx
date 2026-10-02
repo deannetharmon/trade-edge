@@ -71,8 +71,10 @@ export interface FilteredResultControlsProps {
   setHiddenSymbols: (s: string[]) => void;
 
   /** Renders the page-local OiAndSortControls (SCREENER-OI-0001) — kept
-   * page-local since it isn't an exported module. */
-  oiAndSortControls: ReactNode;
+   * page-local since it isn't an exported module. A render function lets this
+   * component place the OI half on line 1 and the Sort half on line 2
+   * (FILTER-LAYOUT-0001); a plain node is placed whole on line 1. */
+  oiAndSortControls: ReactNode | ((part: 'oi' | 'sort') => ReactNode);
 
   th: { border: string; textFaint: string };
 
@@ -180,135 +182,84 @@ export function FilteredResultControls({
     setHiddenSymbols([]);
   }
 
-  return (
-    <section aria-label="Result filters" data-testid="filtered-result-controls" className="space-y-3">
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-1.5">
-          <span title="A displayed estimate, not a broker-guaranteed probability" className={`text-[9px] ${th.textFaint} shrink-0`}>{popLabel} ≥</span>
-          {POP_PRESETS.map(v => (
-            <button key={v} onClick={() => setPopMin(v)}
-              className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                popMin === v ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
-              }`}>
-              {v === 0 ? 'Any' : `${v}%`}
-            </button>
-          ))}
-        </div>
-        <div className={`w-px h-4 ${th.border} border-l`} />
-        {setDteMin && (
-          <>
-            <div className="flex items-center gap-1.5">
-              <span className={`text-[9px] ${th.textFaint} shrink-0`}>DTE ≥</span>
-              {DTE_MIN_PRESETS.map(v => (
-                <button key={v} onClick={() => setDteMin(v)}
-                  className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                    dteMin === v ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
-                  }`}>
-                  {v === 0 ? 'Any' : `${v}d`}
-                </button>
-              ))}
-            </div>
-            <div className={`w-px h-4 ${th.border} border-l`} />
-          </>
-        )}
-        {setDeltaRange && (
-          <>
-            <div className="flex items-center gap-1.5">
-              <span className={`text-[9px] ${th.textFaint} shrink-0`}>Delta</span>
-              {DELTA_RANGE_PRESETS.map(({ label, value }) => {
-                const selected = value === null
-                  ? deltaRange === null
-                  : deltaRange?.[0] === value[0] && deltaRange?.[1] === value[1];
-                return (
-                  <button key={label} onClick={() => setDeltaRange(value)}
-                    className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                      selected ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
-                    }`}>
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-            <div className={`w-px h-4 ${th.border} border-l`} />
-          </>
-        )}
-        {showIvx && setIvxMin && (
-          <>
-            <div className="flex items-center gap-1.5">
-              <span title="Implied volatility for the candidate's exact expiration" className={`text-[9px] ${th.textFaint} shrink-0`}>Exp. IVX ≥</span>
-              {IVX_PRESETS.map(v => (
-                <button key={v} onClick={() => setIvxMin(v)}
-                  className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                    ivxMin === v ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
-                  }`}>
-                  {v === 0 ? 'Any' : `${v}%`}
-                </button>
-              ))}
-            </div>
-            <div className={`w-px h-4 ${th.border} border-l`} />
-          </>
-        )}
-        <div className="flex items-center gap-1.5">
-          <span className={`text-[9px] ${th.textFaint} shrink-0`}>OTM ≥</span>
-          {OTM_PRESETS.map(v => (
-            <button key={v} onClick={() => setOtmMin(v)}
-              className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                otmMin === v ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
-              }`}>
-              {v === 0 ? 'Any' : `${v}%`}
-            </button>
-          ))}
-        </div>
-        <div className={`w-px h-4 ${th.border} border-l`} />
-        <div className="flex items-center gap-1.5">
-          <span className={`text-[9px] ${th.textFaint} shrink-0`}>IVR ≥</span>
-          {IVR_PRESETS.map(v => (
-            <button key={v} onClick={() => setIvrMin(v)}
-              className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                ivrMin === v ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
-              }`}>
-              {v === 0 ? 'Any' : `${v}%`}
-            </button>
-          ))}
-        </div>
-        {showCreditRatio && (
-          <>
-            <div className={`w-px h-4 ${th.border} border-l`} />
-            <div className="flex items-center gap-1.5">
-              <span className={`text-[9px] ${th.textFaint} shrink-0`}>Cr Ratio ≥</span>
-              {CREDIT_RATIO_PRESETS.map(v => (
-                <button key={v} onClick={() => setCreditRatioMin(v)}
-                  className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                    creditRatioMin === v ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
-                  }`}>
-                  {v === 0 ? 'Any' : `${v}%`}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-        {showStrategyToggle && (
-          <>
-            <div className={`w-px h-4 ${th.border} border-l`} />
-            <div className="flex items-center gap-1.5">
-              <span className={`text-[9px] ${th.textFaint} shrink-0`}>Strategy</span>
-              {STRATEGY_OPTIONS.map(s => {
-                const on = strategies.includes(s);
-                return (
-                  <button key={s} onClick={() => toggleStrategy(s)}
-                    className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                      on ? STRATEGY_COLOR[s] : `${th.border} ${th.textFaint} opacity-40`
-                    }`}>
-                    {s}
-                  </button>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </div>
+  const chipCls = (on: boolean) => `text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+    on ? 'border-amber-500 text-amber-300 bg-amber-500/15' : `${th.border} ${th.textFaint} hover:border-amber-500/50`
+  }`;
 
-      <div>{oiAndSortControls}</div>
+  function presetGroup(key: string, label: string, presets: number[], current: number, onSelect: (v: number) => void, suffix: string, title?: string): ReactNode {
+    return (
+      <div key={key} className="flex items-center gap-1.5">
+        <span title={title} className={`text-[9px] ${th.textFaint} shrink-0`}>{label}</span>
+        {presets.map(v => (
+          <button key={v} onClick={() => onSelect(v)} className={chipCls(current === v)}>
+            {v === 0 ? 'Any' : `${v}${suffix}`}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  const popGroup = presetGroup('pop', `${popLabel} ≥`, POP_PRESETS, popMin, setPopMin, '%', 'A displayed estimate, not a broker-guaranteed probability');
+  const dteGroup = setDteMin ? presetGroup('dte', 'DTE ≥', DTE_MIN_PRESETS, dteMin, setDteMin, 'd') : null;
+  const deltaGroup = setDeltaRange ? (
+    <div key="delta" className="flex items-center gap-1.5">
+      <span className={`text-[9px] ${th.textFaint} shrink-0`}>Delta</span>
+      {DELTA_RANGE_PRESETS.map(({ label, value }) => {
+        const selected = value === null
+          ? deltaRange === null
+          : deltaRange?.[0] === value[0] && deltaRange?.[1] === value[1];
+        return (
+          <button key={label} onClick={() => setDeltaRange(value)} className={chipCls(selected)}>
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+  const ivxGroup = showIvx && setIvxMin
+    ? presetGroup('ivx', 'Exp. IVX ≥', IVX_PRESETS, ivxMin, setIvxMin, '%', "Implied volatility for the candidate's exact expiration")
+    : null;
+  const otmGroup = presetGroup('otm', 'OTM ≥', OTM_PRESETS, otmMin, setOtmMin, '%');
+  const ivrGroup = presetGroup('ivr', 'IVR ≥', IVR_PRESETS, ivrMin, setIvrMin, '%');
+  const creditRatioGroup = showCreditRatio ? presetGroup('cr', 'Cr Ratio ≥', CREDIT_RATIO_PRESETS, creditRatioMin, setCreditRatioMin, '%') : null;
+  const strategyGroup = showStrategyToggle ? (
+    <div key="strategy" className="flex items-center gap-1.5">
+      <span className={`text-[9px] ${th.textFaint} shrink-0`}>Strategy</span>
+      {STRATEGY_OPTIONS.map(s => {
+        const on = strategies.includes(s);
+        return (
+          <button key={s} onClick={() => toggleStrategy(s)}
+            className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
+              on ? STRATEGY_COLOR[s] : `${th.border} ${th.textFaint} opacity-40`
+            }`}>
+            {s}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
+  // Thin vertical rule between consecutive groups on one line.
+  function withDividers(groups: (ReactNode | null)[]): ReactNode[] {
+    return groups.filter((g): g is ReactNode => g != null).flatMap((g, i) => (
+      i === 0 ? [g] : [<div key={`div-${i}`} className={`w-px h-4 ${th.border} border-l`} />, g]
+    ));
+  }
+
+  // FILTER-LAYOUT-0001 (Ian): at most three lines, same shape on every result
+  // screen. Line 1 = which contract and can I trade it (Delta, POP, OTM
+  // cushion, credit ratio / strategy where they exist, then OI); line 2 =
+  // tenor and volatility, then ordering (DTE, IVR, Exp. IVX, Sort); line 3 =
+  // Tickers. Groups a screen doesn't have simply drop out.
+  const slot = (part: 'oi' | 'sort'): ReactNode =>
+    typeof oiAndSortControls === 'function' ? oiAndSortControls(part) : (part === 'oi' ? oiAndSortControls : null);
+  const line1 = [deltaGroup, popGroup, otmGroup, creditRatioGroup, strategyGroup, slot('oi')];
+  const line2 = [dteGroup, ivrGroup, ivxGroup, slot('sort')];
+
+  return (
+    <section aria-label="Result filters" data-testid="filtered-result-controls" className="space-y-2">
+      <div className="flex items-center gap-3 flex-wrap">{withDividers(line1)}</div>
+      <div className="flex items-center gap-3 flex-wrap">{withDividers(line2)}</div>
 
       {allFilterSymbols.length > 1 && (
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -324,6 +275,15 @@ export function FilteredResultControls({
               </button>
             );
           })}
+          {/* FILTER-LAYOUT-0001: scan wide, then narrow to a few -- Hide all, click the ones to keep. */}
+          <button type="button" onClick={() => setHiddenSymbols([...allFilterSymbols])}
+            className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-amber-500/50`}>
+            Hide all
+          </button>
+          <button type="button" onClick={() => setHiddenSymbols([])}
+            className={`text-[9px] px-2 py-0.5 rounded border ${th.border} ${th.textFaint} hover:border-amber-500/50`}>
+            Show all
+          </button>
         </div>
       )}
 

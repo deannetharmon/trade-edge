@@ -52,6 +52,24 @@ function renderControls(props: Partial<ComponentProps<typeof FilteredResultContr
 }
 
 describe('FilteredResultControls', () => {
+  // FILTER-LAYOUT-0001: scan wide, then keep a few -- Hide all, then click the ones to keep.
+  it('Hide all hides every ticker and Show all restores them', () => {
+    const { setHiddenSymbols } = renderControls();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide all' }));
+    expect(setHiddenSymbols).toHaveBeenLastCalledWith(['AAPL', 'MSFT']);
+    fireEvent.click(screen.getByRole('button', { name: 'Show all' }));
+    expect(setHiddenSymbols).toHaveBeenLastCalledWith([]);
+  });
+
+  it('puts Tickers on their own line, apart from the filter lines', () => {
+    renderControls();
+    const section = screen.getByTestId('filtered-result-controls');
+    const tickersLabel = screen.getByText('Tickers');
+    const tickersLine = tickersLabel.parentElement as HTMLElement;
+    expect(tickersLine.textContent).not.toMatch(/POP|OTM|IVR|Sort/);
+    expect(section.contains(tickersLine)).toBe(true);
+  });
+
   it('renders the OI/sort controls slot in between the filter row and the ticker chips', () => {
     renderControls();
     expect(screen.getByTestId('oi-sort-slot')).toBeInTheDocument();

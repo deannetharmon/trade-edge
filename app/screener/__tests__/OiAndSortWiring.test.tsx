@@ -222,7 +222,9 @@ describe('SCREENER-OI-0001: single canonical implementation, Ranked + Filtered o
 
     const fnStart = src.indexOf('function TargetedScanResultsPanel(');
     expect(fnStart).toBeGreaterThan(-1);
-    const panelBody = src.slice(fnStart, fnStart + 12000);
+    // FILTER-LAYOUT-0001: Sort moved from the first filter line to the end of
+    // the second, so the window is wider than the other slices in this file.
+    const panelBody = src.slice(fnStart, fnStart + 20000);
     expect(panelBody).toMatch(/<SortRow\b/);
     expect(panelBody).toMatch(/sortFields=\{SPREAD_SORT_FIELDS\}/);
     expect(panelBody).toMatch(/sortItems\(pool, activeSort, getTargetedSortMetrics\)/);
