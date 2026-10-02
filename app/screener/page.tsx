@@ -5899,7 +5899,10 @@ function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade,
   }, [existingPositions, result.symbol, result.bestCandidate]);
 
   // Ranking
-  const scored = rankConfig ? scoreCandidate(result, rankConfig) : null;
+  // CSP-RANK-BADGE-0001: the generic rank model is spread-oriented (EM clearance,
+  // range, buffer and alignment have no CSP branch), so it never scores a CSP.
+  // cspScore below is the only CSP score shown, sorted on or recorded.
+  const scored = rankConfig && c?.strategy !== 'CSP' ? scoreCandidate(result, rankConfig) : null;
   const light = scored ? trafficLight(scored.score, rankConfig!) : null;
   // QUAL-STATES-0001: spread cards in Ranked and Targeted lead with Qualified / Caution / Disqualified.
   // A disqualified row keeps its score as supporting detail but never wears a tier word like "Strong".
