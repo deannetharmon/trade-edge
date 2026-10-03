@@ -5,7 +5,7 @@
 **Strategy:** Quality Value LEAPS  
 **Initial Strategy Version:** QV-v1.0  
 **Status:** APPROVED — IMPLEMENTATION AUTHORIZED  
-**Current Gate:** Gate 2 — Normalized Metrics & Data Audit  
+**Current Gate:** Gate 3 — QV-v1.0 Underlying Strategy  
 **Current Gate Status:** AUTHORIZED  
 **Implementation Agent:** Claude Code  
 **Facilitator:** Frank  
@@ -430,7 +430,7 @@ Implement/map quality, valuation, fundamental, technical, and existing options m
 **Exit review: Dane + Quinn.** Escalate investment-significant data limitations to Ian.
 
 ## GATE 2b — SEC Fundamentals Adapter
-**Status: AUTHORIZED (Paul scope approval; Ian methodology rulings recorded below)**
+**Status: APPROVED / CLOSED (final Gate 2b commit a8d5b65)**
 
 Objective: make the approved QV Quality/Valuation evidence operational using SEC EDGAR XBRL/companyfacts without introducing Gate 3 investment logic.
 
@@ -443,13 +443,15 @@ Do not implement Gate 3 thresholds, scores, classifications, rankings, or lifecy
 **Exit review: Dane + Quinn for data correctness/architecture; Ian for whether the resulting fundamental evidence is fit for Gate 3.**
 
 ## GATE 3 — QV-v1.0 Underlying Strategy
-**Status: BLOCKED**
+**Status: AUTHORIZED**
 
-Implement Quality Gate, Valuation Dislocation, Growth-Adjusted Valuation, Fundamental Integrity/Momentum, Technical State, Risk, Data Completeness, reason codes, underlying ranking, and candidate classification.
+Implement the approved deterministic QV-v1.0 underlying-stock strategy specified in **Section 45 — Gate 3 Final Strategy Specification**.
 
-Prove representative WATCH, SETUP, ACTIONABLE-candidate, INVALIDATED, and INSUFFICIENT_DATA cases without contract ranking.
+Gate 3 determines underlying eligibility and lifecycle/evaluation classification only. It must not implement LEAPS contract ranking, DTE/delta selection, option liquidity/entry pricing, scenario analysis, QV UI, portfolio sizing/allocation, execution, rolling, notifications, or AI discretionary overrides.
 
-**Exit review: Ian** using strong/weak/borderline/value-trap/deteriorating/stabilizing/recovering/missing-data cases.
+Prove representative DISCOVERED, WATCH, SETUP, UNDERLYING ACTIONABLE, INVALIDATED, and INSUFFICIENT_DATA cases without contract ranking.
+
+**Exit review: Quinn + Ian + Paul, facilitated by Frank.** Gate 4 remains blocked.
 
 ## GATE 4 — LEAPS Integration
 **Status: BLOCKED**
@@ -502,7 +504,9 @@ Required final checks: existing Find LEAPS unchanged; QV deterministic/reproduci
 - Gate 1 Exit Review — Quinn: APPROVED at 729124f78b48336c9ba9f4694a2af036827006b5 (after corrections B2, S1, B3)
 - Gate 2 Exit Review — Quinn: APPROVE WITH CHANGES at 8092be1508d0c641039dd8452c8a7f32a61556df (G2-B1 catalog completeness; FMP wording; SEC path documented; questions routed to Ian)
 - Gate 2 Correction: APPROVED at d518bc53aad6c0537c9ccd8f27ee888ab6fd2e93
-- **Current Authorization: GATE 2b ONLY — IMPLEMENTED, AWAITING EXIT REVIEW** (Dane + Quinn data correctness/architecture; Ian fitness of fundamental evidence for Gate 3). Gate 3 blocked.
+- Gate 2b Exit Review: APPROVED / CLOSED at a8d5b65
+- Gate 3 Methodology: APPROVED by Ian with refinements incorporated by Paul; Quinn implementation-readiness review PASS; Frank gate review PASS
+- **Current Authorization: GATE 3 ONLY.** Gate 4 remains blocked.
 
 # 43. Execution Ledger
 
@@ -526,35 +530,322 @@ Discovery Tests: 182 PASS
 Existing LEAPS Regression Tests: 521 PASS
 
 ### Gate 2b
-Status: IMPLEMENTED — AWAITING EXIT REVIEW  
+Status: APPROVED / CLOSED  
+Final Implementation Commit: a8d5b65  
 Purpose: SEC EDGAR fundamentals adapter required to operationalize QV Quality/Valuation evidence before Gate 3.  
 Paul Scope/Dependency Approval: APPROVED  
-Ian Methodology Rulings: APPROVED / RECORDED  
-Implementation: COMPLETE (commit and CI/Vercel results: see the Gate 2b Gate Completion Report)  
+Dane Technical/Data Review: APPROVED  
+Quinn Architecture/Quality Review: APPROVED  
+Ian Investment/Data-Fitness Review: APPROVED  
 Docs: docs/analysis/LEAPS-QV-0001-gate2b-sec-fundamentals.md
 
-### Gates 3–8
+### Gate 3
+Status: AUTHORIZED  
+Specification: Section 45  
+Investment Methodology: Ian APPROVED WITH REFINEMENTS; incorporated below  
+Quinn Implementation-Readiness Review: PASS  
+Frank Gate/Scope Review: PASS
+
+### Gates 4–8
 Status: BLOCKED
 
 # 44. Current Claude Instruction
 
 Read this entire document before making changes and inspect the existing TradeEdge implementation and repository conventions.
 
-You are authorized to execute **GATE 2b — SEC FUNDAMENTALS ADAPTER ONLY**.
+You are authorized to execute **GATE 3 — QV-v1.0 UNDERLYING STRATEGY ONLY**, exactly as specified in Section 45.
 
-Gate 2b scope is defined in Section 41. Implement the SEC EDGAR XBRL/companyfacts provider/data path required to feed the normalized fundamentals layer. Preserve provider provenance and fail closed on ambiguous or unsupported facts. Add the tests needed to prove fiscal-period/TTM correctness, tag-resolution behavior, restatements/amendments, missing/ambiguous data semantics, caching/rate-limit behavior, and normalized metric integration.
+Implementation requirements:
+1. Implement Gate 3 policy centrally in the versioned discovery strategy layer.
+2. Consume normalized metrics only; no provider-specific strategy logic.
+3. Implement Data Sufficiency, Quality, Valuation Dislocation, Growth-Adjusted Valuation, Fundamental Integrity, Fundamental Momentum, Technical State, supported Risk evaluation, and lifecycle/evaluation classification through UNDERLYING ACTIONABLE.
+4. Emit structured reason codes/evidence from the same rules used to classify candidates.
+5. Preserve VALID / UNAVAILABLE / STALE / INVALID semantics.
+6. Implement all Section 45 boundary and behavioral tests.
+7. Prove hard-gate failures cannot be overridden by stronger evidence elsewhere.
+8. Prove technical regression changes ACTIONABLE -> SETUP/WATCH rather than INVALIDATED when the thesis remains intact.
+9. Do not implement Gate 4 functionality.
+10. Do not change existing Find LEAPS behavior.
+11. Do not add UI work.
+12. Do not add new data-provider dependencies merely to satisfy Gate 3.
+13. Run TypeScript/type check, Gate 3/discovery tests, relevant fundamentals regressions, and existing Find LEAPS regression suite.
+14. Self-review the complete diff for scope leakage and duplicated strategy logic.
+15. Update the ticket/gate ledger and relevant Gate 3 implementation documentation.
+16. Commit and push the completed Gate 3 implementation.
+17. Wait for exact-head CI and Vercel results.
+18. Return the Gate Completion Report from Section 40, including branch, SHA, parent SHA, changed files, decisions, tests, CI, Vercel, deviations, and unresolved issues.
+19. **STOP. Do not begin Gate 4.**
 
-Also correct the non-blocking documentation typo in Gate 2 reconciliation notes that says “Ian/Alan”; the methodology authority is Ian.
 
-Do not begin Gate 3. Do not add QV thresholds, scores, rankings, classifications, or lifecycle investment logic. Do not change existing Find LEAPS behavior. Do not add a paid data dependency.
 
-When Gate 2b is complete:
-1. Run applicable unit tests.
-2. Run relevant existing regression tests.
-3. Review the complete diff.
-4. Produce the Gate Completion Report in Section 40.
-5. Commit and push per repository workflow.
-6. Provide branch and commit SHA.
-7. **STOP.**
+# 45. Gate 3 Final Strategy Specification
 
-Gate 2b must receive its exit reviews before Gate 3 is authorized.
+## 45.1 Objective
+
+Implement the deterministic QV-v1.0 **underlying-stock strategy**:
+
+> **Quality + Valuation Dislocation + Fundamental Thesis Intact + Stabilization/Recovery Evidence**
+
+Gate 3 determines whether the underlying is DISCOVERED, WATCH, SETUP, UNDERLYING ACTIONABLE, or INVALIDATED, or produces INSUFFICIENT_DATA. Gate 3 does not determine whether a LEAPS contract should be purchased.
+
+## 45.2 Data Sufficiency
+
+Missing evidence must never be converted into neutral evidence. Each normalized metric retains VALID / UNAVAILABLE / STALE / INVALID semantics.
+
+Required evaluable domains:
+1. Quality
+2. Valuation
+3. Fundamental Integrity / Momentum
+4. Technical State
+
+If a required domain cannot be reliably evaluated, return INSUFFICIENT_DATA. Do not use INSUFFICIENT_DATA for unfavorable evidence; high leverage, poor growth, expensive valuation, and weak technicals are investment evidence.
+
+## 45.3 Quality
+
+Quality is multidimensional. Evaluate business durability, profitability, cash generation, balance-sheet strength, and capital efficiency. No single positive metric establishes Quality.
+
+### Revenue durability
+- STRONG: 5Y revenue CAGR >= 5%
+- ACCEPTABLE: 5Y revenue CAGR >= 0% and < 5%
+- WEAK: 5Y revenue CAGR < 0%
+
+Current TTM revenue growth relative to the long-term trend provides reacceleration/deceleration evidence. Negative long-term growth is a significant concern but does not independently cause INVALIDATED.
+
+### Profitability
+For the ordinary profitable-company QV-v1.0 universe, operating_margin_ttm > 0 is required.
+
+### Free cash flow
+Positive FCF is expected. Distinguish persistent negative FCF, deterioration into negative FCF, and isolated temporary negative FCF using available annual history. One temporary negative period must not automatically invalidate an otherwise intact business.
+
+### ROIC evidence bands
+- STRONG: >= 15%
+- ACCEPTABLE: >= 10% and < 15%
+- WEAK: < 10%
+
+ROIC alone is not a universal hard gate.
+
+### Leverage: Net Debt / EBITDA
+- STRONG: <= 1x
+- ACCEPTABLE: > 1x to 2x
+- ELEVATED: > 2x to 3x
+- HIGH: > 3x
+
+HIGH is unfavorable evidence, not INSUFFICIENT_DATA. For ordinary operating companies, HIGH leverage combined with another material Quality weakness fails Quality. If Net Debt/EBITDA is structurally inappropriate and TradeEdge lacks an authorized alternative, that component may become INSUFFICIENT_DATA.
+
+## 45.4 Valuation Dislocation
+
+Historical valuation is primary. Use current P/E, 5Y P/E percentile, 5Y median P/E, discount/premium to 5Y median, reliable 3Y history when 5Y is unavailable, and FCF yield / Price-to-FCF / EV-to-EBITDA as supporting evidence.
+
+### STRONG DISLOCATION
+Either:
+- 5Y P/E percentile <= 20, OR
+- discount to 5Y median >= 20%
+
+### MODERATE DISLOCATION
+Either:
+- 5Y P/E percentile > 20 and <= 35, OR
+- discount to 5Y median >= 10% and < 20%
+
+### NO MATERIAL DISLOCATION
+Both:
+- 5Y P/E percentile > 35, AND
+- discount to 5Y median < 10%
+
+When reliable 5Y evidence is unavailable but reliable 3Y evidence exists, apply the same economic thresholds with reduced confidence; do not invent separate 3Y economic thresholds.
+
+At least MODERATE DISLOCATION is required for SETUP or UNDERLYING ACTIONABLE. Supporting valuation evidence may identify conflicts but does not receive arbitrary cross-industry absolute cutoffs in QV-v1.0. STRONG valuation cannot rescue failed fundamentals.
+
+If percentile and median-discount disagree, either criterion can independently establish its applicable dislocation class. Example: percentile 18 with only 5% median discount is STRONG DISLOCATION.
+
+## 45.5 Growth-Adjusted Valuation
+
+Classify INTACT / MIXED / DETERIORATING using revenue, EPS, operating-margin, FCF, and appropriate leverage trajectories.
+
+- INTACT: no major fundamental growth dimension is materially deteriorating.
+- MIXED: one important dimension deteriorates while broader evidence remains stable or improving.
+- DETERIORATING: at least two independent major dimensions materially deteriorate, with particular weight to revenue, EPS, operating margin, and FCF.
+
+DETERIORATING cannot become UNDERLYING ACTIONABLE.
+
+## 45.6 Fundamental Integrity
+
+A single weak quarter does not automatically break a long-duration thesis.
+
+QV-v1.0 hard thesis-break rule: **at least three major fundamental dimensions materially deteriorate concurrently** among revenue, EPS, operating margin, FCF, and leverage.
+
+When this occurs, emit FUNDAMENTAL_THESIS_BROKEN. A previously active candidate may become INVALIDATED. Do not implement discretionary "severe deterioration" logic in V1.
+
+## 45.7 Fundamental Momentum
+
+Classify independently from price momentum:
+- DETERIORATING
+- STABILIZING
+- IMPROVING
+
+Use trend direction rather than merely counting positive current values. At least three evaluable fundamental dimensions should normally exist for confident classification.
+
+- IMPROVING: a majority of available major dimensions improve and no major dimension exhibits severe deterioration.
+- STABILIZING: previous deterioration has stopped, or the majority of available evidence is stable while broad deterioration is absent.
+- DETERIORATING: multiple independent fundamental dimensions continue worsening.
+
+If required fundamental momentum cannot be classified reliably, return INSUFFICIENT_DATA for the component/evaluation as appropriate.
+
+Analyst revisions remain OPTIONAL. When unavailable, emit ANALYST_REVISION_DATA_UNAVAILABLE. Missing revisions receive no neutral score and do not independently block ACTIONABLE.
+
+## 45.8 Technical State
+
+Classify:
+- DECLINING
+- OVERSOLD
+- STABILIZING
+- RECOVERING
+
+Use confluence among weekly RSI level/slope, 4-week RSI change, monthly RSI, SMA50 relationship, SMA200 relationship/trend, distance from 52-week high, and 126-day relative strength versus SPY. RSI alone must not determine state.
+
+### DECLINING
+Multiple trend indicators demonstrate continuing downside deterioration.
+
+### OVERSOLD
+Price/momentum evidence is unusually depressed, but stabilization is not established. OVERSOLD is not a buy signal.
+
+### STABILIZING
+Evidence indicates deterioration is ceasing. Core evidence includes weekly RSI slope no longer negative, 4-week RSI change non-negative, and relative-strength deterioration no longer accelerating. Price need not already exceed SMA50.
+
+### RECOVERING
+Positive momentum inflection exists through confluence including rising weekly RSI, positive 4-week RSI change, improving relationship to SMA50, and improving relative strength versus SPY. Price above SMA200 is not required.
+
+## 45.9 Risk
+
+Evaluate available evidence for earnings/event proximity, material corporate events, leverage, data completeness, valuation conflicts, and fundamental deterioration.
+
+Ordinary earnings proximity is not an automatic disqualifier for long-duration LEAPS. Where available emit RISK_EARNINGS_APPROACHING. Binary/corporate events may block ACTIONABLE when supported by reliable evidence. Missing event data remains explicitly unavailable.
+
+## 45.10 Lifecycle / Evaluation Classification
+
+### DISCOVERED
+Candidate is in the QV universe but has not established the complete QV thesis.
+
+### WATCH
+Examples: insufficient valuation dislocation; technically DECLINING; OVERSOLD without stabilization; unresolved valuation conflict; mixed fundamental evidence requiring observation; or loss of prior recovery confirmation without thesis break.
+
+### SETUP
+Requires all:
+- Quality PASS
+- valuation >= MODERATE DISLOCATION
+- growth-adjusted valuation INTACT or MIXED
+- Fundamental Integrity PASS
+- Fundamental Momentum STABILIZING or IMPROVING
+- Technical State STABILIZING
+- sufficient required evidence
+- no disqualifying risk
+
+Meaning: QV thesis established; recovery confirmation incomplete.
+
+### UNDERLYING ACTIONABLE
+Requires all:
+- Quality PASS
+- valuation >= MODERATE DISLOCATION
+- growth-adjusted valuation INTACT or MIXED
+- Fundamental Integrity PASS
+- Fundamental Momentum STABILIZING or IMPROVING
+- Technical State RECOVERING
+- sufficient required evidence
+- no disqualifying risk
+
+Meaning: underlying qualifies for LEAPS contract evaluation. It does not mean a trade should be placed.
+
+### INVALIDATED
+Reserved for durable thesis failure. Do not invalidate merely because price falls, RSI declines, valuation becomes less attractive, technical state regresses, or optional data disappears. Loss of technical confirmation normally causes ACTIONABLE -> SETUP/WATCH rather than INVALIDATED.
+
+## 45.11 Hard-Gate Principle
+
+No aggregate score or ranking may override a failed hard gate. Extraordinary cheapness cannot rescue failed Quality, broken fundamentals, or insufficient required evidence. Technical recovery cannot rescue a fundamentally broken business.
+
+## 45.12 Required Reason Codes
+
+At minimum support structured concepts for:
+- QUALITY_REVENUE_STRONG
+- QUALITY_REVENUE_ACCEPTABLE
+- QUALITY_REVENUE_WEAK
+- QUALITY_FCF_POSITIVE
+- QUALITY_FCF_DETERIORATING
+- QUALITY_ROIC_STRONG
+- QUALITY_ROIC_ACCEPTABLE
+- QUALITY_ROIC_WEAK
+- QUALITY_LEVERAGE_STRONG
+- QUALITY_LEVERAGE_ACCEPTABLE
+- QUALITY_LEVERAGE_ELEVATED
+- QUALITY_LEVERAGE_HIGH
+- VALUATION_DISLOCATION_STRONG
+- VALUATION_DISLOCATION_MODERATE
+- VALUATION_NO_MATERIAL_DISLOCATION
+- VALUATION_CONFLICT
+- GROWTH_ADJUSTED_INTACT
+- GROWTH_ADJUSTED_MIXED
+- GROWTH_ADJUSTED_DETERIORATING
+- FUNDAMENTAL_MOMENTUM_IMPROVING
+- FUNDAMENTAL_MOMENTUM_STABILIZING
+- FUNDAMENTAL_MOMENTUM_DETERIORATING
+- FUNDAMENTAL_THESIS_BROKEN
+- TECHNICAL_DECLINING
+- TECHNICAL_OVERSOLD
+- TECHNICAL_STABILIZING
+- TECHNICAL_RECOVERING
+- ANALYST_REVISION_DATA_UNAVAILABLE
+- RISK_EARNINGS_APPROACHING
+- REQUIRED_DATA_UNAVAILABLE
+
+The same structured evidence must drive classification and explanation.
+
+## 45.13 Required Boundary Tests
+
+Test immediately below, exactly at, and immediately above:
+- P/E percentile 20 and 35
+- historical discount 10% and 20%
+- Net Debt/EBITDA 1x, 2x, 3x
+- ROIC 10% and 15%
+- revenue CAGR 0% and 5%
+
+Also test conflicting valuation signals, including percentile 18 with 5% median discount => STRONG DISLOCATION.
+
+## 45.14 Required Behavioral Tests
+
+1. Classic setup: Quality + discounted + intact fundamentals + STABILIZING => SETUP.
+2. Recovery confirmed: same but RECOVERING => UNDERLYING ACTIONABLE.
+3. Falling knife: Quality + cheap + oversold + still technically deteriorating => WATCH.
+4. Value trap: extremely cheap + revenue/EPS/margins deteriorating => not SETUP/ACTIONABLE.
+5. Expensive quality: excellent company + RECOVERING + insufficient valuation dislocation => DISCOVERED/WATCH.
+6. Missing analyst revisions: otherwise qualifies => qualification remains possible with explicit unavailable reason.
+7. Missing required evidence: cannot establish required domain => INSUFFICIENT_DATA.
+8. Technical regression: ACTIONABLE -> STABILIZING while thesis intact => SETUP, not INVALIDATED.
+9. Great company/tiny discount: percentile 45 + 5% discount + RECOVERING => not SETUP/ACTIONABLE.
+10. Unusual valuation without large median discount: percentile 18 + 5% discount + Quality PASS + RECOVERING => valuation STRONG.
+11. Cheap collapsing business: percentile 5 + 30% discount + three deteriorating fundamental dimensions => not SETUP/ACTIONABLE; thesis-break behavior where applicable.
+
+## 45.15 Architecture / Implementation Requirements
+
+Quinn requirement: centralize QV-v1.0 classifications and thresholds in versioned strategy policy. Do not scatter strategy thresholds/classification logic across UI, API routes, or provider code. Strategy consumes normalized metrics only. No network/provider logic belongs in the strategy engine.
+
+Every classifier returns structured evidence/reason codes. Missing evidence never becomes neutral. Hard-gate failures cannot be overridden by stronger evidence elsewhere.
+
+Preserve existing Find LEAPS behavior.
+
+## 45.16 Explicit Gate 3 Exclusions
+
+Do not implement:
+- LEAPS contract ranking or suitability
+- DTE/delta selection
+- option liquidity or entry-price methodology
+- Bear/Base/Bull scenario engine
+- QV UI
+- position sizing or portfolio allocation
+- order execution
+- rolling/position management
+- notifications
+- AI discretionary overrides
+
+Gate 4 and later gates remain blocked.
+
+## 45.17 Implementation Principle
+
+Prefer false negatives over false positives. QV-v1.0 will eventually feed leveraged long-duration option exposure; therefore fail closed on required evidence, require fundamental confluence, require meaningful valuation dislocation, require stabilization/recovery evidence, preserve WATCH when evidence is unresolved, and never manufacture confidence from missing data.
