@@ -135,6 +135,11 @@ export function lifecycleResolutionProblems(resolution: LifecycleResolution): st
   if (previousState !== null && !isCandidateState(previousState)) problems.push('previousState is not a candidate state.');
   if (requestedState !== null && !isCandidateState(requestedState)) problems.push('requestedState is not a candidate state.');
   if (changed !== (previousState !== state)) problems.push('changed does not match previousState -> state.');
+  // Derive the structural rule from the state machine itself rather than restating it: any move that is
+  // recorded as a change must be a transition isTransitionAllowed() permits (e.g. null -> INVALIDATED is not).
+  if (changed && isCandidateState(state) && (previousState === null || isCandidateState(previousState)) && !isTransitionAllowed(previousState, state)) {
+    problems.push(`${previousState ?? 'null'} -> ${state} is not an allowed transition.`);
+  }
 
   if (blockedByTerminalState) {
     if (previousState === null || !isTerminalState(previousState)) problems.push('blocked, but previousState is not terminal.');

@@ -126,6 +126,16 @@ describe('candidate snapshot', () => {
     const good = resolveNextState(null, evaluation.outcome);
     expect(() => createCandidateSnapshot(input, evaluation, { ...good, state: 'ACTIONABLE' })).toThrow(/Inconsistent lifecycle resolution/);
     expect(() => createCandidateSnapshot(input, evaluation, { ...good, blockedByTerminalState: true })).toThrow(/Inconsistent lifecycle resolution/);
+    // Quinn B3: a first observation cannot be a terminal state, so neither a new snapshot nor a stored one may claim it.
+    const terminalEvaluation = { ...evaluation, outcome: classified('INVALIDATED') };
+    const forged = { previousState: null, requestedState: 'INVALIDATED' as const, state: 'INVALIDATED' as const, changed: true, blockedByTerminalState: false };
+    expect(() => createCandidateSnapshot(input, terminalEvaluation, forged)).toThrow(/null -> INVALIDATED is not an allowed transition/);
+
+    const genuine = snapshotFor();
+    const stored = { ...genuine, candidateState: 'INVALIDATED' as const, evaluationOutcome: classified('INVALIDATED'), lifecycleResolution: forged };
+    const { snapshotId: _old, ...storedContent } = stored;
+    expect(verifySnapshot({ ...stored, snapshotId: computeSnapshotId(storedContent) })).toBe(false);
+
     // Internally consistent, but for a different evaluation outcome.
     const other = resolveNextState(null, classified('WATCH'));
     expect(() => createCandidateSnapshot(input, evaluation, other)).toThrow(/does not match the evaluation outcome/);

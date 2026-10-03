@@ -142,6 +142,27 @@ describe('lifecycleResolutionProblems', () => {
     });
   });
 
+  it('rejects a first observation that lands directly in a terminal state (Quinn B3)', () => {
+    (['INVALIDATED', 'EXPIRED'] as const).forEach((terminal) => {
+      const forged = { previousState: null, requestedState: terminal, state: terminal, changed: true, blockedByTerminalState: false };
+      const problems = lifecycleResolutionProblems(forged);
+      expect(problems).toContain(`null -> ${terminal} is not an allowed transition.`);
+      // resolveNextState itself refuses the same move, so the validator and the state machine agree.
+      expect(() => resolveNextState(null, classified(terminal))).toThrow(/first be observed/);
+    });
+  });
+
+  it('agrees with isTransitionAllowed for every recorded change', () => {
+    const previous: Array<CandidateState | null> = [null, ...CANDIDATE_STATES];
+    previous.forEach((from) => {
+      CANDIDATE_STATES.forEach((to) => {
+        const forged = { previousState: from, requestedState: to, state: to, changed: from !== to, blockedByTerminalState: false };
+        const flaggedAsTransition = lifecycleResolutionProblems(forged).some((p) => /not an allowed transition/.test(p));
+        expect(flaggedAsTransition).toBe(forged.changed && !isTransitionAllowed(from, to));
+      });
+    });
+  });
+
   it('flags resolutions that could not have happened', () => {
     const base = resolveNextState('WATCH', classified('SETUP'));
     expect(lifecycleResolutionProblems({ ...base, changed: false }).join()).toMatch(/changed does not match/);
