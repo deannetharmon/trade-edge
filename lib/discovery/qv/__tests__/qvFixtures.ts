@@ -15,6 +15,7 @@ export type Field =
   | 'pe' | 'percentile5y' | 'percentile3y' | 'discount5y' | 'discount3y'
   | 'revenueGrowth' | 'revenueTrend' | 'epsGrowth' | 'epsTrend' | 'marginChange'
   | 'weeklyRsi' | 'weeklyRsiChange' | 'price' | 'sma50' | 'sma200' | 'sma200Trend' | 'relativeStrength'
+  | 'weeklyRsiSlope' | 'sma50GapChange' | 'relativeStrengthChange'
   | 'daysToEarnings' | 'eventFlags';
 
 const ID: Record<Field, string> = {
@@ -27,6 +28,7 @@ const ID: Record<Field, string> = {
   weeklyRsi: IN.technical.weeklyRsi, weeklyRsiChange: IN.technical.weeklyRsiChange, price: IN.technical.price,
   sma50: IN.technical.sma50, sma200: IN.technical.sma200, sma200Trend: IN.technical.sma200Trend,
   relativeStrength: IN.technical.relativeStrength,
+  weeklyRsiSlope: IN.technical.weeklyRsiSlope, sma50GapChange: IN.technical.sma50GapChange, relativeStrengthChange: IN.technical.relativeStrengthChange,
   daysToEarnings: IN.risk.daysToEarnings, eventFlags: IN.risk.eventFlags,
 };
 
@@ -37,6 +39,7 @@ const BASE: Partial<Record<Field, number | number[] | string[]>> = {
   pe: 12, percentile5y: 15, discount5y: 25,
   revenueGrowth: 6, epsGrowth: 4, epsTrend: 5, marginChange: 0,
   weeklyRsi: 45, weeklyRsiChange: 2, price: 100, sma50: 95, sma200: 90, sma200Trend: 1, relativeStrength: 3,
+  weeklyRsiSlope: 1, sma50GapChange: 1, relativeStrengthChange: 1,
   daysToEarnings: 40, eventFlags: [],
 };
 
@@ -75,7 +78,7 @@ export function stateOf(evaluation: StrategyEvaluation): string {
 export const codesOf = (evaluation: StrategyEvaluation): string[] => evaluation.reasonCodes.map((reason) => reason.code);
 
 // Technical presets
-export const STABILIZING_TECH: Partial<Record<Field, Override>> = { weeklyRsiChange: 0 };
-export const OVERSOLD_TECH: Partial<Record<Field, Override>> = { weeklyRsi: 25, weeklyRsiChange: -2 };
-export const DECLINING_TECH: Partial<Record<Field, Override>> = { weeklyRsi: 40, weeklyRsiChange: -2, price: 80 };
+export const STABILIZING_TECH: Partial<Record<Field, Override>> = { weeklyRsiChange: 0, weeklyRsiSlope: 0 };
+export const OVERSOLD_TECH: Partial<Record<Field, Override>> = { weeklyRsi: 25, weeklyRsiChange: -2, weeklyRsiSlope: -1, relativeStrengthChange: 0 };
+export const DECLINING_TECH: Partial<Record<Field, Override>> = { weeklyRsi: 40, weeklyRsiChange: -2, weeklyRsiSlope: -1, price: 80 };
 export const THREE_DETERIORATING: Partial<Record<Field, Override>> = { revenueGrowth: -5, epsGrowth: -10, marginChange: -3 };

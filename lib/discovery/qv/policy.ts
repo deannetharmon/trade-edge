@@ -124,6 +124,15 @@ export const QV_V1_0_POLICY = deepFreeze({
       sma200: 'sma_200',
       sma200Trend: 'sma_200_change_20d_pct',
       relativeStrength: 'relative_return_126d_vs_benchmark_pct',
+      // GATE 3 DATA LIMITATION (review correction 1): Section 45.8 needs DIRECTION evidence the normalized catalog does not
+      // produce today. These are the contract ids a future normalizer must satisfy; until then they are UNAVAILABLE and the
+      // affected classification fails closed (no proxy is substituted for any of them).
+      //   weeklyRsiSlope        weekly RSI now minus 1 week ago (distinct from the 4-week change above)
+      //   sma50GapChange        change over 4 weeks in the price-vs-SMA50 gap, percentage points (positive = improving)
+      //   relativeStrengthChange change over 4 weeks in the 126d relative return vs SPY, percentage points (negative = worsening)
+      weeklyRsiSlope: 'rsi_weekly_slope_1w',
+      sma50GapChange: 'price_vs_sma50_gap_change_4w_pp',
+      relativeStrengthChange: 'relative_return_126d_change_4w_pp',
       // supporting evidence only: carried on the state reason, never required, never decisive
       monthlyRsi: 'rsi_monthly_14',
       distanceFrom52wHigh: 'distance_from_52w_high_pct',
@@ -143,60 +152,90 @@ export type QvPolicy = typeof QV_V1_0_POLICY;
 // Assumptions: every place Section 45 is qualitative. Surfaced to Ian; none is a silent proxy.
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** DIRECT = the reading follows Section 45 text; POLICY = Section 45 is silent or qualitative and an investment decision is embedded; DATA = a limitation of today's normalized evidence. */
+export type AssumptionBasis = 'DIRECT' | 'POLICY' | 'DATA';
+
 export interface QvAssumption {
   readonly id: string;
   readonly area: string;
   readonly specGap: string;
   readonly reading: string;
+  readonly basis: AssumptionBasis;
+  /** What part is a direct reading and what part needs an investment-policy decision. */
+  readonly policyQuestion: string;
+  /** Always NOT_REVIEWED here: this code records nothing as ratified. Ratification is an actual Ian review, recorded in the ticket. */
+  readonly ratification: 'NOT_REVIEWED';
 }
 
 export const QV_V1_0_ASSUMPTIONS: readonly QvAssumption[] = deepFreeze([
   {
     id: 'A1',
     area: 'Revenue / EPS trajectory ("materially deteriorating")',
-    specGap: 'Section 45.5-45.7 names the dimensions but gives no materiality figure.',
+    specGap: 'Section 45.5-45.7 names the dimensions but gives no materiality figure or reference.',
     reading:
-      'Growth is DETERIORATING when current TTM growth is negative and below the 5Y trend (or the trend is unavailable); IMPROVING when growth is non-negative and above the 5Y trend; otherwise STABLE. No invented percentage.',
+      'Growth is DETERIORATING when current TTM growth is negative and below the 5Y trend (or the trend is unavailable -- negative growth is adverse on its own); IMPROVING when growth is non-negative and above the 5Y trend; STABLE otherwise. Non-negative growth with no trend reference is NOT_EVALUABLE: missing evidence never establishes stability. No invented percentage.',
+    basis: 'POLICY',
+    policyQuestion: 'Is "below its own 5Y trend while negative" the right meaning of materially deteriorating, and is the 5Y trend the right reference?',
+    ratification: 'NOT_REVIEWED',
   },
   {
     id: 'A2',
     area: 'Operating-margin trajectory',
     specGap: 'No materiality figure for margin change.',
     reading: 'Year-over-year change beyond +/- policy.fundamentals.marginMaterialChangePp percentage points; inside the band is STABLE.',
+    basis: 'POLICY',
+    policyQuestion: 'What margin change (percentage points) is material?',
+    ratification: 'NOT_REVIEWED',
   },
   {
     id: 'A3',
     area: 'Free-cash-flow pattern (persistent / deteriorating / isolated)',
     specGap: 'Section 45.3 names the three patterns without defining them.',
     reading:
-      'Over the last policy.quality.fcfHistoryYears annual points plus TTM: PERSISTENT = TTM and the latest year both negative, or two or more of the points negative; DETERIORATING = TTM negative after a strictly falling run; ISOLATED = a single negative period otherwise. FCF history is a data limitation (see inputs.quality.fcfHistory).',
+      'Over the last policy.quality.fcfHistoryYears annual points plus TTM: PERSISTENT = TTM and the latest year both negative, or two or more of the points negative; DETERIORATING = TTM negative after a strictly falling run; ISOLATED = a single negative period otherwise. Annual FCF history is a data limitation (inputs.quality.fcfHistory).',
+    basis: 'POLICY',
+    policyQuestion: 'Are these the right definitions of persistent / deteriorating / isolated negative FCF, and is a 3-year window right?',
+    ratification: 'NOT_REVIEWED',
   },
   {
     id: 'A4',
     area: 'Quality PASS composition',
     specGap: 'Section 45.3 fixes only the operating-margin requirement and the HIGH-leverage-plus-weakness rule.',
     reading:
-      'Quality FAILS on non-positive operating margin; on HIGH leverage plus one other material weakness (SPEC); or on two or more material weaknesses (revenue WEAK, ROIC WEAK, FCF persistent/deteriorating, leverage HIGH). Quality needs all five aspects evaluable (durability, profitability, cash generation, balance sheet, capital efficiency).',
+      'Quality FAILS on non-positive operating margin (SPEC) and on HIGH leverage plus one other material weakness (SPEC); it also FAILS on two or more material weaknesses (revenue WEAK, ROIC WEAK, FCF persistent/deteriorating, leverage HIGH) -- that last rule is not in the spec. Quality needs all five aspects evaluable.',
+    basis: 'POLICY',
+    policyQuestion: 'Is "two or more weaknesses fails Quality" acceptable, and must every one of the five aspects be evaluable for PASS?',
+    ratification: 'NOT_REVIEWED',
   },
   {
     id: 'A5',
     area: 'Technical-state confluence',
-    specGap: 'Section 45.8 lists indicators and qualitative state descriptions without levels, and some "improving" conditions need change series TradeEdge does not store.',
+    specGap: 'Section 45.8 states the confluence requirements; "no longer accelerating", "unusually depressed" and "multiple" have no numeric definition.',
     reading:
-      'RECOVERING = weekly RSI rising AND price above SMA50 AND (SMA200 not falling OR relative strength vs SPY non-negative). STABILIZING = weekly RSI change non-negative, not RECOVERING. Otherwise (RSI still falling): OVERSOLD when weekly RSI is at or below the depressed line and no other bearish indicator confirms; DECLINING in every other case. "Relationship to SMA50 improving" and "relative strength improving" are read from the current relationship and level because no change series exists.',
+      'STABILIZING = weekly RSI slope not negative AND 4-week RSI change non-negative AND relative-strength change not negative (deterioration no longer accelerating). RECOVERING = weekly RSI slope positive AND 4-week change positive AND price-vs-SMA50 gap improving AND relative-strength change positive (SPEC list). Levels are never read as directions. The slope, SMA50-gap change and relative-strength change are not produced by the normalizer today: they are UNAVAILABLE and the affected state fails closed. Known contradicting evidence classifies DECLINING, or OVERSOLD when weekly RSI is at or below the depressed line with no other bearish confirmation.',
+    basis: 'POLICY',
+    policyQuestion:
+      'DIRECT: the STABILIZING/RECOVERING indicator lists. POLICY: how a single 4-week relative-strength change expresses "no longer accelerating" (here: >= 0); the OVERSOLD line (weekly RSI <= 30); how many bearish confirmations make DECLINING; the definitions of the three missing direction metrics (lookbacks).',
+    ratification: 'NOT_REVIEWED',
   },
   {
     id: 'A6',
     area: 'Risk',
     specGap: 'Section 45.9 gives no proximity window and no event schema.',
     reading:
-      'Earnings within policy.risk.earningsApproachingMaxDays days is flagged RISK_EARNINGS_APPROACHING (never disqualifying). A VALID, non-empty corporate_event_flags list is treated as reliable binary/corporate-event evidence and blocks UNDERLYING ACTIONABLE / SETUP; unavailable event data stays explicitly unavailable.',
+      'Earnings within policy.risk.earningsApproachingMaxDays days is flagged RISK_EARNINGS_APPROACHING (never disqualifying). A VALID, non-empty corporate_event_flags list is treated as reliable binary/corporate-event evidence and blocks SETUP / UNDERLYING ACTIONABLE; unavailable event data stays explicitly unavailable.',
+    basis: 'POLICY',
+    policyQuestion: 'What is the earnings window, and which event types count as reliable binary events?',
+    ratification: 'NOT_REVIEWED',
   },
   {
     id: 'A7',
     area: 'Leverage trajectory',
     specGap: 'Section 45.6 lists leverage as a fundamental dimension; TradeEdge has no prior-period leverage metric.',
     reading: 'The leverage dimension is NOT_EVALUABLE (never neutral). The level is judged under Quality only. With revenue, EPS and margin evaluable, three dimensions remain.',
+    basis: 'DATA',
+    policyQuestion: 'None until a prior-period leverage metric exists; then, what change is material.',
+    ratification: 'NOT_REVIEWED',
   },
   {
     id: 'A8',
@@ -204,5 +243,8 @@ export const QV_V1_0_ASSUMPTIONS: readonly QvAssumption[] = deepFreeze([
     specGap: 'Section 45.10 gives WATCH examples, not a rule.',
     reading:
       'WATCH when Quality passes and the fundamental thesis is intact (not broken, growth-adjusted not DETERIORATING, momentum not DETERIORATING) but another SETUP requirement is unmet. Anything weaker is DISCOVERED. INVALIDATED applies only to a candidate previously in WATCH, SETUP or ACTIONABLE (Section 45.6 "previously active").',
+    basis: 'POLICY',
+    policyQuestion: 'Is Quality PASS the right floor for WATCH, and is DISCOVERED the right state for a candidate with failed Quality?',
+    ratification: 'NOT_REVIEWED',
   },
 ]);

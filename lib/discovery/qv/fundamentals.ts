@@ -45,10 +45,15 @@ export interface FundamentalsAssessment extends ComponentTrace {
 const P = QV_V1_0_POLICY.fundamentals;
 const IN = QV_V1_0_POLICY.inputs.fundamentals;
 
-/** Revenue / EPS (assumption A1): growth against its own long-term trend. */
-export function growthTrajectoryOf(growthPct: number, trendPct: number | null): Trajectory {
+/**
+ * Revenue / EPS (assumption A1): growth against its own long-term trend. Missing trend evidence never establishes stability:
+ *  - negative growth is adverse on its own and stays DETERIORATING when the trend is unavailable (independently supported);
+ *  - non-negative growth with no trend reference cannot be called STABLE or IMPROVING -> null (not evaluable).
+ */
+export function growthTrajectoryOf(growthPct: number, trendPct: number | null): Trajectory | null {
   if (growthPct < 0 && (trendPct === null || growthPct < trendPct)) return 'DETERIORATING';
-  if (trendPct !== null && growthPct >= 0 && growthPct > trendPct) return 'IMPROVING';
+  if (trendPct === null) return null;
+  if (growthPct >= 0 && growthPct > trendPct) return 'IMPROVING';
   return 'STABLE';
 }
 
@@ -61,7 +66,9 @@ export function marginTrajectoryOf(changePp: number): Trajectory {
 
 function growthDimension(dimension: FundamentalDimension, growth: NumericRead, trend: NumericRead): DimensionAssessment {
   if (growth.value === null) return { dimension, state: 'NOT_EVALUABLE', blockingMetricIds: [growth.id] };
-  return { dimension, state: growthTrajectoryOf(growth.value, trend.value), blockingMetricIds: [] };
+  const state = growthTrajectoryOf(growth.value, trend.value);
+  if (state === null) return { dimension, state: 'NOT_EVALUABLE', blockingMetricIds: [trend.id] };
+  return { dimension, state, blockingMetricIds: [] };
 }
 
 export function assessFundamentals(set: MetricSet): FundamentalsAssessment {
@@ -125,7 +132,14 @@ export function assessFundamentals(set: MetricSet): FundamentalsAssessment {
     LEVERAGE: [],
   };
   dimensions.forEach((d) => {
-    if (d.state === 'NOT_EVALUABLE') return;
+    if (d.state === 'NOT_EVALUABLE') {
+      // Growth known but no trend reference to judge it against: reported, never counted as stable.
+      const trendId = d.dimension === 'REVENUE' ? IN.revenueTrend : d.dimension === 'EPS' ? IN.epsTrend : null;
+      if (trendId !== null && d.blockingMetricIds.indexOf(trendId) >= 0) {
+        reasons.push(qvReason(QV_REASON.DATA_TREND_REFERENCE_UNAVAILABLE, 'CONCERN', metricsOf([d.dimension === 'REVENUE' ? revenueTrend : epsTrend]), { dimension: d.dimension }));
+      }
+      return;
+    }
     reasons.push(
       qvReason(dimensionReasonCode(d.dimension, d.state), d.state === 'DETERIORATING' ? 'CONCERN' : d.state === 'IMPROVING' ? 'SUPPORTS' : 'INFORMATIONAL', evidenceFor[d.dimension], {
         dimension: d.dimension,

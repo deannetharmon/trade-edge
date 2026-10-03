@@ -543,7 +543,8 @@ Docs: docs/analysis/LEAPS-QV-0001-gate2b-sec-fundamentals.md
 Status: IMPLEMENTED — PENDING REVIEW (Quinn, Ian, Paul, Frank closure)  
 Docs: docs/analysis/LEAPS-QV-0001-gate3-underlying-strategy.md  
 Code: lib/discovery/qv/  
-Gate 3 Tests: 46 PASS (qv); discovery + fundamentals 331 PASS; full suite 6564 PASS (459 files)  
+Review round 1: CHANGES REQUIRED at e0398a9 — Technical State confluence (direction evidence), missing-trend semantics, assumptions review; corrections implemented, pending re-review. Open: Technical direction metrics (rsi_weekly_slope_1w, price_vs_sma50_gap_change_4w_pp, relative_return_126d_change_4w_pp) are not produced by the normalizer, so no candidate can reach SETUP/ACTIONABLE until they exist; Ian policy questions A1–A6, A8 (see Gate 3 doc); Gate 7 must pass previous state to the strategy. Ratification of A1–A8: NOT REVIEWED.  
+Gate 3 Tests: see Gate Completion Report for the final counts  
 TypeScript (tsconfig.check.json): PASS  
 GitHub CI / Vercel: see Gate Completion Report for the exact head  
 Specification: Section 45  

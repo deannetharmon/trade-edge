@@ -6,7 +6,7 @@
 import { readdirSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { describe, expect, it } from 'vitest';
-import { explainReasons, fingerprint, stableStringify } from '../..';
+import { explainReasons, fingerprint, IMPLEMENTED_METRIC_IDS, stableStringify } from '../..';
 import { QV_ALL_REASON_CODES, QV_REASON, QV_SPEC_REASON_CONCEPTS, QV_V1_0_ASSUMPTIONS, QV_V1_0_POLICY, QV_V1_0_STRATEGY } from '..';
 import { codesOf, evaluate, inputWith, stateOf, STABILIZING_TECH } from './qvFixtures';
 import { runStrategy } from '../..';
@@ -15,7 +15,7 @@ const QV_DIR = resolve(__dirname, '..');
 const CLASSIFIERS = ['fcf.ts', 'quality.ts', 'valuation.ts', 'fundamentals.ts', 'technical.ts', 'risk.ts', 'strategy.ts'];
 
 // Pin: any change to a threshold or input contract changes this value and must be a deliberate, versioned decision.
-const POLICY_FINGERPRINT = '1a4e0f8ddbd28e0d52b325d1e062eb484d496018b6c2e7a001e5cb6b905c0230';
+const POLICY_FINGERPRINT = 'aa264fcb8eb19bb6733af9faa62711b351b0d8ef7c5958afb02949c2a2fe8a97';
 
 describe('QV-v1.0 policy', () => {
   it('is frozen and fingerprint-pinned', () => {
@@ -25,6 +25,24 @@ describe('QV-v1.0 policy', () => {
 
   it('records every qualitative-spec interpretation as an assumption for ratification', () => {
     expect(QV_V1_0_ASSUMPTIONS.map((a) => a.id)).toEqual(['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8']);
+  });
+
+  it('every assumption is classified DIRECT / POLICY / DATA and none is marked ratified', () => {
+    QV_V1_0_ASSUMPTIONS.forEach((assumption) => {
+      expect(['DIRECT', 'POLICY', 'DATA']).toContain(assumption.basis);
+      expect(assumption.policyQuestion.length).toBeGreaterThan(0);
+      expect(assumption.ratification).toBe('NOT_REVIEWED');
+    });
+  });
+
+  it('documents the contract-only inputs: they are not produced by the normalizer today (update the docs when one is)', () => {
+    const contractOnly = [
+      QV_V1_0_POLICY.inputs.quality.fcfHistory,
+      QV_V1_0_POLICY.inputs.technical.weeklyRsiSlope,
+      QV_V1_0_POLICY.inputs.technical.sma50GapChange,
+      QV_V1_0_POLICY.inputs.technical.relativeStrengthChange,
+    ];
+    contractOnly.forEach((id) => expect(IMPLEMENTED_METRIC_IDS).not.toContain(id));
   });
 
   it('classifier files hold no numeric thresholds: every number lives in policy.ts', () => {

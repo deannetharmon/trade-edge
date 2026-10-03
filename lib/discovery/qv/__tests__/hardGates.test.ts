@@ -46,7 +46,7 @@ describe('hard gates', () => {
   });
 
   it('missing, stale or invalid required evidence is INSUFFICIENT_DATA and is never compensated by strength elsewhere', () => {
-    const required: Field[] = ['pe', 'margin', 'roic', 'leverage', 'revenueCagr', 'weeklyRsi', 'sma200', 'revenueGrowth', 'epsGrowth', 'marginChange'];
+    const required: Field[] = ['pe', 'margin', 'roic', 'leverage', 'revenueCagr', 'weeklyRsi', 'weeklyRsiSlope', 'relativeStrengthChange', 'sma200', 'revenueGrowth', 'epsGrowth', 'marginChange'];
     required.forEach((field) => {
       [null, unavailable(field), stale(field), invalid(field)].forEach((state) => {
         const evaluation = evaluate({ ...EXTREME_VALUE, [field]: state });
@@ -81,7 +81,7 @@ describe('hard gates', () => {
 
   it('a technical-only regression can never invalidate', () => {
     ['ACTIONABLE', 'SETUP', 'WATCH'].forEach((previous) => {
-      [STABILIZING_TECH, { weeklyRsi: 20, weeklyRsiChange: -3, price: 60 }].forEach((tech) => {
+      [STABILIZING_TECH, { weeklyRsi: 20, weeklyRsiChange: -3, weeklyRsiSlope: -2, price: 60 }].forEach((tech) => {
         expect(stateOf(evaluate(tech, previous as 'WATCH'))).not.toBe('INVALIDATED');
       });
     });

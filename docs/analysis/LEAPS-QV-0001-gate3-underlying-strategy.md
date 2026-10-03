@@ -19,23 +19,44 @@ Code: `lib/discovery/qv/`. Nothing outside `lib/discovery/` changed except one t
 6. Otherwise DISCOVERED.
 Technical regression only fails step 4, so ACTIONABLE falls to SETUP/WATCH, never INVALIDATED.
 
-Domain rules: Quality fails on operating margin <= 0, HIGH leverage plus one other weakness, or two or more weaknesses (A4). Valuation: percentile and discount are independent criteria, stronger class wins; NONE needs both criteria; 3Y fallback at reduced confidence. Fundamentals: five dimensions, never-neutral NOT_EVALUABLE; growth-adjusted 0/1/2+ deteriorating; momentum per 45.7. Technical: confluence of weekly RSI direction, SMA50/SMA200, SMA200 trend and 126d relative strength vs SPY (A5).
+Domain rules (Technical State reflects review correction 1, see "Review round 1"): Quality fails on operating margin <= 0, HIGH leverage plus one other weakness, or two or more weaknesses (A4). Valuation: percentile and discount are independent criteria, stronger class wins; NONE needs both criteria; 3Y fallback at reduced confidence. Fundamentals: five dimensions, never-neutral NOT_EVALUABLE; growth-adjusted 0/1/2+ deteriorating; momentum per 45.7. Technical: STABILIZING = weekly RSI slope not negative + 4-week RSI change non-negative + relative-strength deterioration no longer accelerating; RECOVERING = rising weekly RSI slope + positive 4-week change + improving relationship to SMA50 + improving relative strength vs SPY. Levels are never read as directions. Known contradicting evidence => DECLINING (or OVERSOLD); direction evidence that is unavailable fails closed (A5).
 
 ## Reason codes
-Quality (21), Valuation (8), Fundamental (5 + 15 per-dimension trajectory codes), Technical (4), Risk (6), Data (3), Lifecycle (12). Full list: `QV_ALL_REASON_CODES`.
+Quality (21), Valuation (8), Fundamental (5 + 15 per-dimension trajectory codes), Technical (4), Risk (6), Data (5), Lifecycle (12). Full list: `QV_ALL_REASON_CODES`.
 
-## Assumptions needing Ian's ratification
-A1–A8 in `policy.ts` (`QV_V1_0_ASSUMPTIONS`): where Section 45 is qualitative ("materially", "persistent", "approaching") the reading is recorded, not hidden.
+## Assumptions A1–A8 (review against Section 45)
+None is ratified: every entry carries `ratification: 'NOT_REVIEWED'` in `QV_V1_0_ASSUMPTIONS` until Ian actually reviews it and the ticket records that.
+
+| ID | Area | Basis | Open investment-policy question |
+|---|---|---|---|
+| A1 | Revenue/EPS trajectory | POLICY | Is "negative and below its 5Y trend" what "materially deteriorating" means; is the 5Y trend the right reference? |
+| A2 | Operating-margin trajectory | POLICY | What margin change (pp) is material? |
+| A3 | FCF pattern definitions | POLICY | Are the persistent/deteriorating/isolated definitions and the 3-year window right? |
+| A4 | Quality PASS composition | POLICY (partly DIRECT) | Margin <= 0 and HIGH-leverage-plus-weakness are spec text. "Two or more weaknesses fails Quality" and "all five aspects must be evaluable" are not. |
+| A5 | Technical confluence | POLICY (partly DIRECT) | STABILIZING/RECOVERING indicator lists are spec text. How one relative-strength change expresses "no longer accelerating" (>= 0), the OVERSOLD line (weekly RSI <= 30), the DECLINING confirmation count, and the lookbacks of the three direction metrics are not. |
+| A6 | Risk | POLICY | Earnings window; which events are reliable binary events. |
+| A7 | Leverage trajectory | DATA | No prior-period leverage metric. |
+| A8 | WATCH vs DISCOVERED | POLICY | Is Quality PASS the floor for WATCH; is DISCOVERED right for failed Quality? |
 
 ## Data limitations (not proxied)
 - **Annual FCF history** has no normalized metric (`fcf_annual_history_5y` is the contract id, UNAVAILABLE today). Negative TTM FCF therefore yields INSUFFICIENT_DATA; positive TTM FCF works, but the FCF *trajectory* dimension is NOT_EVALUABLE without history.
+- **Technical direction evidence** (review correction 1): the normalizer produces weekly RSI level, 4-week RSI change, price, SMA50, SMA200, SMA200 trend and 126d relative-strength LEVEL. It does not produce a one-week weekly-RSI slope, a change in the price-vs-SMA50 gap, or a change in relative strength. Contract ids (UNAVAILABLE today, no proxy): `rsi_weekly_slope_1w`, `price_vs_sma50_gap_change_4w_pp`, `relative_return_126d_change_4w_pp`. Effect in production until they exist: RECOVERING cannot be established, STABILIZING cannot be established, so the Technical domain is NOT_EVALUABLE (INSUFFICIENT_DATA) unless known adverse evidence already classifies it DECLINING/OVERSOLD (WATCH). **No candidate can reach SETUP or UNDERLYING ACTIONABLE until a normalizer supplies these metrics (a Gate 2-style change needing Ian's lookback definitions).**
+- **Revenue/EPS trend reference** (review correction 2): non-negative growth with no 5Y trend is NOT_EVALUABLE, not STABLE. Negative growth stays DETERIORATING without a trend (independently supported adverse evidence).
 - **Leverage trajectory**: no prior-period leverage metric (A7). Fundamental dimensions evaluable today: revenue, EPS, operating margin (FCF with history).
 - **Corporate event flags / analyst revisions** are not produced yet; they stay explicitly UNAVAILABLE and never block.
-- **Lifecycle context**: the Gate 1 `StrategyInput` carries no previous state, so INVALIDATED requires `createQvStrategyFor(previousState)`; the stateless registered strategy reports a break as DISCOVERED with `LIFECYCLE_THESIS_BREAK_NO_PRIOR_THESIS`. Wiring the persisted state is Gate 7 work.
+- **Lifecycle context** (review item 5): lifecycle persistence stays outside Gate 3. The Gate 1 `StrategyInput` carries no previous state, so the registered stateless `QV_V1_0_STRATEGY` cannot invalidate: a thesis break is reported DISCOVERED with `LIFECYCLE_THESIS_BREAK_NO_PRIOR_THESIS`. `createQvStrategyFor(previousState)` / `evaluateQv(input, { previousState })` take the persisted state explicitly and are tested (INVALIDATED only from WATCH/SETUP/ACTIONABLE). **Gate 7 dependency:** the persistence layer must pass the candidate's current state into the strategy, or the stateless strategy will never produce INVALIDATED.
 
 ## Deviations
 - Reason-code grammar requires a category prefix: `GROWTH_ADJUSTED_*` => `VALUATION_GROWTH_ADJUSTED_*`, `ANALYST_REVISION_DATA_UNAVAILABLE` => `DATA_…`, `REQUIRED_DATA_UNAVAILABLE` => `DATA_…`.
 - `lib/discovery/__tests__/isolation.test.ts`: the investment-vocabulary guard now also excludes `lib/discovery/qv/` (as Gate 2 did for `normalized/`); `qv/__tests__/policy.test.ts` guards that numbers live only in `policy.ts`.
 
+## Review round 1 (Gate 3 review: CHANGES REQUIRED at e0398a9)
+1. **Technical State confluence.** Found: `technicalStateOf` returned STABILIZING on four-week RSI change >= 0 alone; present inputs (SMA50, relative strength) did not participate in the constructive states; levels stood in for directions. Corrected: STABILIZING and RECOVERING now use the Section 45.8 element lists with three direction metrics that do not exist in the normalizer; they are contract ids, UNAVAILABLE today, and the affected classification fails closed (see Data limitations). Known adverse evidence still classifies DECLINING/OVERSOLD.
+2. **Missing fundamental-trend semantics.** Found: `growthTrajectoryOf(growth >= 0, null)` returned STABLE. Corrected: returns NOT_EVALUABLE; `DATA_TREND_REFERENCE_UNAVAILABLE` is emitted; adverse (negative) growth is preserved.
+3. **Regression cases** added in `technicalDirection.test.ts`: flat/rising RSI with continuing adverse evidence is not STABILIZING; relative-strength level does not prove direction; price above SMA50 does not prove an improving relationship; missing/stale/invalid EPS trend is not STABLE; legitimate SETUP and ACTIONABLE still qualify.
+4. **Assumptions A1–A8** reviewed against Section 45 and classified (table above). None marked ratified.
+5. **Lifecycle persistence** kept outside Gate 3 (see Data limitations).
+Policy fingerprint changed because the technical input contract gained three ids (pin updated deliberately). New reason codes: `DATA_TECHNICAL_DIRECTION_UNAVAILABLE`, `DATA_TREND_REFERENCE_UNAVAILABLE`.
+
 ## Tests (`lib/discovery/qv/__tests__`)
-boundaries (9), behavior (12: all 11 cases + registered-strategy contract), hardGates (15), policy (10) = 46.
+boundaries (9), behavior (12), hardGates (15), policy (12), technicalDirection (15) = 63.
