@@ -136,10 +136,10 @@ const METRIC_DEPS: Readonly<Record<string, readonly string[]>> = {
   fcf_yield_pct: ['operatingCashFlow', 'capex', 'marketCap'],
   roic_v1_pct: ['operatingIncome', 'pretaxIncome', 'incomeTax', 'totalEquityEnd', 'debtEnd', 'cashEnd', 'totalEquityStart', 'debtStart', 'cashStart'],
   net_debt_to_ebitda: ['ebitda', 'debtEnd', 'cashEnd'],
-  pe_ttm: ['dilutedEps', 'price', 'epsBasis'],
+  pe_ttm: ['dilutedEps', 'price', 'peBasis', 'sharesConsistency'],
   revenue_cagr_5y_pct: ['annualRevenue'],
   eps_cagr_5y_pct: ['annualEps'],
-  eps_growth_yoy_ttm_pct: ['dilutedEps', 'dilutedEpsPrior', 'epsBasis', 'epsBasisPrior'],
+  eps_growth_yoy_ttm_pct: ['dilutedEps', 'dilutedEpsPrior', 'epsBasis', 'epsBasisPrior', 'sharesConsistency'],
   revenue_growth_yoy_ttm_pct: ['revenue', 'revenuePrior'],
   operating_margin_trend_5y_pp: ['annualRevenue', 'annualOperatingIncome'],
   operating_margin_change_yoy_pp: ['operatingIncome', 'revenue', 'operatingIncomePrior', 'revenuePrior'],
@@ -217,8 +217,10 @@ export function buildSecFundamentals(compact: CompactFacts, ctx: SecBuildContext
       recordTtm(priorKey, t);
     }
   });
-  status.epsBasis = epsBasisAt(index, anchor);
-  status.epsBasisPrior = epsBasisAt(index, prior);
+  status.epsBasis = epsBasisAt(index, anchor, anchor.bucket === 'FY' ? null : prior);
+  status.epsBasisPrior = epsBasisAt(index, prior, null);
+  // pe_ttm at a fiscal-year anchor uses the as-filed FY EPS only (no FY/YTD mixing), so it needs no basis check there
+  status.peBasis = anchor.bucket === 'FY' ? OK_STATUS : status.epsBasis;
   // EBITDA-v1 = operating income + depreciation and amortization
   if (status.operatingIncome.status === 'OK' && status.depreciationAmortization.status === 'OK') {
     status.ebitda = OK_STATUS;
@@ -307,6 +309,13 @@ export function buildSecFundamentals(compact: CompactFacts, ctx: SecBuildContext
     recordResolved('marketCap', 'WEIGHTED_AVERAGE_DILUTED_SHARES_CROSSCHECK', weighted);
     itemProv.marketCap = [...(itemProv.marketCap || []), ...(itemProv.sharesOutstanding || [])];
   }
+  // Cover-page vs weighted diluted shares disagreeing beyond tolerance (split after the latest filing, 3:2 split, ...) also
+  // invalidates per-share values. Only this INCONSISTENT case blocks; a missing price/cover date/weighted count does not.
+  status.sharesConsistency =
+    status.sharesOutstanding.status === 'OK' && weighted.status === 'OK' && weighted.value > 0 &&
+    Math.abs(values.sharesOutstanding / weighted.value - 1) > MARKET_CAP_SHARES_TOLERANCE
+      ? { status: 'INCONSISTENT', reason: 'SHARES_INCONSISTENT' }
+      : OK_STATUS;
 
   // ---- annual series (also feeds the 5-year metrics) ----
   const annualSeries = buildAnnualSeries(index, fiscalYears, noteFiled);
@@ -373,6 +382,8 @@ export function buildSecFundamentals(compact: CompactFacts, ctx: SecBuildContext
     const blocker = blockerOf(id);
     if (!blocker) return metric;
     if (blocker.status !== 'MISSING') return invalidMetric(id, 'n/a', blocker.reason, provenance);
+    // a missing blocker never hides the more specific reason an already-rejected / stale base metric carries
+    if (metric.validity === 'INVALID' || metric.validity === 'STALE') return metric;
     return unavailableMetric(id, blocker.reason, provenance);
   };
   FUNDAMENTAL_METRIC_IDS.forEach((id) => {
@@ -488,7 +499,7 @@ function sectorMetric(submissions: SecSubmissionsInfo | null, now: string): Norm
  * same basis as the fiscal year before it. A split between the latest 10-K and the current 10-Q would otherwise mix
  * pre-split FY EPS with post-split YTD EPS inside one TTM sum. Break = SPLIT_SUSPECT_RATIO or more, either way.
  */
-function epsBasisAt(index: FactIndex, anchor: Anchor | null): SecItemStatus {
+function epsBasisAt(index: FactIndex, anchor: Anchor | null, priorYtd: Anchor | null): SecItemStatus {
   const notPossible: SecItemStatus = { status: 'MISSING', reason: 'SEC_ITEM_NOT_REPORTED:epsBasis:EPS_SPLIT_CHECK_NOT_POSSIBLE' };
   if (!anchor || !anchor.prevFiscalYear) return notPossible;
   const cur = resolveItemAt(index, SEC_ITEMS.dilutedShares, anchor.start, anchor.end);
@@ -498,6 +509,14 @@ function epsBasisAt(index: FactIndex, anchor: Anchor | null): SecItemStatus {
   const ratio = cur.value / prev.value;
   if (ratio >= SPLIT_SUSPECT_RATIO || ratio <= 1 / SPLIT_SUSPECT_RATIO) {
     return { status: 'INCONSISTENT', reason: 'SPLIT_OR_SHARE_STRUCTURE_CHANGE_SUSPECTED' };
+  }
+  if (priorYtd) {
+    // YTD_PRIOR is subtracted inside the TTM sum, so it must share the current period's basis too
+    const py = resolveItemAt(index, SEC_ITEMS.dilutedShares, priorYtd.start, priorYtd.end);
+    if (py.status === 'AMBIGUOUS') return { status: 'AMBIGUOUS', reason: 'AMBIGUOUS_CONCEPT:dilutedShares' };
+    if (py.status !== 'OK' || !(py.value > 0)) return notPossible;
+    const r = cur.value / py.value;
+    if (r >= SPLIT_SUSPECT_RATIO || r <= 1 / SPLIT_SUSPECT_RATIO) return { status: 'INCONSISTENT', reason: 'SPLIT_OR_SHARE_STRUCTURE_CHANGE_SUSPECTED' };
   }
   return OK_STATUS;
 }

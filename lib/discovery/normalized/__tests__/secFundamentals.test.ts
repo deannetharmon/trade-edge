@@ -282,7 +282,25 @@ describe('SEC fundamentals: price, shares and market cap', () => {
     expect(r.metrics.fcf_yield_pct.validity).toBe('INVALID');
     expect(reasonOf(r, 'fcf_yield_pct')).toBe('SHARES_INCONSISTENT');
     expect(r.metrics.ev_to_ebitda_ttm.validity).toBe('INVALID');
-    expect(r.metrics.pe_ttm.validity).toBe('VALID'); // P/E needs price and EPS only
+    // per-share values share the cover-vs-weighted check: the cover count is on another basis than the EPS (split after the filing)
+    expect(r.metrics.pe_ttm.validity).toBe('INVALID');
+    expect(reasonOf(r, 'pe_ttm')).toBe('SHARES_INCONSISTENT');
+    expect(r.metrics.eps_growth_yoy_ttm_pct.validity).toBe('INVALID');
+    expect(r.metrics.operating_margin_ttm_pct.validity).toBe('VALID');
+  });
+
+  it('a 3:2 split after the latest 10-Q (cover 1.5x the weighted count) invalidates P/E even though 1.5x is under the 1.8x filing-pair ratio', () => {
+    const raw = makeCompanyFacts();
+    raw.facts.dei.EntityCommonStockSharesOutstanding.units.shares[0].val = 750;
+    expect(run(raw).metrics.pe_ttm.validity).toBe('INVALID');
+  });
+
+  it('cover count missing for price/date reasons does not block P/E (only an inconsistency does)', () => {
+    const raw = makeCompanyFacts();
+    delete raw.facts.dei;
+    const r = run(raw);
+    expect(r.metrics.pe_ttm.validity).toBe('VALID');
+    expect(r.metrics.fcf_yield_pct.validity).toBe('UNAVAILABLE');
   });
 
   it('is UNAVAILABLE when the cover-page share count is missing or older than the period', () => {
@@ -416,8 +434,8 @@ describe('SEC fundamentals: coverage and structure', () => {
 });
 
 
-// ---- Regression tests from the live AAPL smoke test (production, 2026-10-03) ----
-describe('live-data regressions (AAPL smoke test)', () => {
+// ---- Pins from the live AAPL smoke test (production, 2026-10-03) ----
+describe('live-data pins (AAPL smoke test)', () => {
   const setDebt = (raw: RawFacts, values: Record<string, number>): void => {
     ['LongTermDebt', 'ShortTermBorrowings', 'LongTermDebtNoncurrent', 'LongTermDebtCurrent', 'DebtCurrent'].forEach((tag) => dropTag(raw, tag));
     const ends = Array.from(new Set(rowsOf(raw, 'AssetsCurrent').map((r) => r.end)));
@@ -510,11 +528,16 @@ describe('per-share basis at the current period (split after the latest 10-K)', 
   it('makes P/E, EPS growth and the P/E history INVALID instead of mixing bases; share-free metrics are untouched', () => {
     const raw = makeCompanyFacts();
     splitAfterLatestTenK(raw);
-    const r = run(raw);
+    const closes: Array<{ t: number; c: number }> = [];
+    for (let d = Date.parse('2020-01-01') / 86400000; d <= Date.parse('2026-10-02') / 86400000; d += 1) {
+      if ((d + 4) % 7 !== 0 && (d + 4) % 7 !== 6) closes.push({ t: d * 86400, c: 50 });
+    }
+    const r = run(raw, { closes });
     expect(r.metrics.pe_ttm.validity).toBe('INVALID');
     expect(reasonOf(r, 'pe_ttm')).toBe('SPLIT_OR_SHARE_STRUCTURE_CHANGE_SUSPECTED');
     expect(r.metrics.eps_growth_yoy_ttm_pct.validity).toBe('INVALID');
-    expect(r.metrics.pe_ttm_median_5y.validity).not.toBe('VALID');
+    expect(r.metrics.pe_ttm_median_5y.validity).toBe('INVALID');
+    expect(reasonOf(r, 'pe_ttm_median_5y')).toBe('INPUT_INVALID:pe_ttm');
     expect(r.metrics.operating_margin_ttm_pct.validity).toBe('VALID');
     expect(r.metrics.fcf_ttm.validity).toBe('VALID');
     expect(r.diagnostics.itemIssues.epsBasis.status).toBe('INCONSISTENT');
@@ -534,6 +557,43 @@ describe('per-share basis at the current period (split after the latest 10-K)', 
     expect(r.diagnostics.itemIssues.epsBasisPrior.status).toBe('INCONSISTENT');
   });
 
+  it('a break between the prior-year period and the current period (YTD_PRIOR basis) blocks P/E and EPS growth', () => {
+    const raw = makeCompanyFacts();
+    const priorEnd = plusDays(currentHalfEnd(), -365);
+    rowsOf(raw, 'WeightedAverageNumberOfDilutedSharesOutstanding', 'shares').forEach((row) => {
+      if (Math.abs(Date.parse(row.end) - Date.parse(priorEnd)) <= 3 * 86400000 && row.end <= '2025-12-31') row.val = 125;
+    });
+    const r = run(raw);
+    expect(r.metrics.pe_ttm.validity).toBe('INVALID');
+    expect(r.metrics.eps_growth_yoy_ttm_pct.validity).toBe('INVALID');
+  });
+
+  it('at a fiscal-year anchor P/E does not need the prior-year share count; EPS growth keeps its check', () => {
+    const raw = makeCompanyFacts({ currentHalf: false });
+    dropTag(raw, 'WeightedAverageNumberOfDilutedSharesOutstanding', (row) => row.end === '2024-12-31');
+    const r = run(raw, { now: '2026-03-01T00:00:00.000Z' });
+    expect(r.metrics.pe_ttm.validity).toBe('VALID');
+    expect(r.metrics.eps_growth_yoy_ttm_pct.validity).toBe('UNAVAILABLE');
+  });
+
+  it('keeps the specific INVALID reason when a MISSING blocker is also present (negative EPS + dropped share count)', () => {
+    const raw = makeCompanyFacts();
+    rowsOf(raw, 'EarningsPerShareDiluted', 'USD/shares').forEach((row) => { if (row.end > '2025-12-31') row.val = -50; });
+    dropTag(raw, 'WeightedAverageNumberOfDilutedSharesOutstanding', (row) => row.end === currentHalfEnd());
+    const r = run(raw);
+    expect(r.metrics.pe_ttm.validity).toBe('INVALID');
+    expect(reasonOf(r, 'pe_ttm')).toContain('NON_POSITIVE_EARNINGS');
+  });
+
+  it('PIN (for Ian): a filer without the weighted-diluted-shares tag loses P/E and EPS growth at quarterly anchors (fail-closed)', () => {
+    const raw = makeCompanyFacts();
+    dropTag(raw, 'WeightedAverageNumberOfDilutedSharesOutstanding');
+    const r = run(raw);
+    expect(r.metrics.pe_ttm.validity).toBe('UNAVAILABLE');
+    expect(r.metrics.eps_growth_yoy_ttm_pct.validity).toBe('UNAVAILABLE');
+    expect(r.metrics.operating_margin_ttm_pct.validity).toBe('VALID');
+  });
+
   it('is UNAVAILABLE (not VALID) when the share count needed to check the basis is missing', () => {
     const raw = makeCompanyFacts();
     dropTag(raw, 'WeightedAverageNumberOfDilutedSharesOutstanding', (row) => row.end === currentHalfEnd());
@@ -548,6 +608,11 @@ describe('per-share basis at the current period (split after the latest 10-K)', 
         if (row.end === currentHalfEnd()) row.val = current;
         if (row.end === '2025-12-31') row.val = previous;
       });
+      const priorEnd = Date.parse(currentHalfEnd()) - 365 * 86400000;
+      rowsOf(raw, 'WeightedAverageNumberOfDilutedSharesOutstanding', 'shares').forEach((row) => {
+        if (Math.abs(Date.parse(row.end) - priorEnd) <= 3 * 86400000 && row.end <= '2025-12-31') row.val = previous; // prior-year period
+      });
+      raw.facts.dei.EntityCommonStockSharesOutstanding.units.shares[0].val = current; // keep the cover count on the same basis
     };
     it.each([
       ['1.79x is not a break', 179, 100, 'VALID'],
