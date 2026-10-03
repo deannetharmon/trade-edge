@@ -31,7 +31,7 @@ export interface AdvanceResult {
   readonly snapshot: CandidateSnapshot;
   /** null when the state did not change (including every INSUFFICIENT_DATA outcome on an existing candidate). */
   readonly transition: StateTransition | null;
-  /** The evaluation asked for a state change but the candidate is already INVALIDATED / EXPIRED. */
+  /** The evaluation asked for a state change but the candidate is already INVALIDATED / EXPIRED. Also stored in the snapshot. */
   readonly blockedByTerminalState: boolean;
 }
 
@@ -59,7 +59,7 @@ export function advanceCandidate(
 
   const history = previous ? previous.history : createTransitionHistory(evaluation.symbol, evaluation.identity);
   const resolved = resolveNextState(currentStateOf(history), evaluation.outcome);
-  const snapshot = createCandidateSnapshot(input, evaluation, resolved.state, extras);
+  const snapshot = createCandidateSnapshot(input, evaluation, resolved, extras);
 
   const nextHistory = resolved.changed
     ? appendTransition(history, {

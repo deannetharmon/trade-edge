@@ -1,20 +1,24 @@
 // lib/discovery/__tests__/snapshot.test.ts
 
 import { describe, expect, it } from 'vitest';
-import { computeSnapshotId, createCandidateSnapshot, runStrategy, snapshotIdentity, verifySnapshot } from '..';
+import { classified, computeSnapshotId, createCandidateSnapshot, resolveNextState, runStrategy, snapshotIdentity, verifySnapshot } from '..';
+import type { CandidateState } from '..';
 import { FIXTURE_IDENTITY, T0, T1, createFixtureStrategy, makeInput, signalFalse, signalMissing, signalTrue } from './fixtures';
 
 const strategy = createFixtureStrategy();
 
-function snapshotFor(signal = signalTrue(), state: Parameters<typeof createCandidateSnapshot>[2] = 'SETUP') {
+/** `previous` is the candidate's state before this evaluation (null = first observation). */
+function snapshotFor(signal = signalTrue(), previous: CandidateState | null = null) {
   const input = makeInput(signal);
-  return createCandidateSnapshot(input, runStrategy(strategy, input), state);
+  const evaluation = runStrategy(strategy, input);
+  return createCandidateSnapshot(input, evaluation, resolveNextState(previous, evaluation.outcome));
 }
 
 describe('candidate snapshot', () => {
   it('captures the strategy, timestamp, underlying, price, metrics with validity, gates, reasons, state, rankings and completeness', () => {
     const snapshot = snapshotFor();
     expect(snapshot).toMatchObject({
+      lifecycleResolution: { previousState: null, requestedState: 'SETUP', state: 'SETUP', changed: true, blockedByTerminalState: false },
       strategyId: 'FIX',
       strategyVersion: 'FIX-v1.0',
       capturedAt: T0,
@@ -37,7 +41,8 @@ describe('candidate snapshot', () => {
 
   it('carries contract and scenario payloads supplied by later gates', () => {
     const input = makeInput(signalTrue());
-    const snapshot = createCandidateSnapshot(input, runStrategy(strategy, input), 'SETUP', {
+    const evaluation = runStrategy(strategy, input);
+    const snapshot = createCandidateSnapshot(input, evaluation, resolveNextState(null, evaluation.outcome), {
       selectedContract: { strike: 90, expiration: '2028-01-21' },
       contractMarketData: { bid: 10.1, ask: 10.4 },
       scenarios: [{ name: 'base', stockPrice: 120 }],
@@ -58,12 +63,15 @@ describe('candidate snapshot', () => {
 
   it('the id is a content fingerprint: identical evidence -> identical id; any change -> different id', () => {
     expect(snapshotFor().snapshotId).toBe(snapshotFor().snapshotId);
-    expect(snapshotFor().snapshotId).toMatch(/^snap_[0-9a-f]{14}$/);
-    expect(snapshotFor(signalFalse(), 'WATCH').snapshotId).not.toBe(snapshotFor().snapshotId);
-    expect(snapshotFor(signalTrue(), 'ACTIONABLE').snapshotId).not.toBe(snapshotFor(signalTrue(), 'SETUP').snapshotId);
+    // 256-bit fingerprint (Quinn Gate 1 review S1): 64 hex characters.
+    expect(snapshotFor().snapshotId).toMatch(/^snap_[0-9a-f]{64}$/);
+    expect(snapshotFor(signalFalse()).snapshotId).not.toBe(snapshotFor().snapshotId);
+    // Same evidence, different lifecycle history -> different snapshot.
+    expect(snapshotFor(signalTrue(), 'WATCH').snapshotId).not.toBe(snapshotFor(signalTrue(), null).snapshotId);
 
     const input = makeInput(signalTrue(), { asOf: T1, symbol: 'ABC' });
-    const later = createCandidateSnapshot(input, runStrategy(strategy, input), 'SETUP');
+    const laterEvaluation = runStrategy(strategy, input);
+    const later = createCandidateSnapshot(input, laterEvaluation, resolveNextState(null, laterEvaluation.outcome));
     expect(later.snapshotId).not.toBe(snapshotFor().snapshotId);
   });
 
@@ -72,13 +80,18 @@ describe('candidate snapshot', () => {
     expect(verifySnapshot(snapshot)).toBe(true);
     const tampered = { ...snapshot, candidateState: 'ACTIONABLE' as const };
     expect(verifySnapshot(tampered)).toBe(false);
+    // A forged resolution is caught even when the id is recomputed to match.
+    const forged = { ...snapshot, candidateState: 'ACTIONABLE' as const, lifecycleResolution: { ...snapshot.lifecycleResolution, state: 'ACTIONABLE' as const } };
+    const { snapshotId: _ignored, ...forgedContent } = forged;
+    expect(verifySnapshot({ ...forged, snapshotId: computeSnapshotId(forgedContent) })).toBe(false);
     const { snapshotId, ...content } = snapshot;
     expect(computeSnapshotId(content)).toBe(snapshotId);
   });
 
   it('retains unflattering cases: insufficient-data and terminal-state evaluations are snapshotted too', () => {
-    const insufficient = snapshotFor(signalMissing(), 'DISCOVERED');
+    const insufficient = snapshotFor(signalMissing());
     expect(insufficient.evaluationOutcome).toMatchObject({ kind: 'INSUFFICIENT_DATA' });
+    expect(insufficient.lifecycleResolution).toMatchObject({ requestedState: null, state: 'DISCOVERED' });
     expect(insufficient.metrics.fixture_signal.validity).toBe('UNAVAILABLE');
     expect(insufficient.reasonCodes[0].code).toBe('DATA_FIXTURE_SIGNAL_UNAVAILABLE');
 
@@ -86,9 +99,41 @@ describe('candidate snapshot', () => {
     expect(invalidated.candidateState).toBe('INVALIDATED');
   });
 
+  it('records WHY a terminal candidate kept its state although the evaluation said otherwise (Quinn B2)', () => {
+    const blocked = snapshotFor(signalTrue(), 'INVALIDATED'); // evidence now says SETUP
+    expect(blocked.evaluationOutcome).toEqual({ kind: 'CLASSIFIED', state: 'SETUP' });
+    expect(blocked.candidateState).toBe('INVALIDATED');
+    expect(blocked.lifecycleResolution).toEqual({
+      previousState: 'INVALIDATED',
+      requestedState: 'SETUP',
+      state: 'INVALIDATED',
+      changed: false,
+      blockedByTerminalState: true,
+    });
+    expect(verifySnapshot(blocked)).toBe(true);
+
+    // The same terminal state with an agreeing evaluation is a different, unblocked record.
+    const agreeing = snapshotFor(signalFalse(), 'INVALIDATED');
+    expect(agreeing.lifecycleResolution.blockedByTerminalState).toBe(true); // WATCH requested, still blocked
+    const same = createCandidateSnapshot(makeInput(signalFalse()), { ...runStrategy(strategy, makeInput(signalFalse())), outcome: classified('INVALIDATED') }, resolveNextState('INVALIDATED', classified('INVALIDATED')));
+    expect(same.lifecycleResolution.blockedByTerminalState).toBe(false);
+    expect(same.snapshotId).not.toBe(blocked.snapshotId);
+  });
+
+  it('refuses a lifecycle resolution that is inconsistent or does not belong to the evaluation', () => {
+    const input = makeInput(signalTrue());
+    const evaluation = runStrategy(strategy, input);
+    const good = resolveNextState(null, evaluation.outcome);
+    expect(() => createCandidateSnapshot(input, evaluation, { ...good, state: 'ACTIONABLE' })).toThrow(/Inconsistent lifecycle resolution/);
+    expect(() => createCandidateSnapshot(input, evaluation, { ...good, blockedByTerminalState: true })).toThrow(/Inconsistent lifecycle resolution/);
+    // Internally consistent, but for a different evaluation outcome.
+    const other = resolveNextState(null, classified('WATCH'));
+    expect(() => createCandidateSnapshot(input, evaluation, other)).toThrow(/does not match the evaluation outcome/);
+  });
+
   it('refuses an evaluation that belongs to a different input', () => {
     const input = makeInput(signalTrue());
     const other = makeInput(signalTrue(), { symbol: 'XYZ' });
-    expect(() => createCandidateSnapshot(other, runStrategy(strategy, input), 'SETUP')).toThrow(/does not belong/);
+    expect(() => createCandidateSnapshot(other, runStrategy(strategy, input), resolveNextState(null, classified('SETUP')))).toThrow(/does not belong/);
   });
 });

@@ -31,6 +31,7 @@ describe('advanceCandidate', () => {
     expect(result.transition?.reasonCodes[0].code).toBe('QUALITY_FIXTURE_SIGNAL_PRESENT');
     expect(verifySnapshot(result.snapshot)).toBe(true);
     expect(result.record.lastSnapshotId).toBe(result.snapshot.snapshotId);
+    expect(result.snapshot.lifecycleResolution).toMatchObject({ previousState: null, requestedState: 'SETUP', state: 'SETUP', changed: true });
   });
 
   it('records forward and reverse movement across evaluations', () => {
@@ -89,6 +90,15 @@ describe('advanceCandidate', () => {
     expect(later.blockedByTerminalState).toBe(true);
     expect(later.snapshot.evaluationOutcome).toEqual({ kind: 'CLASSIFIED', state: 'SETUP' });
     expect(later.snapshot.candidateState).toBe('INVALIDATED');
+    // Quinn B2: the divergence is explained by the stored snapshot itself, not only by the transient AdvanceResult.
+    expect(later.snapshot.lifecycleResolution).toEqual({
+      previousState: 'INVALIDATED',
+      requestedState: 'SETUP',
+      state: 'INVALIDATED',
+      changed: false,
+      blockedByTerminalState: true,
+    });
+    expect(verifySnapshot(later.snapshot)).toBe(true);
     expect(later.record.history.transitions).toHaveLength(2);
   });
 

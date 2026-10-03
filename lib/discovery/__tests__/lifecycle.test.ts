@@ -9,6 +9,7 @@ import {
   insufficientData,
   isOpportunityState,
   isTransitionAllowed,
+  lifecycleResolutionProblems,
   resolveNextState,
 } from '..';
 import type { CandidateState } from '..';
@@ -70,7 +71,13 @@ describe('insufficient-data outcome', () => {
 
 describe('resolveNextState', () => {
   it('moves an existing candidate to the classified state', () => {
-    expect(resolveNextState('WATCH', classified('SETUP'))).toEqual({ state: 'SETUP', changed: true, blockedByTerminalState: false });
+    expect(resolveNextState('WATCH', classified('SETUP'))).toEqual({
+      previousState: 'WATCH',
+      requestedState: 'SETUP',
+      state: 'SETUP',
+      changed: true,
+      blockedByTerminalState: false,
+    });
     expect(resolveNextState('ACTIONABLE', classified('WATCH'))).toMatchObject({ state: 'WATCH', changed: true });
   });
 
@@ -80,12 +87,24 @@ describe('resolveNextState', () => {
 
   it('INSUFFICIENT_DATA never moves an existing candidate', () => {
     ACTIVE_STATES.forEach((state) => {
-      expect(resolveNextState(state, insufficientData(['pe']))).toEqual({ state, changed: false, blockedByTerminalState: false });
+      expect(resolveNextState(state, insufficientData(['pe']))).toEqual({
+        previousState: state,
+        requestedState: null,
+        state,
+        changed: false,
+        blockedByTerminalState: false,
+      });
     });
   });
 
   it('a new candidate with INSUFFICIENT_DATA is recorded as DISCOVERED', () => {
-    expect(resolveNextState(null, insufficientData(['pe']))).toEqual({ state: 'DISCOVERED', changed: true, blockedByTerminalState: false });
+    expect(resolveNextState(null, insufficientData(['pe']))).toEqual({
+      previousState: null,
+      requestedState: null,
+      state: 'DISCOVERED',
+      changed: true,
+      blockedByTerminalState: false,
+    });
   });
 
   it('a new candidate may be classified directly', () => {
@@ -94,8 +113,46 @@ describe('resolveNextState', () => {
   });
 
   it('terminal candidates stay terminal and report when a different state was requested', () => {
-    expect(resolveNextState('INVALIDATED', classified('SETUP'))).toEqual({ state: 'INVALIDATED', changed: false, blockedByTerminalState: true });
+    expect(resolveNextState('INVALIDATED', classified('SETUP'))).toEqual({
+      previousState: 'INVALIDATED',
+      requestedState: 'SETUP',
+      state: 'INVALIDATED',
+      changed: false,
+      blockedByTerminalState: true,
+    });
     expect(resolveNextState('EXPIRED', classified('EXPIRED'))).toMatchObject({ changed: false, blockedByTerminalState: false });
     expect(resolveNextState('INVALIDATED', insufficientData(['pe']))).toMatchObject({ changed: false, blockedByTerminalState: false });
+  });
+});
+
+describe('lifecycleResolutionProblems', () => {
+  it('accepts every resolution that resolveNextState can produce', () => {
+    const outcomes = [...CANDIDATE_STATES.map((state) => classified(state)), insufficientData(['pe'])];
+    const previous: Array<CandidateState | null> = [null, ...CANDIDATE_STATES];
+    previous.forEach((from) => {
+      outcomes.forEach((outcome) => {
+        let resolution;
+        try {
+          resolution = resolveNextState(from, outcome);
+        } catch {
+          return; // a new candidate cannot first be observed as a terminal state
+        }
+        expect(lifecycleResolutionProblems(resolution)).toEqual([]);
+      });
+    });
+  });
+
+  it('flags resolutions that could not have happened', () => {
+    const base = resolveNextState('WATCH', classified('SETUP'));
+    expect(lifecycleResolutionProblems({ ...base, changed: false }).join()).toMatch(/changed does not match/);
+    expect(lifecycleResolutionProblems({ ...base, state: 'ACTIONABLE', changed: true }).join()).toMatch(/without being blocked/);
+    expect(lifecycleResolutionProblems({ ...base, blockedByTerminalState: true }).join()).toMatch(/previousState is not terminal/);
+
+    const blocked = resolveNextState('EXPIRED', classified('SETUP'));
+    expect(lifecycleResolutionProblems({ ...blocked, blockedByTerminalState: false }).join()).toMatch(/must be marked blocked/);
+    expect(lifecycleResolutionProblems({ ...blocked, state: 'SETUP', changed: true }).join()).toMatch(/persisted state moved/);
+
+    const blind = resolveNextState('WATCH', insufficientData(['pe']));
+    expect(lifecycleResolutionProblems({ ...blind, state: 'SETUP', changed: true }).join()).toMatch(/INSUFFICIENT_DATA evaluation must not change/);
   });
 });
