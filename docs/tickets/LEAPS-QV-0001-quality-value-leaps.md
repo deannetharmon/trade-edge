@@ -6,7 +6,7 @@
 **Initial Strategy Version:** QV-v1.0  
 **Status:** APPROVED — IMPLEMENTATION AUTHORIZED  
 **Current Gate:** Gate 3 — QV-v1.0 Underlying Strategy  
-**Current Gate Status:** AUTHORIZED  
+**Current Gate Status:** IMPLEMENTED — PENDING REVIEW  
 **Implementation Agent:** Claude Code  
 **Facilitator:** Frank  
 **Product Owner:** Paul  
@@ -540,7 +540,12 @@ Ian Investment/Data-Fitness Review: APPROVED
 Docs: docs/analysis/LEAPS-QV-0001-gate2b-sec-fundamentals.md
 
 ### Gate 3
-Status: AUTHORIZED  
+Status: IMPLEMENTED — PENDING REVIEW (Quinn, Ian, Paul, Frank closure)  
+Docs: docs/analysis/LEAPS-QV-0001-gate3-underlying-strategy.md  
+Code: lib/discovery/qv/  
+Gate 3 Tests: 46 PASS (qv); discovery + fundamentals 331 PASS; full suite 6564 PASS (459 files)  
+TypeScript (tsconfig.check.json): PASS  
+GitHub CI / Vercel: see Gate Completion Report for the exact head  
 Specification: Section 45  
 Investment Methodology: Ian APPROVED WITH REFINEMENTS; incorporated below  
 Quinn Implementation-Readiness Review: PASS  

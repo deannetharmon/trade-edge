@@ -95,8 +95,11 @@ describe('discovery framework isolation', () => {
     // Gate 2 deviation (reported): lib/discovery/normalized/ is the DATA layer and legitimately names metrics
     // (rsi, roic, delta, ...). The vocabulary guard keeps covering every framework-core file; the data layer is
     // guarded by its own test (normalized/__tests__/noInvestmentLogic.test.ts) against thresholds and scoring.
+    // Gate 3 deviation (reported): lib/discovery/qv/ IS the versioned QV-v1.0 strategy layer and necessarily names RSI,
+    // ROIC, percentile, ... It is the one place that may; qv/__tests__/policyCentralization.test.ts guards that thresholds
+    // live only in qv/policy.ts.
     const offenders: string[] = [];
-    sourceFiles.filter((file) => file.indexOf(`${DISCOVERY}/normalized/`) !== 0).forEach((file) => {
+    sourceFiles.filter((file) => file.indexOf(`${DISCOVERY}/normalized/`) !== 0 && file.indexOf(`${DISCOVERY}/qv/`) !== 0).forEach((file) => {
       readFileSync(file, 'utf8')
         .split('\n')
         .forEach((line, index) => {
