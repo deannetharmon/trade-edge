@@ -38,7 +38,7 @@ export async function handleFundamentalsRequest(rawSymbol: string | null, deps: 
     client: deps.client,
     closes: price.closes,
     priceIssue: price.issue,
-    now: deps.nowIso(),
+    nowIso: deps.nowIso,
   });
   // A provider failure is visible as a 502; "not covered" is a normal 200 with every metric UNAVAILABLE.
   return { status: loaded.coverage === 'PROVIDER_FAILURE' ? 502 : 200, body: loaded };

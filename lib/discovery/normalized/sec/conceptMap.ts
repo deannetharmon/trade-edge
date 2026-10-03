@@ -25,7 +25,7 @@
 
 import { stableStringify } from '../../util';
 
-export const SEC_CONCEPT_MAP_VERSION = 'SECMAP-v1.0';
+export const SEC_CONCEPT_MAP_VERSION = 'SECMAP-v1.1';
 
 export type SecUnit = 'USD' | 'USD/shares' | 'shares';
 export type SecItemKind = 'DURATION' | 'INSTANT';
@@ -92,25 +92,31 @@ export const SEC_ITEMS: Readonly<Record<string, SecItemDef>> = Object.freeze({
   sharesOutstanding: item('sharesOutstanding', 'INSTANT', 'shares', 'EQUIVALENT', ['EntityCommonStockSharesOutstanding'], 'dei'),
 });
 
-export const DEBT_RECIPE_VERSION = 'DEBT-v1';
+export const DEBT_RECIPE_VERSION = 'DEBT-v1.1';
 
 /**
  * Debt recipes, tried in order; the first whose required items are all reported at the balance-sheet date is used.
- *  A: LongTermDebt (includes current maturities) + ShortTermBorrowings + CommercialPaper when reported.
+ * Balance-sheet components come first (exact figures); the footnote total is the fall-back.
  *  B: LongTermDebtNoncurrent + LongTermDebtCurrent (required) + ShortTermBorrowings + CommercialPaper when reported.
  *  C: LongTermDebtNoncurrent + DebtCurrent (required; DebtCurrent already includes short-term borrowings).
- * When A and B can both be computed their long-term parts must agree exactly, otherwise the debt is AMBIGUOUS.
+ *  A: LongTermDebt (includes current maturities) + ShortTermBorrowings + CommercialPaper when reported.
+ * When A and B can both be computed their long-term parts must agree within DEBT_RECIPE_TOLERANCE, otherwise the debt
+ * is AMBIGUOUS. (v1.1, from the live AAPL smoke test: 10-Q footnote LongTermDebt is rounded to $0.1 billion, so exact
+ * agreement with the balance-sheet components cannot be required; the rounded A value must not be preferred either.)
  */
 export const DEBT_RECIPES: ReadonlyArray<{ readonly id: string; readonly required: readonly string[]; readonly optional: readonly string[] }> =
   Object.freeze([
-    Object.freeze({ id: 'A', required: Object.freeze(['longTermDebt']), optional: Object.freeze(['shortTermBorrowings', 'commercialPaper']) }),
     Object.freeze({
       id: 'B',
       required: Object.freeze(['longTermDebtNoncurrent', 'longTermDebtCurrent']),
       optional: Object.freeze(['shortTermBorrowings', 'commercialPaper']),
     }),
     Object.freeze({ id: 'C', required: Object.freeze(['longTermDebtNoncurrent', 'debtCurrent']), optional: Object.freeze([]) }),
+    Object.freeze({ id: 'A', required: Object.freeze(['longTermDebt']), optional: Object.freeze(['shortTermBorrowings', 'commercialPaper']) }),
   ]);
+
+/** Recipes A and B may differ by at most this fraction of the larger long-term figure (data sanity, not an investment threshold). */
+export const DEBT_RECIPE_TOLERANCE = 0.02;
 
 /** Cover-page share count must be within this fraction of the weighted-average diluted share count (data sanity). */
 export const MARKET_CAP_SHARES_TOLERANCE = 0.25;
@@ -130,5 +136,5 @@ export function neededTags(): ReadonlyArray<{ readonly taxonomy: string; readonl
 
 /** Fingerprint input for the "map changed without a version bump" test. */
 export function conceptMapFingerprintSource(): string {
-  return stableStringify({ version: SEC_CONCEPT_MAP_VERSION, items: SEC_ITEMS, debt: DEBT_RECIPES, tolerance: MARKET_CAP_SHARES_TOLERANCE, forms: SEC_ACCEPTED_FORMS });
+  return stableStringify({ version: SEC_CONCEPT_MAP_VERSION, items: SEC_ITEMS, debt: DEBT_RECIPES, debtTolerance: DEBT_RECIPE_TOLERANCE, tolerance: MARKET_CAP_SHARES_TOLERANCE, forms: SEC_ACCEPTED_FORMS });
 }

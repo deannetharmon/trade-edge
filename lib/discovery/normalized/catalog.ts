@@ -216,7 +216,7 @@ const IMPLEMENTED_IDS: ReadonlySet<string> = new Set([
 ]);
 
 const SEC_BACKED_IDS: ReadonlySet<string> = new Set([...FUNDAMENTAL_METRIC_IDS, ...SEC_METRIC_IDS]);
-const SEC_SOURCE = 'SEC EDGAR companyfacts via /api/fundamentals (free; SECMAP-v1.0)';
+const SEC_SOURCE = 'SEC EDGAR companyfacts via /api/fundamentals (free; SECMAP-v1.1)';
 const SEC_CONDITION =
   'Gate 2b: SEC-backed. CONDITIONAL on the issuer being covered (US-GAAP XBRL filer in the SEC directory), the needed concepts resolving unambiguously, and a usable price history where price is an input; otherwise UNAVAILABLE or INVALID with a reason.';
 

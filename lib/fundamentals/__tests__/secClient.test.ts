@@ -99,7 +99,7 @@ describe('SEC client: caching', () => {
     const out = await h.client.getCompanyFacts('1');
     expect(out.kind).toBe('FACTS');
     if (out.kind === 'FACTS') {
-      expect(out.compact.conceptMapVersion).toBe('SECMAP-v1.0');
+      expect(out.compact.conceptMapVersion).toBe('SECMAP-v1.1');
       expect(out.compact.facts.length).toBeGreaterThan(100);
     }
   });

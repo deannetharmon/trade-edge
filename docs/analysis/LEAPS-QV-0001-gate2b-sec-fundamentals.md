@@ -13,7 +13,7 @@ Free data path: SEC EDGAR XBRL `companyfacts` (no key, no paid dependency). Metr
 | `lib/fundamentals/secFundamentals.ts` | Loader: ticker → CIK → facts → metrics; coverage semantics. |
 | `lib/fundamentals/handler.ts`, `app/api/fundamentals/route.ts` | `GET /api/fundamentals?symbol=` — session required; server-side Yahoo closes (~6 years, `quote` series, never `adjclose`). Nothing calls it yet. |
 
-## Concept map `SECMAP-v1.0` (pinned by a fingerprint test)
+## Concept map `SECMAP-v1.1` (pinned by a fingerprint test)
 - Modes: **EQUIVALENT** (several tags mean the same thing; if they disagree for a period → AMBIGUOUS) and **ORDERED** (first tag with any value wins, so a different-meaning fallback tag is never mixed in).
 - Per period the **latest-filed** value wins (restatements, 10-K/A). Two different values filed the same day → AMBIGUOUS. Accepted forms: 10-K, 10-K/A, 10-Q, 10-Q/A; units must be exact (USD, USD/shares, shares).
 - `fy`/`fp` on a fact describe the filing, not the period, so they are never used. Periods are classified by day length (quarter 80–100, H1 170–195, 9M 260–285, FY 350–380).
@@ -23,10 +23,11 @@ Free data path: SEC EDGAR XBRL `companyfacts` (no key, no paid dependency). Metr
 - **One anchor**: the latest fiscal-year-to-date period. Every item is evaluated there; there is no fallback to an older period.
 - **FCF** = operating cash flow − capex (`PaymentsToAcquirePropertyPlantAndEquipment`, else `PaymentsToAcquireProductiveAssets`).
 - **EBITDA-v1** = operating income + depreciation & amortization.
-- **Total debt (debt-v1)**: recipe A `LongTermDebt` (+ short-term borrowings, commercial paper if reported); B noncurrent + current portions (+ same optionals); C noncurrent + `DebtCurrent`. If A and B can both be computed and disagree → AMBIGUOUS.
+- **Total debt (debt-v1.1)**: tried in order B (noncurrent + current portions + short-term borrowings / commercial paper if reported), C (noncurrent + `DebtCurrent`), A (footnote `LongTermDebt` + same optionals). When A and B can both be computed their long-term parts must agree within 2% (`DEBT_RECIPE_TOLERANCE`), otherwise AMBIGUOUS. Balance-sheet components are preferred because 10-Q footnote `LongTermDebt` is rounded (see live validation).
 - **Market cap** = last VALID close × cover-page shares (`dei:EntityCommonStockSharesOutstanding`, dated on or after the period end), cross-checked against weighted diluted shares: more than 25% apart → INVALID (multi-class risk).
 - **EV** = market cap + total debt − cash. **ROIC-v1** unchanged from Gate 2 (Ian-approved).
 - **5-year metrics** use six consecutive fiscal years (five intervals); gaps → UNAVAILABLE.
+- **Per-share basis guard (annual EPS)**: walking back from the newest year, a jump of 1.8x or more (either way) in weighted diluted shares, or a year whose share count cannot be checked, makes every OLDER year's EPS unusable. `annualSeries.dilutedEps` is null for those years (issue `SPLIT_OR_SHARE_STRUCTURE_CHANGE_SUSPECTED` / `EPS_SPLIT_CHECK_NOT_POSSIBLE`); `eps_cagr_5y_pct` is INVALID / UNAVAILABLE when the break falls inside its six-year window. Split-adjusted EPS appears only in filings that restate a year as a comparative, so older years can keep pre-split EPS.
 - **P/E history (Section 12)**: one TTM EPS observation per reported period, usable from its first-published date; daily closes over 3y/5y; median, inclusive percentile, discount to median. Needs a VALID current P/E and genuine window coverage (data sufficiency, not an investment threshold): ≥75% of window days valid, first valid day within 90 days of window start. Negative/zero-EPS days excluded.
 - **Split guard**: weighted diluted shares moving ≥1.8× between consecutive periods excludes every older observation (fail closed, never rescaled).
 
@@ -42,6 +43,20 @@ Client counters (requests, cache hits/misses, in-flight joins, spacing waits, er
 ## Limitations
 - Cache and request spacing are per serverless instance (Vercel does not share memory); a shared Redis cache is a follow-up. Spacing ~6 requests/s per instance. **Per-instance throttling does not guarantee that aggregate SEC traffic stays below the SEC fair-access ceiling (10 requests/s total) under horizontally concurrent serverless execution.** Acceptable for QV-v1.0 because issuer facts are cached and change rarely; do not intentionally parallelize large numbers of uncached SEC requests. A shared cache / global limiter becomes required if real scan load shows it.
 - Debt-free issuers that tag no debt are UNAVAILABLE, not zero.
+- Data-quality constants added in v1.1: `DEBT_RECIPE_TOLERANCE` 2% (needs Ian's ruling). The EPS-growth (TTM vs prior TTM) metric is not separately split-guarded; its pieces come from the same or adjacent filings.
 - P/E history uses latest-filed (restated) EPS, so restatements are visible to older observations.
 - Data-sufficiency constants (0.75, 90 days, 1.8×, 25%) need Ian's review.
 - Built and tested against synthetic fixtures; the build sandbox cannot reach SEC. A live payload check needs `SEC_USER_AGENT` in a deployed environment.
+
+## Live validation (exit condition)
+- **Symbol / environment / time:** AAPL, production (`/api/fundamentals?symbol=AAPL`, signed in), 2026-10-03 ~17:41 UTC, commit `02a9e9c`, concept map `SECMAP-v1.0`.
+- **Coverage:** `COVERED`, CIK `0000320193`, `priceIssue: null`. Fiscal calendar (52/53-week, September year end) and M9 (nine-month) anchor ending 2026-06-27 resolved correctly.
+- **VALID:** operating margin TTM (33.17%), FCF TTM, FCF margin, FCF yield, P/E TTM, revenue CAGR 5y, EPS CAGR 5y, EPS and revenue growth YoY, operating-margin trend and change, current ratio, price/FCF, all six P/E history metrics (3y and 5y; the split guard excluded the pre-2020-split observation at 2019-06-29, as designed).
+- **Hand check:** TTM operating income = 133,050 + 122,432 - 100,623 = 154,859 (million USD); TTM revenue = 466,823; margin 33.17% matches. TTM FCF = (111,482 + 116,996 - 81,754) - (12,715 + 6,799 - 9,473) = 136,683 matches. Provenance cites accession, form and filing date for every piece.
+- **UNAVAILABLE (expected):** `interest_coverage` - Apple's latest fiscal year has no `InterestExpense` fact.
+- **Defects found and fixed (SECMAP-v1.1 / DEBT-v1.1):**
+  1. `total_debt`, `net_debt`, `net_debt_to_ebitda`, `roic_v1_pct`, `ev_to_ebitda_ttm` were INVALID (`AMBIGUOUS_CONCEPT:totalDebt`): footnote `LongTermDebt` in 10-Qs is rounded to $0.1bn (e.g. 91,800 vs balance-sheet components 82,430 + 9,345 = 91,775), so exact A/B agreement was wrong. Fix: balance-sheet recipes first; A/B tolerance 2%. Regression tests added.
+  2. `sector_classification` was INVALID (`SUBMISSIONS_AS_OF_INVALID`): the evaluation clock was read before the SEC fetches, so the submissions fetch time was later than "now". Fix: clock read after all I/O. Regression test added.
+  3. `annualSeries` carried pre-split EPS for FY2016-17 (EPS 8.31, 9.21 next to split-adjusted 2.98). Fix: per-share basis guard above. Regression tests added. (The 5-year CAGR window FY2020-25 was already on one basis.)
+- **Not yet re-verified live:** the three fixes above (unit-tested with fixtures reproducing the live structure). Re-run `/api/fundamentals?symbol=AAPL` after this deploy; expected: debt metrics VALID, sector VALID, FY2016-17 EPS null.
+- No environment values are recorded here.

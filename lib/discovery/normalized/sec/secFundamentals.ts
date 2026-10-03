@@ -28,7 +28,7 @@ import {
   ttmAt,
 } from './periods';
 import type { Anchor, FiscalYear, Ttm } from './periods';
-import { buildPeHistoryMetrics, buildPeObservations, PE_HISTORY_METRIC_IDS } from './valuationHistory';
+import { buildPeHistoryMetrics, buildPeObservations, PE_HISTORY_METRIC_IDS, SPLIT_SUSPECT_RATIO } from './valuationHistory';
 import type { ExcludedObservation, PeObservation } from './valuationHistory';
 import type { CompactFacts, SecItemStatus, SecProvenance, SecSubmissionsInfo } from './types';
 
@@ -322,6 +322,15 @@ export function buildSecFundamentals(compact: CompactFacts, ctx: SecBuildContext
   };
   status.annualRevenue = annualStatus('revenue', 'annualRevenue');
   status.annualEps = annualStatus('dilutedEps', 'annualEps');
+  if (status.annualEps.status === 'OK' && six) {
+    const basis = epsBasis(index, six);
+    if (basis.firstUsable > 0) {
+      status.annualEps =
+        basis.issue === 'SPLIT_OR_SHARE_STRUCTURE_CHANGE_SUSPECTED'
+          ? { status: 'INCONSISTENT', reason: basis.issue }
+          : { status: 'MISSING', reason: `SEC_ITEM_NOT_REPORTED:annualEps:${basis.issue}` };
+    }
+  }
   status.annualOperatingIncome = annualStatus('operatingIncome', 'annualOperatingIncome');
   const annualValue = (itemId: string, fy: FiscalYear): number => (resolveItemAt(index, SEC_ITEMS[itemId], fy.start, fy.end) as { value: number }).value;
 
@@ -472,10 +481,32 @@ function sectorMetric(submissions: SecSubmissionsInfo | null, now: string): Norm
   return validMetric(id, submissions.sic, submissions.fetchedAt, provenance);
 }
 
+/**
+ * Per-share history is comparable only across years reported on one share basis. Split-adjusted EPS appears only in the
+ * filings that restate a year as a comparative, so older years can keep pre-split EPS (live AAPL smoke test: FY2016-17).
+ * Walking back from the newest year, the first jump of SPLIT_SUSPECT_RATIO or more (either way) in weighted diluted
+ * shares, or an unverifiable pair, makes every OLDER year's EPS unusable. `firstUsable` is the oldest usable index.
+ */
+function epsBasis(index: FactIndex, years: readonly FiscalYear[]): { firstUsable: number; issue: string | null } {
+  for (let i = years.length - 1; i >= 1; i -= 1) {
+    const cur = resolveItemAt(index, SEC_ITEMS.dilutedShares, years[i].start, years[i].end);
+    const prev = resolveItemAt(index, SEC_ITEMS.dilutedShares, years[i - 1].start, years[i - 1].end);
+    if (cur.status !== 'OK' || prev.status !== 'OK' || !(cur.value > 0) || !(prev.value > 0)) {
+      return { firstUsable: i, issue: 'EPS_SPLIT_CHECK_NOT_POSSIBLE' };
+    }
+    const ratio = cur.value / prev.value;
+    if (ratio >= SPLIT_SUSPECT_RATIO || ratio <= 1 / SPLIT_SUSPECT_RATIO) {
+      return { firstUsable: i, issue: 'SPLIT_OR_SHARE_STRUCTURE_CHANGE_SUSPECTED' };
+    }
+  }
+  return { firstUsable: 0, issue: null };
+}
+
 function buildAnnualSeries(index: FactIndex, fiscalYears: readonly FiscalYear[], noteFiled: (filed: string) => void): AnnualPoint[] {
   void noteFiled;
   const years = fiscalYears.slice(Math.max(0, fiscalYears.length - 10));
-  return years.map((fy) => {
+  const basis = epsBasis(index, years);
+  return years.map((fy, position) => {
     const issues: string[] = [];
     const get = (itemId: string): number | null => {
       const r = resolveItemAt(index, SEC_ITEMS[itemId], fy.start, fy.end);
@@ -485,7 +516,9 @@ function buildAnnualSeries(index: FactIndex, fiscalYears: readonly FiscalYear[],
     };
     const revenue = get('revenue');
     const operatingIncome = get('operatingIncome');
-    const dilutedEps = get('dilutedEps');
+    let dilutedEps: number | null = null;
+    if (position < basis.firstUsable) issues.push(`${basis.issue}:dilutedEps`);
+    else dilutedEps = get('dilutedEps');
     const operatingCashFlow = get('operatingCashFlow');
     const capitalExpenditure = get('capex');
     return {

@@ -398,9 +398,9 @@ describe('SEC fundamentals: coverage and structure', () => {
   });
 
   it('pins the concept map: any change to tags, units or modes must bump SECMAP-v and this fingerprint', () => {
-    expect(SEC_CONCEPT_MAP_VERSION).toBe('SECMAP-v1.0');
+    expect(SEC_CONCEPT_MAP_VERSION).toBe('SECMAP-v1.1');
     const hash = createHash('sha256').update(conceptMapFingerprintSource()).digest('hex').slice(0, 16);
-    expect(hash).toBe('64e06b394e883655');
+    expect(hash).toBe('e93d5900bbdbf8da');
   });
 
   it('declares exactly the new SEC metric ids', () => {
@@ -415,3 +415,80 @@ describe('SEC fundamentals: coverage and structure', () => {
   });
 });
 
+
+// ---- Regression tests from the live AAPL smoke test (production, 2026-10-03) ----
+describe('live-data regressions (AAPL smoke test)', () => {
+  const setDebt = (raw: RawFacts, values: Record<string, number>): void => {
+    ['LongTermDebt', 'ShortTermBorrowings', 'LongTermDebtNoncurrent', 'LongTermDebtCurrent', 'DebtCurrent'].forEach((tag) => dropTag(raw, tag));
+    const ends = Array.from(new Set(rowsOf(raw, 'AssetsCurrent').map((r) => r.end)));
+    ends.forEach((end) =>
+      Object.keys(values).forEach((tag) => addRow(raw, tag, 'USD', { end, val: values[tag], accn: `d-${tag}-${end}`, fy: 0, fp: 'Q2', form: '10-Q', filed: plusDays(end, 35) })),
+    );
+  };
+
+  it('a footnote LongTermDebt rounded to $0.1bn does not make debt AMBIGUOUS; the balance-sheet components are used', () => {
+    const raw = makeCompanyFacts();
+    // AAPL 2025-06-28: LongTermDebt 91,800 (rounded) vs noncurrent 82,430 + current 9,345 = 91,775.
+    setDebt(raw, { LongTermDebt: 91_800, LongTermDebtNoncurrent: 82_430, LongTermDebtCurrent: 9_345 });
+    const r = run(raw);
+    expect(value(r, 'total_debt')).toBe(91_775);
+    expect(r.provenance.total_debt.map((p) => p.role)).toEqual(['DEBT_B', 'DEBT_B']);
+  });
+
+  it('still fails closed when the recipes disagree by more than the tolerance', () => {
+    const raw = makeCompanyFacts();
+    setDebt(raw, { LongTermDebt: 100_000, LongTermDebtNoncurrent: 82_430, LongTermDebtCurrent: 9_345 });
+    expect(run(raw).metrics.total_debt.validity).toBe('INVALID');
+  });
+
+  describe('per-share history on mixed split bases', () => {
+    // Years before `breakAt` are on the pre-split basis: 4x the shares' inverse, i.e. shares / 4 and EPS x 4 (real structure:
+    // older fiscal years keep pre-split figures because only later filings restate them as comparatives).
+    const preSplit = (raw: RawFacts, olderThan: string): void => {
+      rowsOf(raw, 'WeightedAverageNumberOfDilutedSharesOutstanding', 'shares').forEach((row) => {
+        if (row.end <= olderThan) row.val = 125;
+      });
+      rowsOf(raw, 'EarningsPerShareDiluted', 'USD/shares').forEach((row) => {
+        if (row.end <= olderThan) row.val = row.val * 4;
+      });
+    };
+
+    it('nulls pre-split annual EPS, names the issue, and leaves split-free metrics alone', () => {
+      const raw = makeCompanyFacts();
+      preSplit(raw, '2020-12-31');
+      const r = run(raw);
+      const byYear = (end: string) => r.annualSeries.find((p) => p.fiscalYearEnd === end)!;
+      ['2019-12-31', '2020-12-31'].forEach((end) => {
+        expect(byYear(end).dilutedEps, end).toBeNull();
+        expect(byYear(end).issues, end).toContain('SPLIT_OR_SHARE_STRUCTURE_CHANGE_SUSPECTED:dilutedEps');
+        expect(byYear(end).revenue, end).not.toBeNull();
+      });
+      expect(byYear('2021-12-31').dilutedEps).toBeCloseTo(1.4, 9);
+      expect(value(r, 'revenue_cagr_5y_pct')).toBeCloseTo((Math.pow(1600 / 1100, 1 / 5) - 1) * 100, 9);
+    });
+
+    it('a split inside the six-year window makes EPS CAGR INVALID rather than mixing bases', () => {
+      const raw = makeCompanyFacts();
+      preSplit(raw, '2021-12-31');
+      const r = run(raw);
+      expect(r.metrics.eps_cagr_5y_pct.validity).toBe('INVALID');
+      expect(reasonOf(r, 'eps_cagr_5y_pct')).toBe('SPLIT_OR_SHARE_STRUCTURE_CHANGE_SUSPECTED');
+    });
+
+    it('a split older than the six-year window does not block EPS CAGR', () => {
+      const raw = makeCompanyFacts();
+      preSplit(raw, '2019-12-31');
+      const r = run(raw);
+      expect(value(r, 'eps_cagr_5y_pct')).toBeCloseTo((Math.pow(2.2 / 1.2, 1 / 5) - 1) * 100, 9);
+      expect(r.annualSeries[0].dilutedEps).toBeNull();
+    });
+
+    it('is UNAVAILABLE when the share count needed to verify the basis is missing', () => {
+      const raw = makeCompanyFacts();
+      dropTag(raw, 'WeightedAverageNumberOfDilutedSharesOutstanding', (row) => row.end === '2022-12-31');
+      const r = run(raw);
+      expect(r.metrics.eps_cagr_5y_pct.validity).toBe('UNAVAILABLE');
+      expect(reasonOf(r, 'eps_cagr_5y_pct')).toContain('EPS_SPLIT_CHECK_NOT_POSSIBLE');
+    });
+  });
+});

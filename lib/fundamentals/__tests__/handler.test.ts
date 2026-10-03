@@ -79,7 +79,7 @@ describe('handleFundamentalsRequest', () => {
     expect(body.cik).toBe('0001234567');
     expect(body.metrics.operating_margin_ttm_pct.validity).toBe('VALID');
     expect(body.metrics.sector_classification.validity).toBe('VALID');
-    expect(body.conceptMapVersion).toBe('SECMAP-v1.0');
+    expect(body.conceptMapVersion).toBe('SECMAP-v1.1');
     expect(body.provenance.fcf_ttm.length).toBeGreaterThan(0);
     expect(body.annualSeries.length).toBe(7);
   });
@@ -153,5 +153,27 @@ describe('fetchYahooPriceHistory', () => {
     expect(await fetchYahooPriceHistory('ACME', yahoo({ chart: { result: null } }))).toEqual({ closes: null, issue: 'PRICE_NO_DATA' });
     const boom = (async () => { throw new Error('x'); }) as unknown as typeof fetch;
     expect(await fetchYahooPriceHistory('ACME', boom)).toEqual({ closes: null, issue: 'PRICE_FETCH_FAILED' });
+  });
+});
+
+describe('evaluation clock ordering (live AAPL smoke test: sector_classification was INVALID)', () => {
+  it('reads "now" after the SEC fetches, so a fetched timestamp is never later than now', async () => {
+    let clock = Date.parse('2026-10-03T17:00:00.000Z');
+    const tick = (): number => {
+      clock += 1000; // every read of the clock is one second later
+      return clock;
+    };
+    const c = createSecClient({
+      userAgent: UA,
+      nowMs: tick,
+      sleep: async () => undefined,
+      fetchImpl: async (url) => {
+        const body = url.indexOf('company_tickers') >= 0 ? DIRECTORY : url.indexOf('/companyfacts/') >= 0 ? makeCompanyFacts() : { sic: '3571', sicDescription: 'x' };
+        return { ok: true, status: 200, json: async () => body };
+      },
+    });
+    const res = await handleFundamentalsRequest('ACME', deps({ client: c, nowIso: () => new Date(tick()).toISOString() }));
+    const body = res.body as Awaited<ReturnType<typeof loadSecFundamentals>>;
+    expect(body.metrics.sector_classification.validity).toBe('VALID');
   });
 });

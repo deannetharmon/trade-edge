@@ -58,8 +58,8 @@ export interface LoadDeps {
   /** Completed daily closes, oldest first, from the server-side price fetch; null when unavailable. */
   readonly closes: readonly DailyBar[] | null;
   readonly priceIssue: string | null;
-  /** Evaluation time (ISO-8601). */
-  readonly now: string;
+  /** Evaluation clock (ISO-8601). Read AFTER all I/O so no fetched timestamp can be later than "now". */
+  readonly nowIso: () => string;
 }
 
 export async function loadSecFundamentals(rawSymbol: string, deps: LoadDeps): Promise<LoadedFundamentals> {
@@ -82,9 +82,10 @@ export async function loadSecFundamentals(rawSymbol: string, deps: LoadDeps): Pr
       submissions = null;
     }
 
-    const technicals = deps.closes ? buildTechnicalMetrics(deps.closes, { now: deps.now, provider: 'yahoo' }) : null;
+    const now = deps.nowIso();
+    const technicals = deps.closes ? buildTechnicalMetrics(deps.closes, { now, provider: 'yahoo' }) : null;
     const price = technicals ? technicals.price_last_close : null;
-    const result = buildSecFundamentals(outcome.compact, { now: deps.now, price, closes: deps.closes, submissions });
+    const result = buildSecFundamentals(outcome.compact, { now, price, closes: deps.closes, submissions });
     return {
       symbol,
       cik,

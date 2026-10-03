@@ -9,7 +9,7 @@
 //  * EQUIVALENT items whose tags disagree for the same period are AMBIGUOUS; ORDERED items take the first reporting tag.
 
 import { epochDayOfDateString } from '../dates';
-import { DEBT_RECIPES, SEC_ACCEPTED_FORMS, SEC_CONCEPT_MAP_VERSION, SEC_ITEMS, neededTags } from './conceptMap';
+import { DEBT_RECIPES, DEBT_RECIPE_TOLERANCE, SEC_ACCEPTED_FORMS, SEC_CONCEPT_MAP_VERSION, SEC_ITEMS, neededTags } from './conceptMap';
 import type { SecItemDef } from './conceptMap';
 import type { CompactFacts, SecCompanyFactsRaw, SecFact, SecProvenance } from './types';
 
@@ -229,7 +229,7 @@ export function resolveDebt(index: FactIndex, end: string): DebtResolution {
   if (a && b) {
     const aLongTerm = at('longTermDebt');
     const bLongTerm = [at('longTermDebtNoncurrent'), at('longTermDebtCurrent')].reduce((t, r) => t + (r.status === 'OK' ? r.value : 0), 0);
-    if (aLongTerm.status === 'OK' && aLongTerm.value !== bLongTerm) {
+    if (aLongTerm.status === 'OK' && Math.abs(aLongTerm.value - bLongTerm) > DEBT_RECIPE_TOLERANCE * Math.max(Math.abs(aLongTerm.value), Math.abs(bLongTerm))) {
       return { status: 'AMBIGUOUS', components: a.parts, reason: 'AMBIGUOUS_CONCEPT:totalDebt' };
     }
   }
