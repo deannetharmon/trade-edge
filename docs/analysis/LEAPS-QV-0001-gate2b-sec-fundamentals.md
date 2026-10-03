@@ -40,7 +40,7 @@ Forward estimates, revisions, guidance, event feeds, PEG (`corporate_event_flags
 Client counters (requests, cache hits/misses, in-flight joins, spacing waits, errors by code); per-result diagnostics: concept-map version, anchor, unresolved items with reasons, restated pieces, dropped facts by reason, observation count, excluded observations. Provenance per metric: tag, unit, period, value, accession, form, filing date, restated flag.
 
 ## Limitations
-- Cache and request spacing are per serverless instance (Vercel does not share memory); a shared Redis cache is a follow-up. Spacing ~6 requests/s per instance.
+- Cache and request spacing are per serverless instance (Vercel does not share memory); a shared Redis cache is a follow-up. Spacing ~6 requests/s per instance. **Per-instance throttling does not guarantee that aggregate SEC traffic stays below the SEC fair-access ceiling (10 requests/s total) under horizontally concurrent serverless execution.** Acceptable for QV-v1.0 because issuer facts are cached and change rarely; do not intentionally parallelize large numbers of uncached SEC requests. A shared cache / global limiter becomes required if real scan load shows it.
 - Debt-free issuers that tag no debt are UNAVAILABLE, not zero.
 - P/E history uses latest-filed (restated) EPS, so restatements are visible to older observations.
 - Data-sufficiency constants (0.75, 90 days, 1.8×, 25%) need Ian's review.
