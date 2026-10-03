@@ -43,6 +43,7 @@ import { THEMES, getSavedTheme } from '@/lib/theme';
 import { useTaskManager } from '@/hooks/useTaskManager';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { useSuggestedActions } from '@/lib/suggested-actions/useSuggestedActions';
+import { SuggestedActionsCard } from '@/components/suggested-actions/SuggestedActionsCard';
 import { usePortfolioMode } from '@/components/portfolio-mode/PortfolioModeProvider';
 import { PortfolioModeGateNotice } from '@/components/portfolio-mode/PortfolioModeGateNotice';
 import { buildOpportunityRecommendations } from '@/lib/command-center/buildOpportunityRecommendations';
@@ -159,6 +160,7 @@ export default function DashboardPage() {
     <>
       <MissionControl viewModel={viewModel} th={th} />
       <div className="mx-auto max-w-3xl px-4 pb-6">
+        <SuggestedActionsCard result={suggestedActions} th={th} onRefresh={refresh} />
         <BackgroundTaskCard backgroundTasks={backgroundTasks} th={th} />
       </div>
     </>
