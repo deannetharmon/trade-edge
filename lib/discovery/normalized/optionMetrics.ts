@@ -204,7 +204,7 @@ export function buildContractMetrics(
 }
 
 // ---------------------------------------------------------------------------
-// Underlying implied volatility, provider IV Rank, earnings date, beta (TastyTrade market-metrics item)
+// Underlying implied volatility, provider IV Rank, earnings date (TastyTrade market-metrics item)
 // ---------------------------------------------------------------------------
 
 export const VOLATILITY_EVENT_METRIC_IDS: readonly string[] = [
@@ -215,7 +215,6 @@ export const VOLATILITY_EVENT_METRIC_IDS: readonly string[] = [
   'iv_rank_internal',
   'iv_percentile_internal',
   'underlying_liquidity_rating',
-  'underlying_beta',
   'next_earnings_date',
   'days_to_next_earnings',
 ];
@@ -272,8 +271,6 @@ export function buildMarketMetrics(raw: Record<string, unknown> | null | undefin
     ...base('liquidity-rating'),
     rejectIf: (v) => (Number.isInteger(v) && v >= 1 && v <= 5 ? null : 'LIQUIDITY_RATING_OUT_OF_RANGE'),
   });
-  // Only the 'beta' field. 'beta-60-day' is a different window and is never substituted for it.
-  out.underlying_beta = providerNumber('underlying_beta', get('beta'), base('beta'));
 
   const earnings = raw.earnings && typeof raw.earnings === 'object' ? (raw.earnings as Record<string, unknown>) : null;
   const dateRaw = earnings ? earnings['expected-report-date'] : undefined;

@@ -9,8 +9,17 @@
 //   UNAVAILABLE no source exists in TradeEdge today; the metric is reported UNAVAILABLE, never substituted
 // `investmentSignificant` marks gaps that must go to Ian before Gate 3 (Section 37).
 
+import { unavailableMetric } from '../metrics';
+import type { MetricSet } from '../metrics';
+import { ANALYST_REVISION_METRIC_IDS, FUNDAMENTAL_METRIC_IDS, HISTORICAL_VALUATION_METRIC_IDS } from './fundamentals';
+import { CONTRACT_METRIC_IDS, VOLATILITY_EVENT_METRIC_IDS } from './optionMetrics';
+import { TECHNICAL_METRIC_IDS } from './technicals';
+
 export type DataClassification = 'AVAILABLE' | 'DERIVABLE' | 'CONDITIONAL' | 'UNAVAILABLE';
 export type MetricCategory = 'QUALITY' | 'VALUATION' | 'FUNDAMENTAL' | 'TECHNICAL' | 'RISK' | 'LEAPS';
+
+/** What an approved SEC EDGAR adapter (Gate 2b, NOT authorized) would be expected to make of a metric. To be verified in 2b. */
+export type SecExpectation = 'DERIVABLE' | 'CONDITIONAL' | 'UNAVAILABLE' | null;
 
 export interface CatalogEntry {
   readonly id: string;
@@ -19,6 +28,9 @@ export interface CatalogEntry {
   readonly source: string;
   readonly investmentSignificant: boolean;
   readonly note: string;
+  /** True when an adapter in this layer can emit the metric today. False = catalog-only: reported UNAVAILABLE, no calculation exists. */
+  readonly implemented: boolean;
+  readonly expectedWithSecAdapter: SecExpectation;
 }
 
 const YAHOO = 'Yahoo daily closes via /api/chart-history (split-adjusted, dividend-unadjusted)';
@@ -33,11 +45,11 @@ function entry(
   source: string,
   investmentSignificant: boolean,
   note: string,
-): CatalogEntry {
+): Omit<CatalogEntry, 'implemented' | 'expectedWithSecAdapter'> {
   return Object.freeze({ id, category, classification, source, investmentSignificant, note });
 }
 
-export const METRIC_CATALOG: readonly CatalogEntry[] = Object.freeze([
+const METRIC_CATALOG_BASE: ReadonlyArray<Omit<CatalogEntry, 'implemented' | 'expectedWithSecAdapter'>> = [
   // --- Technical (Section 16) ---
   entry('price_last_close', 'TECHNICAL', 'DERIVABLE', YAHOO, false, 'Last completed daily close.'),
   entry('sma_50', 'TECHNICAL', 'DERIVABLE', YAHOO, false, 'Simple average of the last 50 closes.'),
@@ -58,7 +70,6 @@ export const METRIC_CATALOG: readonly CatalogEntry[] = Object.freeze([
   entry('iv_rank_internal', 'RISK', 'UNAVAILABLE', NONE, true, 'Section 26: no historical IV series is stored anywhere in TradeEdge, so no internal IV Rank can be computed correctly.'),
   entry('iv_percentile_internal', 'RISK', 'UNAVAILABLE', NONE, true, 'Same as iv_rank_internal.'),
   entry('underlying_liquidity_rating', 'RISK', 'CONDITIONAL', TT_MM, false, 'liquidity-rating; present in existing mapping.'),
-  entry('underlying_beta', 'RISK', 'CONDITIONAL', TT_MM, false, "Only the 'beta' field. Existing acquisition code falls back to 'beta-60-day' (different window); not replicated here."),
   entry('next_earnings_date', 'RISK', 'CONDITIONAL', TT_MM, false, 'earnings.expected-report-date; may be an estimate. FMP earning_calendar (lib/scans/eventCalendar.ts) is a second source, not yet reconciled.'),
   entry('days_to_next_earnings', 'RISK', 'CONDITIONAL', TT_MM, false, 'Derived from next_earnings_date and the evaluation date.'),
   entry('analyst_eps_revision_90d_pct', 'FUNDAMENTAL', 'UNAVAILABLE', NONE, true, 'Section 15: no analyst estimate or revision data in TradeEdge. Reported as Analyst Revision Data: UNAVAILABLE.'),
@@ -99,7 +110,121 @@ export const METRIC_CATALOG: readonly CatalogEntry[] = Object.freeze([
   entry('contract_breakeven_move_pct', 'LEAPS', 'DERIVABLE', CHAIN, false, 'breakeven / underlying - 1.'),
   entry('contract_open_interest', 'LEAPS', 'AVAILABLE', CHAIN, false, 'Missing is UNAVAILABLE; screener provider coerces missing to 0 (not reused).'),
   entry('contract_volume', 'LEAPS', 'CONDITIONAL', CHAIN, false, 'In the generic provider shape; not in the PMCC chain adapter.'),
+
+  // --- Gate 2 correction (Quinn G2-B1): ticket concepts with no data source today. Catalog-only: no calculation exists. ---
+  // Quality (Section 10)
+  entry('revenue_growth_consistency_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "5Y revenue CAGR and consistency". Consistency definition not yet fixed (Ian/Alan).'),
+  entry('eps_cagr_5y_pct', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "EPS growth". Negative-base handling must be INVALID, not a rate.'),
+  entry('eps_growth_yoy_ttm_pct', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10/13/14 current EPS growth and EPS trajectory (one metric serves both concepts).'),
+  entry('eps_growth_consistency_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "EPS growth and consistency". Definition not yet fixed (Ian/Alan).'),
+  entry('operating_margin_trend_5y_pp', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "operating margin trend" / Section 13-14 margin trajectory (long horizon).'),
+  entry('operating_margin_change_yoy_pp', 'FUNDAMENTAL', 'UNAVAILABLE', NONE, true, 'Section 14 margin trajectory (recent horizon): TTM operating margin minus the prior-year TTM.'),
+  entry('fcf_trend_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 FCF trajectory/stability, Section 13-14 FCF trajectory. Trend definition not yet fixed (Ian/Alan).'),
+  entry('earnings_stability_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "earnings stability". Definition not yet fixed (Ian/Alan).'),
+  entry('operating_margin_stability_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "margin stability". Definition not yet fixed (Ian/Alan).'),
+  entry('fcf_stability_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "FCF stability". Definition not yet fixed (Ian/Alan).'),
+  entry('total_debt', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "debt" / balance-sheet strength.'),
+  entry('net_debt', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "net debt": total debt minus cash and equivalents.'),
+  entry('current_ratio', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "liquidity" / balance-sheet strength.'),
+  entry('interest_coverage', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "interest burden" / Section 18 balance-sheet stress.'),
+  // Fundamental momentum (Section 14) and expectations (Sections 13, 15)
+  entry('revenue_growth_yoy_ttm_pct', 'FUNDAMENTAL', 'UNAVAILABLE', NONE, true, 'Section 14 revenue trajectory (TTM vs prior-year TTM).'),
+  entry('eps_growth_forward_pct', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 13 forward growth; needs analyst estimates (none).'),
+  entry('consensus_eps_current_year', 'FUNDAMENTAL', 'UNAVAILABLE', NONE, true, 'Section 15 current-year expectation; needs analyst estimates (none).'),
+  entry('consensus_eps_next_year', 'FUNDAMENTAL', 'UNAVAILABLE', NONE, true, 'Section 15 next-year expectation; needs analyst estimates (none).'),
+  entry('consensus_revenue_current_year', 'FUNDAMENTAL', 'UNAVAILABLE', NONE, true, 'Section 15; needs analyst estimates (none).'),
+  entry('consensus_revenue_next_year', 'FUNDAMENTAL', 'UNAVAILABLE', NONE, true, 'Section 15; needs analyst estimates (none).'),
+  entry('company_guidance', 'FUNDAMENTAL', 'UNAVAILABLE', NONE, true, 'Section 14/18 "company guidance where available". No source; guidance is not structured XBRL data.'),
+  // Valuation (Sections 11-12)
+  entry('pe_forward', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 forward P/E; needs forward EPS estimates (none).'),
+  entry('ev_to_ebitda_ttm', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 current EV/EBITDA. EV = market cap + total debt - cash; definition to be fixed.'),
+  entry('price_to_fcf', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 Price/FCF (market cap / TTM FCF; INVALID for non-positive FCF).'),
+  entry('peg_ratio', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11/13 PEG "where meaningful". Trailing vs forward growth basis is an Ian decision.'),
+  entry('pe_ttm_median_3y', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 3Y median; needs historical fundamentals and prices.'),
+  entry('pe_ttm_percentile_3y', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11-12 historical percentile (3Y window); window choice is an Ian decision.'),
+  entry('pe_ttm_discount_to_median_3y_pct', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 discount/premium to the historical regime (3Y).'),
+  entry('pe_ttm_discount_to_median_5y_pct', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 discount/premium to the historical regime (5Y).'),
+  entry('ev_to_ebitda_median_5y', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 historical EV/EBITDA median.'),
+  entry('ev_to_ebitda_discount_to_median_5y_pct', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 discount/premium to historical EV/EBITDA.'),
+  entry('sector_classification', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 "sector/company-appropriate treatment": no sector or industry data in TradeEdge.'),
+  // Risk / event (Section 18)
+  entry('corporate_event_flags', 'RISK', 'UNAVAILABLE', NONE, true, 'Section 18 regulatory events, litigation, binary and company-specific events: no source.'),
+  entry('corporate_actions_upcoming', 'RISK', 'CONDITIONAL', 'FMP dividends/splits calendar (lib/scans/eventCalendar.ts, FMP_API_KEY)', false, 'Section 18 corporate actions. Entitlement of the existing FMP key must be verified (FMP lists some calendar endpoints as paid).'),
+];
+
+/** SEC adapter expectation (to be verified in Gate 2b). Anything absent here is null: not a fundamentals metric. */
+const SEC_EXPECTATION: Readonly<Record<string, SecExpectation>> = Object.freeze({
+  operating_margin_ttm_pct: 'DERIVABLE',
+  fcf_ttm: 'DERIVABLE',
+  fcf_margin_ttm_pct: 'DERIVABLE',
+  fcf_yield_pct: 'DERIVABLE',
+  roic_v1_pct: 'CONDITIONAL',
+  net_debt_to_ebitda: 'CONDITIONAL',
+  pe_ttm: 'DERIVABLE',
+  revenue_cagr_5y_pct: 'DERIVABLE',
+  revenue_growth_consistency_5y: 'CONDITIONAL',
+  eps_cagr_5y_pct: 'DERIVABLE',
+  eps_growth_yoy_ttm_pct: 'DERIVABLE',
+  eps_growth_consistency_5y: 'CONDITIONAL',
+  operating_margin_trend_5y_pp: 'DERIVABLE',
+  operating_margin_change_yoy_pp: 'DERIVABLE',
+  fcf_trend_5y: 'CONDITIONAL',
+  earnings_stability_5y: 'CONDITIONAL',
+  operating_margin_stability_5y: 'CONDITIONAL',
+  fcf_stability_5y: 'CONDITIONAL',
+  total_debt: 'CONDITIONAL',
+  net_debt: 'CONDITIONAL',
+  current_ratio: 'DERIVABLE',
+  interest_coverage: 'CONDITIONAL',
+  revenue_growth_yoy_ttm_pct: 'DERIVABLE',
+  ev_to_ebitda_ttm: 'CONDITIONAL',
+  price_to_fcf: 'DERIVABLE',
+  peg_ratio: 'CONDITIONAL',
+  pe_ttm_median_3y: 'CONDITIONAL',
+  pe_ttm_median_5y: 'CONDITIONAL',
+  pe_ttm_percentile_3y: 'CONDITIONAL',
+  pe_ttm_percentile_5y: 'CONDITIONAL',
+  pe_ttm_discount_to_median_3y_pct: 'CONDITIONAL',
+  pe_ttm_discount_to_median_5y_pct: 'CONDITIONAL',
+  ev_to_ebitda_median_5y: 'CONDITIONAL',
+  ev_to_ebitda_percentile_5y: 'CONDITIONAL',
+  ev_to_ebitda_discount_to_median_5y_pct: 'CONDITIONAL',
+  sector_classification: 'CONDITIONAL',
+  corporate_event_flags: 'CONDITIONAL',
+  // SEC XBRL carries no forward estimates, revisions or structured guidance.
+  pe_forward: 'UNAVAILABLE',
+  eps_growth_forward_pct: 'UNAVAILABLE',
+  consensus_eps_current_year: 'UNAVAILABLE',
+  consensus_eps_next_year: 'UNAVAILABLE',
+  consensus_revenue_current_year: 'UNAVAILABLE',
+  consensus_revenue_next_year: 'UNAVAILABLE',
+  company_guidance: 'UNAVAILABLE',
+  analyst_eps_revision_90d_pct: 'UNAVAILABLE',
+  analyst_revenue_revision_90d_pct: 'UNAVAILABLE',
+  analyst_revision_breadth_90d: 'UNAVAILABLE',
+});
+
+const IMPLEMENTED_IDS: ReadonlySet<string> = new Set([
+  ...TECHNICAL_METRIC_IDS,
+  ...CONTRACT_METRIC_IDS,
+  ...VOLATILITY_EVENT_METRIC_IDS,
+  ...FUNDAMENTAL_METRIC_IDS,
+  ...ANALYST_REVISION_METRIC_IDS,
+  ...HISTORICAL_VALUATION_METRIC_IDS,
 ]);
+
+/** Ids an adapter in this layer can emit (the catalog's implemented subset is asserted equal to this by a test). */
+export const IMPLEMENTED_METRIC_IDS: readonly string[] = Object.freeze(Array.from(IMPLEMENTED_IDS).sort());
+
+export const METRIC_CATALOG: readonly CatalogEntry[] = Object.freeze(
+  METRIC_CATALOG_BASE.map((base) =>
+    Object.freeze({
+      ...base,
+      implemented: IMPLEMENTED_IDS.has(base.id),
+      expectedWithSecAdapter: SEC_EXPECTATION[base.id] ?? null,
+    }),
+  ),
+);
 
 export function catalogEntry(id: string): CatalogEntry | undefined {
   return METRIC_CATALOG.find((e) => e.id === id);
@@ -107,4 +232,16 @@ export function catalogEntry(id: string): CatalogEntry | undefined {
 
 export function investmentSignificantGaps(): CatalogEntry[] {
   return METRIC_CATALOG.filter((e) => e.investmentSignificant && (e.classification === 'UNAVAILABLE' || e.classification === 'CONDITIONAL'));
+}
+
+/**
+ * UNAVAILABLE for every catalog metric no adapter implements, so a strategy's data-completeness count names them
+ * explicitly instead of relying on an absent key (an absent key is UNAVAILABLE too, by getMetric).
+ */
+export function catalogOnlyMetrics(): MetricSet {
+  const out: Record<string, ReturnType<typeof unavailableMetric>> = {};
+  METRIC_CATALOG.filter((e) => !e.implemented).forEach((e) => {
+    out[e.id] = unavailableMetric(e.id, 'NO_DATA_SOURCE');
+  });
+  return out;
 }

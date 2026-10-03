@@ -487,7 +487,8 @@ Required final checks: existing Find LEAPS unchanged; QV deterministic/reproduci
 - Frank Full Team Review: APPROVED
 - Implementation: AUTHORIZED
 - Gate 1 Exit Review — Quinn: APPROVED at 729124f78b48336c9ba9f4694a2af036827006b5 (after corrections B2, S1, B3)
-- **Current Authorization: GATE 2 ONLY**
+- Gate 2 Exit Review — Quinn: APPROVE WITH CHANGES at 8092be1508d0c641039dd8452c8a7f32a61556df (G2-B1 catalog completeness; FMP wording; SEC path documented; questions routed to Ian)
+- **Current Authorization: GATE 2 CORRECTION ROUND ONLY** (Gate 2b recommended, not authorized; Gate 3 blocked)
 
 # 43. Execution Ledger
 
@@ -501,9 +502,13 @@ Discovery Tests: 113 PASS
 Existing LEAPS Regression Tests: 521 PASS
 
 ### Gate 2
-Status: IMPLEMENTED — AWAITING EXIT REVIEW (Dane + Quinn; investment-significant data limitations to Ian)  
-Implementation: Complete (see docs/analysis/LEAPS-QV-0001-gate2-data-audit.md)  
-Commit: see Gate 2 Completion Report
+Status: IMPLEMENTED BUT OPEN — CORRECTION ROUND (Quinn Gate 2 exit review: APPROVE WITH CHANGES, G2-B1)  
+Implementation: Complete at 8092be1508d0c641039dd8452c8a7f32a61556df; correction round committed on the same branch (see Gate 2 correction report)  
+Exit Review: Dane + Quinn (investment-significant data limitations to Ian)  
+Gate 3: BLOCKED until: catalog completeness corrected, Ian questions routed, fundamentals-provider path approved, Gate 2 final approval
+
+### Gate 2b (recommended by Quinn, NOT authorized)
+SEC Fundamentals Adapter — requires Paul/Ian approval (new external data dependency)
 
 ### Gates 3–8
 Status: BLOCKED
@@ -512,7 +517,7 @@ Status: BLOCKED
 
 Read this entire document before making changes and inspect the existing TradeEdge implementation and repository conventions.
 
-You are authorized to execute **GATE 2 — NORMALIZED METRICS & DATA AUDIT ONLY**.
+You are authorized to execute the **GATE 2 — NORMALIZED METRICS & DATA AUDIT CORRECTION ROUND ONLY** (Quinn Gate 2 exit review). Do not implement the SEC adapter (Gate 2b) or begin Gate 3.
 
 Gate 2 scope (Quinn Gate 1 final review, restating Section 41):
 

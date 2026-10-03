@@ -6,3 +6,4 @@ export * from './technicals';
 export * from './optionMetrics';
 export * from './fundamentals';
 export * from './catalog';
+export * from './specReconciliation';

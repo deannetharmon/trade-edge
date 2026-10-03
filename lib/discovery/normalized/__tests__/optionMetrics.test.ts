@@ -138,7 +138,6 @@ describe('buildMarketMetrics / historical IV', () => {
     'historical-volatility-30-day': 0.28,
     'implied-volatility-index-rank': '0.62',
     'liquidity-rating': 4,
-    beta: '1.18',
     earnings: { 'expected-report-date': '2026-10-28' },
   };
   const mctx = { now: NOW, payloadAsOf: QUOTE };
@@ -151,7 +150,6 @@ describe('buildMarketMetrics / historical IV', () => {
     expect(v(set, 'historical_volatility_30d')).toBe(0.28);
     expect(v(set, 'iv_rank_provider')).toBeCloseTo(0.62, 10);
     expect(v(set, 'underlying_liquidity_rating')).toBe(4);
-    expect(v(set, 'underlying_beta')).toBeCloseTo(1.18, 10);
     expect(v(set, 'days_to_next_earnings')).toBe(25);
     expect(v(set, 'next_earnings_date' as any)).toBe('2026-10-28' as any);
   });
@@ -168,12 +166,6 @@ describe('buildMarketMetrics / historical IV', () => {
     const set = buildMarketMetrics(payload, mctx);
     expect((set.iv_rank_provider as any).provenance).toEqual({ provider: 'tastytrade', field: 'implied-volatility-index-rank' });
     expect(buildMarketMetrics({ ...payload, 'implied-volatility-index-rank': '62' }, mctx).iv_rank_provider.validity).toBe('INVALID');
-  });
-
-  it("does not substitute 'beta-60-day' for beta", () => {
-    const { beta, ...rest } = payload;
-    void beta;
-    expect(buildMarketMetrics({ ...rest, 'beta-60-day': '1.4' }, mctx).underlying_beta.validity).toBe('UNAVAILABLE');
   });
 
   it('flags a past or malformed report date and treats a missing one as UNAVAILABLE', () => {
