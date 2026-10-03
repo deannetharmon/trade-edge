@@ -58,5 +58,10 @@ Client counters (requests, cache hits/misses, in-flight joins, spacing waits, er
   1. `total_debt`, `net_debt`, `net_debt_to_ebitda`, `roic_v1_pct`, `ev_to_ebitda_ttm` were INVALID (`AMBIGUOUS_CONCEPT:totalDebt`): footnote `LongTermDebt` in 10-Qs is rounded to $0.1bn (e.g. 91,800 vs balance-sheet components 82,430 + 9,345 = 91,775), so exact A/B agreement was wrong. Fix: balance-sheet recipes first; A/B tolerance 2%. Regression tests added.
   2. `sector_classification` was INVALID (`SUBMISSIONS_AS_OF_INVALID`): the evaluation clock was read before the SEC fetches, so the submissions fetch time was later than "now". Fix: clock read after all I/O. Regression test added.
   3. `annualSeries` carried pre-split EPS for FY2016-17 (EPS 8.31, 9.21 next to split-adjusted 2.98). Fix: per-share basis guard above. Regression tests added. (The 5-year CAGR window FY2020-25 was already on one basis.)
-- **Not yet re-verified live:** the three fixes above (unit-tested with fixtures reproducing the live structure). Re-run `/api/fundamentals?symbol=AAPL` after this deploy; expected: debt metrics VALID, sector VALID, FY2016-17 EPS null.
+- **Re-verified live (production, `a803512`, `SECMAP-v1.1`, 2026-10-03 ~17:53 UTC), AAPL:** `COVERED`, `priceIssue: null`.
+  - Debt now resolves by recipe B: 71,340 + 11,007 + 1,997 (commercial paper) = 84,344 million USD total debt; net debt 44,800 (cash 39,544). `net_debt_to_ebitda` 0.267, `roic_v1_pct` 90.3, `ev_to_ebitda_ttm` 29.26 are VALID. Hand check: TTM EBITDA = 154,859 + 13,100 = 167,959; EV = market cap + 44,800.
+  - `sector_classification` VALID (SIC 3571).
+  - `annualSeries` FY2016-17 `dilutedEps` null with issue `SPLIT_OR_SHARE_STRUCTURE_CHANGE_SUSPECTED:dilutedEps`; FY2018-25 EPS on one split-adjusted basis.
+  - Every other metric unchanged from the first run; only `interest_coverage` remains UNAVAILABLE (no `InterestExpense` fact in Apple's latest fiscal year).
+  - No unexpected tag-resolution behavior remaining. `FORM_NOT_USED` dropped facts: 119 (non-10-K/10-Q forms), as designed.
 - No environment values are recorded here.
