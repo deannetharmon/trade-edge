@@ -136,10 +136,10 @@ const METRIC_DEPS: Readonly<Record<string, readonly string[]>> = {
   fcf_yield_pct: ['operatingCashFlow', 'capex', 'marketCap'],
   roic_v1_pct: ['operatingIncome', 'pretaxIncome', 'incomeTax', 'totalEquityEnd', 'debtEnd', 'cashEnd', 'totalEquityStart', 'debtStart', 'cashStart'],
   net_debt_to_ebitda: ['ebitda', 'debtEnd', 'cashEnd'],
-  pe_ttm: ['dilutedEps', 'price'],
+  pe_ttm: ['dilutedEps', 'price', 'epsBasis'],
   revenue_cagr_5y_pct: ['annualRevenue'],
   eps_cagr_5y_pct: ['annualEps'],
-  eps_growth_yoy_ttm_pct: ['dilutedEps', 'dilutedEpsPrior'],
+  eps_growth_yoy_ttm_pct: ['dilutedEps', 'dilutedEpsPrior', 'epsBasis', 'epsBasisPrior'],
   revenue_growth_yoy_ttm_pct: ['revenue', 'revenuePrior'],
   operating_margin_trend_5y_pp: ['annualRevenue', 'annualOperatingIncome'],
   operating_margin_change_yoy_pp: ['operatingIncome', 'revenue', 'operatingIncomePrior', 'revenuePrior'],
@@ -217,6 +217,8 @@ export function buildSecFundamentals(compact: CompactFacts, ctx: SecBuildContext
       recordTtm(priorKey, t);
     }
   });
+  status.epsBasis = epsBasisAt(index, anchor);
+  status.epsBasisPrior = epsBasisAt(index, prior);
   // EBITDA-v1 = operating income + depreciation and amortization
   if (status.operatingIncome.status === 'OK' && status.depreciationAmortization.status === 'OK') {
     status.ebitda = OK_STATUS;
@@ -371,7 +373,7 @@ export function buildSecFundamentals(compact: CompactFacts, ctx: SecBuildContext
     const blocker = blockerOf(id);
     if (!blocker) return metric;
     if (blocker.status !== 'MISSING') return invalidMetric(id, 'n/a', blocker.reason, provenance);
-    return metric.validity === 'UNAVAILABLE' ? unavailableMetric(id, blocker.reason, provenance) : metric;
+    return unavailableMetric(id, blocker.reason, provenance);
   };
   FUNDAMENTAL_METRIC_IDS.forEach((id) => {
     out[id] = withBlocker(id, base[id]);
@@ -479,6 +481,25 @@ function sectorMetric(submissions: SecSubmissionsInfo | null, now: string): Norm
   const age = Date.parse(now) - Date.parse(submissions.fetchedAt);
   if (age > SIC_MAX_AGE_MS) return staleMetric(id, submissions.sic, submissions.fetchedAt, age, SIC_MAX_AGE_MS, provenance);
   return validMetric(id, submissions.sic, submissions.fetchedAt, provenance);
+}
+
+/**
+ * Current-basis check for per-share TTM values: the weighted diluted shares of a fiscal-year-to-date period must be on the
+ * same basis as the fiscal year before it. A split between the latest 10-K and the current 10-Q would otherwise mix
+ * pre-split FY EPS with post-split YTD EPS inside one TTM sum. Break = SPLIT_SUSPECT_RATIO or more, either way.
+ */
+function epsBasisAt(index: FactIndex, anchor: Anchor | null): SecItemStatus {
+  const notPossible: SecItemStatus = { status: 'MISSING', reason: 'SEC_ITEM_NOT_REPORTED:epsBasis:EPS_SPLIT_CHECK_NOT_POSSIBLE' };
+  if (!anchor || !anchor.prevFiscalYear) return notPossible;
+  const cur = resolveItemAt(index, SEC_ITEMS.dilutedShares, anchor.start, anchor.end);
+  const prev = resolveItemAt(index, SEC_ITEMS.dilutedShares, anchor.prevFiscalYear.start, anchor.prevFiscalYear.end);
+  if (cur.status === 'AMBIGUOUS' || prev.status === 'AMBIGUOUS') return { status: 'AMBIGUOUS', reason: 'AMBIGUOUS_CONCEPT:dilutedShares' };
+  if (cur.status !== 'OK' || prev.status !== 'OK' || !(cur.value > 0) || !(prev.value > 0)) return notPossible;
+  const ratio = cur.value / prev.value;
+  if (ratio >= SPLIT_SUSPECT_RATIO || ratio <= 1 / SPLIT_SUSPECT_RATIO) {
+    return { status: 'INCONSISTENT', reason: 'SPLIT_OR_SHARE_STRUCTURE_CHANGE_SUSPECTED' };
+  }
+  return OK_STATUS;
 }
 
 /**

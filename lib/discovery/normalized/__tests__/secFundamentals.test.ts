@@ -492,3 +492,128 @@ describe('live-data regressions (AAPL smoke test)', () => {
     });
   });
 });
+
+// ---- Quinn review round (a803512): current-basis guard, debt recipe rules, boundaries ----
+describe('per-share basis at the current period (split after the latest 10-K)', () => {
+  const H1_2025_END = plusDays('2025-01-01', 181);
+  // Everything up to the latest fiscal year is on the pre-split basis (shares / 4, EPS x 4) EXCEPT the 2025 half-year
+  // comparative, which the current 10-Q restates -- the structure a real post-10-K split produces.
+  const splitAfterLatestTenK = (raw: RawFacts): void => {
+    rowsOf(raw, 'WeightedAverageNumberOfDilutedSharesOutstanding', 'shares').forEach((row) => {
+      if (row.end <= '2025-12-31' && row.end !== H1_2025_END) row.val = 125;
+    });
+    rowsOf(raw, 'EarningsPerShareDiluted', 'USD/shares').forEach((row) => {
+      if (row.end <= '2025-12-31' && row.end !== H1_2025_END) row.val = row.val * 4;
+    });
+  };
+
+  it('makes P/E, EPS growth and the P/E history INVALID instead of mixing bases; share-free metrics are untouched', () => {
+    const raw = makeCompanyFacts();
+    splitAfterLatestTenK(raw);
+    const r = run(raw);
+    expect(r.metrics.pe_ttm.validity).toBe('INVALID');
+    expect(reasonOf(r, 'pe_ttm')).toBe('SPLIT_OR_SHARE_STRUCTURE_CHANGE_SUSPECTED');
+    expect(r.metrics.eps_growth_yoy_ttm_pct.validity).toBe('INVALID');
+    expect(r.metrics.pe_ttm_median_5y.validity).not.toBe('VALID');
+    expect(r.metrics.operating_margin_ttm_pct.validity).toBe('VALID');
+    expect(r.metrics.fcf_ttm.validity).toBe('VALID');
+    expect(r.diagnostics.itemIssues.epsBasis.status).toBe('INCONSISTENT');
+  });
+
+  it('a break between the prior fiscal year and the prior-year period blocks only EPS growth', () => {
+    const raw = makeCompanyFacts();
+    rowsOf(raw, 'WeightedAverageNumberOfDilutedSharesOutstanding', 'shares').forEach((row) => {
+      if (row.end === '2024-12-31') row.val = 125;
+    });
+    rowsOf(raw, 'EarningsPerShareDiluted', 'USD/shares').forEach((row) => {
+      if (row.end === '2024-12-31') row.val = row.val * 4;
+    });
+    const r = run(raw);
+    expect(r.metrics.pe_ttm.validity).toBe('VALID');
+    expect(r.metrics.eps_growth_yoy_ttm_pct.validity).toBe('INVALID');
+    expect(r.diagnostics.itemIssues.epsBasisPrior.status).toBe('INCONSISTENT');
+  });
+
+  it('is UNAVAILABLE (not VALID) when the share count needed to check the basis is missing', () => {
+    const raw = makeCompanyFacts();
+    dropTag(raw, 'WeightedAverageNumberOfDilutedSharesOutstanding', (row) => row.end === currentHalfEnd());
+    const r = run(raw);
+    expect(r.metrics.pe_ttm.validity).toBe('UNAVAILABLE');
+    expect(reasonOf(r, 'pe_ttm')).toContain('EPS_SPLIT_CHECK_NOT_POSSIBLE');
+  });
+
+  describe('threshold boundary (SPLIT_SUSPECT_RATIO = 1.8; Ian owns the value)', () => {
+    const setRatio = (raw: RawFacts, current: number, previous: number): void => {
+      rowsOf(raw, 'WeightedAverageNumberOfDilutedSharesOutstanding', 'shares').forEach((row) => {
+        if (row.end === currentHalfEnd()) row.val = current;
+        if (row.end === '2025-12-31') row.val = previous;
+      });
+    };
+    it.each([
+      ['1.79x is not a break', 179, 100, 'VALID'],
+      ['exactly 1.8x is a break', 450, 250, 'INVALID'],
+      ['a 2:1 reduction is a break', 250, 500, 'INVALID'],
+    ])('%s', (_name, current, previous, expected) => {
+      const raw = makeCompanyFacts();
+      setRatio(raw, current as number, previous as number);
+      expect(run(raw).metrics.pe_ttm.validity).toBe(expected);
+    });
+    it('KNOWN GAP (pinned for Ian): a 1.5x change (a 3:2 split) is below the threshold and is not flagged', () => {
+      const raw = makeCompanyFacts();
+      setRatio(raw, 150, 100);
+      expect(run(raw).metrics.pe_ttm.validity).toBe('VALID');
+    });
+  });
+
+  it('real issuance of 1.8x or more is labelled like a split (conservative)', () => {
+    const raw = makeCompanyFacts();
+    rowsOf(raw, 'WeightedAverageNumberOfDilutedSharesOutstanding', 'shares').forEach((row) => {
+      if (row.end >= '2023-12-31') row.val = 1000;
+    });
+    const r = run(raw);
+    expect(r.metrics.eps_cagr_5y_pct.validity).toBe('INVALID');
+    expect(reasonOf(r, 'eps_cagr_5y_pct')).toBe('SPLIT_OR_SHARE_STRUCTURE_CHANGE_SUSPECTED');
+  });
+
+  it('a missing share count for the oldest of the six years makes EPS CAGR UNAVAILABLE', () => {
+    const raw = makeCompanyFacts();
+    dropTag(raw, 'WeightedAverageNumberOfDilutedSharesOutstanding', (row) => row.end === '2020-12-31' && row.form === '10-K');
+    const r = run(raw);
+    expect(r.metrics.eps_cagr_5y_pct.validity).toBe('UNAVAILABLE');
+    expect(reasonOf(r, 'eps_cagr_5y_pct')).toContain('EPS_SPLIT_CHECK_NOT_POSSIBLE');
+  });
+});
+
+describe('debt recipe rules (DEBT-v1.1)', () => {
+  const setDebt = (raw: RawFacts, values: Record<string, number>): void => {
+    ['LongTermDebt', 'ShortTermBorrowings', 'LongTermDebtNoncurrent', 'LongTermDebtCurrent', 'DebtCurrent', 'CommercialPaper'].forEach((tag) => dropTag(raw, tag));
+    const ends = Array.from(new Set(rowsOf(raw, 'AssetsCurrent').map((r) => r.end)));
+    ends.forEach((end) =>
+      Object.keys(values).forEach((tag) => addRow(raw, tag, 'USD', { end, val: values[tag], accn: `d-${tag}-${end}`, fy: 0, fp: 'Q2', form: '10-Q', filed: plusDays(end, 35) })),
+    );
+  };
+  const debt = (values: Record<string, number>): SecFundamentalsResult => {
+    const raw = makeCompanyFacts();
+    setDebt(raw, values);
+    return run(raw);
+  };
+
+  it('only the first computable recipe is used: B beats C beats A; A and C alone use C (documented, not cross-checked)', () => {
+    expect(value(debt({ LongTermDebtNoncurrent: 600, LongTermDebtCurrent: 400, DebtCurrent: 1500 }), 'total_debt')).toBe(1000); // B, C ignored
+    expect(value(debt({ LongTermDebt: 1000, LongTermDebtNoncurrent: 900, DebtCurrent: 5 }), 'total_debt')).toBe(905); // C, A ignored
+    expect(value(debt({ LongTermDebt: 1000 }), 'total_debt')).toBe(1000); // A fall-back
+  });
+
+  it('A and B: 1.9% apart passes, 2.1% apart fails closed', () => {
+    expect(value(debt({ LongTermDebt: 1019, LongTermDebtNoncurrent: 600, LongTermDebtCurrent: 400 }), 'total_debt')).toBe(1000);
+    expect(debt({ LongTermDebt: 1022, LongTermDebtNoncurrent: 600, LongTermDebtCurrent: 400 }).metrics.total_debt.validity).toBe('INVALID');
+  });
+
+  it('optional components (short-term borrowings, commercial paper) never trip the A/B check and are added once', () => {
+    expect(value(debt({ LongTermDebt: 1000, LongTermDebtNoncurrent: 600, LongTermDebtCurrent: 400, ShortTermBorrowings: 50, CommercialPaper: 25 }), 'total_debt')).toBe(1075);
+  });
+
+  it('KNOWN LIMIT (fail closed): a rounded footnote on very small debt can exceed the 2% tolerance', () => {
+    expect(debt({ LongTermDebt: 11, LongTermDebtNoncurrent: 6, LongTermDebtCurrent: 4 }).metrics.total_debt.validity).toBe('INVALID');
+  });
+});

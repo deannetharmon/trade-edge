@@ -177,3 +177,22 @@ describe('evaluation clock ordering (live AAPL smoke test: sector_classification
     expect(body.metrics.sector_classification.validity).toBe('VALID');
   });
 });
+
+describe('loadSecFundamentals reads the clock after all I/O', () => {
+  it('calls nowIso only after the SEC fetches have completed', async () => {
+    const events: string[] = [];
+    const c = createSecClient({
+      userAgent: UA,
+      nowMs: () => Date.parse(NOW),
+      sleep: async () => undefined,
+      fetchImpl: async (url) => {
+        events.push('fetch');
+        const body = url.indexOf('company_tickers') >= 0 ? DIRECTORY : url.indexOf('/companyfacts/') >= 0 ? makeCompanyFacts() : { sic: '3571', sicDescription: 'x' };
+        return { ok: true, status: 200, json: async () => body };
+      },
+    });
+    await loadSecFundamentals('ACME', { client: c, closes: bars(), priceIssue: null, nowIso: () => { events.push('now'); return NOW; } });
+    expect(events.filter((e) => e === 'now')).toHaveLength(1);
+    expect(events.lastIndexOf('fetch')).toBeLessThan(events.indexOf('now'));
+  });
+});
