@@ -423,11 +423,24 @@ Do not implement QV thresholds/scoring, valuation calculations, technical/fundam
 **Exit review: Quinn** — architecture, isolation, testability, versioning, state/snapshot model, missing-data semantics, reason codes, regression risk. Gate 2 requires Quinn approval.
 
 ## GATE 2 — Normalized Metrics & Data Audit
-**Status: AUTHORIZED**
+**Status: APPROVED (Dane + Quinn, final Gate 2 commit d518bc53aad6c0537c9ccd8f27ee888ab6fd2e93)**
 
 Implement/map quality, valuation, fundamental, technical, and existing options metrics. Classify each AVAILABLE / DERIVABLE / CONDITIONAL / UNAVAILABLE. Investigate analyst revisions and historical IV. No silent substitutes.
 
 **Exit review: Dane + Quinn.** Escalate investment-significant data limitations to Ian.
+
+## GATE 2b — SEC Fundamentals Adapter
+**Status: AUTHORIZED (Paul scope approval; Ian methodology rulings recorded below)**
+
+Objective: make the approved QV Quality/Valuation evidence operational using SEC EDGAR XBRL/companyfacts without introducing Gate 3 investment logic.
+
+Implement only the provider/data work required to feed the normalized fundamentals layer: ticker→CIK resolution; SEC-compliant User-Agent/rate limiting; caching; deterministic/versioned XBRL concept resolution; fiscal-period and TTM construction; amended/restated filing handling; provenance; fail-closed ambiguity handling; historical fundamental observations sufficient for supported valuation history; tests and observability. Unsupported/non-covered securities remain UNAVAILABLE, never investment failures.
+
+Do not implement Gate 3 thresholds, scores, classifications, rankings, or lifecycle decisions. Forward estimates/revisions/guidance remain UNAVAILABLE unless a separately approved reliable source exists.
+
+**Ian methodology rulings before Gate 2b:** ROIC-v1 approved as defined; QV-v1.0 primary relative-strength benchmark = SPY over 126 trading days; provider IV Rank remains source-labelled informational evidence only; analyst revisions remain optional/explicitly UNAVAILABLE when absent; close-based 52-week high is accepted when labelled; ACTIONABLE later requires sufficient evidence of business quality, valuation dislocation, and intact/non-deteriorating fundamentals, but not every catalog metric. Forward estimates, analyst revisions, company guidance, historical IV, PEG, and event feeds are optional enrichments and do not independently block a candidate solely because unavailable. Deterministic consistency/stability formulas and investment thresholds are Gate 3 work after Gate 2b data is validated.
+
+**Exit review: Dane + Quinn for data correctness/architecture; Ian for whether the resulting fundamental evidence is fit for Gate 3.**
 
 ## GATE 3 — QV-v1.0 Underlying Strategy
 **Status: BLOCKED**
@@ -502,13 +515,21 @@ Discovery Tests: 113 PASS
 Existing LEAPS Regression Tests: 521 PASS
 
 ### Gate 2
-Status: IMPLEMENTED BUT OPEN — CORRECTION ROUND (Quinn Gate 2 exit review: APPROVE WITH CHANGES, G2-B1)  
-Implementation: Complete at 8092be1508d0c641039dd8452c8a7f32a61556df; correction round committed on the same branch (see Gate 2 correction report)  
-Exit Review: Dane + Quinn (investment-significant data limitations to Ian)  
-Gate 3: BLOCKED until: catalog completeness corrected, Ian questions routed, fundamentals-provider path approved, Gate 2 final approval
+Status: APPROVED  
+Final Implementation Commit: d518bc53aad6c0537c9ccd8f27ee888ab6fd2e93  
+Dane Technical/Data Review: APPROVED  
+Quinn Architecture/Quality Review: APPROVED  
+GitHub CI: PASS (run 37136402226)  
+Vercel: PASS  
+Discovery Tests: 182 PASS  
+Existing LEAPS Regression Tests: 521 PASS
 
-### Gate 2b (recommended by Quinn, NOT authorized)
-SEC Fundamentals Adapter — requires Paul/Ian approval (new external data dependency)
+### Gate 2b
+Status: AUTHORIZED  
+Purpose: SEC EDGAR fundamentals adapter required to operationalize QV Quality/Valuation evidence before Gate 3.  
+Paul Scope/Dependency Approval: APPROVED  
+Ian Methodology Rulings: APPROVED / RECORDED  
+Implementation: NOT STARTED
 
 ### Gates 3–8
 Status: BLOCKED
@@ -517,32 +538,21 @@ Status: BLOCKED
 
 Read this entire document before making changes and inspect the existing TradeEdge implementation and repository conventions.
 
-You are authorized to execute the **GATE 2 — NORMALIZED METRICS & DATA AUDIT CORRECTION ROUND ONLY** (Quinn Gate 2 exit review). Do not implement the SEC adapter (Gate 2b) or begin Gate 3.
+You are authorized to execute **GATE 2b — SEC FUNDAMENTALS ADAPTER ONLY**.
 
-Gate 2 scope (Quinn Gate 1 final review, restating Section 41):
+Gate 2b scope is defined in Section 41. Implement the SEC EDGAR XBRL/companyfacts provider/data path required to feed the normalized fundamentals layer. Preserve provider provenance and fail closed on ambiguous or unsupported facts. Add the tests needed to prove fiscal-period/TTM correctness, tag-resolution behavior, restatements/amendments, missing/ambiguous data semantics, caching/rate-limit behavior, and normalized metric integration.
 
-* inventory existing TradeEdge data capabilities before adding providers
-* map each required QV metric to actual data sources
-* classify each metric as AVAILABLE, DERIVABLE, CONDITIONAL, or UNAVAILABLE
-* implement normalized metric calculations only where supported by reliable data
-* explicitly investigate analyst-estimate/revision availability
-* explicitly investigate historical-IV availability
-* establish canonical/versioned definitions for derived metrics such as ROIC
-* preserve VALID / UNAVAILABLE / STALE / INVALID semantics
-* do not silently substitute proxy metrics
-* do not implement QV investment thresholds or scoring
-* do not implement Gate 3 classification logic
-* do not modify existing Find LEAPS investment behavior
+Also correct the non-blocking documentation typo in Gate 2 reconciliation notes that says “Ian/Alan”; the methodology authority is Ian.
 
-Do not begin Gate 3. Any investment-significant data limitation must be returned to Ian for investment-methodology review before Gate 3.
+Do not begin Gate 3. Do not add QV thresholds, scores, rankings, classifications, or lifecycle investment logic. Do not change existing Find LEAPS behavior. Do not add a paid data dependency.
 
-When Gate 2 is complete:
+When Gate 2b is complete:
 1. Run applicable unit tests.
 2. Run relevant existing regression tests.
 3. Review the complete diff.
 4. Produce the Gate Completion Report in Section 40.
-5. Commit and push per repository workflow (one consolidated push).
+5. Commit and push per repository workflow.
 6. Provide branch and commit SHA.
 7. **STOP.**
 
-The Gate 2 report must be reviewed (Dane + Quinn exit review) before Gate 3 is authorized.
+Gate 2b must receive its exit reviews before Gate 3 is authorized.
