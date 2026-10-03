@@ -12,13 +12,14 @@
 import { unavailableMetric } from '../metrics';
 import type { MetricSet } from '../metrics';
 import { ANALYST_REVISION_METRIC_IDS, FUNDAMENTAL_METRIC_IDS, HISTORICAL_VALUATION_METRIC_IDS } from './fundamentals';
+import { SEC_METRIC_IDS } from './sec/secFundamentals';
 import { CONTRACT_METRIC_IDS, VOLATILITY_EVENT_METRIC_IDS } from './optionMetrics';
 import { TECHNICAL_METRIC_IDS } from './technicals';
 
 export type DataClassification = 'AVAILABLE' | 'DERIVABLE' | 'CONDITIONAL' | 'UNAVAILABLE';
 export type MetricCategory = 'QUALITY' | 'VALUATION' | 'FUNDAMENTAL' | 'TECHNICAL' | 'RISK' | 'LEAPS';
 
-/** What an approved SEC EDGAR adapter (Gate 2b, NOT authorized) would be expected to make of a metric. To be verified in 2b. */
+/** What the SEC EDGAR adapter was expected to make of a metric (Gate 2 expectation, verified in Gate 2b). */
 export type SecExpectation = 'DERIVABLE' | 'CONDITIONAL' | 'UNAVAILABLE' | null;
 
 export interface CatalogEntry {
@@ -113,16 +114,16 @@ const METRIC_CATALOG_BASE: ReadonlyArray<Omit<CatalogEntry, 'implemented' | 'exp
 
   // --- Gate 2 correction (Quinn G2-B1): ticket concepts with no data source today. Catalog-only: no calculation exists. ---
   // Quality (Section 10)
-  entry('revenue_growth_consistency_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "5Y revenue CAGR and consistency". Consistency definition not yet fixed (Ian/Alan).'),
+  entry('revenue_growth_consistency_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "5Y revenue CAGR and consistency". Consistency definition not yet fixed (Ian).'),
   entry('eps_cagr_5y_pct', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "EPS growth". Negative-base handling must be INVALID, not a rate.'),
   entry('eps_growth_yoy_ttm_pct', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10/13/14 current EPS growth and EPS trajectory (one metric serves both concepts).'),
-  entry('eps_growth_consistency_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "EPS growth and consistency". Definition not yet fixed (Ian/Alan).'),
+  entry('eps_growth_consistency_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "EPS growth and consistency". Definition not yet fixed (Ian).'),
   entry('operating_margin_trend_5y_pp', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "operating margin trend" / Section 13-14 margin trajectory (long horizon).'),
   entry('operating_margin_change_yoy_pp', 'FUNDAMENTAL', 'UNAVAILABLE', NONE, true, 'Section 14 margin trajectory (recent horizon): TTM operating margin minus the prior-year TTM.'),
-  entry('fcf_trend_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 FCF trajectory/stability, Section 13-14 FCF trajectory. Trend definition not yet fixed (Ian/Alan).'),
-  entry('earnings_stability_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "earnings stability". Definition not yet fixed (Ian/Alan).'),
-  entry('operating_margin_stability_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "margin stability". Definition not yet fixed (Ian/Alan).'),
-  entry('fcf_stability_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "FCF stability". Definition not yet fixed (Ian/Alan).'),
+  entry('fcf_trend_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 FCF trajectory/stability, Section 13-14 FCF trajectory. Trend definition not yet fixed (Ian).'),
+  entry('earnings_stability_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "earnings stability". Definition not yet fixed (Ian).'),
+  entry('operating_margin_stability_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "margin stability". Definition not yet fixed (Ian).'),
+  entry('fcf_stability_5y', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "FCF stability". Definition not yet fixed (Ian).'),
   entry('total_debt', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "debt" / balance-sheet strength.'),
   entry('net_debt', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "net debt": total debt minus cash and equivalents.'),
   entry('current_ratio', 'QUALITY', 'UNAVAILABLE', NONE, true, 'Section 10 "liquidity" / balance-sheet strength.'),
@@ -211,13 +212,25 @@ const IMPLEMENTED_IDS: ReadonlySet<string> = new Set([
   ...FUNDAMENTAL_METRIC_IDS,
   ...ANALYST_REVISION_METRIC_IDS,
   ...HISTORICAL_VALUATION_METRIC_IDS,
+  ...SEC_METRIC_IDS,
 ]);
+
+const SEC_BACKED_IDS: ReadonlySet<string> = new Set([...FUNDAMENTAL_METRIC_IDS, ...SEC_METRIC_IDS]);
+const SEC_SOURCE = 'SEC EDGAR companyfacts via /api/fundamentals (free; SECMAP-v1.0)';
+const SEC_CONDITION =
+  'Gate 2b: SEC-backed. CONDITIONAL on the issuer being covered (US-GAAP XBRL filer in the SEC directory), the needed concepts resolving unambiguously, and a usable price history where price is an input; otherwise UNAVAILABLE or INVALID with a reason.';
+
+/** Gate 2b: metrics the SEC adapter feeds move from UNAVAILABLE to CONDITIONAL (never AVAILABLE: coverage is per issuer). */
+function withSecBacking(base: Omit<CatalogEntry, 'implemented' | 'expectedWithSecAdapter'>): Omit<CatalogEntry, 'implemented' | 'expectedWithSecAdapter'> {
+  if (!SEC_BACKED_IDS.has(base.id)) return base;
+  return Object.freeze({ ...base, classification: 'CONDITIONAL' as DataClassification, source: SEC_SOURCE, note: `${SEC_CONDITION} ${base.note}` });
+}
 
 /** Ids an adapter in this layer can emit (the catalog's implemented subset is asserted equal to this by a test). */
 export const IMPLEMENTED_METRIC_IDS: readonly string[] = Object.freeze(Array.from(IMPLEMENTED_IDS).sort());
 
 export const METRIC_CATALOG: readonly CatalogEntry[] = Object.freeze(
-  METRIC_CATALOG_BASE.map((base) =>
+  METRIC_CATALOG_BASE.map(withSecBacking).map((base) =>
     Object.freeze({
       ...base,
       implemented: IMPLEMENTED_IDS.has(base.id),

@@ -501,7 +501,8 @@ Required final checks: existing Find LEAPS unchanged; QV deterministic/reproduci
 - Implementation: AUTHORIZED
 - Gate 1 Exit Review — Quinn: APPROVED at 729124f78b48336c9ba9f4694a2af036827006b5 (after corrections B2, S1, B3)
 - Gate 2 Exit Review — Quinn: APPROVE WITH CHANGES at 8092be1508d0c641039dd8452c8a7f32a61556df (G2-B1 catalog completeness; FMP wording; SEC path documented; questions routed to Ian)
-- **Current Authorization: GATE 2 CORRECTION ROUND ONLY** (Gate 2b recommended, not authorized; Gate 3 blocked)
+- Gate 2 Correction: APPROVED at d518bc53aad6c0537c9ccd8f27ee888ab6fd2e93
+- **Current Authorization: GATE 2b ONLY — IMPLEMENTED, AWAITING EXIT REVIEW** (Dane + Quinn data correctness/architecture; Ian fitness of fundamental evidence for Gate 3). Gate 3 blocked.
 
 # 43. Execution Ledger
 
@@ -525,11 +526,12 @@ Discovery Tests: 182 PASS
 Existing LEAPS Regression Tests: 521 PASS
 
 ### Gate 2b
-Status: AUTHORIZED  
+Status: IMPLEMENTED — AWAITING EXIT REVIEW  
 Purpose: SEC EDGAR fundamentals adapter required to operationalize QV Quality/Valuation evidence before Gate 3.  
 Paul Scope/Dependency Approval: APPROVED  
 Ian Methodology Rulings: APPROVED / RECORDED  
-Implementation: NOT STARTED
+Implementation: COMPLETE (commit and CI/Vercel results: see the Gate 2b Gate Completion Report)  
+Docs: docs/analysis/LEAPS-QV-0001-gate2b-sec-fundamentals.md
 
 ### Gates 3–8
 Status: BLOCKED

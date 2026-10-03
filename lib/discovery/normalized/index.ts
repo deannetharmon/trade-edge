@@ -7,3 +7,4 @@ export * from './optionMetrics';
 export * from './fundamentals';
 export * from './catalog';
 export * from './specReconciliation';
+export * from './sec';

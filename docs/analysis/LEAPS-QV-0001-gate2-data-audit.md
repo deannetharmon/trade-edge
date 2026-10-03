@@ -23,17 +23,17 @@ Every data concept in the ticket maps to a catalog metric, or has a recorded rea
 | § | Ticket concept | Disposition | Catalog metric(s) | Note |
 |---|---|---|---|---|
 | 10 | 5Y revenue CAGR | MAPPED | `revenue_cagr_5y_pct` (UNAVAILABLE) |  |
-| 10 | Revenue consistency | MAPPED | `revenue_growth_consistency_5y` (UNAVAILABLE, not implemented) | Consistency definition not fixed; Ian/Alan. |
+| 10 | Revenue consistency | MAPPED | `revenue_growth_consistency_5y` (UNAVAILABLE, not implemented) | Consistency definition not fixed; Ian. |
 | 10 | EPS growth | MAPPED | `eps_cagr_5y_pct` (UNAVAILABLE, not implemented)<br>`eps_growth_yoy_ttm_pct` (UNAVAILABLE, not implemented) |  |
-| 10 | EPS consistency | MAPPED | `eps_growth_consistency_5y` (UNAVAILABLE, not implemented) | Consistency definition not fixed; Ian/Alan. |
+| 10 | EPS consistency | MAPPED | `eps_growth_consistency_5y` (UNAVAILABLE, not implemented) | Consistency definition not fixed; Ian. |
 | 10 | Operating margin | MAPPED | `operating_margin_ttm_pct` (UNAVAILABLE) |  |
 | 10 | Operating margin trend | MAPPED | `operating_margin_trend_5y_pp` (UNAVAILABLE, not implemented) |  |
 | 10 | FCF | MAPPED | `fcf_ttm` (UNAVAILABLE) |  |
 | 10 | FCF margin | MAPPED | `fcf_margin_ttm_pct` (UNAVAILABLE) |  |
 | 10 | ROIC / appropriate return measures | MAPPED | `roic_v1_pct` (UNAVAILABLE) | ROIC-v1 is the only return measure; adding others (e.g. ROE) is an Ian decision. ROIC-v1 itself needs Ian approval. |
-| 10 | Earnings stability | MAPPED | `earnings_stability_5y` (UNAVAILABLE, not implemented) | Stability definition not fixed; Ian/Alan. |
-| 10 | Margin stability | MAPPED | `operating_margin_stability_5y` (UNAVAILABLE, not implemented) | Stability definition not fixed; Ian/Alan. |
-| 10 | FCF stability / trajectory | MAPPED | `fcf_stability_5y` (UNAVAILABLE, not implemented)<br>`fcf_trend_5y` (UNAVAILABLE, not implemented) | Definitions not fixed; Ian/Alan. |
+| 10 | Earnings stability | MAPPED | `earnings_stability_5y` (UNAVAILABLE, not implemented) | Stability definition not fixed; Ian. |
+| 10 | Margin stability | MAPPED | `operating_margin_stability_5y` (UNAVAILABLE, not implemented) | Stability definition not fixed; Ian. |
+| 10 | FCF stability / trajectory | MAPPED | `fcf_stability_5y` (UNAVAILABLE, not implemented)<br>`fcf_trend_5y` (UNAVAILABLE, not implemented) | Definitions not fixed; Ian. |
 | 10 | Debt | MAPPED | `total_debt` (UNAVAILABLE, not implemented) |  |
 | 10 | Net debt | MAPPED | `net_debt` (UNAVAILABLE, not implemented) |  |
 | 10 | Net debt / EBITDA | MAPPED | `net_debt_to_ebitda` (UNAVAILABLE) |  |
@@ -78,7 +78,7 @@ Every data concept in the ticket maps to a catalog metric, or has a recorded rea
 | 16 | Distance from 52-week high | MAPPED | `distance_from_52w_high_pct` (DERIVABLE) | Close-based; labelled as such. |
 | 16 | Moving-average relationships / trends | MAPPED | `price_last_close` (DERIVABLE)<br>`sma_50` (DERIVABLE)<br>`sma_200` (DERIVABLE)<br>`sma_200_change_20d_pct` (DERIVABLE) | The relationships themselves are computed by Gate 3 from these inputs. |
 | 16 | Relative strength | MAPPED | `relative_return_126d_vs_benchmark_pct` (DERIVABLE) | Benchmark choice is an Ian decision; lookback window is fixed at 126 bars pending Ian. |
-| 16 | Base formation | IAN_DECISION | — | No definition exists. Derivable from daily bars once Ian/Alan define it; not invented here. |
+| 16 | Base formation | IAN_DECISION | — | No definition exists. Derivable from daily bars once Ian define it; not invented here. |
 | 16 | Momentum inflection | GATE3_INTERPRETATION | `rsi_weekly_change_4w` (DERIVABLE)<br>`sma_200_change_20d_pct` (DERIVABLE) | Interpreted from the slope metrics in Gate 3. |
 | 16 | Technical state classification (Section 16 four-state model) | GATE3_INTERPRETATION | — | Classification is Gate 3. |
 | 18 | Earnings | MAPPED | `next_earnings_date` (CONDITIONAL)<br>`days_to_next_earnings` (CONDITIONAL) |  |
@@ -133,7 +133,7 @@ Not recommended: Finnhub free (free endpoints unverifiable), Yahoo fundamentals 
 4. **Analyst-revision unavailability**: confirm QV-v1.0 treats revisions as CONDITIONAL/UNAVAILABLE and how much weight missing revisions carry when other fundamentals deteriorate.
 5. **Close-based 52-week high** acceptable as the evidence.
 6. Which fundamental metrics are **REQUIRED vs OPTIONAL for ACTIONABLE**.
-7. Any QV-v1.0 metrics **intentionally removed or deferred** from the approved framework (every one is currently carried in the catalog; the following need Ian/Alan definitions before they can be calculated: revenue/EPS consistency, earnings/margin/FCF stability, FCF trend, base formation, "near-zero" earnings cutoff, 3Y vs 5Y valuation window, PEG basis, sector-appropriate treatment).
+7. Any QV-v1.0 metrics **intentionally removed or deferred** from the approved framework (every one is currently carried in the catalog; the following need Ian definitions before they can be calculated: revenue/EPS consistency, earnings/margin/FCF stability, FCF trend, base formation, "near-zero" earnings cutoff, 3Y vs 5Y valuation window, PEG basis, sector-appropriate treatment).
 8. **Unresolved, due no later than Gate 4:** contract entry pricing basis (bid / mid / ask). Gate 2 only provides descriptive bid, ask and mid; it does not assert mid is the economic entry price.
 
 Plus the dependency decision for Paul/Ian: **Gate 2b — SEC Fundamentals Adapter** (recommended by Quinn, not authorized).
@@ -236,3 +236,7 @@ These do not affect the discovery layer (isolated) but must not leak into QV; re
 | `sector_classification` | VALUATION | UNAVAILABLE | no | CONDITIONAL | yes |
 | `corporate_event_flags` | RISK | UNAVAILABLE | no | CONDITIONAL | yes |
 | `corporate_actions_upcoming` | RISK | CONDITIONAL | no | — |  |
+
+## Gate 2b update
+
+SEC-backed metrics moved from UNAVAILABLE to CONDITIONAL (per-issuer coverage). Details, definitions and limitations: `docs/analysis/LEAPS-QV-0001-gate2b-sec-fundamentals.md`. Consistency, stability, FCF trend, PEG, forward estimates, revisions, guidance, event feeds and EV/EBITDA history remain unimplemented.

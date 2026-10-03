@@ -7,6 +7,7 @@ import {
   FUNDAMENTAL_METRIC_IDS,
   HISTORICAL_VALUATION_METRIC_IDS,
   IMPLEMENTED_METRIC_IDS,
+  SEC_METRIC_IDS,
   METRIC_CATALOG,
   SPEC_CONCEPTS,
   catalogOnlyMetrics,
@@ -30,6 +31,7 @@ const adapterIds = [
   ...FUNDAMENTAL_METRIC_IDS,
   ...ANALYST_REVISION_METRIC_IDS,
   ...HISTORICAL_VALUATION_METRIC_IDS,
+  ...SEC_METRIC_IDS,
 ];
 
 describe('metric catalog', () => {
@@ -82,9 +84,19 @@ describe('metric catalog', () => {
   });
 
   it('classifies the Section 37 constraints honestly', () => {
-    ['analyst_eps_revision_90d_pct', 'analyst_revenue_revision_90d_pct', 'analyst_revision_breadth_90d', 'iv_rank_internal', 'iv_percentile_internal', 'roic_v1_pct', 'pe_ttm_percentile_5y'].forEach((id) => {
+    ['analyst_eps_revision_90d_pct', 'analyst_revenue_revision_90d_pct', 'analyst_revision_breadth_90d', 'iv_rank_internal', 'iv_percentile_internal', 'ev_to_ebitda_percentile_5y'].forEach((id) => {
       expect(catalogEntry(id)!.classification).toBe('UNAVAILABLE');
       expect(catalogEntry(id)!.investmentSignificant).toBe(true);
+    });
+    // Gate 2b: SEC-backed metrics are CONDITIONAL (per-issuer coverage), never AVAILABLE.
+    ['roic_v1_pct', 'pe_ttm', 'pe_ttm_percentile_5y', 'eps_cagr_5y_pct', 'net_debt', 'sector_classification'].forEach((id) => {
+      expect(catalogEntry(id)!.classification, id).toBe('CONDITIONAL');
+      expect(catalogEntry(id)!.source, id).toContain('SEC EDGAR');
+    });
+    // Definitions Gate 3 owns stay UNAVAILABLE here.
+    ['revenue_growth_consistency_5y', 'eps_growth_consistency_5y', 'fcf_trend_5y', 'earnings_stability_5y', 'operating_margin_stability_5y', 'fcf_stability_5y', 'peg_ratio'].forEach((id) => {
+      expect(catalogEntry(id)!.classification, id).not.toBe('AVAILABLE');
+      expect(catalogEntry(id)!.implemented, id).toBe(false);
     });
     expect(catalogEntry('iv_rank_provider')!.classification).toBe('CONDITIONAL');
     TECHNICAL_METRIC_IDS.forEach((id) => expect(catalogEntry(id)!.classification).toBe('DERIVABLE'));

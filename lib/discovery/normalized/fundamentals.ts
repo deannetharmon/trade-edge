@@ -77,10 +77,14 @@ export const ANALYST_REVISION_METRIC_IDS: readonly string[] = [
   'analyst_revision_breadth_90d',
 ];
 
+/**
+ * Historical EV/EBITDA needs per-period share counts, debt and cash that are not split-safe in SEC data; the SEC
+ * adapter (Gate 2b) supports P/E history only, so these stay UNAVAILABLE.
+ */
 export const HISTORICAL_VALUATION_METRIC_IDS: readonly string[] = [
-  'pe_ttm_percentile_5y',
-  'pe_ttm_median_5y',
+  'ev_to_ebitda_median_5y',
   'ev_to_ebitda_percentile_5y',
+  'ev_to_ebitda_discount_to_median_5y_pct',
 ];
 
 /** Section 15: reported explicitly as "Analyst Revision Data: UNAVAILABLE". Never neutral / stable / positive. */
@@ -94,11 +98,11 @@ export function analystRevisionMetrics(): MetricSet {
   return out;
 }
 
-/** Section 12: needs reliable historical fundamentals; TradeEdge has none, so these are UNAVAILABLE. */
+/** Section 12 (EV/EBITDA history): not supported by the SEC adapter, so UNAVAILABLE. P/E history lives in the SEC layer. */
 export function historicalValuationMetrics(): MetricSet {
   const out: Record<string, NormalizedMetric> = {};
   HISTORICAL_VALUATION_METRIC_IDS.forEach((id) => {
-    out[id] = unavailableMetric(id, 'NO_HISTORICAL_FUNDAMENTALS');
+    out[id] = unavailableMetric(id, 'HISTORICAL_EV_INPUTS_NOT_SUPPORTED');
   });
   return out;
 }
@@ -106,21 +110,19 @@ export function historicalValuationMetrics(): MetricSet {
 type Maybe = number | null | undefined;
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
-export function buildFundamentalMetrics(input: FundamentalsInput | null | undefined, now: string): MetricSet {
-  const out: Record<string, NormalizedMetric> = {};
-  if (!input) {
-    FUNDAMENTAL_METRIC_IDS.forEach((id) => {
-      out[id] = unavailableMetric(id, 'NO_FUNDAMENTALS_PROVIDER');
-    });
-    return out;
-  }
-  const provenance = { provider: input.provider };
-  const asOf = input.asOf;
+/**
+ * Section 8 freshness semantics for a derived fundamental figure: `value` null -> UNAVAILABLE(`missing`); a non-empty
+ * `invalid` reason -> INVALID; an untimed / future statement -> INVALID; older than FUNDAMENTALS_MAX_AGE_MS -> STALE.
+ */
+export function createFundamentalResult(
+  provider: string,
+  asOf: string | null,
+  now: string,
+): (id: string, value: number | null, missing: string, invalid?: string) => NormalizedMetric {
+  const provenance = { provider };
   const nowMs = Date.parse(now);
   const asOfMs = asOf !== null && isIsoTimestamp(asOf) ? Date.parse(asOf) : NaN;
-
-  // Result constructor with the Section 8 freshness semantics.
-  const result = (id: string, value: number | null, missing: string, invalid?: string): NormalizedMetric => {
+  return (id, value, missing, invalid) => {
     if (invalid) return invalidMetric(id, value ?? 'n/a', invalid, provenance);
     if (value === null) return unavailableMetric(id, missing, provenance);
     if (!Number.isFinite(asOfMs) || !Number.isFinite(nowMs)) return invalidMetric(id, String(asOf), 'FUNDAMENTALS_AS_OF_INVALID', provenance);
@@ -131,6 +133,18 @@ export function buildFundamentalMetrics(input: FundamentalsInput | null | undefi
     }
     return validMetric(id, value, asOf as string, provenance);
   };
+}
+
+export function buildFundamentalMetrics(input: FundamentalsInput | null | undefined, now: string): MetricSet {
+  const out: Record<string, NormalizedMetric> = {};
+  if (!input) {
+    FUNDAMENTAL_METRIC_IDS.forEach((id) => {
+      out[id] = unavailableMetric(id, 'NO_FUNDAMENTALS_PROVIDER');
+    });
+    return out;
+  }
+  const asOf = input.asOf;
+  const result = createFundamentalResult(input.provider, asOf, now);
   const bad = (...values: Maybe[]): string | null => {
     for (const v of values) if (v !== null && v !== undefined && !isNum(v)) return 'INPUT_NOT_A_FINITE_NUMBER';
     return null;

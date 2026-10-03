@@ -59,10 +59,13 @@ describe('discovery framework isolation', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('is not imported by any code outside lib/discovery (existing Find LEAPS is unchanged)', () => {
+  it('is not imported by any code outside lib/discovery and lib/fundamentals (existing Find LEAPS is unchanged)', () => {
+    // Gate 2b deviation (reported): lib/fundamentals/ is the I/O layer (SEC client, loader, handler) and is the ONLY
+    // place allowed to import lib/discovery. Everything else -- the screener, Find LEAPS, every other route -- still may not.
+    const FUNDAMENTALS = resolve(ROOT, 'lib', 'fundamentals');
     const offenders: string[] = [];
     walk(ROOT)
-      .filter((file) => file.indexOf(`${DISCOVERY}/`) !== 0)
+      .filter((file) => file.indexOf(`${DISCOVERY}/`) !== 0 && file.indexOf(`${FUNDAMENTALS}/`) !== 0)
       .forEach((file) => {
         importSpecifiers(readFileSync(file, 'utf8')).forEach((specifier) => {
           if (/(^|\/)lib\/discovery(\/|$)/.test(specifier)) offenders.push(`${relative(ROOT, file)} -> ${specifier}`);

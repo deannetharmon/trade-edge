@@ -87,3 +87,9 @@ export function epochDayOfIso(iso: string): number | null {
   const ms = Date.parse(iso);
   return Number.isFinite(ms) ? Math.floor(ms / 1000 / SECONDS_PER_DAY) : null;
 }
+
+/** YYYY-MM-DD for an epoch day. */
+export function dateStringFromEpochDay(day: number): string {
+  const civil = civilFromDays(day);
+  return `${pad(civil.year, 4)}-${pad(civil.month, 2)}-${pad(civil.day, 2)}`;
+}

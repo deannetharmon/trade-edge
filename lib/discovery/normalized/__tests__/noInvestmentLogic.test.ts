@@ -9,11 +9,15 @@ import { join, resolve } from 'path';
 import { describe, expect, it } from 'vitest';
 
 const DIR = resolve(__dirname, '..');
-const files = readdirSync(DIR).filter((name) => /\.ts$/.test(name));
+// Gate 2b: the guard also covers lib/discovery/normalized/sec/ (paths relative to DIR).
+const files = [
+  ...readdirSync(DIR).filter((name) => /\.ts$/.test(name)),
+  ...readdirSync(join(DIR, 'sec')).filter((name) => /\.ts$/.test(name)).map((name) => `sec/${name}`),
+];
 
 describe('normalized data layer carries no investment logic', () => {
   it('finds its source files', () => {
-    expect(files.length).toBeGreaterThanOrEqual(6);
+    expect(files.length).toBeGreaterThanOrEqual(14);
   });
 
   it('has no threshold, scoring, qualification or Gate 3 state vocabulary in code or strings', () => {
