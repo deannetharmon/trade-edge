@@ -88,9 +88,12 @@ describe('discovery framework isolation', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('contains no Quality Value thresholds or scoring (Gate 1 is architecture only)', () => {
+  it('contains no Quality Value thresholds or scoring in the framework core', () => {
+    // Gate 2 deviation (reported): lib/discovery/normalized/ is the DATA layer and legitimately names metrics
+    // (rsi, roic, delta, ...). The vocabulary guard keeps covering every framework-core file; the data layer is
+    // guarded by its own test (normalized/__tests__/noInvestmentLogic.test.ts) against thresholds and scoring.
     const offenders: string[] = [];
-    sourceFiles.forEach((file) => {
+    sourceFiles.filter((file) => file.indexOf(`${DISCOVERY}/normalized/`) !== 0).forEach((file) => {
       readFileSync(file, 'utf8')
         .split('\n')
         .forEach((line, index) => {

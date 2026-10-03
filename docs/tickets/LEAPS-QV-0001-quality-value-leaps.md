@@ -5,7 +5,7 @@
 **Strategy:** Quality Value LEAPS  
 **Initial Strategy Version:** QV-v1.0  
 **Status:** APPROVED — IMPLEMENTATION AUTHORIZED  
-**Current Gate:** Gate 1 — Discovery Framework Foundation  
+**Current Gate:** Gate 2 — Normalized Metrics & Data Audit  
 **Current Gate Status:** AUTHORIZED  
 **Implementation Agent:** Claude Code  
 **Facilitator:** Frank  
@@ -401,7 +401,7 @@ Then: **STOP. Do not begin the next gate.**
 # 41. Implementation Gates
 
 ## GATE 1 — Discovery Framework Foundation
-**Status: AUTHORIZED**
+**Status: APPROVED (Quinn, final commit 729124f78b48336c9ba9f4694a2af036827006b5)**
 
 Objective: establish architecture without QV investment logic.
 
@@ -423,7 +423,7 @@ Do not implement QV thresholds/scoring, valuation calculations, technical/fundam
 **Exit review: Quinn** — architecture, isolation, testability, versioning, state/snapshot model, missing-data semantics, reason codes, regression risk. Gate 2 requires Quinn approval.
 
 ## GATE 2 — Normalized Metrics & Data Audit
-**Status: BLOCKED pending Gate 1 approval**
+**Status: AUTHORIZED**
 
 Implement/map quality, valuation, fundamental, technical, and existing options metrics. Classify each AVAILABLE / DERIVABLE / CONDITIONAL / UNAVAILABLE. Investigate analyst revisions and historical IV. No silent substitutes.
 
@@ -486,19 +486,24 @@ Required final checks: existing Find LEAPS unchanged; QV deterministic/reproduci
 - Paul + Ian Reconciliation: APPROVED
 - Frank Full Team Review: APPROVED
 - Implementation: AUTHORIZED
-- **Current Authorization: GATE 1 ONLY**
+- Gate 1 Exit Review — Quinn: APPROVED at 729124f78b48336c9ba9f4694a2af036827006b5 (after corrections B2, S1, B3)
+- **Current Authorization: GATE 2 ONLY**
 
 # 43. Execution Ledger
 
 ### Gate 1
-Status: AUTHORIZED  
-Implementation: Pending  
-Quinn Review: Pending  
-Approval: Pending  
-Commit: Pending
+Status: APPROVED  
+Final Implementation Commit: 729124f78b48336c9ba9f4694a2af036827006b5  
+Quinn Architecture/Quality Review: APPROVED  
+GitHub CI: PASS  
+Vercel: PASS  
+Discovery Tests: 113 PASS  
+Existing LEAPS Regression Tests: 521 PASS
 
 ### Gate 2
-Status: BLOCKED — Awaiting Gate 1 approval
+Status: IMPLEMENTED — AWAITING EXIT REVIEW (Dane + Quinn; investment-significant data limitations to Ian)  
+Implementation: Complete (see docs/analysis/LEAPS-QV-0001-gate2-data-audit.md)  
+Commit: see Gate 2 Completion Report
 
 ### Gates 3–8
 Status: BLOCKED
@@ -507,17 +512,32 @@ Status: BLOCKED
 
 Read this entire document before making changes and inspect the existing TradeEdge implementation and repository conventions.
 
-You are authorized to execute **GATE 1 — DISCOVERY FRAMEWORK FOUNDATION ONLY**.
+You are authorized to execute **GATE 2 — NORMALIZED METRICS & DATA AUDIT ONLY**.
 
-Do not begin Gate 2. Do not implement QV investment rules. Do not alter existing Find LEAPS investment behavior.
+Gate 2 scope (Quinn Gate 1 final review, restating Section 41):
 
-When Gate 1 is complete:
+* inventory existing TradeEdge data capabilities before adding providers
+* map each required QV metric to actual data sources
+* classify each metric as AVAILABLE, DERIVABLE, CONDITIONAL, or UNAVAILABLE
+* implement normalized metric calculations only where supported by reliable data
+* explicitly investigate analyst-estimate/revision availability
+* explicitly investigate historical-IV availability
+* establish canonical/versioned definitions for derived metrics such as ROIC
+* preserve VALID / UNAVAILABLE / STALE / INVALID semantics
+* do not silently substitute proxy metrics
+* do not implement QV investment thresholds or scoring
+* do not implement Gate 3 classification logic
+* do not modify existing Find LEAPS investment behavior
+
+Do not begin Gate 3. Any investment-significant data limitation must be returned to Ian for investment-methodology review before Gate 3.
+
+When Gate 2 is complete:
 1. Run applicable unit tests.
 2. Run relevant existing regression tests.
 3. Review the complete diff.
 4. Produce the Gate Completion Report in Section 40.
-5. Commit Gate 1 if repository workflow permits.
+5. Commit and push per repository workflow (one consolidated push).
 6. Provide branch and commit SHA.
 7. **STOP.**
 
-The Gate 1 report must be reviewed before Gate 2 is authorized.
+The Gate 2 report must be reviewed (Dane + Quinn exit review) before Gate 3 is authorized.
