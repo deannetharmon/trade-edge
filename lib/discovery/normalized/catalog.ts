@@ -143,10 +143,10 @@ const METRIC_CATALOG_BASE: ReadonlyArray<Omit<CatalogEntry, 'implemented' | 'exp
   entry('peg_ratio', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11/13 PEG "where meaningful". Trailing vs forward growth basis is an Ian decision.'),
   entry('pe_ttm_median_3y', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 3Y median; needs historical fundamentals and prices.'),
   entry('pe_ttm_percentile_3y', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11-12 historical percentile (3Y window); window choice is an Ian decision.'),
-  entry('pe_ttm_discount_to_median_3y_pct', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 discount/premium to the historical regime (3Y).'),
-  entry('pe_ttm_discount_to_median_5y_pct', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 discount/premium to the historical regime (5Y).'),
+  entry('pe_ttm_discount_to_median_3y_pct', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 discount/premium to the historical regime (3Y). Sign: positive = discount (cheaper than median), negative = premium.'),
+  entry('pe_ttm_discount_to_median_5y_pct', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 discount/premium to the historical regime (5Y). Sign: positive = discount (cheaper than median), negative = premium.'),
   entry('ev_to_ebitda_median_5y', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 historical EV/EBITDA median.'),
-  entry('ev_to_ebitda_discount_to_median_5y_pct', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 discount/premium to historical EV/EBITDA.'),
+  entry('ev_to_ebitda_discount_to_median_5y_pct', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 discount/premium to historical EV/EBITDA. Sign: positive = discount (cheaper than median), negative = premium.'),
   entry('sector_classification', 'VALUATION', 'UNAVAILABLE', NONE, true, 'Section 11 "sector/company-appropriate treatment": no sector or industry data in TradeEdge.'),
   // Risk / event (Section 18)
   entry('corporate_event_flags', 'RISK', 'UNAVAILABLE', NONE, true, 'Section 18 regulatory events, litigation, binary and company-specific events: no source.'),

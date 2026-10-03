@@ -91,6 +91,14 @@ export function buildPeObservations(index: FactIndex, anchors: readonly Anchor[]
   return { observations, excluded };
 }
 
+/**
+ * Sign convention for every `*_discount_to_median_*_pct` metric (Ian, G2b-B1): positive = DISCOUNT (cheaper than the
+ * historical median), zero = at the median, negative = PREMIUM (more expensive). ((median - current) / median) x 100.
+ */
+export function discountToMedianPct(current: number, median: number): number {
+  return ((median - current) / median) * 100;
+}
+
 export const PE_HISTORY_METRIC_IDS: readonly string[] = [
   'pe_ttm_median_3y',
   'pe_ttm_median_5y',
@@ -178,7 +186,7 @@ export function buildPeHistoryMetrics(args: PeHistoryArgs): MetricSet {
     const ctx = { asOf, now, maxAgeMs: TECHNICAL_MAX_BAR_AGE_MS, provenance };
     out[medianId] = normalizeNumberMetric(medianId, med, ctx);
     out[percentileId] = normalizeNumberMetric(percentileId, (atOrBelow / sorted.length) * 100, ctx);
-    out[discountId] = normalizeNumberMetric(discountId, (current / med - 1) * 100, ctx);
+    out[discountId] = normalizeNumberMetric(discountId, discountToMedianPct(current, med), ctx);
   });
   return out;
 }

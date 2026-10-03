@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { validMetric } from '../../metrics';
 import { PE_HISTORY_METRIC_IDS, buildSecFundamentals, compactCompanyFacts } from '../sec';
+import { discountToMedianPct } from '../sec/valuationHistory';
 import type { SecFundamentalsResult } from '../sec';
 import { epochDayOfDateString } from '../dates';
 import type { DailyBar } from '../technicals';
@@ -62,10 +63,10 @@ describe('P/E history metrics', () => {
       const disc = (r.metrics[`pe_ttm_discount_to_median_${years}y_pct`] as { value: number }).value;
       expect(med).toBeCloseTo(expected.median, 6);
       expect(pct).toBeCloseTo(expected.percentile, 6);
-      expect(disc).toBeCloseTo((peNow / expected.median - 1) * 100, 6);
+      expect(disc).toBeCloseTo(((expected.median - peNow) / expected.median) * 100, 6);
     });
     // Earnings grew while the price was flat, so today's multiple is the cheapest in its own history.
-    expect((r.metrics.pe_ttm_discount_to_median_5y_pct as { value: number }).value).toBeLessThan(0);
+    expect((r.metrics.pe_ttm_discount_to_median_5y_pct as { value: number }).value).toBeGreaterThan(0); // cheaper than median = positive discount
   });
 
   it('only uses a period once it was public (no look-ahead to periods not yet filed)', () => {
@@ -111,5 +112,28 @@ describe('P/E history metrics', () => {
     const o = r.observations.find((x) => x.periodEnd === '2022-12-31')!;
     expect(o.epsTtm).toBeCloseTo(fy2022.val + 0.1, 9);
     expect(o.availableFrom).toBe(plusDays('2022-12-31', 45)); // first-published date, not the amendment date
+  });
+});
+
+describe('discount-to-median sign convention (G2b-B1): positive = discount, negative = premium', () => {
+  it('discount: current 20 vs median 25 is +20', () => expect(discountToMedianPct(20, 25)).toBeCloseTo(20, 9));
+  it('premium: current 30 vs median 25 is -20', () => expect(discountToMedianPct(30, 25)).toBeCloseTo(-20, 9));
+  it('at median: 0', () => expect(discountToMedianPct(25, 25)).toBe(0));
+  it('live AAPL pin: current above the median never yields a positive discount (38.2672 vs 34.3638 and 31.2508)', () => {
+    expect(discountToMedianPct(38.2672, 34.3638)).toBeCloseTo(-11.359, 2);
+    expect(discountToMedianPct(38.2672, 31.2508)).toBeCloseTo(-22.452, 2);
+    [[40, 30], [30.01, 30], [100, 1]].forEach(([cur, med]) => expect(discountToMedianPct(cur, med)).toBeLessThan(0));
+  });
+  it('the built metric is negative when today\'s P/E is above every historical P/E (price rose, EPS flat)', () => {
+    const raw = makeCompanyFacts();
+    const expensive = weekdayCloses('2019-01-01', '2026-10-02', 50);
+    const compacted = compactCompanyFacts(raw, '0001234567');
+    if (!compacted.ok) throw new Error('fixture rejected');
+    const r = buildSecFundamentals(compacted.compact, {
+      now: NOW, price: validMetric('price_last_close', 5000, '2026-10-02T00:00:00.000Z', { provider: 'y' }), closes: expensive, submissions: null,
+    });
+    const d = r.metrics.pe_ttm_discount_to_median_3y_pct;
+    expect(d.validity).toBe('VALID');
+    expect((d as { value: number }).value).toBeLessThan(0);
   });
 });
