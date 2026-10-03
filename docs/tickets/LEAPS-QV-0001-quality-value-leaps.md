@@ -539,11 +539,19 @@ Quinn Architecture/Quality Review: APPROVED
 Ian Investment/Data-Fitness Review: APPROVED  
 Docs: docs/analysis/LEAPS-QV-0001-gate2b-sec-fundamentals.md
 
+### Gate 2c
+Status: PROPOSED — NOT AUTHORIZED (specification only; no code)  
+Purpose: technical direction metrics (rsi_weekly_slope_1w, price_vs_sma50_gap_change_4w_pp, relative_return_126d_change_4w_pp), SPY benchmark/loader exposure/completed-bar enforcement, and fcf_annual_history_5y from the existing SEC annualSeries. Unblocks Gate 3 SETUP/ACTIONABLE in production.  
+Spec: docs/analysis/LEAPS-QV-0001-gate2c-technical-direction-and-fcf-history.md  
+Reviews required (none recorded): Ian, Alan, Quinn, Paul
+
 ### Gate 3
 Status: IMPLEMENTED — PENDING REVIEW (Quinn, Ian, Paul, Frank closure)  
 Docs: docs/analysis/LEAPS-QV-0001-gate3-underlying-strategy.md  
 Code: lib/discovery/qv/  
 Review round 1: CHANGES REQUIRED at e0398a9 — Technical State confluence (direction evidence), missing-trend semantics, assumptions review; corrections implemented, pending re-review. Open: Technical direction metrics (rsi_weekly_slope_1w, price_vs_sma50_gap_change_4w_pp, relative_return_126d_change_4w_pp) are not produced by the normalizer, so no candidate can reach SETUP/ACTIONABLE until they exist; Ian policy questions A1–A6, A8 (see Gate 3 doc); Gate 7 must pass previous state to the strategy. Ratification of A1–A8: NOT REVIEWED.  
+Review round 2 (baseline 76dee26): adverse Technical State confluence corrected (DECLINING needs 2+ independent bearish families; NOT_ESTABLISHED/OVERSOLD/unavailable kept distinct); Gate 2c amendment SPECIFIED, NOT AUTHORIZED: docs/analysis/LEAPS-QV-0001-gate2c-technical-direction-and-fcf-history.md; policy proposals for A1–A6, A8 with examples, NOT APPROVED: docs/analysis/LEAPS-QV-0001-gate3-policy-decisions.md.  
+PRODUCTION BLOCKER: no candidate can reach SETUP/UNDERLYING ACTIONABLE until Gate 2c (or equivalent) exists — direction metrics, SPY benchmark (the loader fetches none, so the relative-strength level is UNAVAILABLE in production), technical metrics returned by the loader, completed-bar enforcement. Taxonomy gap (NOT_ESTABLISHED) and strict relative-strength change vs acceleration await Ian. Reviews: none recorded for Gate 2c or A1–A8.  
 Gate 3 Tests: see Gate Completion Report for the final counts  
 TypeScript (tsconfig.check.json): PASS  
 GitHub CI / Vercel: see Gate Completion Report for the exact head  

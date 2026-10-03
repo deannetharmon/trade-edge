@@ -14,6 +14,15 @@
 // affected classification FAILS CLOSED (RECOVERING is not established; STABILIZING is not established, so the domain is
 // NOT_EVALUABLE unless known adverse evidence already classifies it DECLINING / OVERSOLD). Known adverse evidence stands.
 //
+// Evidence is kept in four distinct classes (review round 2), and an unsupported state is never forced:
+//   DECLINING        >= policy.technical.decliningMinBearishFamilies INDEPENDENT bearish indicator families are evidenced
+//                    (RSI momentum, SMA50 relationship, SMA200 trend, relative strength). One contradicting signal is not DECLINING.
+//   OVERSOLD         weekly RSI is unusually depressed and stabilization is not established, without multi-family deterioration.
+//   NOT_ESTABLISHED  the domain IS evaluable but the evidence supports none of the four states: stabilization is contradicted
+//                    by known evidence, yet deterioration is not multiply confirmed and the stock is not depressed. This is a
+//                    taxonomy gap in Section 45.8 (reported for Ian); it fails the SETUP/ACTIONABLE requirement and is not
+//                    INSUFFICIENT_DATA, because the evidence is present and unfavorable, not missing.
+//   NOT_EVALUABLE    required evidence is unavailable and nothing independently established decides a state.
 // OVERSOLD is a description of how depressed the stock is, not a buy signal: it never moves a candidate past WATCH.
 // Monthly RSI and the distance from the 52-week high are supporting evidence only (carried on the reason).
 
@@ -25,7 +34,7 @@ import { QV_V1_0_POLICY } from './policy';
 import { QV_REASON, qvReason } from './reasons';
 
 export type TechnicalState = 'DECLINING' | 'OVERSOLD' | 'STABILIZING' | 'RECOVERING';
-export type TechnicalResult = TechnicalState | 'NOT_EVALUABLE';
+export type TechnicalResult = TechnicalState | 'NOT_ESTABLISHED' | 'NOT_EVALUABLE';
 
 /** true / false = evidenced; null = the direction evidence is not available (never read as either). */
 export type Evidenced = boolean | null;
@@ -45,7 +54,12 @@ export interface TechnicalSignals {
   readonly priceBelowSma50: boolean;
   readonly belowFallingSma200: boolean;
   readonly relativeStrengthNegative: boolean;
-  readonly otherBearishCount: number;
+  /** Independent bearish families that are evidenced (each family counts once, however many of its readings are bearish). */
+  readonly rsiMomentumBearish: boolean;
+  readonly sma50Bearish: boolean;
+  readonly sma200Bearish: boolean;
+  readonly relativeStrengthBearish: boolean;
+  readonly bearishFamilyCount: number;
 }
 
 export interface TechnicalAssessment extends ComponentTrace {
@@ -58,7 +72,8 @@ export interface TechnicalAssessment extends ComponentTrace {
 const P = QV_V1_0_POLICY.technical;
 const IN = QV_V1_0_POLICY.inputs.technical;
 
-const STATE_CODE: Record<TechnicalState, string> = {
+const STATE_CODE: Record<TechnicalState | 'NOT_ESTABLISHED', string> = {
+  NOT_ESTABLISHED: QV_REASON.TECHNICAL_STATE_NOT_ESTABLISHED,
   DECLINING: QV_REASON.TECHNICAL_DECLINING,
   OVERSOLD: QV_REASON.TECHNICAL_OVERSOLD,
   STABILIZING: QV_REASON.TECHNICAL_STABILIZING,
@@ -69,17 +84,21 @@ function allTrue(values: readonly Evidenced[]): boolean {
   return values.every((value) => value === true);
 }
 
-/** The state the evidence establishes, or null when it does not establish one (a required direction is unavailable). */
-export function technicalStateOf(signals: TechnicalSignals): TechnicalState | null {
+/**
+ * The state the evidence establishes, 'NOT_ESTABLISHED' when the evidence is present but supports none of the four states, or
+ * null when required evidence is unavailable and nothing independently established decides a state.
+ */
+export function technicalStateOf(signals: TechnicalSignals): TechnicalState | 'NOT_ESTABLISHED' | null {
   if (allTrue([signals.weeklyRsiSlopePositive, signals.rsiChange4wPositive, signals.smaGapImproving, signals.relativeStrengthImproving])) return 'RECOVERING';
   const core: Evidenced[] = [signals.weeklyRsiSlopeNonNegative, signals.rsiChange4wNonNegative, signals.relativeStrengthNotWorsening];
   if (allTrue(core)) return 'STABILIZING';
-  // Stabilization is contradicted by known evidence: DECLINING, or OVERSOLD when depressed with no other bearish confirmation.
-  if (core.indexOf(false) >= 0) {
-    if (signals.otherBearishCount < P.decliningMinOtherBearish && signals.weeklyRsiDepressed) return 'OVERSOLD';
-    return 'DECLINING';
-  }
-  // Nothing contradicts stabilization, but part of it cannot be evidenced: not established, fail closed.
+  // Independently established adverse evidence stands even when other inputs are unavailable.
+  if (signals.bearishFamilyCount >= P.decliningMinBearishFamilies) return 'DECLINING';
+  // Depressed and not stabilized (contradicted OR not evidenced). OVERSOLD is never constructive: it cannot pass WATCH.
+  if (signals.weeklyRsiDepressed) return 'OVERSOLD';
+  // One contradicting signal and nothing else adverse: evaluable, but no state is supported. Do not force one.
+  if (core.indexOf(false) >= 0) return 'NOT_ESTABLISHED';
+  // Nothing contradicts stabilization, but part of it cannot be evidenced: fail closed.
   return null;
 }
 
@@ -113,6 +132,9 @@ export function assessTechnical(set: MetricSet): TechnicalAssessment {
   const belowFallingSma200 = (price.value as number) < (sma200.value as number) && (sma200Trend.value as number) < 0;
   const relativeStrengthNegative = (relative.value as number) < 0;
   const relativeWorsening = relativeChange.value !== null && relativeChange.value < 0;
+  const rsiMomentumBearish = (slope.value !== null && slope.value < 0) || (rsiChange.value as number) < 0;
+  const sma50Bearish = belowSma50 || (gapChange.value !== null && gapChange.value < 0);
+  const relativeStrengthBearish = relativeStrengthNegative || relativeWorsening;
   const signals: TechnicalSignals = {
     weeklyRsiSlopeNonNegative: tri(slope, (v) => v >= 0),
     rsiChange4wNonNegative: (rsiChange.value as number) >= 0,
@@ -125,7 +147,11 @@ export function assessTechnical(set: MetricSet): TechnicalAssessment {
     priceBelowSma50: belowSma50,
     belowFallingSma200,
     relativeStrengthNegative,
-    otherBearishCount: [belowSma50, belowFallingSma200, relativeStrengthNegative, relativeWorsening].filter(Boolean).length,
+    rsiMomentumBearish,
+    sma50Bearish,
+    sma200Bearish: belowFallingSma200,
+    relativeStrengthBearish,
+    bearishFamilyCount: [rsiMomentumBearish, sma50Bearish, belowFallingSma200, relativeStrengthBearish].filter(Boolean).length,
   };
   const state = technicalStateOf(signals);
 
@@ -149,7 +175,12 @@ export function assessTechnical(set: MetricSet): TechnicalAssessment {
         relativeStrengthNotWorsening: signals.relativeStrengthNotWorsening,
         smaGapImproving: signals.smaGapImproving,
         weeklyRsiDepressed: signals.weeklyRsiDepressed,
-        otherBearishCount: signals.otherBearishCount,
+        bearishFamilyCount: signals.bearishFamilyCount,
+        rsiMomentumBearish: signals.rsiMomentumBearish,
+        sma50Bearish: signals.sma50Bearish,
+        sma200Bearish: signals.sma200Bearish,
+        relativeStrengthBearish: signals.relativeStrengthBearish,
+        decliningMinBearishFamilies: P.decliningMinBearishFamilies,
         weeklyRsiDepressedMax: P.weeklyRsiDepressedMax,
       },
     ),

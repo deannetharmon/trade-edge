@@ -15,7 +15,7 @@ const QV_DIR = resolve(__dirname, '..');
 const CLASSIFIERS = ['fcf.ts', 'quality.ts', 'valuation.ts', 'fundamentals.ts', 'technical.ts', 'risk.ts', 'strategy.ts'];
 
 // Pin: any change to a threshold or input contract changes this value and must be a deliberate, versioned decision.
-const POLICY_FINGERPRINT = 'aa264fcb8eb19bb6733af9faa62711b351b0d8ef7c5958afb02949c2a2fe8a97';
+const POLICY_FINGERPRINT = '19cb810ab46f4766369067a4233cbc073abff5294a0771bd257b5fc60cd82f98';
 
 describe('QV-v1.0 policy', () => {
   it('is frozen and fingerprint-pinned', () => {

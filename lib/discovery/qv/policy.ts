@@ -76,8 +76,10 @@ export const QV_V1_0_POLICY = deepFreeze({
   technical: {
     // ASSUMPTION A5: weekly RSI at or below this level is "unusually depressed" (the conventional oversold line)
     weeklyRsiDepressedMax: 30,
-    // ASSUMPTION A5: DECLINING needs the falling weekly RSI plus at least this many OTHER bearish trend indicators
-    decliningMinOtherBearish: 1,
+    // ASSUMPTION A5: DECLINING needs at least this many INDEPENDENT bearish indicator families (Section 45.8 "multiple trend
+    // indicators"). Families: RSI momentum, SMA50 relationship, SMA200 trend, relative strength. Two RSI-derived readings
+    // (slope, 4-week change) are one family, not two confirmations.
+    decliningMinBearishFamilies: 2,
   },
 
   // ---- 45.9 Risk ----------------------------------------------------------------------------------------------
@@ -212,10 +214,10 @@ export const QV_V1_0_ASSUMPTIONS: readonly QvAssumption[] = deepFreeze([
     area: 'Technical-state confluence',
     specGap: 'Section 45.8 states the confluence requirements; "no longer accelerating", "unusually depressed" and "multiple" have no numeric definition.',
     reading:
-      'STABILIZING = weekly RSI slope not negative AND 4-week RSI change non-negative AND relative-strength change not negative (deterioration no longer accelerating). RECOVERING = weekly RSI slope positive AND 4-week change positive AND price-vs-SMA50 gap improving AND relative-strength change positive (SPEC list). Levels are never read as directions. The slope, SMA50-gap change and relative-strength change are not produced by the normalizer today: they are UNAVAILABLE and the affected state fails closed. Known contradicting evidence classifies DECLINING, or OVERSOLD when weekly RSI is at or below the depressed line with no other bearish confirmation.',
+      'STABILIZING = weekly RSI slope not negative AND 4-week RSI change non-negative AND relative-strength change not negative (deterioration no longer accelerating). RECOVERING = weekly RSI slope positive AND 4-week change positive AND price-vs-SMA50 gap improving AND relative-strength change positive (SPEC list). Levels are never read as directions. The slope, SMA50-gap change and relative-strength change are not produced by the normalizer today: they are UNAVAILABLE and the affected state fails closed. DECLINING needs at least two independent bearish indicator families (RSI momentum, SMA50 relationship, SMA200 trend, relative strength). OVERSOLD = weekly RSI at or below the depressed line and stabilization not established, without multi-family deterioration. One contradicting signal with no multi-family deterioration and no depressed RSI is NOT_ESTABLISHED (evaluable, requirement unmet, WATCH): a Section 45.8 taxonomy gap, not forced into a state. Unavailable direction evidence with nothing independently established is NOT_EVALUABLE.',
     basis: 'POLICY',
     policyQuestion:
-      'DIRECT: the STABILIZING/RECOVERING indicator lists. POLICY: how a single 4-week relative-strength change expresses "no longer accelerating" (here: >= 0); the OVERSOLD line (weekly RSI <= 30); how many bearish confirmations make DECLINING; the definitions of the three missing direction metrics (lookbacks).',
+      'DIRECT: the STABILIZING/RECOVERING indicator lists. POLICY: how a single 4-week relative-strength change expresses "no longer accelerating" (here: >= 0); the OVERSOLD line (weekly RSI <= 30); two independent bearish families make DECLINING; the NOT_ESTABLISHED taxonomy gap; the definitions of the three missing direction metrics (lookbacks).',
     ratification: 'NOT_REVIEWED',
   },
   {

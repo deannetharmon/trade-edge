@@ -34,7 +34,7 @@ describe('Technical State confluence (Section 45.8)', () => {
   });
 
   it('a positive relative-strength LEVEL does not prove improving direction', () => {
-    expect(tech({ relativeStrength: 40, relativeStrengthChange: -1 }).result).toBe('DECLINING'); // level high, direction worsening
+    expect(tech({ relativeStrength: 40, relativeStrengthChange: -1 }).result).toBe('NOT_ESTABLISHED'); // level high, direction worsening: not stabilizing, one family only
     expect(tech({ relativeStrength: 40, relativeStrengthChange: 0 }).result).toBe('STABILIZING'); // not worsening, but not improving
     expect(tech({ relativeStrength: 40, relativeStrengthChange: null }).result).toBe('NOT_EVALUABLE'); // level alone proves nothing
   });
@@ -75,12 +75,14 @@ describe('Technical State confluence (Section 45.8)', () => {
     const base = {
       weeklyRsiSlopeNonNegative: true, rsiChange4wNonNegative: true, relativeStrengthNotWorsening: true,
       weeklyRsiSlopePositive: true, rsiChange4wPositive: true, smaGapImproving: true, relativeStrengthImproving: true,
-      weeklyRsiDepressed: false, priceBelowSma50: false, belowFallingSma200: false, relativeStrengthNegative: false, otherBearishCount: 0,
+      weeklyRsiDepressed: false, priceBelowSma50: false, belowFallingSma200: false, relativeStrengthNegative: false,
+      rsiMomentumBearish: false, sma50Bearish: false, sma200Bearish: false, relativeStrengthBearish: false, bearishFamilyCount: 0,
     };
     expect(technicalStateOf(base)).toBe('RECOVERING');
     expect(technicalStateOf({ ...base, smaGapImproving: null })).toBe('STABILIZING');
     expect(technicalStateOf({ ...base, weeklyRsiSlopeNonNegative: null, weeklyRsiSlopePositive: null })).toBeNull();
-    expect(technicalStateOf({ ...base, weeklyRsiSlopeNonNegative: false, weeklyRsiSlopePositive: false })).toBe('DECLINING');
+    expect(technicalStateOf({ ...base, weeklyRsiSlopeNonNegative: false, weeklyRsiSlopePositive: false })).toBe('NOT_ESTABLISHED'); // one contradiction is not DECLINING
+    expect(technicalStateOf({ ...base, weeklyRsiSlopeNonNegative: false, weeklyRsiSlopePositive: false, bearishFamilyCount: 2 })).toBe('DECLINING');
   });
 
   it('existing legitimate cases still qualify with sufficient evidence', () => {
@@ -119,5 +121,55 @@ describe('missing fundamental-trend semantics', () => {
   it('a missing EPS trend does not hide independently supported adverse EPS evidence', () => {
     const fundamentals = assessFundamentals(metricsWith({ epsTrend: null, epsGrowth: -8 }));
     expect(fundamentals.dimensions.find((d) => d.dimension === 'EPS')?.state).toBe('DETERIORATING');
+  });
+});
+
+describe('adverse confluence taxonomy (Section 45.8, review round 2)', () => {
+  const notEstablished = (overrides: Parameters<typeof metricsWith>[0]) => {
+    const assessment = tech(overrides);
+    expect(assessment.result).toBe('NOT_ESTABLISHED');
+    const evaluation = evaluate(overrides);
+    expect(stateOf(evaluation)).toBe('WATCH'); // evaluable and unfavorable: not INSUFFICIENT_DATA, not forced into DECLINING
+    expect(codesOf(evaluation)).toContain('TECHNICAL_STATE_NOT_ESTABLISHED');
+    expect(codesOf(evaluation)).not.toContain('TECHNICAL_DECLINING');
+    expect(evaluation.gateOutcomes.find((g) => g.gateId === 'qv_technical_state')?.result).toBe('FAIL');
+  };
+
+  it('ONE contradicting signal with otherwise favorable evidence is not DECLINING (and is not forced to any state)', () => {
+    notEstablished({ weeklyRsiSlope: -1 });
+    notEstablished({ weeklyRsiChange: -1 });
+    notEstablished({ relativeStrengthChange: -1 });
+    notEstablished({ weeklyRsiSlope: -1, weeklyRsiChange: -2 }); // two RSI-derived readings are ONE family
+    notEstablished({ relativeStrength: -4, relativeStrengthChange: -1 }); // two relative-strength readings are ONE family
+  });
+
+  it('multiple INDEPENDENT bearish families establish DECLINING', () => {
+    expect(tech({ weeklyRsiSlope: -1, price: 80 }).result).toBe('DECLINING'); // RSI + SMA50
+    expect(tech({ relativeStrengthChange: -1, price: 85, sma50: 80, sma200: 90, sma200Trend: -1 }).result).toBe('DECLINING'); // RS + SMA200
+    expect(tech({ weeklyRsiChange: -2, relativeStrength: -3 }).result).toBe('DECLINING'); // RSI + RS
+    expect(tech({ weeklyRsiSlope: -1, price: 80 }).signals?.bearishFamilyCount).toBeGreaterThanOrEqual(2);
+    expect(stateOf(evaluate({ weeklyRsiSlope: -1, price: 80 }))).toBe('WATCH');
+  });
+
+  it('OVERSOLD: depressed and not stabilized without multi-family deterioration; DECLINING takes precedence when both hold', () => {
+    expect(tech({ weeklyRsi: 25, weeklyRsiChange: -2, weeklyRsiSlope: -1, relativeStrengthChange: 0 }).result).toBe('OVERSOLD');
+    expect(tech({ weeklyRsi: 25, weeklyRsiChange: -2, weeklyRsiSlope: -1, price: 80 }).result).toBe('DECLINING');
+    expect(tech({ weeklyRsi: 30, weeklyRsiSlope: -1 }).result).toBe('OVERSOLD'); // 30 is the depressed line (inclusive)
+    expect(tech({ weeklyRsi: 30.01, weeklyRsiSlope: -1 }).result).toBe('NOT_ESTABLISHED');
+  });
+
+  it('stabilized evidence is never overridden by depressed levels or level-type bearish readings', () => {
+    expect(tech({ weeklyRsi: 20, weeklyRsiSlope: 0, price: 80 }).result).toBe('STABILIZING');
+  });
+
+  it('independently established adverse evidence stays visible when other inputs are unavailable', () => {
+    expect(tech({ weeklyRsiChange: -3, price: 80, weeklyRsiSlope: null, relativeStrengthChange: null }).result).toBe('DECLINING');
+    expect(tech({ weeklyRsi: 25, weeklyRsiChange: -3, weeklyRsiSlope: null, relativeStrengthChange: null }).result).toBe('OVERSOLD');
+    expect(tech({ weeklyRsiChange: -3, weeklyRsiSlope: null, relativeStrengthChange: null }).result).toBe('NOT_ESTABLISHED');
+  });
+
+  it('unavailable evidence with no contradiction and no independent adverse evidence is NOT_EVALUABLE (INSUFFICIENT_DATA), distinct from unfavorable', () => {
+    expect(tech({ weeklyRsiSlope: null }).result).toBe('NOT_EVALUABLE');
+    expect(stateOf(evaluate({ weeklyRsiSlope: null }))).toBe('INSUFFICIENT_DATA');
   });
 });
