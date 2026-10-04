@@ -56,7 +56,8 @@ export async function handleFundamentalsRequest(rawSymbol: string | null, deps: 
   const evaluatedAt = deps.nowIso();
   const stock = price.closes ? dropFormingBars(price.closes, evaluatedAt) : null;
   const bench = benchmarkSource.closes ? dropFormingBars(benchmarkSource.closes, evaluatedAt) : null;
-  const calendarIssue = (stock && stock.status !== 'OK') || (bench && bench.status !== 'OK') ? 'SESSION_CALENDAR_UNAVAILABLE' : null;
+  const calendarIssue = stock && stock.status !== 'OK' ? 'SESSION_CALENDAR_UNAVAILABLE' : null;
+  const benchmarkCalendarIssue = bench && bench.status !== 'OK' ? 'SESSION_CALENDAR_UNAVAILABLE' : null;
   const loaded = await loadSecFundamentals(symbol, {
     client: deps.client,
     closes: stock ? stock.bars : null,
@@ -66,6 +67,7 @@ export async function handleFundamentalsRequest(rawSymbol: string | null, deps: 
     benchmarkIssue: benchmarkSource.closes ? null : `BENCHMARK_${benchmarkSource.issue || 'NO_DATA'}`,
     benchmarkBasis: benchmarkSource.basis,
     calendarIssue,
+    benchmarkCalendarIssue,
     nowIso: deps.nowIso,
   });
   // A provider failure is visible as a 502; "not covered" is a normal 200 with every metric UNAVAILABLE.

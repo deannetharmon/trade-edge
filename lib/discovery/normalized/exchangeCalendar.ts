@@ -157,6 +157,14 @@ export function latestCompletedSession(nowEpochSeconds: number): number | null {
   return null;
 }
 
+/** True only when EVERY bar falls on a calendar-valid session day (no holiday, weekend, special closure or out-of-range date). */
+export function seriesOnSessionDays(bars: readonly { readonly t: number }[]): boolean {
+  for (let i = 0; i < bars.length; i += 1) {
+    if (!Number.isFinite(bars[i].t) || sessionCloseEpochSeconds(epochDay(bars[i].t)) === null) return false;
+  }
+  return true;
+}
+
 export type SessionStatus = 'OK' | 'CALENDAR_UNAVAILABLE';
 
 export interface CompletedBars<T extends { readonly t: number }> {
@@ -168,12 +176,15 @@ export interface CompletedBars<T extends { readonly t: number }> {
 
 /**
  * Removes the still-forming trailing bar(s): a bar is completed only when the exchange-calendar close of its session is at or
- * before `nowIso`. When the calendar cannot decide (date outside the supported range, or a bar on a day the calendar says the
+ * before `nowIso`. When the calendar cannot decide (ANY bar outside the supported range, or on a day the calendar says the
  * exchange was closed), nothing is guessed: the bars come back unchanged with status CALENDAR_UNAVAILABLE.
  */
 export function dropFormingBars<T extends { readonly t: number }>(bars: readonly T[], nowIso: string): CompletedBars<T> {
   const nowMs = Date.parse(nowIso);
   if (!Number.isFinite(nowMs)) return { bars, status: 'CALENDAR_UNAVAILABLE', dropped: 0 };
+  // The WHOLE series is validated first: an interior holiday / weekend / out-of-range bar is a calendar contradiction that fails
+  // closed (bars returned untouched, never silently removed or repaired), even when the latest bars are valid.
+  if (!seriesOnSessionDays(bars)) return { bars, status: 'CALENDAR_UNAVAILABLE', dropped: 0 };
   const nowSeconds = nowMs / 1000;
   let end = bars.length;
   while (end > 0) {

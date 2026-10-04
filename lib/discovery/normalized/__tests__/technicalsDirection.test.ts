@@ -54,11 +54,26 @@ describe('rsi_weekly_slope_1w', () => {
     expect(few.reason).toBe('INSUFFICIENT_HISTORY');
   });
 
-  it('weekly observation semantics: on the Saturday the forming-week rule drops nothing extra only once the week is complete', () => {
-    // On Saturday 2026-10-03 the week containing Friday 2026-10-02 is still the current calendar week -> dropped by the existing weekly rule,
-    // leaving 15 completed weekly closes -> the slope cannot be computed yet (conservative, spec 6.3).
+  it('weekly observation semantics: with exactly 16 weekly closes the current week is excluded on a Saturday', () => {
+    // On Saturday 2026-10-03 the week containing Friday 2026-10-02 is the current calendar week -> excluded by the existing weekly rule,
+    // leaving 15 earlier completed weekly closes -> not enough for the slope (the rule itself is unchanged).
     const m = metric(buildTechnicalMetrics(weekly(W16), ctx), 'rsi_weekly_slope_1w');
     expect(m.validity).toBe('UNAVAILABLE');
+  });
+
+  it('Saturday / Sunday: the current week is excluded until Monday, the slope is still available from 16 EARLIER completed weekly closes', () => {
+    const w17 = [...W16, 45.9]; // 17th (current-week) close must not matter on the weekend
+    const expected = -4.214516467541998; // slope of the 16 earlier weeks (W16)
+    ['2026-10-03T14:00:00.000Z', '2026-10-04T14:00:00.000Z'].forEach((now) => {
+      const set = buildTechnicalMetrics(weekly(w17), { ...ctx, now }) as Record<string, any>;
+      expect(set.rsi_weekly_slope_1w.validity, now).toBe('VALID');
+      expect(set.rsi_weekly_slope_1w.value).toBeCloseTo(expected, 10);
+    });
+    // On Monday the 17th week is complete and becomes the latest observation: a different slope.
+    const monday = buildTechnicalMetrics(weekly(w17), { ...ctx, now: MON }) as Record<string, any>;
+    expect(monday.rsi_weekly_slope_1w.value).not.toBeCloseTo(expected, 6);
+    // Only 15 earlier completed weeks (16 total including the current week) -> UNAVAILABLE on the weekend.
+    expect(metric(buildTechnicalMetrics(weekly(W16), ctx), 'rsi_weekly_slope_1w').validity).toBe('UNAVAILABLE');
   });
 
   it('is deterministic', () => {
@@ -222,5 +237,55 @@ describe('completed-session guard and freshness (all three direction metrics)', 
   it('no price history -> every direction metric UNAVAILABLE NO_PRICE_HISTORY', () => {
     const set = buildTechnicalMetrics([], ctx, b);
     ids.forEach((id) => expect(set[id], id).toMatchObject({ validity: 'UNAVAILABLE', reason: 'NO_PRICE_HISTORY' }));
+  });
+});
+
+describe('whole-series calendar validation inside the metric layer (stock and benchmark isolated)', () => {
+  const f = (i: number): number => 100 + (i % 9);
+  const holidayBar = (bars: DailyBar[], index: number): DailyBar[] => {
+    // replace one INTERIOR bar's timestamp with a calendar-closed day that keeps the series strictly ascending
+    const t = bars[index].t;
+    const closedDay = epochDayOf(t) - 1;
+    return bars.map((bar, i) => (i === index ? { ...bar, t: closedDay * 86400 + OPEN } : bar));
+  };
+  const epochDayOf = (t: number): number => Math.floor(t / 86400);
+  const s = sessions(160, f);
+  const b = sessions(160, f);
+  // find an interior index whose previous calendar day is a weekend/holiday and the bar before it is older than that day
+  const interior = (() => {
+    for (let i = 5; i < 150; i += 1) {
+      const prevDay = epochDayOf(s[i].t) - 1;
+      if (isSessionDay(prevDay) === false && epochDayOf(s[i - 1].t) < prevDay) return i;
+    }
+    return -1;
+  })();
+
+  it('fixture sanity: an interior bar can be moved onto a closed day', () => expect(interior).toBeGreaterThan(0));
+
+  it('stock series with an interior closed-day bar and a valid latest session -> all three direction metrics UNAVAILABLE', () => {
+    const set = buildTechnicalMetrics(holidayBar(s, interior), ctx, b);
+    DIRECTION_METRIC_IDS.forEach((id) => expect(set[id], id).toMatchObject({ validity: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' }));
+  });
+
+  it('stock series with an interior out-of-range bar -> all three UNAVAILABLE', () => {
+    const early = [{ t: daysFromCivil(2006, 6, 1) * 86400 + OPEN, c: 100 }, ...s.slice(1)];
+    const set = buildTechnicalMetrics(early, ctx, b);
+    DIRECTION_METRIC_IDS.forEach((id) => expect(set[id], id).toMatchObject({ validity: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' }));
+  });
+
+  it('valid stock history with a calendar-invalid benchmark: ONLY the relative-strength change is UNAVAILABLE; stock-only metrics stay VALID', () => {
+    const set = buildTechnicalMetrics(s, ctx, holidayBar(b, interior)) as Record<string, any>;
+    expect(set.relative_return_126d_change_4w_pp).toMatchObject({ validity: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' });
+    expect(set.price_vs_sma50_gap_change_4w_pp.validity).toBe('VALID');
+    expect(set.sma_50.validity).toBe('VALID');
+    expect(set.rsi_daily_14.validity).toBe('VALID');
+  });
+
+  it('the fetch-boundary flags make the result stricter even when the series itself looks clean', () => {
+    const stockFlag = buildTechnicalMetrics(s, { ...ctx, calendarUnavailable: true }, b);
+    DIRECTION_METRIC_IDS.forEach((id) => expect(stockFlag[id], id).toMatchObject({ validity: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' }));
+    const benchFlag = buildTechnicalMetrics(s, { ...ctx, benchmarkCalendarUnavailable: true }, b) as Record<string, any>;
+    expect(benchFlag.relative_return_126d_change_4w_pp.reason).toBe('SESSION_CALENDAR_UNAVAILABLE');
+    expect(benchFlag.price_vs_sma50_gap_change_4w_pp.validity).toBe('VALID');
   });
 });

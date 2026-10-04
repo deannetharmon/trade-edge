@@ -12,6 +12,7 @@ import {
   isEarlyClose,
   isSessionDay,
   latestCompletedSession,
+  seriesOnSessionDays,
   newYorkUtcOffsetSeconds,
   sessionCloseEpochSeconds,
 } from '..';
@@ -139,6 +140,26 @@ describe('dropFormingBars', () => {
 
   it('drops a bar dated after "now" (clock skew) rather than trusting it', () => {
     expect(dropFormingBars([bar(2026, 10, 1), bar(2026, 10, 2)], '2026-10-01T22:00:00Z').bars).toHaveLength(1);
+  });
+
+  it('validates the WHOLE series: an interior holiday / weekend / out-of-range bar fails closed even when the latest bars are valid', () => {
+    const valid = [bar(2026, 9, 29), bar(2026, 9, 30), bar(2026, 10, 1), bar(2026, 10, 2)];
+    const now = '2026-10-03T14:00:00Z';
+    expect(dropFormingBars(valid, now).status).toBe('OK');
+    const withHoliday = [bar(2026, 9, 4), bar(2026, 9, 7), ...valid]; // Labor Day inside the series
+    const withWeekend = [bar(2026, 9, 25), bar(2026, 9, 26), ...valid]; // Saturday inside the series
+    const withOutOfRange = [{ t: day(2006, 12, 29) * 86400 + 13 * 3600, c: 100 }, ...valid]; // first bar before 2007
+    const withFarFuture = [...valid.slice(0, 2), { t: day(2041, 1, 2) * 86400 + 13 * 3600, c: 100 }]; // after the supported range
+    [withHoliday, withWeekend, withOutOfRange, withFarFuture].forEach((series) => {
+      const result = dropFormingBars(series, now);
+      expect(result.status).toBe('CALENDAR_UNAVAILABLE');
+      expect(result.dropped).toBe(0);
+      expect(result.bars).toBe(series); // untouched: never removed or repaired
+    });
+    expect(seriesOnSessionDays(valid)).toBe(true);
+    expect(seriesOnSessionDays(withHoliday)).toBe(false);
+    expect(seriesOnSessionDays(withWeekend)).toBe(false);
+    expect(seriesOnSessionDays(withOutOfRange)).toBe(false);
   });
 
   it('never guesses: an unknown calendar day or an unparseable instant returns the bars untouched, flagged unavailable', () => {

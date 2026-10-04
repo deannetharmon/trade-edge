@@ -30,6 +30,7 @@ export interface LoadedFundamentals {
   /** Gate 2c: why the SPY benchmark was not usable (null when it was) and whether the exchange calendar could not decide. */
   readonly benchmarkIssue: string | null;
   readonly calendarIssue: string | null;
+  readonly benchmarkCalendarIssue: string | null;
   /**
    * Gate 2c: Yahoo-derived technical metrics (always present, independent of SEC coverage): built from completed bars only.
    * An unusable stock history makes every one UNAVAILABLE; an unusable SPY history only the benchmark-derived ones.
@@ -55,6 +56,8 @@ function technicalsOf(deps: LoadDeps, now: string): MetricSet {
       priceBasis: deps.priceBasis,
       benchmarkBasis: deps.benchmarkBasis,
       benchmarkUnavailableReason: deps.benchmarkIssue || null,
+      calendarUnavailable: !!deps.calendarIssue,
+      benchmarkCalendarUnavailable: !!deps.benchmarkCalendarIssue,
     },
     deps.benchmark || null,
   );
@@ -75,6 +78,7 @@ function failure(symbol: string, cik: string | null, coverage: Coverage, reason:
     priceIssue,
     benchmarkIssue: deps.benchmarkIssue || null,
     calendarIssue: deps.calendarIssue || null,
+    benchmarkCalendarIssue: deps.benchmarkCalendarIssue || null,
     technicals: technicalsOf(deps, deps.nowIso()),
   };
 }
@@ -90,6 +94,7 @@ export interface LoadDeps {
   readonly benchmarkBasis?: string;
   readonly benchmarkIssue?: string | null;
   readonly calendarIssue?: string | null;
+  readonly benchmarkCalendarIssue?: string | null;
   /** Evaluation clock (ISO-8601). Read AFTER all I/O so no fetched timestamp can be later than "now". */
   readonly nowIso: () => string;
 }
@@ -131,6 +136,7 @@ export async function loadSecFundamentals(rawSymbol: string, deps: LoadDeps): Pr
       priceIssue: deps.priceIssue,
       benchmarkIssue: deps.benchmarkIssue || null,
       calendarIssue: deps.calendarIssue || null,
+    benchmarkCalendarIssue: deps.benchmarkCalendarIssue || null,
       technicals,
     };
   } catch (err) {

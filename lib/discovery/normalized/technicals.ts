@@ -15,7 +15,7 @@
 import { invalidMetric, normalizeNumberMetric, unavailableMetric } from '../metrics';
 import type { MetricSet, NormalizedMetric } from '../metrics';
 import { epochDay, epochDayOfIso, isoFromEpochSeconds, mondayOfEpochDay, monthIndexOfEpochDay } from './dates';
-import { latestCompletedSession, sessionCloseEpochSeconds } from './exchangeCalendar';
+import { latestCompletedSession, seriesOnSessionDays, sessionCloseEpochSeconds } from './exchangeCalendar';
 
 export interface DailyBar {
   /** Unix SECONDS of the session open. */
@@ -129,6 +129,13 @@ export interface TechnicalContext {
   readonly benchmarkBasis?: string;
   /** Gate 2c: why no benchmark series is available (e.g. a failed SPY fetch); reported as the UNAVAILABLE reason. */
   readonly benchmarkUnavailableReason?: string | null;
+  /**
+   * Gate 2c: calendar verdicts computed at the fetch boundary. The builder also validates the whole of each series itself, so these
+   * can only make the result stricter. Stock calendar failure -> all three direction metrics UNAVAILABLE; benchmark calendar failure
+   * -> only relative_return_126d_change_4w_pp (stock-only direction metrics are unaffected).
+   */
+  readonly calendarUnavailable?: boolean;
+  readonly benchmarkCalendarUnavailable?: boolean;
 }
 
 export const TECHNICAL_METRIC_IDS: readonly string[] = [
@@ -158,7 +165,8 @@ type SessionGuard = { readonly kind: 'OK' } | { readonly kind: 'UNAVAILABLE' | '
  * session at the evaluation instant. Calendar unknown -> UNAVAILABLE; a still-forming bar -> INVALID; a missing latest session ->
  * UNAVAILABLE. Nothing is guessed.
  */
-function sessionGuard(last: DailyBar, nowIso: string): SessionGuard {
+function sessionGuard(last: DailyBar, nowIso: string, seriesCalendarOk: boolean): SessionGuard {
+  if (!seriesCalendarOk) return { kind: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' };
   const nowMs = Date.parse(nowIso);
   const lastDay = epochDay(last.t);
   const close = sessionCloseEpochSeconds(lastDay);
@@ -281,7 +289,7 @@ export function buildTechnicalMetrics(
   }
 
   // ---- Gate 2c direction metrics ----
-  const guard = sessionGuard(last, context.now);
+  const guard = sessionGuard(last, context.now, !context.calendarUnavailable && seriesOnSessionDays(bars));
   const guarded = (id: string, benchmarkBased: boolean): NormalizedMetric | null => {
     if (guard.kind === 'OK') return null;
     const meta = benchmarkBased ? benchmarkProvenance : stockProvenance;
@@ -309,6 +317,7 @@ export function buildTechnicalMetrics(
     const early = guarded(id, true);
     if (early) return early;
     if (!benchmark || benchmark.length === 0) return unavailableMetric(id, noBenchmarkReason, benchmarkProvenance);
+    if (context.benchmarkCalendarUnavailable || !seriesOnSessionDays(benchmark)) return unavailableMetric(id, 'SESSION_CALENDAR_UNAVAILABLE', benchmarkProvenance);
     if (basisMismatch) return invalidMetric(id, context.benchmarkBasis, 'ADJUSTMENT_BASIS_MISMATCH', benchmarkProvenance);
     const benchProblem = barsProblem(benchmark);
     if (benchProblem) return invalidMetric(id, 'benchmark', benchProblem, benchmarkProvenance);

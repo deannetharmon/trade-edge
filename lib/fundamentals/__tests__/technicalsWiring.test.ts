@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { createSecClient } from '../sec/client';
 import { fetchYahooPriceHistory, handleFundamentalsRequest } from '../handler';
 import type { HandlerDeps, PriceHistory } from '../handler';
+import { loadSecFundamentals } from '../secFundamentals';
 import type { LoadedFundamentals } from '../secFundamentals';
 import { makeCompanyFacts } from '@/lib/discovery/normalized/__tests__/secFixtures';
 import { PRICE_BASIS_QUOTE, daysFromCivil, isSessionDay } from '@/lib/discovery/normalized';
@@ -168,3 +169,81 @@ describe('technicals through the loader / handler', () => {
     expect(ok.closes!.map((b) => b.c)).toEqual([10, 11, 12]); // quote closes, never adjclose
   });
 });
+
+describe('calendar failure reaching metric evaluation (handler -> loader -> builder), with SEC isolation', () => {
+  const withClosedInterior = (): DailyBar[] => {
+    const bars = sessions(200, stockF);
+    for (let i = 20; i < 190; i += 1) {
+      const prevDay = Math.floor(bars[i].t / 86400) - 1;
+      if (isSessionDay(prevDay) === false && Math.floor(bars[i - 1].t / 86400) < prevDay) {
+        bars[i] = { ...bars[i], t: prevDay * 86400 + OPEN }; // interior bar moved onto a weekend / holiday
+        return bars;
+      }
+    }
+    throw new Error('fixture');
+  };
+  const benchWithClosedInterior = (): DailyBar[] => {
+    const bars = sessions(200, spyF);
+    for (let i = 20; i < 190; i += 1) {
+      const prevDay = Math.floor(bars[i].t / 86400) - 1;
+      if (isSessionDay(prevDay) === false && Math.floor(bars[i - 1].t / 86400) < prevDay) {
+        bars[i] = { ...bars[i], t: prevDay * 86400 + OPEN };
+        return bars;
+      }
+    }
+    throw new Error('fixture');
+  };
+
+  it('interior closed-day stock bar: calendarIssue set, all direction metrics UNAVAILABLE, SEC metrics intact', async () => {
+    const { res, body } = await run('ACME', { stock: { closes: withClosedInterior(), issue: null, basis: PRICE_BASIS_QUOTE } });
+    expect(res.status).toBe(200);
+    expect(body.calendarIssue).toBe('SESSION_CALENDAR_UNAVAILABLE');
+    expect(body.benchmarkCalendarIssue).toBeNull();
+    DIRECTION.forEach((id) => expect(body.technicals[id], id).toMatchObject({ validity: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' }));
+    expect(body.metrics.operating_margin_ttm_pct.validity).toBe('VALID');
+    expect(body.metrics.fcf_annual_history_5y.validity).toBe('VALID');
+  });
+
+  it('interior out-of-range stock bar is the same fail-closed outcome', async () => {
+    const bars = sessions(200, stockF);
+    bars[0] = { ...bars[0], t: daysFromCivil(2006, 6, 1) * 86400 + OPEN };
+    const { body } = await run('ACME', { stock: { closes: bars, issue: null, basis: PRICE_BASIS_QUOTE } });
+    expect(body.calendarIssue).toBe('SESSION_CALENDAR_UNAVAILABLE');
+    DIRECTION.forEach((id) => expect(body.technicals[id].validity, id).toBe('UNAVAILABLE'));
+    expect(body.metrics.fcf_ttm.validity).toBe('VALID');
+  });
+
+  it('valid stock + calendar-invalid benchmark: only the benchmark-derived change is UNAVAILABLE; stock-only metrics and SEC intact', async () => {
+    const { res, body } = await run('ACME', { spy: { closes: benchWithClosedInterior(), issue: null, basis: PRICE_BASIS_QUOTE } });
+    expect(res.status).toBe(200);
+    expect(body.calendarIssue).toBeNull();
+    expect(body.benchmarkCalendarIssue).toBe('SESSION_CALENDAR_UNAVAILABLE');
+    expect(body.technicals.relative_return_126d_change_4w_pp).toMatchObject({ validity: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' });
+    expect(body.technicals.price_vs_sma50_gap_change_4w_pp.validity).toBe('VALID');
+    expect(body.technicals.sma_50.validity).toBe('VALID');
+    expect(body.metrics.operating_margin_ttm_pct.validity).toBe('VALID');
+  });
+
+  it('the loader itself enforces a supplied calendarIssue (flag reaches metric evaluation even for a clean series)', async () => {
+    const base = { client: secClient(), closes: sessions(200, stockF), priceIssue: null, priceBasis: PRICE_BASIS_QUOTE, benchmark: sessions(200, spyF), benchmarkBasis: PRICE_BASIS_QUOTE, nowIso: () => NOW };
+    const stockFlag = await loadSecFundamentals('ACME', { ...base, calendarIssue: 'SESSION_CALENDAR_UNAVAILABLE' });
+    DIRECTION.forEach((id) => expect(stockFlag.technicals[id].validity, id).toBe('UNAVAILABLE'));
+    expect(stockFlag.metrics.fcf_annual_history_5y.validity).toBe('VALID');
+    const benchFlag = await loadSecFundamentals('ACME', { ...base, benchmarkCalendarIssue: 'SESSION_CALENDAR_UNAVAILABLE' });
+    expect(benchFlag.technicals.relative_return_126d_change_4w_pp.validity).toBe('UNAVAILABLE');
+    expect(benchFlag.technicals.price_vs_sma50_gap_change_4w_pp.validity).toBe('VALID');
+    const clean = await loadSecFundamentals('ACME', base);
+    DIRECTION.forEach((id) => expect(clean.technicals[id].validity, id).toBe('VALID'));
+  });
+
+  it('calendar flags are present (null) on the SEC provider-failure and not-covered paths too', async () => {
+    const failed = await run('ACME', { sec: 503 });
+    expect(failed.body.calendarIssue).toBeNull();
+    expect(failed.body.benchmarkCalendarIssue).toBeNull();
+    const bad = await run('ACME', { sec: 503, stock: { closes: withClosedInterior(), issue: null, basis: PRICE_BASIS_QUOTE } });
+    expect(bad.body.coverage).toBe('PROVIDER_FAILURE');
+    expect(bad.body.calendarIssue).toBe('SESSION_CALENDAR_UNAVAILABLE');
+    DIRECTION.forEach((id) => expect(bad.body.technicals[id].validity, id).toBe('UNAVAILABLE'));
+  });
+});
+
