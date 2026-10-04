@@ -5,8 +5,8 @@
 **Strategy:** Quality Value LEAPS  
 **Initial Strategy Version:** QV-v1.0  
 **Status:** APPROVED — IMPLEMENTATION AUTHORIZED  
-**Current Gate:** Gate 3 — QV-v1.0 Underlying Strategy  
-**Current Gate Status:** IMPLEMENTED — PENDING REVIEW  
+**Current Gate:** Gate 2c — Technical Direction Metrics & FCF History  
+**Current Gate Status:** AUTHORIZED — IMPLEMENTATION NOT STARTED  
 **Implementation Agent:** Claude Code  
 **Facilitator:** Frank  
 **Product Owner:** Paul  
@@ -546,12 +546,17 @@ Spec: docs/analysis/LEAPS-QV-0001-gate2c-technical-direction-and-fcf-history.md
 Reviews required for the implementation (none recorded yet): Alan, Quinn
 
 ### Gate 3
-Status: IMPLEMENTED — PENDING REVIEW (Quinn, Ian, Paul, Frank closure)  
+Status: APPROVED / CLOSED  
+Final Implementation Commit: d3fd48bfc851b099f87ad33a8dfd607db60f106b  
+Quinn Architecture/Quality Review: APPROVED  
+Ian Investment Methodology Review: APPROVED  
+Paul Product/Scope Review: APPROVED  
+Frank Final Closure Review: APPROVED  
 Docs: docs/analysis/LEAPS-QV-0001-gate3-underlying-strategy.md  
 Code: lib/discovery/qv/  
 Review round 1: CHANGES REQUIRED at e0398a9 — Technical State confluence (direction evidence), missing-trend semantics, assumptions review; corrections implemented, pending re-review. Open: Technical direction metrics (rsi_weekly_slope_1w, price_vs_sma50_gap_change_4w_pp, relative_return_126d_change_4w_pp) are not produced by the normalizer, so no candidate can reach SETUP/ACTIONABLE until they exist; Ian policy questions A1–A6, A8 (see Gate 3 doc); Gate 7 must pass previous state to the strategy. Ratification of A1–A8: NOT REVIEWED.  
 Review round 2 (baseline 76dee26): adverse Technical State confluence corrected (DECLINING needs 2+ distinct bearish feature groups; NOT_ESTABLISHED/OVERSOLD/unavailable kept distinct); Gate 2c amendment SPECIFIED, NOT AUTHORIZED: docs/analysis/LEAPS-QV-0001-gate2c-technical-direction-and-fcf-history.md; policy proposals for A1–A6, A8 with examples, NOT APPROVED: docs/analysis/LEAPS-QV-0001-gate3-policy-decisions.md.  
-Review round 5 (baseline 5f9f7f8 accepted except one A3 item): FCF trajectory guard — positive TTM below the latest fiscal-year FCF cannot be IMPROVING; classified STABLE with explicit FUNDAMENTAL_FCF_BELOW_LATEST_FY_CONTEXT evidence (no threshold, not DETERIORATING from that comparison alone). TTM stays a level, not an annual observation; no other policy changed. Gate 2c AUTHORIZED, implementation NOT STARTED; Gate 4 BLOCKED.  
+Review round 5: APPROVED / CLOSED at d3fd48bfc851b099f87ad33a8dfd607db60f106b. Final A3 FCF trajectory guard accepted: positive TTM below latest fiscal-year FCF cannot be IMPROVING; it is STABLE with explicit FUNDAMENTAL_FCF_BELOW_LATEST_FY_CONTEXT evidence. TTM remains a level and is not double-counted as an annual observation. Exact-head TypeScript, QV, discovery/fundamentals, full-suite CI, and Vercel verification PASS. Gate 2c AUTHORIZED; Gate 4 BLOCKED.  
 Review round 4 (baseline 9a0e029 accepted; narrow policy-ratification correction): A1–A8 RATIFIED by Ian/Paul rulings. A1 negative growth DETERIORATING regardless of trend (slowdown context separate, no new threshold); A2 ±1 pp; A3 level (POSITIVE/BREAKEVEN/NEGATIVE) separate from annual non-overlapping trajectory, persistence = 2+ negative annual periods, TTM not double-counted, fail closed; A4 as ratified; A5 OVERSOLD never from RSI alone, DECLINING first with 2+ distinct groups, NOT_ESTABLISHED is an evaluation result not an investment state, relative strength Option A (no acceleration metric), price-return convention split-adjusted dividend-unadjusted; A6 UNKNOWN stays UNKNOWN, no WATCH cap, no event provider in Gate 3; A7 data limitation; A8 as ratified. Gate 2c AUTHORIZED (Paul), implementation NOT STARTED, separate from Gate 3 algorithm acceptance. Gate 4 BLOCKED.  
 Review round 3 (team review CHANGES REQUIRED at 7a913b4): OVERSOLD now needs non-RSI confirmation; adverse evidence preserved as a trace when data is missing; risk gate NOT_EVALUABLE when event coverage is UNKNOWN; A1/A3 alternatives with counterexamples and A2/A4/A5/A7/A8 REVIEW RECOMMENDATIONS recorded (nothing ratified); Gate 2c spec corrected (6.1 withdrawn implication, calendar/alignment/FCF contract, fixtures). Status tracks: Gate 3 algorithm = IMPLEMENTED — PENDING REVIEW; Gate 2c data = SPECIFIED, NOT AUTHORIZED; production integration = NOT STARTED; Gate 7 previous-state = NOT STARTED. Gate 4 blocked.  
 PRODUCTION BLOCKER: no candidate can reach SETUP/UNDERLYING ACTIONABLE until Gate 2c (or equivalent) exists — direction metrics, SPY benchmark (the loader fetches none, so the relative-strength level is UNAVAILABLE in production), technical metrics returned by the loader, completed-bar enforcement. Taxonomy gap (NOT_ESTABLISHED) and strict relative-strength change vs acceleration await Ian. Reviews: none recorded for Gate 2c or A1–A8.  
@@ -570,30 +575,16 @@ Status: BLOCKED
 
 Read this entire document before making changes and inspect the existing TradeEdge implementation and repository conventions.
 
-You are authorized to execute **GATE 3 — QV-v1.0 UNDERLYING STRATEGY ONLY**, exactly as specified in Section 45.
+Gate 3 is APPROVED / CLOSED at `d3fd48bfc851b099f87ad33a8dfd607db60f106b`. You are authorized to execute **GATE 2c — Technical Direction Metrics & FCF History ONLY**, exactly as specified in `docs/analysis/LEAPS-QV-0001-gate2c-technical-direction-and-fcf-history.md`. Gate 4 remains BLOCKED.
 
-Implementation requirements:
-1. Implement Gate 3 policy centrally in the versioned discovery strategy layer.
-2. Consume normalized metrics only; no provider-specific strategy logic.
-3. Implement Data Sufficiency, Quality, Valuation Dislocation, Growth-Adjusted Valuation, Fundamental Integrity, Fundamental Momentum, Technical State, supported Risk evaluation, and lifecycle/evaluation classification through UNDERLYING ACTIONABLE.
-4. Emit structured reason codes/evidence from the same rules used to classify candidates.
-5. Preserve VALID / UNAVAILABLE / STALE / INVALID semantics.
-6. Implement all Section 45 boundary and behavioral tests.
-7. Prove hard-gate failures cannot be overridden by stronger evidence elsewhere.
-8. Prove technical regression changes ACTIONABLE -> SETUP/WATCH rather than INVALIDATED when the thesis remains intact.
-9. Do not implement Gate 4 functionality.
-10. Do not change existing Find LEAPS behavior.
-11. Do not add UI work.
-12. Do not add new data-provider dependencies merely to satisfy Gate 3.
-13. Run TypeScript/type check, Gate 3/discovery tests, relevant fundamentals regressions, and existing Find LEAPS regression suite.
-14. Self-review the complete diff for scope leakage and duplicated strategy logic.
-15. Update the ticket/gate ledger and relevant Gate 3 implementation documentation.
-16. Commit and push the completed Gate 3 implementation.
-17. Wait for exact-head CI and Vercel results.
-18. Return the Gate Completion Report from Section 40, including branch, SHA, parent SHA, changed files, decisions, tests, CI, Vercel, deviations, and unresolved issues.
-19. **STOP. Do not begin Gate 4.**
-
-
+Implementation requirements for Gate 2c:
+1. Read the complete Gate 2c specification before coding.
+2. Implement only the authorized data-enablement scope: technical direction metrics, SPY benchmark/alignment, completed-session semantics, loader exposure, and normalized annual FCF history from existing SEC annualSeries.
+3. Do not alter the closed Gate 3 investment methodology.
+4. Do not implement Gate 4.
+5. Preserve existing Find LEAPS behavior.
+6. Run the specified Gate 2c contract/fixture tests, relevant discovery/fundamentals regressions, TypeScript, full suite, exact-head CI, and Vercel.
+7. Update the ticket/analysis docs, commit/push, return the Gate 2c completion report, and STOP.
 
 # 45. Gate 3 Final Strategy Specification
 
@@ -726,7 +717,7 @@ Multiple trend indicators demonstrate continuing downside deterioration.
 Price/momentum evidence is unusually depressed, but stabilization is not established. OVERSOLD is not a buy signal.
 
 ### STABILIZING
-Evidence indicates deterioration is ceasing. Core evidence includes weekly RSI slope no longer negative, 4-week RSI change non-negative, and relative-strength deterioration no longer accelerating. Price need not already exceed SMA50.
+Evidence indicates deterioration is ceasing. Core evidence includes weekly RSI slope no longer negative, 4-week RSI change non-negative, and relative strength no longer deteriorating. Price need not already exceed SMA50.
 
 ### RECOVERING
 Positive momentum inflection exists through confluence including rising weekly RSI, positive 4-week RSI change, improving relationship to SMA50, and improving relative strength versus SPY. Price above SMA200 is not required.
