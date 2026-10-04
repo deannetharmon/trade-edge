@@ -3,7 +3,7 @@
 **Status: PROPOSED SPECIFICATION — NOT AUTHORIZED.** Prepared in the repository for Ian (investment), Quinn (architecture/quality), Paul (scope) and Alan (formulas/golden fixtures). Nothing in this document is implemented. Gate 3 stays pending; Gate 4 stays blocked. No reviewer approval is recorded here.
 
 ## 1. Why this amendment exists
-Gate 3 implements Section 45.8 faithfully, so STABILIZING and RECOVERING need direction evidence the normalized layer does not produce, and a negative-FCF company needs annual FCF history. Until this amendment (or an equivalent) is built, the Gate 3 strategy fails closed and **no candidate can reach SETUP or UNDERLYING ACTIONABLE in production**.
+Gate 3 implements a strict, fail-closed reading of Section 45.8 (the relative-strength first-difference rule is stricter than the spec wording; see 6.1), so STABILIZING and RECOVERING need direction evidence the normalized layer does not produce, and a negative-FCF company needs annual FCF history. Until this amendment (or an equivalent) is built, the Gate 3 strategy fails closed and **no candidate can reach SETUP or UNDERLYING ACTIONABLE in production**.
 
 Audit of the production path (read from the repository at `76dee26`):
 
@@ -50,21 +50,39 @@ Out: any threshold, classification, state, scoring or ranking (the normalizer st
 - **Formula:** `R(i) = (c[i]/c[i−126] − b[i]/b[i−126]) × 100` (the existing `relative_return_126d_vs_benchmark_pct` evaluated at bar `i`); `value = R(n−1) − R(n−21)`. Percentage points; positive = relative strength improving.
 - **Min history:** 147 bars for both series (`n−1−20−126 ≥ 0`).
 - **Benchmark:** SPY (Ian methodology ruling recorded in the ticket before Gate 2b), fetched through the same Yahoo route and parameters as the stock, so basis and session calendar are identical.
-- **SPY alignment (strict, no repair):** the benchmark's last bar timestamp must equal the stock's last bar timestamp, and SPY must contain a bar with exactly the same timestamp at each of the four indexes `n−1`, `n−21`, `n−127`, `n−147`. A missing timestamp ⇒ INVALID `BENCHMARK_NOT_ALIGNED_TO_LOOKBACK_BAR`; last-bar mismatch ⇒ INVALID `BENCHMARK_NOT_ALIGNED_TO_LAST_BAR` (existing reason); invalid benchmark bars ⇒ INVALID with the `barsProblem` reason; no benchmark ⇒ UNAVAILABLE `NO_BENCHMARK_HISTORY`.
-- **Adjusted-price consistency:** both series must be split-adjusted, dividend-unadjusted. Dividends are therefore excluded from both legs; SPY's ~1–2% annual yield versus the stock's differs only through ex-dividend steps inside the 20-session window and is accepted as immaterial to a direction measure. The loader asserts both fetches used the `quote` series; any mismatch ⇒ INVALID `ADJUSTMENT_BASIS_MISMATCH`.
+- **SPY alignment (strict, no repair, lookup by required timestamp, never by array position):** the benchmark's last bar timestamp must equal the stock's last bar timestamp, and SPY must contain a bar with exactly the same timestamp at each of the four indexes `n−1`, `n−21`, `n−127`, `n−147`. A missing timestamp ⇒ INVALID `BENCHMARK_NOT_ALIGNED_TO_LOOKBACK_BAR`; last-bar mismatch ⇒ INVALID `BENCHMARK_NOT_ALIGNED_TO_LAST_BAR` (existing reason); invalid benchmark bars ⇒ INVALID with the `barsProblem` reason; no benchmark ⇒ UNAVAILABLE `NO_BENCHMARK_HISTORY`.
+- **Adjusted-price consistency:** both series must be split-adjusted, dividend-unadjusted. Dividends are therefore excluded from both legs. This is an explicit v1 convention (price return, not total return), **not** a claim that dividends are immaterial: an ex-dividend step inside either 20-session window can move a stock/SPY difference and can flip a decision whose boundary is zero. Whether total-return series are required is a decision for Ian. The loader asserts both fetches used the `quote` series; any mismatch ⇒ INVALID `ADJUSTMENT_BASIS_MISMATCH`.
 
-### 6.1 Relative-strength change is not acceleration (decision for Ian)
-Let `d = R(n−1) − R(n−21)` (this metric, a first difference) and `dp = R(n−21) − R(n−41)` (the previous 20-session change). Section 45.8 says relative-strength deterioration is "no longer accelerating", which is a statement about the **second difference** `a = d − dp ≥ 0`.
+### 6.1 Relative-strength change is not acceleration (decision for Ian) — CORRECTED
+Let `d = R(n−1) − R(n−21)` (this metric, a first difference) and `dp = R(n−21) − R(n−41)`. Section 45.8 says relative-strength deterioration is "no longer accelerating", a statement about the **second difference** `a = d − dp ≥ 0`.
 
-- `d ≥ 0` (no deterioration at all) **implies** "not accelerating", but not the reverse.
-- Counter-example: `R = 0, −10, −18` ⇒ `dp = −10`, `d = −8`: relative strength is still falling, but the fall is decelerating (`a = +2`). The spec wording admits this case as stabilization; the Gate 3 rule `d ≥ 0` rejects it. So a nonnegative change is **stricter** than the spec and the two are not mathematically equivalent.
-- Gate 3 currently implements the strict rule (`d ≥ 0` for STABILIZING, `d > 0` for RECOVERING) because it needs only this metric and fails safe. It is recorded as assumption A5.
+**The two predicates are incomparable.** `d ≥ 0` does NOT imply `a ≥ 0`, and `a ≥ 0` does not imply `d ≥ 0`:
+- `R = 0, 10, 12`: `dp = 10`, `d = 2` (`d ≥ 0` true) but `a = −8` (accelerating deterioration of the gain: `a ≥ 0` false).
+- `R = 0, −10, −18`: `dp = −10`, `d = −8` (`d ≥ 0` false) but `a = +2` (`a ≥ 0` true).
+(An earlier draft of this section said `d ≥ 0` implies "not accelerating". That was wrong and is withdrawn.)
+
+Gate 3 currently implements `d ≥ 0` (STABILIZING) and `d > 0` (RECOVERING) because it needs only this metric and fails safe. It is a review-time policy choice (A5), not a faithful reading of "no longer accelerating".
 
 Options:
-- **A (default, no extra data):** keep the strict first-difference rule. Conservative: some genuine stabilizations stay WATCH.
-- **B (adds one metric):** add `relative_return_126d_acceleration_4w_pp = d − dp` (min 167 bars; SPY aligned at six indexes). Gate 3 would then qualify STABILIZING when `d ≥ 0 OR a ≥ 0`. This is a Gate 3 rule change as well as a data change, so it is not included until Ian decides.
+- **A (recommended for strictness, no extra data):** keep `d ≥ 0`, and amend the wording to "relative strength no longer deteriorating".
+- **B (adds one metric):** add `relative_return_126d_acceleration_4w_pp = d − dp` (min 167 bars; SPY aligned at six timestamps). Option B's `d ≥ 0 OR a ≥ 0` is a **union** of incomparable predicates: it admits `R = 0,−10,−18` (still falling) and is not a refinement of A. Choosing B needs an explicit Ian decision on whether a still-falling-but-decelerating case is stabilization.
+
+## 6.2 Exchange calendar and completed-session contract (no guessed closing time)
+- Sessions are defined by the exchange calendar for the listing exchange (US equities: NYSE/Nasdaq, `America/New_York`), including early closes (13:00), holidays and DST. No fixed UTC close, "after 21:00 UTC" or similar shortcut is allowed.
+- A bar is **completed** only if its session close time (from the calendar) is at or before the evaluation instant. The still-forming bar is excluded from both series.
+- If the calendar or the evaluation instant is unavailable, or the latest completed session cannot be determined, every direction metric is UNAVAILABLE `SESSION_CALENDAR_UNAVAILABLE`; the loader never guesses.
+- If the series lacks the latest completed session, the metric is UNAVAILABLE `LATEST_COMPLETED_SESSION_MISSING`.
+- Weekly bars use Monday-based exchange weeks (a week containing a holiday is still one week; Friday close, or the last session of the week when Friday is closed). The last weekly observation used must be a completed week.
+- **Evidence time vs evaluation time:** a weekly metric's `asOf` is the date of the last completed weekly observation, not the evaluation instant. Freshness is judged on evidence time.
+
+## 6.3 Required fixtures independent of the implementation
+- 70 closes, first 50 = 100, last 20 = 110: SMA50 at the last bar = (30×100 + 20×110)/50 = 104; gap(n−1) = (110/104 − 1)×100 = 5.7692307…; gap(n−21) = 0 (all 100); `price_vs_sma50_gap_change_4w_pp` = **5.769230769… pp**.
+- 147 stock bars and 147 SPY bars all at 100, final stock close 120: `R(n−1) = 20`, `R(n−21) = 0`, `relative_return_126d_change_4w_pp` = **20 pp**.
+- Weekly-slope and 16-weekly-close vectors are to be computed independently (script outside the code under test) and committed as literals before Gate 2c implementation.
 
 ## 7. Wiring changes required (finding 2–4)
+0. **Failure isolation (Quinn):** a SPY fetch failure makes only the benchmark-derived metrics (`relative_return_126d_vs_benchmark_pct`, `relative_return_126d_change_4w_pp`) UNAVAILABLE; SEC metrics and stock-only technical metrics are still returned. The additive `technicals` contract is returned consistently on success, NOT_COVERED and provider-failure paths (empty/UNAVAILABLE, never absent).
+0b. **Contract tests** must prove real completed-bar wiring through the loader and handler (a forming bar in the fixture must not reach `buildTechnicalMetrics`), not only the pure functions.
 1. `handler.ts`: fetch SPY once per request with the same function and years; drop the still-forming bar from both series (completed-bar rule); assert both came from the `quote` series.
 2. `loadSecFundamentals`: pass the benchmark to `buildTechnicalMetrics`; include the technical metric set in the loader result (new `technicals` field) instead of discarding it. The SEC metrics and their response shape are unchanged.
 3. `buildTechnicalMetrics`: add the three ids (and `TECHNICAL_METRIC_IDS`), reuse `wilderRsiSeries`, `periodCloses`, `simpleMovingAverage`; add catalog entries (DERIVABLE, YAHOO) and `IMPLEMENTED_METRIC_IDS`.
@@ -73,7 +91,7 @@ Options:
 ## 8. `fcf_annual_history_5y` from the existing SEC `annualSeries`
 **Can the existing SEC adapter supply it without a new provider? Yes**, with limitations.
 - **Source:** `SecFundamentalsResult.annualSeries` (up to the last 10 fiscal years) already contains `operatingCashFlow`, `capitalExpenditure` and `freeCashFlow = operatingCashFlow − capitalExpenditure` per fiscal year, resolved by the same concept map, period and ambiguity rules as `fcf_ttm`, with per-year `issues`. `fcf_ttm` uses the identical formula, so the two are definitionally consistent.
-- **Mapping:** take the most recent run of up to 5 fiscal years that are consecutive (`consecutiveFiscalYears` gap rule, ~365 days between year ends) and end at the latest fiscal year; require `freeCashFlow !== null` for every year in the run; emit them oldest first as a JSON array `number[]`. Minimum 3 points (`fcfHistoryYears`); fewer ⇒ UNAVAILABLE `INSUFFICIENT_HISTORY`. Any year in the run with an `issues` entry for `operatingCashFlow` or `capex` ⇒ UNAVAILABLE `SEC_ITEM_NOT_REPORTED:<item>` (a gap is never bridged or interpolated). `AMBIGUOUS` ⇒ INVALID with the diagnostic reason.
+- **Mapping (suffix rule):** the usable history is the **latest contiguous suffix** of fiscal years ending at the latest FY; an older gap does not invalidate a contiguous suffix of at least 3 years, and a gap inside the last 3 years does. If FCF for the newest fiscal year is missing (e.g. capex not yet reported) the metric is UNAVAILABLE — an older year is never substituted. 52/53-week fiscal years are consecutive when year ends are 357–378 days apart; restated values use the latest filing for that period and record the restatement in provenance; ambiguous or conflicting items are INVALID. Detail: take the most recent run of up to 5 fiscal years that are consecutive (`consecutiveFiscalYears` gap rule, ~365 days between year ends) and end at the latest fiscal year; require `freeCashFlow !== null` for every year in the run; emit them oldest first as a JSON array `number[]`. Minimum 3 points (`fcfHistoryYears`); fewer ⇒ UNAVAILABLE `INSUFFICIENT_HISTORY`. Any year in the run with an `issues` entry for `operatingCashFlow` or `capex` ⇒ UNAVAILABLE `SEC_ITEM_NOT_REPORTED:<item>` (a gap is never bridged or interpolated). `AMBIGUOUS` ⇒ INVALID with the diagnostic reason.
 - **`asOf`:** the latest filing date used (`filedMax`, as other SEC metrics). Freshness: reuse the SEC metrics' staleness rule.
 - **Provenance:** one `SecProvenance` entry per fiscal year used (already recorded in `itemProv`).
 - **Limitations (report to Ian):**

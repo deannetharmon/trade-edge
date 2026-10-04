@@ -79,6 +79,6 @@ export const codesOf = (evaluation: StrategyEvaluation): string[] => evaluation.
 
 // Technical presets
 export const STABILIZING_TECH: Partial<Record<Field, Override>> = { weeklyRsiChange: 0, weeklyRsiSlope: 0 };
-export const OVERSOLD_TECH: Partial<Record<Field, Override>> = { weeklyRsi: 25, weeklyRsiChange: -2, weeklyRsiSlope: -1, relativeStrengthChange: 0 };
+export const OVERSOLD_TECH: Partial<Record<Field, Override>> = { weeklyRsi: 25, weeklyRsiChange: 0, weeklyRsiSlope: 0, relativeStrengthChange: -1 };
 export const DECLINING_TECH: Partial<Record<Field, Override>> = { weeklyRsi: 40, weeklyRsiChange: -2, weeklyRsiSlope: -1, price: 80 };
 export const THREE_DETERIORATING: Partial<Record<Field, Override>> = { revenueGrowth: -5, epsGrowth: -10, marginChange: -3 };

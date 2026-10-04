@@ -59,12 +59,55 @@ None is ratified: every entry carries `ratification: 'NOT_REVIEWED'` in `QV_V1_0
 Policy fingerprint changed because the technical input contract gained three ids (pin updated deliberately). New reason codes: `DATA_TECHNICAL_DIRECTION_UNAVAILABLE`, `DATA_TREND_REFERENCE_UNAVAILABLE`.
 
 ## Review round 2 (baseline 76dee26)
-1. **Adverse Technical State confluence.** Found: `technicalStateOf` returned DECLINING whenever any single stabilization-core condition was false. Corrected: four evidence classes are distinguished (DECLINING needs two or more independent bearish families; OVERSOLD; NOT_ESTABLISHED = present-but-unsupported, WATCH, not forced; NOT_EVALUABLE = unavailable). Independently established adverse evidence stays visible when other inputs are missing. New reason code `TECHNICAL_STATE_NOT_ESTABLISHED`; policy `decliningMinOtherBearish` replaced by `decliningMinBearishFamilies` (fingerprint re-pinned). Taxonomy gap recorded for Ian (see policy decisions document).
+1. **Adverse Technical State confluence.** Found: `technicalStateOf` returned DECLINING whenever any single stabilization-core condition was false. Corrected: four evidence classes are distinguished (DECLINING needs two or more distinct bearish feature groups (not statistically independent); OVERSOLD; NOT_ESTABLISHED = present-but-unsupported, WATCH, not forced; NOT_EVALUABLE = unavailable). Independently established adverse evidence stays visible when other inputs are missing. New reason code `TECHNICAL_STATE_NOT_ESTABLISHED`; policy `decliningMinOtherBearish` replaced by `decliningMinBearishFamilies` (fingerprint re-pinned). Taxonomy gap recorded for Ian (see policy decisions document).
 2. **Gate 2c data amendment prepared (not authorized, nothing implemented):** `docs/analysis/LEAPS-QV-0001-gate2c-technical-direction-and-fcf-history.md`. Audit found the production path is wider than three metrics: the loader never fetches SPY (the existing relative-strength metric is UNAVAILABLE in production), technical metrics are not returned by the loader, the completed-bar rule is not enforced at the fetch boundary, and annual FCF history is derivable from the existing SEC `annualSeries` without a new provider.
 3. **Policy decisions made reviewable:** `docs/analysis/LEAPS-QV-0001-gate3-policy-decisions.md` — concrete proposals and worked examples for A1–A6 and A8, split into investment-policy questions and engineering/data questions. Examples are executed in `policyExamples.test.ts`. No approval is recorded.
 4. Ticket ledger updated; Gate 3 stays pending, Gate 4 blocked.
 
 **Production blocker:** until Gate 2c (or equivalent) is built, no candidate can reach SETUP or UNDERLYING ACTIONABLE in production.
 
+## Review round 3 (team review CHANGES REQUIRED at 7a913b4; review document a33a14b)
+
+### Status tracks (Paul) — four separate statuses
+| Track | Status | Owner |
+|---|---|---|
+| Gate 3 algorithm acceptance | IMPLEMENTED — PENDING REVIEW (this round) | Dane / Quinn / Ian |
+| Gate 2c data acceptance | SPECIFIED, NOT AUTHORIZED (scope decision is separate) | Paul |
+| Production integration (StrategyInput assembler, event data, end-to-end) | NOT STARTED | Quinn (architecture review) |
+| Gate 7 persisted previous-state | NOT STARTED | Frank (dependency ledger) |
+Gate 4 remains blocked. Production has no path to SETUP/ACTIONABLE until Gate 2c and production integration exist.
+
+### State-specific evidence requirements
+| State | Requires | Missing evidence effect |
+|---|---|---|
+| RECOVERING | RSI slope > 0, 4w RSI change > 0, SMA50-gap change > 0, RS change > 0 | any missing: not RECOVERING (STABILIZING at best) |
+| STABILIZING | RSI slope >= 0, 4w RSI change >= 0, RS change >= 0 (SMA50-gap change NOT required) | missing slope or RS change: NOT_EVALUABLE; missing gap change: SETUP still reachable, data completeness reports it |
+| DECLINING | >= 2 distinct bearish feature groups (not statistically independent) | unavailable groups are not counted |
+| OVERSOLD | weekly RSI <= 30 AND >= 1 non-RSI bearish group, DECLINING not established | RSI alone is NOT_ESTABLISHED |
+| NOT_ESTABLISHED | stabilization contradicted, not DECLINING/OVERSOLD | WATCH only if Quality passes and the thesis is intact, else DISCOVERED |
+| NOT_EVALUABLE | required level or direction metric unavailable | INSUFFICIENT_DATA; independently evidenced adverse readings still reported as `TECHNICAL_ADVERSE_EVIDENCE_PRESENT` (a trace, not a state) |
+
+### Claims narrowed
+- Gate 3 does not implement Section 45.8 "faithfully": the relative-strength rule is a stricter first-difference reading, and NOT_ESTABLISHED is an added state. Both are review items, not spec text.
+- Adverse evidence is preserved as a trace when required data is missing; the STATE is still never classified from partial evidence.
+- "Independent bearish families" is now "distinct bearish feature groups" (SMA50 and SMA200 are correlated).
+- Unknown event coverage is reported UNKNOWN and the risk gate is NOT_EVALUABLE; it is never "verified no events".
+
+### Strategy version
+QV-v1.0 has not been published or persisted (Gate 3 is pending), so these changes stay inside QV-v1.0 (A5 assumption wording changed; fingerprint re-pinned). Any change after Gate 3 closure requires a version bump.
+
+### Review-item disposition
+| Item | Disposition |
+|---|---|
+| Correct false Gate 2c 6.1 implication, "faithfully", dividend claim, dependency ledger | DONE (docs) |
+| A1/A3 alternatives with counterexamples | DONE (policy doc); nothing ratified; counterexamples pinned as current behavior in `reviewRound3.test.ts` |
+| A2/A4/A5/A7/A8 as REVIEW RECOMMENDATIONS | DONE (policy doc) |
+| OVERSOLD confluence vs 45.8 | DONE (code + tests); open question for Ian: RSI-alone OVERSOLD |
+| Preserve adverse evidence with missing data | DONE (trace reason); strict sufficiency kept |
+| Typed event schema / coverage; nonblocking absence kept | PROPOSED (policy doc); risk gate NOT_EVALUABLE when UNKNOWN (code); classification unchanged |
+| Gate 2c calendar/date/alignment/FCF contract, fixtures | DONE (spec only; no provider/data-layer implementation) |
+| Regression tests for changed behavior | DONE (`reviewRound3.test.ts`, updated taxonomy tests) |
+| Exact-head CI/Vercel evidence | see completion report |
+
 ## Tests (`lib/discovery/qv/__tests__`)
-boundaries (9), behavior (12), hardGates (15), policy (12), technicalDirection (21), policyExamples (7) = 76.
+boundaries (9), behavior (12), hardGates (15), policy (12), technicalDirection (21), policyExamples (7), reviewRound3 (11) = 87.

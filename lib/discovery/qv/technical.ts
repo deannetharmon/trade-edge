@@ -15,14 +15,22 @@
 // NOT_EVALUABLE unless known adverse evidence already classifies it DECLINING / OVERSOLD). Known adverse evidence stands.
 //
 // Evidence is kept in four distinct classes (review round 2), and an unsupported state is never forced:
-//   DECLINING        >= policy.technical.decliningMinBearishFamilies INDEPENDENT bearish indicator families are evidenced
-//                    (RSI momentum, SMA50 relationship, SMA200 trend, relative strength). One contradicting signal is not DECLINING.
-//   OVERSOLD         weekly RSI is unusually depressed and stabilization is not established, without multi-family deterioration.
+//   DECLINING        >= policy.technical.decliningMinBearishFamilies DISTINCT bearish feature groups are evidenced (RSI momentum,
+//                    SMA50 relationship, SMA200 trend, relative strength). The groups are distinct measurements, NOT statistically
+//                    independent signals (SMA50 and SMA200 are correlated). One contradicting signal is not DECLINING.
+//   OVERSOLD         weekly RSI is at or below the depressed line AND at least one non-RSI group (SMA50 / SMA200 / relative
+//                    strength) is bearish, stabilization is not established, and DECLINING is not established. RSI alone never
+//                    produces OVERSOLD ("RSI alone must not determine state"): a depressed RSI with no non-RSI confirmation is
+//                    NOT_ESTABLISHED. Whether a depressed RSI level alone should be OVERSOLD is an open specification question
+//                    for Ian (see the policy-decisions document); no threshold is invented here.
 //   NOT_ESTABLISHED  the domain IS evaluable but the evidence supports none of the four states: stabilization is contradicted
 //                    by known evidence, yet deterioration is not multiply confirmed and the stock is not depressed. This is a
 //                    taxonomy gap in Section 45.8 (reported for Ian); it fails the SETUP/ACTIONABLE requirement and is not
 //                    INSUFFICIENT_DATA, because the evidence is present and unfavorable, not missing.
-//   NOT_EVALUABLE    required evidence is unavailable and nothing independently established decides a state.
+//   NOT_EVALUABLE    required evidence is unavailable and nothing independently established decides a state. Strict sufficiency is
+//                    kept: when a required LEVEL metric is missing the STATE is never classified from partial evidence. Whatever
+//                    adverse readings ARE independently evidenced are still reported as a TECHNICAL_ADVERSE_EVIDENCE_PRESENT
+//                    reason (a trace, not a state), so the adverse evidence is never erased by missing data.
 // OVERSOLD is a description of how depressed the stock is, not a buy signal: it never moves a candidate past WATCH.
 // Monthly RSI and the distance from the 52-week high are supporting evidence only (carried on the reason).
 
@@ -60,6 +68,8 @@ export interface TechnicalSignals {
   readonly sma200Bearish: boolean;
   readonly relativeStrengthBearish: boolean;
   readonly bearishFamilyCount: number;
+  /** Bearish groups other than RSI momentum (SMA50, SMA200, relative strength): the confirmation OVERSOLD requires. */
+  readonly nonRsiBearishGroups: number;
 }
 
 export interface TechnicalAssessment extends ComponentTrace {
@@ -94,12 +104,40 @@ export function technicalStateOf(signals: TechnicalSignals): TechnicalState | 'N
   if (allTrue(core)) return 'STABILIZING';
   // Independently established adverse evidence stands even when other inputs are unavailable.
   if (signals.bearishFamilyCount >= P.decliningMinBearishFamilies) return 'DECLINING';
-  // Depressed and not stabilized (contradicted OR not evidenced). OVERSOLD is never constructive: it cannot pass WATCH.
-  if (signals.weeklyRsiDepressed) return 'OVERSOLD';
+  // Depressed RSI CONFIRMED by non-RSI evidence, and not stabilized (contradicted OR not evidenced). OVERSOLD is never
+  // constructive: it cannot pass WATCH. A depressed RSI with no non-RSI confirmation falls through (RSI alone decides nothing).
+  if (signals.weeklyRsiDepressed && signals.nonRsiBearishGroups >= 1) return 'OVERSOLD';
   // One contradicting signal and nothing else adverse: evaluable, but no state is supported. Do not force one.
   if (core.indexOf(false) >= 0) return 'NOT_ESTABLISHED';
   // Nothing contradicts stabilization, but part of it cannot be evidenced: fail closed.
   return null;
+}
+
+/**
+ * The adverse readings that ARE independently evidenced by the inputs that are available, as one trace reason (null when none).
+ * Used when the state cannot be classified: the missing data is reported, and so is the adverse evidence it did not erase.
+ */
+function adverseTrace(
+  price: NumericRead, sma50: NumericRead, sma200: NumericRead, sma200Trend: NumericRead, relative: NumericRead,
+  rsiChange: NumericRead, slope: NumericRead, gapChange: NumericRead, relativeChange: NumericRead,
+): ReasonCode | null {
+  const readings: string[] = [];
+  const used: NumericRead[] = [];
+  const note = (name: string, ...reads: NumericRead[]): void => {
+    readings.push(name);
+    reads.forEach((read) => used.push(read));
+  };
+  if (rsiChange.value !== null && rsiChange.value < 0) note('RSI_4W_CHANGE_NEGATIVE', rsiChange);
+  if (slope.value !== null && slope.value < 0) note('RSI_WEEKLY_SLOPE_NEGATIVE', slope);
+  if (price.value !== null && sma50.value !== null && price.value < sma50.value) note('PRICE_BELOW_SMA50', price, sma50);
+  if (gapChange.value !== null && gapChange.value < 0) note('SMA50_GAP_WORSENING', gapChange);
+  if (price.value !== null && sma200.value !== null && sma200Trend.value !== null && price.value < sma200.value && sma200Trend.value < 0) {
+    note('PRICE_BELOW_FALLING_SMA200', price, sma200, sma200Trend);
+  }
+  if (relative.value !== null && relative.value < 0) note('RELATIVE_STRENGTH_NEGATIVE', relative);
+  if (relativeChange.value !== null && relativeChange.value < 0) note('RELATIVE_STRENGTH_WORSENING', relativeChange);
+  if (readings.length === 0) return null;
+  return qvReason(QV_REASON.TECHNICAL_ADVERSE_EVIDENCE_PRESENT, 'CONCERN', metricsOf(used), { readings, classified: false });
 }
 
 const tri = (read: NumericRead, test: (value: number) => boolean): Evidenced => (read.value === null ? null : test(read.value));
@@ -125,7 +163,9 @@ export function assessTechnical(set: MetricSet): TechnicalAssessment {
 
   const levelBlocking = blockingIds(level);
   if (levelBlocking.length > 0) {
-    return { result: 'NOT_EVALUABLE', signals: null, reasons: [], requiredMetricIds: required, blockingMetricIds: levelBlocking, missingDirectionMetricIds: missingDirection };
+    // Strict sufficiency: no state from partial evidence. The independently evidenced adverse readings are still reported.
+    const trace = adverseTrace(price, sma50, sma200, sma200Trend, relative, rsiChange, slope, gapChange, relativeChange);
+    return { result: 'NOT_EVALUABLE', signals: null, reasons: trace ? [trace] : [], requiredMetricIds: required, blockingMetricIds: levelBlocking, missingDirectionMetricIds: missingDirection };
   }
 
   const belowSma50 = (price.value as number) < (sma50.value as number);
@@ -152,6 +192,7 @@ export function assessTechnical(set: MetricSet): TechnicalAssessment {
     sma200Bearish: belowFallingSma200,
     relativeStrengthBearish,
     bearishFamilyCount: [rsiMomentumBearish, sma50Bearish, belowFallingSma200, relativeStrengthBearish].filter(Boolean).length,
+    nonRsiBearishGroups: [sma50Bearish, belowFallingSma200, relativeStrengthBearish].filter(Boolean).length,
   };
   const state = technicalStateOf(signals);
 
@@ -160,6 +201,8 @@ export function assessTechnical(set: MetricSet): TechnicalAssessment {
     // Fail closed: the stabilization core cannot be evidenced. Named, never guessed.
     const unavailable = direction.filter((read) => read.value === null);
     reasons.push(qvReason(QV_REASON.DATA_TECHNICAL_DIRECTION_UNAVAILABLE, 'BLOCKING', metricsOf(unavailable), { affects: 'STABILIZING', metricIds: missingDirection }));
+    const trace = adverseTrace(price, sma50, sma200, sma200Trend, relative, rsiChange, slope, gapChange, relativeChange);
+    if (trace) reasons.push(trace);
     return { result: 'NOT_EVALUABLE', signals, reasons, requiredMetricIds: required, blockingMetricIds: missingDirection, missingDirectionMetricIds: missingDirection };
   }
 
@@ -175,6 +218,7 @@ export function assessTechnical(set: MetricSet): TechnicalAssessment {
         relativeStrengthNotWorsening: signals.relativeStrengthNotWorsening,
         smaGapImproving: signals.smaGapImproving,
         weeklyRsiDepressed: signals.weeklyRsiDepressed,
+        nonRsiBearishGroups: signals.nonRsiBearishGroups,
         bearishFamilyCount: signals.bearishFamilyCount,
         rsiMomentumBearish: signals.rsiMomentumBearish,
         sma50Bearish: signals.sma50Bearish,

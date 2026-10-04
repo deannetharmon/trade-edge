@@ -24,7 +24,15 @@ export interface RiskContext {
   readonly deterioratingDimensions: number;
 }
 
+/** What is actually known about corporate/binary events. UNKNOWN is never read as "no events". */
+export type EventCoverage = 'EVENTS_PRESENT' | 'VERIFIED_EMPTY' | 'UNKNOWN';
+
 export interface RiskAssessment extends ComponentTrace {
+  /**
+   * EVENTS_PRESENT: a usable list with entries. VERIFIED_EMPTY: a VALID usable empty list. UNKNOWN: absent / stale / invalid /
+   * malformed. Unknown coverage stays nonblocking for classification (current spec), but the risk gate is NOT_EVALUABLE, not PASS.
+   */
+  readonly eventCoverage: EventCoverage;
   readonly earningsApproaching: boolean;
   readonly binaryEventPending: boolean;
   /** A reliable event signal that withholds SETUP / UNDERLYING ACTIONABLE. */
@@ -80,7 +88,9 @@ export function assessRisk(set: MetricSet, context: RiskContext): RiskAssessment
     flags.push(qvReason(QV_REASON.RISK_FUNDAMENTAL_DETERIORATION, 'CONCERN', [], { deterioratingDimensions: context.deterioratingDimensions }));
   }
 
+  const eventCoverage: EventCoverage = !events.usable ? 'UNKNOWN' : binaryEventPending ? 'EVENTS_PRESENT' : 'VERIFIED_EMPTY';
   return {
+    eventCoverage,
     earningsApproaching,
     binaryEventPending,
     disqualifying: binaryEventPending,

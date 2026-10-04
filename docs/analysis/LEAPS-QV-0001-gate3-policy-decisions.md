@@ -6,48 +6,56 @@ Questions are split below: **Part 1 — investment-policy** (Ian), **Part 2 — 
 
 ## Part 1 — Investment-policy questions
 
-### A1 Revenue / EPS trajectory ("materially deteriorating")
-- **Proposed decision:** growth is DETERIORATING when TTM growth is negative and below the 5Y CAGR (or the CAGR is unavailable — negative growth is adverse on its own); IMPROVING when growth is non-negative and above the 5Y CAGR; STABLE otherwise; NOT_EVALUABLE when growth is non-negative and the 5Y CAGR is unavailable.
-- **Examples:** growth −2 vs trend 5 ⇒ DETERIORATING. Growth 3 vs 5 ⇒ STABLE. Growth 7 vs 5 ⇒ IMPROVING. Growth 1 vs trend 12 ⇒ **STABLE** (positive but far below trend). Growth −2 with no trend ⇒ DETERIORATING. Growth 4 with no trend ⇒ NOT_EVALUABLE.
-- **Open question:** is a large positive shortfall against trend (the 1 vs 12 case) "material deterioration"? Alternative: DETERIORATING when growth is more than X percentage points below trend even if positive. That would make more names reach growth-adjusted MIXED/DETERIORATING and thesis break sooner. Needs X from Ian; not implemented.
+### A1 Revenue / EPS trajectory ("materially deteriorating") — REVISED ALTERNATIVES (nothing ratified)
+- **Current code (not ratified):** DETERIORATING when growth is negative and below trend; IMPROVING when non-negative and above trend; STABLE otherwise.
+- **Counterexamples to the current rule (Ian):** growth +1% vs trend 12% reads STABLE; contraction −2% vs trend −5% reads STABLE (growth is *above* a worse trend, yet the business is shrinking). Neither should silently establish stability.
+- **Alternative A1-a (separate direction from context):** *Recent direction* = sign and size of TTM growth (negative ⇒ contracting). *Long-term context* = relation to the 5Y trend (above / near / below). DETERIORATING when contracting, regardless of trend; a positive-but-far-below-trend case becomes a CONCERN flag, not STABLE. Needs X (pp below trend) from Ian.
+- **Alternative A1-b:** keep three states, but add a fourth, NOT_STABLE-CONTRACTING, so −2 vs −5 is never STABLE.
+- **Alternative A1-c:** keep current rule and document it as lenient. Not recommended.
+- Missing trend with non-negative growth stays NOT_EVALUABLE under all alternatives.
 
-### A2 Operating-margin trajectory
+### A2 Operating-margin trajectory — REVIEW RECOMMENDATION (Ian conditionally accepts the ±1 pp band; not a specification decision until recorded)
 - **Proposed decision:** year-over-year change beyond ±1 percentage point is material; within the band is STABLE.
 - **Examples (pp):** −1.01 ⇒ DETERIORATING; −1 ⇒ STABLE; 0 ⇒ STABLE; +1 ⇒ STABLE; +1.01 ⇒ IMPROVING.
 - **Open question:** is 1 pp the right materiality? Margin scale differs by sector (software versus distribution); a sector-relative band is an alternative.
 
-### A3 Free-cash-flow pattern (isolated / persistent / deteriorating)
-- **Proposed decision:** using TTM plus the last three fiscal years — PERSISTENT: TTM and the latest year both ≤ 0, or two or more of the points ≤ 0; DETERIORATING INTO NEGATIVE: TTM ≤ 0 after a strictly falling run; TEMPORARY (isolated): a single negative period otherwise. Persistent and deteriorating count as a material weakness; temporary does not.
-- **Examples (TTM = −1):** history [5, −1, 4] ⇒ temporary (Quality can still PASS). [30, 20, 10] ⇒ deteriorating (with weak ROIC, Quality FAILS). [−5, −3, −2] ⇒ persistent. No history ⇒ NOT_EVALUABLE (INSUFFICIENT_DATA; see Part 2).
-- **Open question:** are "two of three negative" and "strictly falling" the right tests; is a 3-year window right for long-duration LEAPS?
+### A3 Free-cash-flow pattern — REVISED ALTERNATIVES (nothing ratified)
+- **Current code (not ratified):** PERSISTENT when TTM and latest FY both ≤ 0 or two or more points ≤ 0; DETERIORATING into negative when TTM ≤ 0 after a strictly falling run; TEMPORARY otherwise; trajectory from TTM versus history.
+- **Counterexamples (Ian):** TTM +1 with history [10,20,30] reads IMPROVING although FCF has collapsed 97% (level and trajectory are conflated). TTM −1 with history [20,10,−5]: the latest FY and TTM overlap, so one weak year is counted twice as "persistent". TTM 0 with [5,4,3] reads DETERIORATING because zero is counted as non-positive, which merges zero with negative.
+- **Alternative A3-a:** separate **level** (positive / zero / negative) from **trajectory** (rising / falling / flat), reported as two facts; PERSISTENT requires negative FCF in at least two **non-overlapping** periods (latest FY and TTM overlap and count once).
+- **Alternative A3-b:** zero is its own band (BREAKEVEN), neither negative nor positive.
+- **Alternative A3-c:** trajectory must be compared on non-overlapping annual points only (TTM is used for the level, not as an independent persistence observation).
+- Persistence evidence: Ian to choose the window (3 years vs 5) and the strictness of "falling".
 
-### A4 Quality PASS composition
+### A4 Quality PASS composition — REVIEW RECOMMENDATION (conditional acceptance; not a specification decision until recorded)
 - **Spec text (direct):** operating margin must be positive; HIGH leverage plus one other material weakness fails.
 - **Proposed addition (not spec text):** two or more material weaknesses (revenue WEAK, ROIC WEAK, FCF persistent/deteriorating, leverage HIGH) fail Quality; PASS requires all five aspects evaluable.
 - **Examples:** ROIC 5 alone ⇒ PASS. ROIC 5 + revenue CAGR −1 ⇒ FAIL. Leverage 3.5 alone ⇒ PASS. Leverage 3.5 + ROIC 5 ⇒ FAIL. Leverage 2.5 (ELEVATED) + ROIC 5 ⇒ PASS (ELEVATED is not a weakness).
 - **Open question:** accept "two weaknesses fail"? Accept that one weak aspect passes? Should ELEVATED leverage count?
 
-### A5 Technical State
+### A5 Technical State — REVIEW RECOMMENDATION (strict Option A preferred; wording "relative strength no longer deteriorating"; OVERSOLD resolved below)
 - **Spec text (direct):** the STABILIZING and RECOVERING indicator lists in Section 45.8.
 - **Proposed decisions (not spec text):**
-  1. OVERSOLD line: weekly RSI ≤ 30.
-  2. DECLINING needs at least two independent bearish families among RSI momentum, SMA50 relationship, SMA200 trend, relative strength (two RSI-derived readings are one family).
+  1. OVERSOLD (confluence, Section 45.8 "RSI alone must not determine state"): weekly RSI ≤ 30 **and** at least one non-RSI bearish group, stabilization not established, DECLINING not established. A depressed RSI alone is NOT_ESTABLISHED. Open for Ian: whether a depressed RSI level alone should be OVERSOLD (a spec amendment; no threshold invented). Consequence: OVERSOLD is narrow; with RSI momentum bearish plus any non-RSI group the state is DECLINING.
+  2. DECLINING needs at least two distinct bearish feature groups (distinct measurements, NOT statistically independent: SMA50 and SMA200 are correlated) among RSI momentum, SMA50 relationship, SMA200 trend, relative strength (two RSI-derived readings are one family).
   3. A stabilization-contradicted, not-depressed, single-family case is **NOT_ESTABLISHED** (see taxonomy gap).
   4. Relative-strength condition for STABILIZING is `change ≥ 0`, stricter than "no longer accelerating" (Gate 2c section 6.1).
-- **Examples:** weekly RSI 30 and falling ⇒ OVERSOLD; 31 and falling ⇒ NOT_ESTABLISHED. One contradicting signal with otherwise favorable evidence ⇒ NOT_ESTABLISHED (WATCH). RSI falling plus price below SMA50 ⇒ DECLINING. Relative strength change −3 (decline decelerating from −5, say) with everything else favorable ⇒ NOT_ESTABLISHED under the strict rule (it would be STABILIZING under an acceleration rule).
+- **Examples:** weekly RSI 30, slope 0, RS change −1 ⇒ OVERSOLD; weekly RSI 30 and falling with no non-RSI confirmation ⇒ NOT_ESTABLISHED; 31 with RS change −1 ⇒ NOT_ESTABLISHED. One contradicting signal with otherwise favorable evidence ⇒ NOT_ESTABLISHED (WATCH). RSI falling plus price below SMA50 ⇒ DECLINING. Relative strength change −3 (decline decelerating from −5, say) with everything else favorable ⇒ NOT_ESTABLISHED under the strict rule (it would be STABILIZING under an acceleration rule).
 - **Taxonomy gap for Ian:** Section 45.8 defines four states. Evidence exists for a fifth situation — stabilization contradicted by one signal, no multi-indicator deterioration, not depressed. Gate 3 reports it as NOT_ESTABLISHED (evaluable, unmet requirement, WATCH) rather than forcing DECLINING or OVERSOLD. Options: keep as is; map it into WATCH-only "TECHNICAL_MIXED" language; or redefine DECLINING to need only one family (which would also call a single contradicting signal DECLINING).
 
-### A6 Risk
-- **Proposed decision:** earnings within 14 days is flagged and never disqualifying; a VALID non-empty `corporate_event_flags` list blocks SETUP/ACTIONABLE (state WATCH); unavailable event data stays explicitly unavailable.
-- **Examples:** 14 days ⇒ flagged; 15 ⇒ not flagged. Earnings in 3 days with everything else qualifying ⇒ still ACTIONABLE. `['TENDER_OFFER']` ⇒ WATCH.
-- **Open questions:** window length; which event types are "reliable binary events" (any listed flag blocks today); the flag source and schema do not exist yet (Part 2).
+### A6 Risk — classification unchanged; typed schema and coverage proposal
+- **Current behavior (nonblocking absence):** earnings within 14 days flagged, never disqualifying; a VALID non-empty `corporate_event_flags` list blocks SETUP/ACTIONABLE; absent event data stays explicitly unavailable. **Added in round 3:** the risk gate outcome is NOT_EVALUABLE (not PASS) when event coverage is UNKNOWN; PASS only for VERIFIED_EMPTY; FAIL when events are present. Classification is unchanged.
+- **Proposed typed event schema (not implemented, not authorized):** `corporate_event_flags` becomes a typed record list `{ category, source, observedAt, effectiveDate|null, status }` plus a coverage object `{ coverage: VERIFIED_EMPTY | EVENTS_PRESENT | UNKNOWN, categoriesChecked[], source, asOf }`.
+- **Material-event categories (for Ian to confirm):** tender offer / merger or acquisition announcement, spin-off, bankruptcy or delisting notice, trading halt, going-concern language, guidance withdrawal. Source, freshness window and which categories must be checked for VERIFIED_EMPTY are decisions, not defaults.
+- **Proposed stricter amendment (NOT authorized):** UNKNOWN coverage caps the state at WATCH. Until accepted, absence stays nonblocking and is reported UNKNOWN, never as verified "no events".
+- Earnings 14-day window: acceptable per Ian.
 
-### A8 WATCH versus DISCOVERED
+### A8 WATCH versus DISCOVERED — REVIEW RECOMMENDATION (conditional acceptance; not a specification decision until recorded)
 - **Proposed decision:** WATCH when Quality PASSES and the fundamental thesis is intact (growth-adjusted and momentum not DETERIORATING, no thesis break) but a SETUP requirement is unmet; otherwise DISCOVERED. INVALIDATED only for a candidate previously in WATCH/SETUP/ACTIONABLE.
 - **Examples:** Quality PASS + percentile 50 / discount 2 ⇒ WATCH. Quality FAIL (margin −3) ⇒ DISCOVERED. Revenue and EPS both deteriorating ⇒ DISCOVERED (growth-adjusted DETERIORATING). Three dimensions deteriorating, no prior thesis ⇒ DISCOVERED; the same from SETUP ⇒ INVALIDATED.
 - **Open question:** is "Quality PASS" the right floor for WATCH, and is DISCOVERED the right home for a failed-Quality name?
 
-### Not policy: A7
+### A7 (not policy until data exists) — REVIEW RECOMMENDATION to keep as a data limitation
 Leverage trajectory is a data limitation (no prior-period leverage metric). It becomes a policy question (what change is material) only after data exists.
 
 ## Part 2 — Engineering / data questions (not investment policy)

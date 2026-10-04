@@ -114,7 +114,7 @@ function gateOutcomes(domains: QvDomainAssessments): GateOutcome[] {
       result: ofResult(technical.result === 'NOT_EVALUABLE' ? null : technical.result === 'STABILIZING' || technical.result === 'RECOVERING'),
       reasonCodes: technical.reasons,
     },
-    { gateId: QV_GATE_IDS.RISK, result: risk.disqualifying ? 'FAIL' : 'PASS', reasonCodes: risk.reasons },
+    { gateId: QV_GATE_IDS.RISK, result: risk.disqualifying ? 'FAIL' : risk.eventCoverage === 'UNKNOWN' ? 'NOT_EVALUABLE' : 'PASS', reasonCodes: risk.reasons },
   ];
   return gates;
 }

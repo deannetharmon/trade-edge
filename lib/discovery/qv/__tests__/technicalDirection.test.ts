@@ -67,7 +67,9 @@ describe('Technical State confluence (Section 45.8)', () => {
   it('known adverse evidence stands even when direction evidence is unavailable', () => {
     const adverse = { weeklyRsiChange: -3, weeklyRsiSlope: null, relativeStrengthChange: null, price: 80 };
     expect(tech(adverse).result).toBe('DECLINING');
-    expect(tech({ ...adverse, price: 100, weeklyRsi: 25 }).result).toBe('OVERSOLD');
+    // depressed RSI with no non-RSI confirmation is NOT OVERSOLD (RSI alone must not determine state)
+    expect(tech({ ...adverse, price: 100, weeklyRsi: 25 }).result).toBe('NOT_ESTABLISHED');
+    expect(tech({ ...adverse, price: 94, weeklyRsi: 25 }).result).toBe('DECLINING'); // RSI momentum + SMA50 = two groups
     expect(stateOf(evaluate(adverse))).toBe('WATCH');
   });
 
@@ -76,7 +78,7 @@ describe('Technical State confluence (Section 45.8)', () => {
       weeklyRsiSlopeNonNegative: true, rsiChange4wNonNegative: true, relativeStrengthNotWorsening: true,
       weeklyRsiSlopePositive: true, rsiChange4wPositive: true, smaGapImproving: true, relativeStrengthImproving: true,
       weeklyRsiDepressed: false, priceBelowSma50: false, belowFallingSma200: false, relativeStrengthNegative: false,
-      rsiMomentumBearish: false, sma50Bearish: false, sma200Bearish: false, relativeStrengthBearish: false, bearishFamilyCount: 0,
+      rsiMomentumBearish: false, sma50Bearish: false, sma200Bearish: false, relativeStrengthBearish: false, bearishFamilyCount: 0, nonRsiBearishGroups: 0,
     };
     expect(technicalStateOf(base)).toBe('RECOVERING');
     expect(technicalStateOf({ ...base, smaGapImproving: null })).toBe('STABILIZING');
@@ -152,10 +154,14 @@ describe('adverse confluence taxonomy (Section 45.8, review round 2)', () => {
   });
 
   it('OVERSOLD: depressed and not stabilized without multi-family deterioration; DECLINING takes precedence when both hold', () => {
-    expect(tech({ weeklyRsi: 25, weeklyRsiChange: -2, weeklyRsiSlope: -1, relativeStrengthChange: 0 }).result).toBe('OVERSOLD');
+    // OVERSOLD = depressed RSI + exactly one non-RSI bearish group (here relative strength worsening); RSI momentum not bearish
+    expect(tech({ weeklyRsi: 25, weeklyRsiChange: 0, weeklyRsiSlope: 0, relativeStrengthChange: -1 }).result).toBe('OVERSOLD');
+    expect(tech({ weeklyRsi: 30, weeklyRsiChange: 0, weeklyRsiSlope: 0, relativeStrengthChange: -1 }).result).toBe('OVERSOLD'); // 30 inclusive
+    expect(tech({ weeklyRsi: 30.01, weeklyRsiChange: 0, weeklyRsiSlope: 0, relativeStrengthChange: -1 }).result).toBe('NOT_ESTABLISHED');
     expect(tech({ weeklyRsi: 25, weeklyRsiChange: -2, weeklyRsiSlope: -1, price: 80 }).result).toBe('DECLINING');
-    expect(tech({ weeklyRsi: 30, weeklyRsiSlope: -1 }).result).toBe('OVERSOLD'); // 30 is the depressed line (inclusive)
-    expect(tech({ weeklyRsi: 30.01, weeklyRsiSlope: -1 }).result).toBe('NOT_ESTABLISHED');
+    // RSI alone never decides: depressed RSI with falling RSI momentum and no non-RSI confirmation
+    expect(tech({ weeklyRsi: 25, weeklyRsiChange: -2, weeklyRsiSlope: -1, relativeStrengthChange: 0 }).result).toBe('NOT_ESTABLISHED');
+    expect(tech({ weeklyRsi: 30, weeklyRsiSlope: -1 }).result).toBe('NOT_ESTABLISHED');
   });
 
   it('stabilized evidence is never overridden by depressed levels or level-type bearish readings', () => {
@@ -164,7 +170,7 @@ describe('adverse confluence taxonomy (Section 45.8, review round 2)', () => {
 
   it('independently established adverse evidence stays visible when other inputs are unavailable', () => {
     expect(tech({ weeklyRsiChange: -3, price: 80, weeklyRsiSlope: null, relativeStrengthChange: null }).result).toBe('DECLINING');
-    expect(tech({ weeklyRsi: 25, weeklyRsiChange: -3, weeklyRsiSlope: null, relativeStrengthChange: null }).result).toBe('OVERSOLD');
+    expect(tech({ weeklyRsi: 25, weeklyRsiChange: -3, weeklyRsiSlope: null, relativeStrengthChange: null }).result).toBe('NOT_ESTABLISHED');
     expect(tech({ weeklyRsiChange: -3, weeklyRsiSlope: null, relativeStrengthChange: null }).result).toBe('NOT_ESTABLISHED');
   });
 

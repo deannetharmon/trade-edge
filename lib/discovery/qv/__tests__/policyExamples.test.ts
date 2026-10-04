@@ -38,8 +38,9 @@ describe('policy decision examples (PROPOSED, not ratified)', () => {
   });
 
   it('A5 technical: OVERSOLD line, one contradiction, relative-strength change versus acceleration', () => {
-    expect(assessTechnical(metricsWith({ weeklyRsi: 30, weeklyRsiSlope: -1 })).result).toBe('OVERSOLD');
-    expect(assessTechnical(metricsWith({ weeklyRsi: 31, weeklyRsiSlope: -1 })).result).toBe('NOT_ESTABLISHED');
+    expect(assessTechnical(metricsWith({ weeklyRsi: 30, weeklyRsiSlope: 0, relativeStrengthChange: -1 })).result).toBe('OVERSOLD');
+    expect(assessTechnical(metricsWith({ weeklyRsi: 30, weeklyRsiSlope: -1 })).result).toBe('NOT_ESTABLISHED'); // RSI alone
+    expect(assessTechnical(metricsWith({ weeklyRsi: 31, weeklyRsiSlope: 0, relativeStrengthChange: -1 })).result).toBe('NOT_ESTABLISHED');
     // Relative strength falling more slowly (decelerating decline) is NOT eligible for STABILIZING under the strict
     // first-difference rule (change >= 0), although it would satisfy "deterioration no longer accelerating".
     expect(assessTechnical(metricsWith({ relativeStrengthChange: -3 })).result).toBe('NOT_ESTABLISHED');
