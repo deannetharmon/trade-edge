@@ -4,9 +4,9 @@
 **Ticket:** LEAPS-QV-0001  
 **Strategy:** Quality Value LEAPS  
 **Initial Strategy Version:** QV-v1.0  
-**Status:** APPROVED — IMPLEMENTATION AUTHORIZED  
-**Current Gate:** Gate 2c — Technical Direction Metrics & FCF History  
-**Current Gate Status:** AUTHORIZED — IMPLEMENTATION NOT STARTED  
+**Status:** APPROVED — gate-by-gate authorization (Gates 1, 2, 2b, 2c, 3 CLOSED; Gate 4 implementation BLOCKED; Gates 5–8 BLOCKED)  
+**Current Gate:** Gate 4 — LEAPS Integration (SPECIFICATION ONLY)  
+**Current Gate Status:** SPECIFICATION IN REVIEW — IMPLEMENTATION BLOCKED (Gates 1, 2, 2b, 2c, 3 are APPROVED / CLOSED; Gate 2c closed at 0e60a2447f496078f593158be7a3978794c94fe1)  
 **Implementation Agent:** Claude Code  
 **Facilitator:** Frank  
 **Product Owner:** Paul  
@@ -442,8 +442,13 @@ Do not implement Gate 3 thresholds, scores, classifications, rankings, or lifecy
 
 **Exit review: Dane + Quinn for data correctness/architecture; Ian for whether the resulting fundamental evidence is fit for Gate 3.**
 
+## GATE 2c — Technical Direction Metrics & FCF History
+**Status: APPROVED / CLOSED (implementation 0e60a2447f496078f593158be7a3978794c94fe1)**
+
+Data enablement for Gate 3 (direction metrics, SPY benchmark, completed-session enforcement, loader exposure, fcf_annual_history_5y). Spec: docs/analysis/LEAPS-QV-0001-gate2c-technical-direction-and-fcf-history.md.
+
 ## GATE 3 — QV-v1.0 Underlying Strategy
-**Status: AUTHORIZED**
+**Status: APPROVED / CLOSED (d3fd48bfc851b099f87ad33a8dfd607db60f106b)**
 
 Implement the approved deterministic QV-v1.0 underlying-stock strategy specified in **Section 45 — Gate 3 Final Strategy Specification**.
 
@@ -454,7 +459,7 @@ Prove representative DISCOVERED, WATCH, SETUP, UNDERLYING ACTIONABLE, INVALIDATE
 **Exit review: Quinn + Ian + Paul, facilitated by Frank.** Gate 4 remains blocked.
 
 ## GATE 4 — LEAPS Integration
-**Status: BLOCKED**
+**Status: BLOCKED — specification and review package in review (docs/analysis/LEAPS-QV-0001-gate4-leaps-integration.md); implementation not authorized**
 
 Implement LEAPS availability, eligibility, DTE, delta/exposure, debit, capital efficiency, extrinsic value, theta, IV, vega, liquidity, breakeven, and contract ranking. Keep underlying and contract attractiveness separate.
 
@@ -500,13 +505,15 @@ Required final checks: existing Find LEAPS unchanged; QV deterministic/reproduci
 - Quinn — Architecture/Quality: APPROVED WITH INCORPORATED REQUIREMENTS
 - Paul + Ian Reconciliation: APPROVED
 - Frank Full Team Review: APPROVED
-- Implementation: AUTHORIZED
+- Implementation: AUTHORIZED (*history: initial gate-by-gate authorization at ticket approval; the per-gate status lines below govern*)
 - Gate 1 Exit Review — Quinn: APPROVED at 729124f78b48336c9ba9f4694a2af036827006b5 (after corrections B2, S1, B3)
 - Gate 2 Exit Review — Quinn: APPROVE WITH CHANGES at 8092be1508d0c641039dd8452c8a7f32a61556df (G2-B1 catalog completeness; FMP wording; SEC path documented; questions routed to Ian)
 - Gate 2 Correction: APPROVED at d518bc53aad6c0537c9ccd8f27ee888ab6fd2e93
 - Gate 2b Exit Review: APPROVED / CLOSED at a8d5b65
 - Gate 3 Methodology: APPROVED by Ian with refinements incorporated by Paul; Quinn implementation-readiness review PASS; Frank gate review PASS
-- **Current Authorization: GATE 3 ONLY.** Gate 4 remains blocked.
+- *History (superseded):* "Current Authorization: GATE 3 ONLY. Gate 4 remains blocked." — written before Gate 3 and Gate 2c were closed.
+- Gate 3: APPROVED / CLOSED at d3fd48bfc851b099f87ad33a8dfd607db60f106b. Gate 2c: APPROVED / CLOSED at 0e60a2447f496078f593158be7a3978794c94fe1 (weekly completion rule accepted by the closing review; no separate Alan/Ian approvals recorded).
+- **Current Authorization: Gate 4 SPECIFICATION AND REVIEW PACKAGE ONLY (documentation).** Gate 4 implementation remains BLOCKED pending Ian + Quinn review, Paul's scope confirmation and Frank's authorization. No Gate 4 reviewer approvals are recorded.
 
 # 43. Execution Ledger
 
@@ -540,10 +547,11 @@ Ian Investment/Data-Fitness Review: APPROVED
 Docs: docs/analysis/LEAPS-QV-0001-gate2b-sec-fundamentals.md
 
 ### Gate 2c
-Status: AUTHORIZED (Paul) — IMPLEMENTATION NOT STARTED; separate from Gate 3 algorithm acceptance; Gate 4 remains BLOCKED  
+Status: APPROVED / CLOSED at implementation SHA 0e60a2447f496078f593158be7a3978794c94fe1 (documentation closure d25631384611aeaa8ccfce86328ba746bca3bb7f)  
 Purpose: technical direction metrics (rsi_weekly_slope_1w, price_vs_sma50_gap_change_4w_pp, relative_return_126d_change_4w_pp), SPY benchmark/loader exposure/completed-bar enforcement, and fcf_annual_history_5y from the existing SEC annualSeries. Unblocks Gate 3 SETUP/ACTIONABLE in production.  
 Spec: docs/analysis/LEAPS-QV-0001-gate2c-technical-direction-and-fcf-history.md  
-Reviews required for the implementation (none recorded yet): Alan, Quinn
+Closure: CI "Type check and tests" and Vercel preview green on the implementation head; full suite 467 files / 6747 tests; weekly completion rule accepted unchanged (current week excluded until Monday incl. Sat/Sun; slope available with 16 earlier completed weekly closes). Attributed to the closing review.  
+*History (superseded, kept for audit):* "Status: AUTHORIZED (Paul) — IMPLEMENTATION NOT STARTED; Reviews required for the implementation (none recorded yet): Alan, Quinn" — written before implementation; no longer current.
 
 ### Gate 3
 Status: APPROVED / CLOSED  
@@ -554,6 +562,7 @@ Paul Product/Scope Review: APPROVED
 Frank Final Closure Review: APPROVED  
 Docs: docs/analysis/LEAPS-QV-0001-gate3-underlying-strategy.md  
 Code: lib/discovery/qv/  
+*Review history for Gate 3 and Gate 2c follows (chronology kept as written; statements such as "AUTHORIZED", "NOT AUTHORIZED" or "BLOCKED" inside these entries were true at that time and are superseded by the status lines above).*  
 Review round 1: CHANGES REQUIRED at e0398a9 — Technical State confluence (direction evidence), missing-trend semantics, assumptions review; corrections implemented, pending re-review. Open: Technical direction metrics (rsi_weekly_slope_1w, price_vs_sma50_gap_change_4w_pp, relative_return_126d_change_4w_pp) are not produced by the normalizer, so no candidate can reach SETUP/ACTIONABLE until they exist; Ian policy questions A1–A6, A8 (see Gate 3 doc); Gate 7 must pass previous state to the strategy. Ratification of A1–A8: NOT REVIEWED.  
 Review round 2 (baseline 76dee26): adverse Technical State confluence corrected (DECLINING needs 2+ distinct bearish feature groups; NOT_ESTABLISHED/OVERSOLD/unavailable kept distinct); Gate 2c amendment SPECIFIED, NOT AUTHORIZED: docs/analysis/LEAPS-QV-0001-gate2c-technical-direction-and-fcf-history.md; policy proposals for A1–A6, A8 with examples, NOT APPROVED: docs/analysis/LEAPS-QV-0001-gate3-policy-decisions.md.  
 Gate 2c: APPROVED / CLOSED at 0e60a2447f496078f593158be7a3978794c94fe1 (CI and Vercel green; 467 files / 6747 tests). Review ruling: weekly completion rule accepted unchanged for QV-v1.0 (current week excluded until Monday incl. Sat/Sun; slope available with 16 earlier completed weekly closes, UNAVAILABLE with 15; weekend screening uses the preceding completed week's evidence). Attributed to the current review, no separate Alan/Ian approvals recorded. Gate 3 methodology unchanged; Gate 4 BLOCKED pending separate authorization.  
@@ -561,7 +570,7 @@ Gate 2c review round 2 (CHANGES REQUIRED at aa4aaca) corrected: calendar validit
 Review round 5: APPROVED / CLOSED at d3fd48bfc851b099f87ad33a8dfd607db60f106b. Final A3 FCF trajectory guard accepted: positive TTM below latest fiscal-year FCF cannot be IMPROVING; it is STABLE with explicit FUNDAMENTAL_FCF_BELOW_LATEST_FY_CONTEXT evidence. TTM remains a level and is not double-counted as an annual observation. Exact-head TypeScript, QV, discovery/fundamentals, full-suite CI, and Vercel verification PASS. Gate 2c AUTHORIZED; Gate 4 BLOCKED.  
 Review round 4 (baseline 9a0e029 accepted; narrow policy-ratification correction): A1–A8 RATIFIED by Ian/Paul rulings. A1 negative growth DETERIORATING regardless of trend (slowdown context separate, no new threshold); A2 ±1 pp; A3 level (POSITIVE/BREAKEVEN/NEGATIVE) separate from annual non-overlapping trajectory, persistence = 2+ negative annual periods, TTM not double-counted, fail closed; A4 as ratified; A5 OVERSOLD never from RSI alone, DECLINING first with 2+ distinct groups, NOT_ESTABLISHED is an evaluation result not an investment state, relative strength Option A (no acceleration metric), price-return convention split-adjusted dividend-unadjusted; A6 UNKNOWN stays UNKNOWN, no WATCH cap, no event provider in Gate 3; A7 data limitation; A8 as ratified. Gate 2c AUTHORIZED (Paul), implementation NOT STARTED, separate from Gate 3 algorithm acceptance. Gate 4 BLOCKED.  
 Review round 3 (team review CHANGES REQUIRED at 7a913b4): OVERSOLD now needs non-RSI confirmation; adverse evidence preserved as a trace when data is missing; risk gate NOT_EVALUABLE when event coverage is UNKNOWN; A1/A3 alternatives with counterexamples and A2/A4/A5/A7/A8 REVIEW RECOMMENDATIONS recorded (nothing ratified); Gate 2c spec corrected (6.1 withdrawn implication, calendar/alignment/FCF contract, fixtures). Status tracks: Gate 3 algorithm = IMPLEMENTED — PENDING REVIEW; Gate 2c data = SPECIFIED, NOT AUTHORIZED; production integration = NOT STARTED; Gate 7 previous-state = NOT STARTED. Gate 4 blocked.  
-PRODUCTION BLOCKER: no candidate can reach SETUP/UNDERLYING ACTIONABLE until Gate 2c (or equivalent) exists — direction metrics, SPY benchmark (the loader fetches none, so the relative-strength level is UNAVAILABLE in production), technical metrics returned by the loader, completed-bar enforcement. Taxonomy gap (NOT_ESTABLISHED) and strict relative-strength change vs acceleration await Ian. Reviews: none recorded for Gate 2c or A1–A8.  
+*History (resolved by Gate 2c):* PRODUCTION BLOCKER: no candidate can reach SETUP/UNDERLYING ACTIONABLE until Gate 2c (or equivalent) exists — direction metrics, SPY benchmark (the loader fetches none, so the relative-strength level is UNAVAILABLE in production), technical metrics returned by the loader, completed-bar enforcement. Taxonomy gap (NOT_ESTABLISHED) and strict relative-strength change vs acceleration await Ian. Reviews: none recorded for Gate 2c or A1–A8.  
 Gate 3 Tests: see Gate Completion Report for the final counts  
 TypeScript (tsconfig.check.json): PASS  
 GitHub CI / Vercel: see Gate Completion Report for the exact head  
@@ -570,23 +579,19 @@ Investment Methodology: Ian APPROVED WITH REFINEMENTS; incorporated below
 Quinn Implementation-Readiness Review: PASS  
 Frank Gate/Scope Review: PASS
 
-### Gates 4–8
+### Gate 4
+Status: BLOCKED — SPECIFICATION IN REVIEW (documentation only)  
+Spec/review package: docs/analysis/LEAPS-QV-0001-gate4-leaps-integration.md  
+Reviews required before any coding: Ian + Quinn (exit review as in Section 41), Paul scope confirmation, Frank authorization. None recorded.
+
+### Gates 5–8
 Status: BLOCKED
 
 # 44. Current Claude Instruction
 
-Read this entire document before making changes and inspect the existing TradeEdge implementation and repository conventions.
+**Current instruction (documentation only):** Gate 2c and Gate 3 are APPROVED / CLOSED. The only authorized work is the Gate 4 specification and review package in `docs/analysis/LEAPS-QV-0001-gate4-leaps-integration.md`. **Do not implement Gate 4** (no code, no provider calls, no UI, strategy assembly, scenario engine, persistence, sizing, execution, rolling or notifications) until Ian + Quinn have reviewed, Paul has confirmed scope and Frank has authorized implementation in this ledger. Preserve existing Find LEAPS behavior. Do not change Gate 3 methodology.
 
-Gate 3 is APPROVED / CLOSED at `d3fd48bfc851b099f87ad33a8dfd607db60f106b`. You are authorized to execute **GATE 2c — Technical Direction Metrics & FCF History ONLY**, exactly as specified in `docs/analysis/LEAPS-QV-0001-gate2c-technical-direction-and-fcf-history.md`. Gate 4 remains BLOCKED.
-
-Implementation requirements for Gate 2c:
-1. Read the complete Gate 2c specification before coding.
-2. Implement only the authorized data-enablement scope: technical direction metrics, SPY benchmark/alignment, completed-session semantics, loader exposure, and normalized annual FCF history from existing SEC annualSeries.
-3. Do not alter the closed Gate 3 investment methodology.
-4. Do not implement Gate 4.
-5. Preserve existing Find LEAPS behavior.
-6. Run the specified Gate 2c contract/fixture tests, relevant discovery/fundamentals regressions, TypeScript, full suite, exact-head CI, and Vercel.
-7. Update the ticket/analysis docs, commit/push, return the Gate 2c completion report, and STOP.
+*History (superseded — does not direct any work):* the previous instruction authorized "GATE 2c — Technical Direction Metrics & FCF History ONLY" at Gate 3 closure (`d3fd48bfc851b099f87ad33a8dfd607db60f106b`) with seven implementation requirements; that work was completed and closed at `0e60a2447f496078f593158be7a3978794c94fe1`.
 
 # 45. Gate 3 Final Strategy Specification
 
