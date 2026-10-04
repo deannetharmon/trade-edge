@@ -12,7 +12,7 @@
 
 import type { MetricSet } from '../metrics';
 import type { ReasonCode } from '../reasonCodes';
-import { fcfTrajectory } from './fcf';
+import { fcfBelowLatestFiscalYear, fcfTrajectory } from './fcf';
 import { metricsOf, readFcfHistory, readNumber } from './inputs';
 import type { ComponentTrace, NumericRead } from './inputs';
 import { QV_V1_0_POLICY } from './policy';
@@ -145,6 +145,9 @@ export function assessFundamentals(set: MetricSet): FundamentalsAssessment {
       reasons.push(qvReason(QV_REASON.FUNDAMENTAL_GROWTH_SLOWDOWN_CONTEXT, 'CONCERN', metricsOf([growth, trend]), { dimension, growthPct: growth.value, trendPct: trend.value as number }));
     }
   });
+  if (fcf.value !== null && history.points !== null && fcfBelowLatestFiscalYear(fcf.value, history.points)) {
+    reasons.push(qvReason(QV_REASON.FUNDAMENTAL_FCF_BELOW_LATEST_FY_CONTEXT, 'CONCERN', metricsOf([fcf]).concat([history.metric]), { ttmFcf: fcf.value, latestFiscalYearFcf: history.points[history.points.length - 1] }));
+  }
   dimensions.forEach((d) => {
     if (d.state === 'NOT_EVALUABLE') {
       // Growth known but no trend reference to judge it against: reported, never counted as stable.

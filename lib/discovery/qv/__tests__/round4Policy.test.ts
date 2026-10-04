@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { assessFundamentals, assessQuality, assessRisk, assessTechnical, growthTrajectoryOf, marginTrajectoryOf, QV_V1_0_ASSUMPTIONS } from '..';
-import { classifyFcfPattern, fcfLevelOf, fcfTrajectory } from '../fcf';
+import { classifyFcfPattern, fcfBelowLatestFiscalYear, fcfLevelOf, fcfTrajectory } from '../fcf';
 import { codesOf, evaluate, metricsWith, stateOf, unavailable } from './qvFixtures';
 
 const gate = (evaluation: ReturnType<typeof evaluate>, id: string) => evaluation.gateOutcomes.find((g) => g.gateId === id)?.result;
@@ -88,7 +88,7 @@ describe('A3 free cash flow (ratified): level separate from annual trajectory', 
   });
 
   it('historical trajectory comes from annual observations only', () => {
-    expect(fcfTrajectory(5, [10, 20, 30])).toBe('IMPROVING');
+    expect(fcfTrajectory(35, [10, 20, 30])).toBe('IMPROVING');
     expect(fcfTrajectory(5, [30, 20, 10])).toBe('STABLE');
     expect(fcfTrajectory(0, [30, 20, 10])).toBe('DETERIORATING');
     expect(fcfTrajectory(0, null)).toBeNull();
@@ -150,5 +150,46 @@ describe('A1-A8 ratification records', () => {
       expect(a.ratificationRecord).not.toBeNull();
     });
     expect(QV_V1_0_ASSUMPTIONS.find((a) => a.id === 'A7')?.basis).toBe('DATA');
+  });
+});
+
+describe('A3 clarification (round 5): current TTM versus latest fiscal year', () => {
+  const codes = (overrides: Parameters<typeof metricsWith>[0]) => assessFundamentals(metricsWith(overrides)).reasons.map((r) => r.code);
+
+  it('TTM 1 with rising annual [10,20,30] is STABLE (not IMPROVING, not DETERIORATING) and emits explicit context', () => {
+    expect(fcfTrajectory(1, [10, 20, 30])).toBe('STABLE');
+    expect(fcfBelowLatestFiscalYear(1, [10, 20, 30])).toBe(true);
+    const assessment = assessFundamentals(metricsWith({ fcf: 1, fcfHistory: [10, 20, 30] }));
+    expect(assessment.dimensions.find((d) => d.dimension === 'FCF')?.state).toBe('STABLE');
+    expect(assessment.reasons.map((r) => r.code)).toContain('FUNDAMENTAL_FCF_BELOW_LATEST_FY_CONTEXT');
+  });
+
+  it('TTM at or above the latest fiscal year keeps IMPROVING and emits no context', () => {
+    expect(fcfTrajectory(35, [10, 20, 30])).toBe('IMPROVING');
+    expect(fcfTrajectory(30, [10, 20, 30])).toBe('IMPROVING'); // not below the latest FY
+    expect(fcfBelowLatestFiscalYear(30, [10, 20, 30])).toBe(false);
+    expect(codes({ fcf: 35, fcfHistory: [10, 20, 30] })).not.toContain('FUNDAMENTAL_FCF_BELOW_LATEST_FY_CONTEXT');
+    expect(codes({ fcf: 30, fcfHistory: [10, 20, 30] })).not.toContain('FUNDAMENTAL_FCF_BELOW_LATEST_FY_CONTEXT');
+  });
+
+  it('the guard is a level comparison only: it never makes DETERIORATING and never applies without a positive TTM or usable history', () => {
+    expect(fcfTrajectory(1, [30, 20, 10])).toBe('STABLE');
+    expect(fcfBelowLatestFiscalYear(1, null)).toBe(false);
+    expect(fcfBelowLatestFiscalYear(1, [10, 20])).toBe(false);
+    expect(fcfBelowLatestFiscalYear(0, [10, 20, 30])).toBe(false);
+    expect(fcfBelowLatestFiscalYear(-1, [10, 20, 30])).toBe(false);
+    expect(fcfBelowLatestFiscalYear(null, [10, 20, 30])).toBe(false);
+  });
+
+  it('TTM is still not an annual observation: persistence and level behavior from round 4 are unchanged', () => {
+    expect(classifyFcfPattern(-1, [20, 10, -5])).toBe('DETERIORATING_INTO_NEGATIVE'); // one negative year; TTM not counted
+    expect(classifyFcfPattern(-1, [5, 6, -5])).toBe('NEGATIVE_TEMPORARY');
+    expect(classifyFcfPattern(-1, [5, -3, -2])).toBe('NEGATIVE_PERSISTENT');
+    expect(classifyFcfPattern(1, [10, 20, 30])).toBe('POSITIVE'); // a collapsed positive TTM is still a POSITIVE level
+    expect(classifyFcfPattern(0, null)).toBe('BREAKEVEN');
+    expect(classifyFcfPattern(-1, null)).toBe('NOT_EVALUABLE');
+    expect(fcfTrajectory(0, [30, 20, 10])).toBe('DETERIORATING');
+    expect(fcfTrajectory(-1, [-5, 4, -2])).toBe('DETERIORATING');
+    expect(assessQuality(metricsWith({ fcf: 1, fcfHistory: [10, 20, 30] })).result).toBe('PASS'); // Quality reads level only
   });
 });

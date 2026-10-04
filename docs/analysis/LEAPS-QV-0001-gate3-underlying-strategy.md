@@ -122,7 +122,10 @@ QV-v1.0 has not been published or persisted (Gate 3 is pending), so these change
 | Ratification records | `QvAssumption.ratification` is now `RATIFIED` with `ratificationRecord` for A1–A8 |
 | Gate 2c | AUTHORIZED, implementation NOT STARTED; Option B / acceleration metric rejected for QV-v1.0 |
 
-Known limitation recorded, not changed: with annual-only trajectory and a POSITIVE TTM level, a rising annual history with a collapsed TTM (e.g. TTM 1, annual [10,20,30]) reads IMPROVING; TTM is a level, not a trajectory observation, per the ruling.
+The limitation recorded here in round 4 (collapsed TTM with rising annual history reading IMPROVING) is resolved in round 5 below.
+
+## Review round 5 (baseline 5f9f7f8 accepted except one A3 item)
+A3 clarification only: current-vs-latest-FY guard in `fcf.ts` (`fcfBelowLatestFiscalYear`). For a positive TTM, rising annual history gives IMPROVING only if TTM is not below the latest fiscal-year FCF; otherwise STABLE with the new reason `FUNDAMENTAL_FCF_BELOW_LATEST_FY_CONTEXT` (CONCERN, structured: ttmFcf, latestFiscalYearFcf). No percentage threshold; never DETERIORATING from this comparison alone. TTM remains a level: not an annual observation, not counted toward persistence; persistent-negative, BREAKEVEN and fail-closed behavior unchanged. A1, A2, A4-A8 untouched. Gate 2c not implemented; Gate 4 blocked.
 
 ## Tests (`lib/discovery/qv/__tests__`)
-boundaries (9), behavior (12), hardGates (15), policy (12), technicalDirection (21), policyExamples (7), reviewRound3 (9), round4Policy (19) = 104.
+boundaries (9), behavior (12), hardGates (15), policy (12), technicalDirection (21), policyExamples (7), reviewRound3 (9), round4Policy (23) = 108.

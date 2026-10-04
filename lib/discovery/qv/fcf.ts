@@ -65,6 +65,15 @@ export function classifyFcfPattern(ttm: number | null, history: readonly number[
 }
 
 /**
+ * Current-vs-latest-FY guard (A3 clarification): a POSITIVE TTM figure below the latest annual FCF. TTM is compared as a LEVEL against
+ * the latest fiscal year; it is not an annual observation and never counts toward persistence or the annual trajectory.
+ */
+export function fcfBelowLatestFiscalYear(ttm: number | null, history: readonly number[] | null): boolean {
+  if (ttm === null || ttm <= 0 || !annualHistoryUsable(history)) return false;
+  return ttm < history[history.length - 1];
+}
+
+/**
  * The cash-flow dimension of fundamental trajectory; null when it cannot be judged (never neutral). Historical trajectory is read
  * from the annual observations only. A POSITIVE or BREAKEVEN level needs the annual history to be judged.
  */
@@ -76,6 +85,9 @@ export function fcfTrajectory(ttm: number | null, history: readonly number[] | n
     if (!annualHistoryUsable(history)) return null;
     const recent = recentPoints(history);
     if (pattern === 'BREAKEVEN') return strictlyFalling(recent) ? 'DETERIORATING' : 'STABLE';
+    // Rising annual history supports IMPROVING only while current TTM FCF has not fallen below the latest fiscal-year level.
+    // No materiality threshold is authorized, so the TTM-vs-FY drop alone is never DETERIORATING: it is STABLE plus explicit context.
+    if (fcfBelowLatestFiscalYear(ttm, history)) return 'STABLE';
     return strictlyRising(recent) ? 'IMPROVING' : 'STABLE';
   }
   return null;
