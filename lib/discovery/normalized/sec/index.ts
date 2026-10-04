@@ -5,4 +5,5 @@ export * from './conceptMap';
 export * from './facts';
 export * from './periods';
 export * from './valuationHistory';
+export * from './fcfHistory';
 export * from './secFundamentals';

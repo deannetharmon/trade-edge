@@ -1,6 +1,7 @@
 // lib/discovery/normalized/index.ts
 
 export * from './dates';
+export * from './exchangeCalendar';
 export * from './providerNumber';
 export * from './technicals';
 export * from './optionMetrics';

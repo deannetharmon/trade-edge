@@ -15,6 +15,7 @@
 import { invalidMetric, normalizeNumberMetric, unavailableMetric } from '../metrics';
 import type { MetricSet, NormalizedMetric } from '../metrics';
 import { epochDay, epochDayOfIso, isoFromEpochSeconds, mondayOfEpochDay, monthIndexOfEpochDay } from './dates';
+import { latestCompletedSession, sessionCloseEpochSeconds } from './exchangeCalendar';
 
 export interface DailyBar {
   /** Unix SECONDS of the session open. */
@@ -30,6 +31,13 @@ export const SMA_LONG_PERIOD = 200;
 export const SMA_SLOPE_LOOKBACK_BARS = 20;
 export const RSI_WEEKLY_SLOPE_LOOKBACK = 4;
 export const RELATIVE_RETURN_LOOKBACK_BARS = 126;
+/** Gate 2c: the direction metrics compare "now" with 20 completed sessions ago (four trading weeks). */
+export const DIRECTION_LOOKBACK_BARS = 20;
+/** Weekly evidence legitimately lags the evaluation time by up to one week (the last COMPLETED week), so its freshness window is longer. */
+export const WEEKLY_EVIDENCE_MAX_AGE_MS = TECHNICAL_MAX_BAR_AGE_MS + 7 * 24 * 60 * 60 * 1000;
+/** The price basis every QV-v1.0 price-return metric uses for BOTH the stock and the benchmark. */
+export const PRICE_BASIS_QUOTE = 'QUOTE_SPLIT_ADJUSTED_DIVIDEND_UNADJUSTED';
+export const BENCHMARK_SYMBOL = 'SPY';
 export const HIGH_WINDOW_DAYS = 365;
 /** Bars required before a 52-week figure is trusted (one year of trading days, minus slack for holidays). */
 export const HIGH_MIN_BARS = 240;
@@ -90,20 +98,25 @@ export type Period = 'WEEK' | 'MONTH';
  * falls in a later period than the last bar.
  */
 export function periodCloses(bars: readonly DailyBar[], period: Period, asOfEpochDay: number): number[] {
+  return periodObservations(bars, period, asOfEpochDay).map((observation) => observation.c);
+}
+
+/** As periodCloses, but each period carries the time of its LAST bar (the evidence time of that observation). */
+export function periodObservations(bars: readonly DailyBar[], period: Period, asOfEpochDay: number): DailyBar[] {
   const keyOf = (day: number): number => (period === 'WEEK' ? mondayOfEpochDay(day) : monthIndexOfEpochDay(day));
-  const closes: number[] = [];
+  const observations: DailyBar[] = [];
   let currentKey: number | null = null;
   bars.forEach((bar) => {
     const key = keyOf(epochDay(bar.t));
     if (key !== currentKey) {
-      closes.push(bar.c);
+      observations.push({ t: bar.t, c: bar.c });
       currentKey = key;
     } else {
-      closes[closes.length - 1] = bar.c;
+      observations[observations.length - 1] = { t: bar.t, c: bar.c };
     }
   });
-  if (bars.length > 0 && keyOf(asOfEpochDay) <= keyOf(epochDay(bars[bars.length - 1].t))) closes.pop();
-  return closes;
+  if (bars.length > 0 && keyOf(asOfEpochDay) <= keyOf(epochDay(bars[bars.length - 1].t))) observations.pop();
+  return observations;
 }
 
 export interface TechnicalContext {
@@ -111,6 +124,11 @@ export interface TechnicalContext {
   readonly now: string;
   readonly provider: string;
   readonly maxAgeMs?: number;
+  /** Gate 2c: price basis of the stock series and of the benchmark series; a mismatch makes the benchmark metrics INVALID. */
+  readonly priceBasis?: string;
+  readonly benchmarkBasis?: string;
+  /** Gate 2c: why no benchmark series is available (e.g. a failed SPY fetch); reported as the UNAVAILABLE reason. */
+  readonly benchmarkUnavailableReason?: string | null;
 }
 
 export const TECHNICAL_METRIC_IDS: readonly string[] = [
@@ -124,7 +142,40 @@ export const TECHNICAL_METRIC_IDS: readonly string[] = [
   'rsi_monthly_14',
   'distance_from_52w_high_pct',
   'relative_return_126d_vs_benchmark_pct',
+  // Gate 2c direction metrics (no thresholds; Gate 3 reads them).
+  'rsi_weekly_slope_1w',
+  'price_vs_sma50_gap_change_4w_pp',
+  'relative_return_126d_change_4w_pp',
 ];
+
+/** Gate 2c metrics that depend on the session calendar (completed-session semantics). */
+export const DIRECTION_METRIC_IDS: readonly string[] = ['rsi_weekly_slope_1w', 'price_vs_sma50_gap_change_4w_pp', 'relative_return_126d_change_4w_pp'];
+
+type SessionGuard = { readonly kind: 'OK' } | { readonly kind: 'UNAVAILABLE' | 'INVALID'; readonly reason: string };
+
+/**
+ * Exchange-calendar guard for the direction metrics (spec 6.2): the last bar must be a COMPLETED session and the LATEST completed
+ * session at the evaluation instant. Calendar unknown -> UNAVAILABLE; a still-forming bar -> INVALID; a missing latest session ->
+ * UNAVAILABLE. Nothing is guessed.
+ */
+function sessionGuard(last: DailyBar, nowIso: string): SessionGuard {
+  const nowMs = Date.parse(nowIso);
+  const lastDay = epochDay(last.t);
+  const close = sessionCloseEpochSeconds(lastDay);
+  const latest = Number.isFinite(nowMs) ? latestCompletedSession(nowMs / 1000) : null;
+  if (close === null || latest === null) return { kind: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' };
+  if (close > nowMs / 1000) return { kind: 'INVALID', reason: 'FORMING_BAR_PRESENT' };
+  if (lastDay !== latest) return { kind: 'UNAVAILABLE', reason: 'LATEST_COMPLETED_SESSION_MISSING' };
+  return { kind: 'OK' };
+}
+
+/** gap(i) = (close[i] / SMA50 ending at i - 1) * 100, or null when fewer than 50 closes precede-and-include i. */
+function smaGapPct(closes: readonly number[], index: number): number | null {
+  if (index + 1 < SMA_SHORT_PERIOD) return null;
+  let sum = 0;
+  for (let i = index - SMA_SHORT_PERIOD + 1; i <= index; i += 1) sum += closes[i];
+  return (closes[index] / (sum / SMA_SHORT_PERIOD) - 1) * 100;
+}
 
 function allWith(
   make: (id: string) => NormalizedMetric,
@@ -158,11 +209,27 @@ export function buildTechnicalMetrics(
   const last = bars[bars.length - 1];
   const asOf = isoFromEpochSeconds(last.t);
   const closes = bars.map((bar) => bar.c);
-  const number = (id: string, value: number | null, reason: string): NormalizedMetric => {
-    if (value === null) return unavailableMetric(id, reason, provenance);
-    if (!Number.isFinite(value)) return invalidMetric(id, value, 'NON_FINITE_RESULT', provenance);
-    return normalizeNumberMetric(id, value, { asOf, now: context.now, maxAgeMs: context.maxAgeMs ?? TECHNICAL_MAX_BAR_AGE_MS, provenance });
+  const priceBasis = context.priceBasis;
+  const stockProvenance = priceBasis ? { ...provenance, priceBasis } : provenance;
+  const benchmarkProvenance = { ...stockProvenance, benchmark: BENCHMARK_SYMBOL };
+  const number = (
+    id: string,
+    value: number | null,
+    reason: string,
+    evidence?: { readonly asOf: string; readonly maxAgeMs: number; readonly provenance?: typeof provenance },
+  ): NormalizedMetric => {
+    const meta = evidence ? evidence.provenance || stockProvenance : stockProvenance;
+    if (value === null) return unavailableMetric(id, reason, meta);
+    if (!Number.isFinite(value)) return invalidMetric(id, value, 'NON_FINITE_RESULT', meta);
+    return normalizeNumberMetric(id, value, {
+      asOf: evidence ? evidence.asOf : asOf,
+      now: context.now,
+      maxAgeMs: evidence ? evidence.maxAgeMs : context.maxAgeMs ?? TECHNICAL_MAX_BAR_AGE_MS,
+      provenance: meta,
+    });
   };
+  const basisMismatch = !!(context.priceBasis && context.benchmarkBasis && context.priceBasis !== context.benchmarkBasis);
+  const noBenchmarkReason = context.benchmarkUnavailableReason || 'NO_BENCHMARK_HISTORY';
 
   const sma50 = simpleMovingAverage(closes, SMA_SHORT_PERIOD);
   const sma200 = simpleMovingAverage(closes, SMA_LONG_PERIOD);
@@ -187,16 +254,18 @@ export function buildTechnicalMetrics(
     distance = (last.c / high - 1) * 100;
   }
 
-  let relative: NormalizedMetric = unavailableMetric('relative_return_126d_vs_benchmark_pct', 'NO_BENCHMARK_HISTORY', provenance);
+  let relative: NormalizedMetric = unavailableMetric('relative_return_126d_vs_benchmark_pct', noBenchmarkReason, benchmarkProvenance);
   if (benchmark && benchmark.length > 0) {
     const benchProblem = barsProblem(benchmark);
     const benchLast = benchmark[benchmark.length - 1];
-    if (benchProblem) {
-      relative = invalidMetric('relative_return_126d_vs_benchmark_pct', 'benchmark', benchProblem, provenance);
+    if (basisMismatch) {
+      relative = invalidMetric('relative_return_126d_vs_benchmark_pct', context.benchmarkBasis, 'ADJUSTMENT_BASIS_MISMATCH', benchmarkProvenance);
+    } else if (benchProblem) {
+      relative = invalidMetric('relative_return_126d_vs_benchmark_pct', 'benchmark', benchProblem, benchmarkProvenance);
     } else if (benchLast.t !== last.t) {
-      relative = invalidMetric('relative_return_126d_vs_benchmark_pct', benchLast.t, 'BENCHMARK_NOT_ALIGNED_TO_LAST_BAR', provenance);
+      relative = invalidMetric('relative_return_126d_vs_benchmark_pct', benchLast.t, 'BENCHMARK_NOT_ALIGNED_TO_LAST_BAR', benchmarkProvenance);
     } else if (bars.length <= RELATIVE_RETURN_LOOKBACK_BARS) {
-      relative = unavailableMetric('relative_return_126d_vs_benchmark_pct', 'INSUFFICIENT_HISTORY', provenance);
+      relative = unavailableMetric('relative_return_126d_vs_benchmark_pct', 'INSUFFICIENT_HISTORY', benchmarkProvenance);
     } else {
       const startBar = bars[bars.length - 1 - RELATIVE_RETURN_LOOKBACK_BARS];
       const benchStart = benchmark.find((bar) => bar.t === startBar.t);
@@ -205,10 +274,65 @@ export function buildTechnicalMetrics(
             'relative_return_126d_vs_benchmark_pct',
             (last.c / startBar.c - benchLast.c / benchStart.c) * 100,
             'INSUFFICIENT_HISTORY',
+            { asOf, maxAgeMs: context.maxAgeMs ?? TECHNICAL_MAX_BAR_AGE_MS, provenance: benchmarkProvenance },
           )
-        : invalidMetric('relative_return_126d_vs_benchmark_pct', startBar.t, 'BENCHMARK_NOT_ALIGNED_TO_START_BAR', provenance);
+        : invalidMetric('relative_return_126d_vs_benchmark_pct', startBar.t, 'BENCHMARK_NOT_ALIGNED_TO_START_BAR', benchmarkProvenance);
     }
   }
+
+  // ---- Gate 2c direction metrics ----
+  const guard = sessionGuard(last, context.now);
+  const guarded = (id: string, benchmarkBased: boolean): NormalizedMetric | null => {
+    if (guard.kind === 'OK') return null;
+    const meta = benchmarkBased ? benchmarkProvenance : stockProvenance;
+    return guard.kind === 'UNAVAILABLE' ? unavailableMetric(id, guard.reason, meta) : invalidMetric(id, last.t, guard.reason, meta);
+  };
+
+  // rsi_weekly_slope_1w: the last COMPLETED weekly step of the same weekly RSI series that feeds rsi_weekly_change_4w.
+  const weeklyObservations = periodObservations(bars, 'WEEK', nowDay);
+  const slopeEvidenceAsOf = weeklyObservations.length > 0 ? isoFromEpochSeconds(weeklyObservations[weeklyObservations.length - 1].t) : asOf;
+  const slopeValue = weekly && weekly.length >= 2 ? weekly[weekly.length - 1] - weekly[weekly.length - 2] : null;
+  const rsiWeeklySlope =
+    guarded('rsi_weekly_slope_1w', false) ||
+    number('rsi_weekly_slope_1w', slopeValue, 'INSUFFICIENT_HISTORY', { asOf: slopeEvidenceAsOf, maxAgeMs: context.maxAgeMs ? context.maxAgeMs + 7 * 86400000 : WEEKLY_EVIDENCE_MAX_AGE_MS });
+
+  // price_vs_sma50_gap_change_4w_pp: gap(n-1) - gap(n-21), percentage points.
+  const gapNow = smaGapPct(closes, closes.length - 1);
+  const gapThen = smaGapPct(closes, closes.length - 1 - DIRECTION_LOOKBACK_BARS);
+  const smaGapChange =
+    guarded('price_vs_sma50_gap_change_4w_pp', false) ||
+    number('price_vs_sma50_gap_change_4w_pp', gapNow !== null && gapThen !== null ? gapNow - gapThen : null, 'INSUFFICIENT_HISTORY');
+
+  // relative_return_126d_change_4w_pp: R(n-1) - R(n-21), R(i) = (stock return - benchmark return over 126 bars ending i) * 100.
+  const relativeChange: NormalizedMetric = (() => {
+    const id = 'relative_return_126d_change_4w_pp';
+    const early = guarded(id, true);
+    if (early) return early;
+    if (!benchmark || benchmark.length === 0) return unavailableMetric(id, noBenchmarkReason, benchmarkProvenance);
+    if (basisMismatch) return invalidMetric(id, context.benchmarkBasis, 'ADJUSTMENT_BASIS_MISMATCH', benchmarkProvenance);
+    const benchProblem = barsProblem(benchmark);
+    if (benchProblem) return invalidMetric(id, 'benchmark', benchProblem, benchmarkProvenance);
+    const benchLast = benchmark[benchmark.length - 1];
+    if (benchLast.t !== last.t) return invalidMetric(id, benchLast.t, 'BENCHMARK_NOT_ALIGNED_TO_LAST_BAR', benchmarkProvenance);
+    const needed = RELATIVE_RETURN_LOOKBACK_BARS + DIRECTION_LOOKBACK_BARS + 1;
+    if (bars.length < needed) return unavailableMetric(id, 'INSUFFICIENT_HISTORY', benchmarkProvenance);
+    const n = bars.length;
+    // required stock indexes, and the benchmark close at EXACTLY the same timestamp (looked up by timestamp, never by position)
+    const indexes = [n - 1, n - 1 - DIRECTION_LOOKBACK_BARS, n - 1 - RELATIVE_RETURN_LOOKBACK_BARS, n - 1 - DIRECTION_LOOKBACK_BARS - RELATIVE_RETURN_LOOKBACK_BARS];
+    const benchByTime: Record<number, number> = {};
+    benchmark.forEach((bar) => {
+      benchByTime[bar.t] = bar.c;
+    });
+    const benchClose: number[] = [];
+    for (const index of indexes) {
+      const found = benchByTime[bars[index].t];
+      if (found === undefined) return invalidMetric(id, bars[index].t, 'BENCHMARK_NOT_ALIGNED_TO_LOOKBACK_BAR', benchmarkProvenance);
+      benchClose.push(found);
+    }
+    const relativeNow = (bars[indexes[0]].c / bars[indexes[2]].c - benchClose[0] / benchClose[2]) * 100;
+    const relativeThen = (bars[indexes[1]].c / bars[indexes[3]].c - benchClose[1] / benchClose[3]) * 100;
+    return number(id, relativeNow - relativeThen, 'INSUFFICIENT_HISTORY', { asOf, maxAgeMs: context.maxAgeMs ?? TECHNICAL_MAX_BAR_AGE_MS, provenance: benchmarkProvenance });
+  })();
 
   const weeklyLast = weekly ? weekly[weekly.length - 1] : null;
   const weeklyPrior = weekly && weekly.length > RSI_WEEKLY_SLOPE_LOOKBACK ? weekly[weekly.length - 1 - RSI_WEEKLY_SLOPE_LOOKBACK] : null;
@@ -232,6 +356,9 @@ export function buildTechnicalMetrics(
     rsi_monthly_14: number('rsi_monthly_14', monthly ? monthly[monthly.length - 1] : null, 'INSUFFICIENT_HISTORY'),
     distance_from_52w_high_pct: number('distance_from_52w_high_pct', distance, 'INSUFFICIENT_HISTORY'),
     relative_return_126d_vs_benchmark_pct: relative,
+    rsi_weekly_slope_1w: rsiWeeklySlope,
+    price_vs_sma50_gap_change_4w_pp: smaGapChange,
+    relative_return_126d_change_4w_pp: relativeChange,
   };
   return set;
 }

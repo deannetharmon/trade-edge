@@ -36,14 +36,14 @@ describe('QV-v1.0 policy', () => {
     });
   });
 
-  it('documents the contract-only inputs: they are not produced by the normalizer today (update the docs when one is)', () => {
-    const contractOnly = [
+  it('the four Gate 2c input ids are produced by the normalizer (they were contract-only before Gate 2c)', () => {
+    const produced = [
       QV_V1_0_POLICY.inputs.quality.fcfHistory,
       QV_V1_0_POLICY.inputs.technical.weeklyRsiSlope,
       QV_V1_0_POLICY.inputs.technical.sma50GapChange,
       QV_V1_0_POLICY.inputs.technical.relativeStrengthChange,
     ];
-    contractOnly.forEach((id) => expect(IMPLEMENTED_METRIC_IDS).not.toContain(id));
+    produced.forEach((id) => expect(IMPLEMENTED_METRIC_IDS).toContain(id));
   });
 
   it('classifier files hold no numeric thresholds: every number lives in policy.ts', () => {

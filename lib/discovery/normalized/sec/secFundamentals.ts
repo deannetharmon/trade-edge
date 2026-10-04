@@ -28,6 +28,7 @@ import {
   ttmAt,
 } from './periods';
 import type { Anchor, FiscalYear, Ttm } from './periods';
+import { buildFcfAnnualHistory } from './fcfHistory';
 import { buildPeHistoryMetrics, buildPeObservations, PE_HISTORY_METRIC_IDS, SPLIT_SUSPECT_RATIO } from './valuationHistory';
 import type { ExcludedObservation, PeObservation } from './valuationHistory';
 import type { CompactFacts, SecItemStatus, SecProvenance, SecSubmissionsInfo } from './types';
@@ -35,6 +36,7 @@ import type { CompactFacts, SecItemStatus, SecProvenance, SecSubmissionsInfo } f
 export const SEC_PROVIDER = 'sec-edgar';
 
 export const SEC_METRIC_IDS: readonly string[] = [
+  'fcf_annual_history_5y',
   'eps_cagr_5y_pct',
   'eps_growth_yoy_ttm_pct',
   'revenue_growth_yoy_ttm_pct',
@@ -441,6 +443,10 @@ export function buildSecFundamentals(compact: CompactFacts, ctx: SecBuildContext
   // sector classification (SIC) from the submissions payload
   out.sector_classification = sectorMetric(ctx.submissions, ctx.now);
 
+  // ---- Gate 2c: annual FCF history (latest contiguous suffix of fiscal years; data only) ----
+  const fcfHistory = buildFcfAnnualHistory(index, fiscalYears, ctx.now, filedMax);
+  out.fcf_annual_history_5y = fcfHistory.metric;
+
   // ---- P/E history ----
   const obs = buildPeObservations(index, anchors, (a, b) => dayOf(b) - dayOf(a));
   Object.assign(out, buildPeHistoryMetrics({ observations: obs.observations, closes: ctx.closes, peNow: out.pe_ttm, now: ctx.now }));
@@ -456,6 +462,7 @@ export function buildSecFundamentals(compact: CompactFacts, ctx: SecBuildContext
     deps.forEach((d) => (itemProv[d] || []).forEach((p) => list.push(p)));
     if (list.length > 0) metricProvenance[id] = list;
   });
+  if (fcfHistory.provenance.length > 0) metricProvenance.fcf_annual_history_5y = fcfHistory.provenance.slice();
   const itemIssues: Record<string, SecItemStatus> = {};
   Object.keys(status).forEach((key) => {
     if (status[key].status !== 'OK') itemIssues[key] = status[key];

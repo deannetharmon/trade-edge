@@ -424,7 +424,7 @@ describe('SEC fundamentals: coverage and structure', () => {
   it('declares exactly the new SEC metric ids', () => {
     expect([...SEC_METRIC_IDS].sort()).toEqual(
       [
-        'eps_cagr_5y_pct', 'eps_growth_yoy_ttm_pct', 'revenue_growth_yoy_ttm_pct', 'operating_margin_trend_5y_pp', 'operating_margin_change_yoy_pp',
+        'fcf_annual_history_5y', 'eps_cagr_5y_pct', 'eps_growth_yoy_ttm_pct', 'revenue_growth_yoy_ttm_pct', 'operating_margin_trend_5y_pp', 'operating_margin_change_yoy_pp',
         'total_debt', 'net_debt', 'current_ratio', 'interest_coverage', 'ev_to_ebitda_ttm', 'price_to_fcf', 'sector_classification',
         'pe_ttm_median_3y', 'pe_ttm_percentile_3y', 'pe_ttm_discount_to_median_3y_pct',
         'pe_ttm_median_5y', 'pe_ttm_percentile_5y', 'pe_ttm_discount_to_median_5y_pct',

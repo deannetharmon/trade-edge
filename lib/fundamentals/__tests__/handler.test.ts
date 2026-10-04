@@ -145,14 +145,14 @@ describe('fetchYahooPriceHistory', () => {
 
   it('uses the quote close series (not adjclose), drops null / non-positive / out-of-order bars', async () => {
     const payload = { chart: { result: [{ timestamp: [100, 200, 300, 250, 400], indicators: { quote: [{ close: [1, null, 3, 4, 0] }], adjclose: [{ adjclose: [9, 9, 9, 9, 9] }] } }] } };
-    expect(await fetchYahooPriceHistory('ACME', yahoo(payload))).toEqual({ closes: [{ t: 100, c: 1 }, { t: 300, c: 3 }], issue: null });
+    expect(await fetchYahooPriceHistory('ACME', yahoo(payload))).toEqual({ closes: [{ t: 100, c: 1 }, { t: 300, c: 3 }], issue: null, basis: 'QUOTE_SPLIT_ADJUSTED_DIVIDEND_UNADJUSTED' });
   });
 
   it('reports why history is unusable', async () => {
-    expect(await fetchYahooPriceHistory('ACME', yahoo({}, false, 429))).toEqual({ closes: null, issue: 'PRICE_HTTP_429' });
-    expect(await fetchYahooPriceHistory('ACME', yahoo({ chart: { result: null } }))).toEqual({ closes: null, issue: 'PRICE_NO_DATA' });
+    expect(await fetchYahooPriceHistory('ACME', yahoo({}, false, 429))).toEqual({ closes: null, issue: 'PRICE_HTTP_429', basis: 'QUOTE_SPLIT_ADJUSTED_DIVIDEND_UNADJUSTED' });
+    expect(await fetchYahooPriceHistory('ACME', yahoo({ chart: { result: null } }))).toEqual({ closes: null, issue: 'PRICE_NO_DATA', basis: 'QUOTE_SPLIT_ADJUSTED_DIVIDEND_UNADJUSTED' });
     const boom = (async () => { throw new Error('x'); }) as unknown as typeof fetch;
-    expect(await fetchYahooPriceHistory('ACME', boom)).toEqual({ closes: null, issue: 'PRICE_FETCH_FAILED' });
+    expect(await fetchYahooPriceHistory('ACME', boom)).toEqual({ closes: null, issue: 'PRICE_FETCH_FAILED', basis: 'QUOTE_SPLIT_ADJUSTED_DIVIDEND_UNADJUSTED' });
   });
 });
 

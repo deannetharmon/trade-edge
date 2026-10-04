@@ -17,6 +17,10 @@ export const METRIC_VALIDITIES: readonly MetricValidity[] = ['VALID', 'UNAVAILAB
 export interface MetricProvenance {
   readonly provider: string;
   readonly field?: string;
+  /** Benchmark series a relative metric was computed against (e.g. 'SPY'). */
+  readonly benchmark?: string;
+  /** Price basis of the underlying series (e.g. split-adjusted, dividend-unadjusted). */
+  readonly priceBasis?: string;
 }
 
 export interface ValidMetric<T extends JsonValue> {

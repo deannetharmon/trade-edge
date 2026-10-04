@@ -27,6 +27,14 @@ export interface LoadedFundamentals {
   readonly diagnostics: SecFundamentalsResult['diagnostics'] | null;
   /** Why the price history was not usable (null when it was). */
   readonly priceIssue: string | null;
+  /** Gate 2c: why the SPY benchmark was not usable (null when it was) and whether the exchange calendar could not decide. */
+  readonly benchmarkIssue: string | null;
+  readonly calendarIssue: string | null;
+  /**
+   * Gate 2c: Yahoo-derived technical metrics (always present, independent of SEC coverage): built from completed bars only.
+   * An unusable stock history makes every one UNAVAILABLE; an unusable SPY history only the benchmark-derived ones.
+   */
+  readonly technicals: MetricSet;
 }
 
 const SYMBOL_PATTERN = /^[A-Z]{1,6}([.-][A-Z]{1,2})?$/;
@@ -38,7 +46,22 @@ export function normalizeTicker(raw: string): string | null {
   return upper.replace('.', '-');
 }
 
-function failure(symbol: string, cik: string | null, coverage: Coverage, reason: string, priceIssue: string | null): LoadedFundamentals {
+function technicalsOf(deps: LoadDeps, now: string): MetricSet {
+  return buildTechnicalMetrics(
+    deps.closes,
+    {
+      now,
+      provider: 'yahoo',
+      priceBasis: deps.priceBasis,
+      benchmarkBasis: deps.benchmarkBasis,
+      benchmarkUnavailableReason: deps.benchmarkIssue || null,
+    },
+    deps.benchmark || null,
+  );
+}
+
+function failure(symbol: string, cik: string | null, coverage: Coverage, reason: string, deps: LoadDeps): LoadedFundamentals {
+  const priceIssue = deps.priceIssue;
   return {
     symbol,
     cik,
@@ -50,6 +73,9 @@ function failure(symbol: string, cik: string | null, coverage: Coverage, reason:
     annualSeries: [],
     diagnostics: null,
     priceIssue,
+    benchmarkIssue: deps.benchmarkIssue || null,
+    calendarIssue: deps.calendarIssue || null,
+    technicals: technicalsOf(deps, deps.nowIso()),
   };
 }
 
@@ -58,20 +84,26 @@ export interface LoadDeps {
   /** Completed daily closes, oldest first, from the server-side price fetch; null when unavailable. */
   readonly closes: readonly DailyBar[] | null;
   readonly priceIssue: string | null;
+  /** Gate 2c: price basis of `closes` / `benchmark` (they must match), the SPY series (completed sessions only) and its issue. */
+  readonly priceBasis?: string;
+  readonly benchmark?: readonly DailyBar[] | null;
+  readonly benchmarkBasis?: string;
+  readonly benchmarkIssue?: string | null;
+  readonly calendarIssue?: string | null;
   /** Evaluation clock (ISO-8601). Read AFTER all I/O so no fetched timestamp can be later than "now". */
   readonly nowIso: () => string;
 }
 
 export async function loadSecFundamentals(rawSymbol: string, deps: LoadDeps): Promise<LoadedFundamentals> {
   const symbol = normalizeTicker(rawSymbol);
-  if (!symbol) return failure(rawSymbol, null, 'NOT_COVERED', 'SYMBOL_NOT_SUPPORTED', deps.priceIssue);
+  if (!symbol) return failure(rawSymbol, null, 'NOT_COVERED', 'SYMBOL_NOT_SUPPORTED', deps);
   let cik: string | null = null;
   try {
     cik = await deps.client.lookupCik(symbol);
-    if (!cik) return failure(symbol, null, 'NOT_COVERED', 'TICKER_NOT_IN_SEC_DIRECTORY', deps.priceIssue);
+    if (!cik) return failure(symbol, null, 'NOT_COVERED', 'TICKER_NOT_IN_SEC_DIRECTORY', deps);
     const outcome = await deps.client.getCompanyFacts(cik);
-    if (outcome.kind === 'NOT_FOUND') return failure(symbol, cik, 'NOT_COVERED', 'NO_SEC_COMPANYFACTS', deps.priceIssue);
-    if (outcome.kind === 'NOT_US_GAAP') return failure(symbol, cik, 'NOT_COVERED', 'NOT_US_GAAP_XBRL', deps.priceIssue);
+    if (outcome.kind === 'NOT_FOUND') return failure(symbol, cik, 'NOT_COVERED', 'NO_SEC_COMPANYFACTS', deps);
+    if (outcome.kind === 'NOT_US_GAAP') return failure(symbol, cik, 'NOT_COVERED', 'NOT_US_GAAP_XBRL', deps);
 
     // Submissions only supply the SIC code; a failure there must not hide the financial metrics.
     let submissions = null;
@@ -83,8 +115,8 @@ export async function loadSecFundamentals(rawSymbol: string, deps: LoadDeps): Pr
     }
 
     const now = deps.nowIso();
-    const technicals = deps.closes ? buildTechnicalMetrics(deps.closes, { now, provider: 'yahoo' }) : null;
-    const price = technicals ? technicals.price_last_close : null;
+    const technicals = technicalsOf(deps, now);
+    const price = technicals.price_last_close;
     const result = buildSecFundamentals(outcome.compact, { now, price, closes: deps.closes, submissions });
     return {
       symbol,
@@ -97,9 +129,12 @@ export async function loadSecFundamentals(rawSymbol: string, deps: LoadDeps): Pr
       annualSeries: result.annualSeries,
       diagnostics: result.diagnostics,
       priceIssue: deps.priceIssue,
+      benchmarkIssue: deps.benchmarkIssue || null,
+      calendarIssue: deps.calendarIssue || null,
+      technicals,
     };
   } catch (err) {
-    if (err instanceof SecProviderError) return failure(symbol, cik, 'PROVIDER_FAILURE', `SEC_${err.code}`, deps.priceIssue);
-    return failure(symbol, cik, 'PROVIDER_FAILURE', 'SEC_UNEXPECTED_ERROR', deps.priceIssue);
+    if (err instanceof SecProviderError) return failure(symbol, cik, 'PROVIDER_FAILURE', `SEC_${err.code}`, deps);
+    return failure(symbol, cik, 'PROVIDER_FAILURE', 'SEC_UNEXPECTED_ERROR', deps);
   }
 }
