@@ -25,7 +25,7 @@ Domain rules (Technical State reflects review correction 1, see "Review round 1"
 Quality (21), Valuation (8), Fundamental (5 + 15 per-dimension trajectory codes), Technical (5, incl. TECHNICAL_STATE_NOT_ESTABLISHED), Risk (6), Data (5), Lifecycle (12). Full list: `QV_ALL_REASON_CODES`.
 
 ## Assumptions A1–A8 (review against Section 45)
-None is ratified: every entry carries `ratification: 'NOT_REVIEWED'` in `QV_V1_0_ASSUMPTIONS` until Ian actually reviews it and the ticket records that.
+A1–A8 are RATIFIED (round 4: final Ian/Paul rulings, recorded in the ticket ledger); every entry carries `ratification: 'RATIFIED'` and a `ratificationRecord` in `QV_V1_0_ASSUMPTIONS`. The "open question" column below is the historical question; the ratified ruling is in `docs/analysis/LEAPS-QV-0001-gate3-policy-decisions.md`.
 
 | ID | Area | Basis | Open investment-policy question |
 |---|---|---|---|
@@ -54,7 +54,7 @@ None is ratified: every entry carries `ratification: 'NOT_REVIEWED'` in `QV_V1_0
 1. **Technical State confluence.** Found: `technicalStateOf` returned STABILIZING on four-week RSI change >= 0 alone; present inputs (SMA50, relative strength) did not participate in the constructive states; levels stood in for directions. Corrected: STABILIZING and RECOVERING now use the Section 45.8 element lists with three direction metrics that do not exist in the normalizer; they are contract ids, UNAVAILABLE today, and the affected classification fails closed (see Data limitations). Known adverse evidence still classifies DECLINING/OVERSOLD.
 2. **Missing fundamental-trend semantics.** Found: `growthTrajectoryOf(growth >= 0, null)` returned STABLE. Corrected: returns NOT_EVALUABLE; `DATA_TREND_REFERENCE_UNAVAILABLE` is emitted; adverse (negative) growth is preserved.
 3. **Regression cases** added in `technicalDirection.test.ts`: flat/rising RSI with continuing adverse evidence is not STABILIZING; relative-strength level does not prove direction; price above SMA50 does not prove an improving relationship; missing/stale/invalid EPS trend is not STABLE; legitimate SETUP and ACTIONABLE still qualify.
-4. **Assumptions A1–A8** reviewed against Section 45 and classified (table above). None marked ratified.
+4. **Assumptions A1–A8** reviewed against Section 45 and classified (table above). Ratified in round 4.
 5. **Lifecycle persistence** kept outside Gate 3 (see Data limitations).
 Policy fingerprint changed because the technical input contract gained three ids (pin updated deliberately). New reason codes: `DATA_TECHNICAL_DIRECTION_UNAVAILABLE`, `DATA_TREND_REFERENCE_UNAVAILABLE`.
 
@@ -109,5 +109,20 @@ QV-v1.0 has not been published or persisted (Gate 3 is pending), so these change
 | Regression tests for changed behavior | DONE (`reviewRound3.test.ts`, updated taxonomy tests) |
 | Exact-head CI/Vercel evidence | see completion report |
 
+## Review round 4 (baseline 9a0e029 accepted; policy ratification)
+| Item | Disposition |
+|---|---|
+| A1 | `growthTrajectoryOf`: negative growth is DETERIORATING regardless of trend; positive-below-trend is not DETERIORATING; new `FUNDAMENTAL_GROWTH_SLOWDOWN_CONTEXT` reason (no threshold) |
+| A2 | Ratified ±1 pp; exact boundary tests |
+| A3 | `fcf.ts`: level (POSITIVE/BREAKEVEN/NEGATIVE), annual non-overlapping persistence (2+ negative annual points), TTM never counted as an annual observation, fail closed; new `QUALITY_FCF_BREAKEVEN`; `Quality` reads history only for a NEGATIVE level |
+| A4, A8 | Ratified; behavior unchanged (confirmed by existing and new tests) |
+| A5 | Ratified; wording changed to "relative strength no longer deteriorating"; NOT_ESTABLISHED documented as an evaluation result, not an investment state; price-return convention documented |
+| A6 | Ratified; UNKNOWN stays UNKNOWN, nonblocking, no WATCH cap, never VERIFIED_EMPTY (test) |
+| A7 | Ratified data limitation |
+| Ratification records | `QvAssumption.ratification` is now `RATIFIED` with `ratificationRecord` for A1–A8 |
+| Gate 2c | AUTHORIZED, implementation NOT STARTED; Option B / acceleration metric rejected for QV-v1.0 |
+
+Known limitation recorded, not changed: with annual-only trajectory and a POSITIVE TTM level, a rising annual history with a collapsed TTM (e.g. TTM 1, annual [10,20,30]) reads IMPROVING; TTM is a level, not a trajectory observation, per the ruling.
+
 ## Tests (`lib/discovery/qv/__tests__`)
-boundaries (9), behavior (12), hardGates (15), policy (12), technicalDirection (21), policyExamples (7), reviewRound3 (11) = 87.
+boundaries (9), behavior (12), hardGates (15), policy (12), technicalDirection (21), policyExamples (7), reviewRound3 (9), round4Policy (19) = 104.

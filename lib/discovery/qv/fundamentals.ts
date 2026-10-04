@@ -47,14 +47,22 @@ const IN = QV_V1_0_POLICY.inputs.fundamentals;
 
 /**
  * Revenue / EPS (assumption A1): growth against its own long-term trend. Missing trend evidence never establishes stability:
- *  - negative growth is adverse on its own and stays DETERIORATING when the trend is unavailable (independently supported);
+ *  - negative growth is DETERIORATING regardless of the trend (ratified A1), including when the trend is unavailable;
  *  - non-negative growth with no trend reference cannot be called STABLE or IMPROVING -> null (not evaluable).
  */
 export function growthTrajectoryOf(growthPct: number, trendPct: number | null): Trajectory | null {
-  if (growthPct < 0 && (trendPct === null || growthPct < trendPct)) return 'DETERIORATING';
+  // Assumption A1 (ratified): current negative growth is DETERIORATING regardless of the trend (-2 against a -5 trend is still
+  // DETERIORATING). Positive growth below trend is NOT automatically DETERIORATING; the slowdown is reported separately
+  // (growthSlowdownContext) as evidence, with no invented threshold.
+  if (growthPct < 0) return 'DETERIORATING';
   if (trendPct === null) return null;
-  if (growthPct >= 0 && growthPct > trendPct) return 'IMPROVING';
+  if (growthPct > trendPct) return 'IMPROVING';
   return 'STABLE';
+}
+
+/** Non-negative growth that is below its own trend: slowdown context, kept separate from the trajectory state. */
+export function growthSlowdownContext(growthPct: number, trendPct: number | null): boolean {
+  return trendPct !== null && growthPct >= 0 && growthPct < trendPct;
 }
 
 /** Operating margin (assumption A2): year-over-year change in percentage points, with a materiality band. */
@@ -131,6 +139,12 @@ export function assessFundamentals(set: MetricSet): FundamentalsAssessment {
     FCF: metricsOf([fcf]).concat([history.metric]),
     LEVERAGE: [],
   };
+  const slowdown: Array<[FundamentalDimension, NumericRead, NumericRead]> = [['REVENUE', revenueGrowth, revenueTrend], ['EPS', epsGrowth, epsTrend]];
+  slowdown.forEach(([dimension, growth, trend]) => {
+    if (growth.value !== null && growthSlowdownContext(growth.value, trend.value)) {
+      reasons.push(qvReason(QV_REASON.FUNDAMENTAL_GROWTH_SLOWDOWN_CONTEXT, 'CONCERN', metricsOf([growth, trend]), { dimension, growthPct: growth.value, trendPct: trend.value as number }));
+    }
+  });
   dimensions.forEach((d) => {
     if (d.state === 'NOT_EVALUABLE') {
       // Growth known but no trend reference to judge it against: reported, never counted as stable.

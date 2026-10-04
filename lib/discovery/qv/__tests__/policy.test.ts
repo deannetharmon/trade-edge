@@ -27,11 +27,12 @@ describe('QV-v1.0 policy', () => {
     expect(QV_V1_0_ASSUMPTIONS.map((a) => a.id)).toEqual(['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8']);
   });
 
-  it('every assumption is classified DIRECT / POLICY / DATA and none is marked ratified', () => {
+  it('every assumption is classified DIRECT / POLICY / DATA and A1-A8 carry the round 4 ratification record', () => {
     QV_V1_0_ASSUMPTIONS.forEach((assumption) => {
       expect(['DIRECT', 'POLICY', 'DATA']).toContain(assumption.basis);
       expect(assumption.policyQuestion.length).toBeGreaterThan(0);
-      expect(assumption.ratification).toBe('NOT_REVIEWED');
+      expect(assumption.ratification).toBe('RATIFIED');
+      expect(assumption.ratificationRecord).toContain('round 4');
     });
   });
 

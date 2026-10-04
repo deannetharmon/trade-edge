@@ -4,8 +4,7 @@
 // evidence requirements, and the current behaviour behind the A1/A3 counterexamples (under review, NOT ratified).
 
 import { describe, expect, it } from 'vitest';
-import { assessRisk, assessTechnical, growthTrajectoryOf } from '..';
-import { fcfTrajectory } from '../fcf';
+import { assessRisk, assessTechnical } from '..';
 import { codesOf, evaluate, metricsWith, stateOf, unavailable } from './qvFixtures';
 
 const gate = (evaluation: ReturnType<typeof evaluate>, id: string) => evaluation.gateOutcomes.find((g) => g.gateId === id)?.result;
@@ -77,16 +76,5 @@ describe('state-specific evidence requirements', () => {
 
   it('OVERSOLD never passes WATCH', () => {
     expect(stateOf(evaluate({ weeklyRsi: 25, weeklyRsiChange: 0, weeklyRsiSlope: 0, relativeStrengthChange: -1 }))).toBe('WATCH');
-  });
-});
-
-describe('A1/A3 counterexamples: CURRENT behaviour, documented for review (not ratified)', () => {
-  it('A1: growth 1% vs trend 12% reads STABLE; contraction -2% vs -5% reads STABLE', () => {
-    expect(growthTrajectoryOf(1, 12)).toBe('STABLE');
-    expect(growthTrajectoryOf(-2, -5)).toBe('STABLE');
-  });
-
-  it('A3: overlapping latest-FY/TTM; TTM 1 with history [10,20,30] reads IMPROVING', () => {
-    expect(fcfTrajectory(1, [10, 20, 30])).toBe('IMPROVING');
   });
 });

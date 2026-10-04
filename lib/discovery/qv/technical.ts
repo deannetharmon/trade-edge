@@ -4,10 +4,10 @@
 //
 // RSI alone never decides a state, and evidence that is merely present does not participate unless the rule uses it.
 // The two constructive states need DIRECTION evidence (Section 45.8):
-//   STABILIZING  weekly RSI slope not negative AND 4-week RSI change non-negative AND relative-strength deterioration no
-//                longer accelerating. Price need not exceed SMA50.
+//   STABILIZING  weekly RSI slope not negative AND 4-week RSI change non-negative AND relative strength no longer
+//                deteriorating (4-week relative-strength change >= 0; QV-v1.0 Option A, ratified). Price need not exceed SMA50.
 //   RECOVERING   weekly RSI slope rising AND 4-week RSI change positive AND improving relationship to SMA50 AND improving
-//                relative strength vs SPY.
+//                relative strength vs SPY (4-week relative-strength change > 0).
 // A LEVEL is never read as a direction: positive relative strength does not prove improving relative strength, and price
 // above SMA50 does not prove an improving relationship to SMA50. The slope, the SMA50-gap change and the relative-strength
 // change are separate contract metrics; the normalizer does not produce them yet, so today they are UNAVAILABLE and the
@@ -21,12 +21,11 @@
 //   OVERSOLD         weekly RSI is at or below the depressed line AND at least one non-RSI group (SMA50 / SMA200 / relative
 //                    strength) is bearish, stabilization is not established, and DECLINING is not established. RSI alone never
 //                    produces OVERSOLD ("RSI alone must not determine state"): a depressed RSI with no non-RSI confirmation is
-//                    NOT_ESTABLISHED. Whether a depressed RSI level alone should be OVERSOLD is an open specification question
-//                    for Ian (see the policy-decisions document); no threshold is invented here.
-//   NOT_ESTABLISHED  the domain IS evaluable but the evidence supports none of the four states: stabilization is contradicted
-//                    by known evidence, yet deterioration is not multiply confirmed and the stock is not depressed. This is a
-//                    taxonomy gap in Section 45.8 (reported for Ian); it fails the SETUP/ACTIONABLE requirement and is not
-//                    INSUFFICIENT_DATA, because the evidence is present and unfavorable, not missing.
+//                    NOT_ESTABLISHED. RATIFIED (A5): OVERSOLD is never established from RSI alone.
+//   NOT_ESTABLISHED  an EVALUATION RESULT, not a fifth investment state: the domain IS evaluable but the evidence establishes none of
+//                    the four states (stabilization contradicted by known evidence, deterioration not confirmed by two distinct
+//                    groups, no OVERSOLD confirmation). It fails the SETUP/ACTIONABLE requirement and is not INSUFFICIENT_DATA,
+//                    because the evidence is present and unfavorable, not missing.
 //   NOT_EVALUABLE    required evidence is unavailable and nothing independently established decides a state. Strict sufficiency is
 //                    kept: when a required LEVEL metric is missing the STATE is never classified from partial evidence. Whatever
 //                    adverse readings ARE independently evidenced are still reported as a TECHNICAL_ADVERSE_EVIDENCE_PRESENT
@@ -42,6 +41,10 @@ import { QV_V1_0_POLICY } from './policy';
 import { QV_REASON, qvReason } from './reasons';
 
 export type TechnicalState = 'DECLINING' | 'OVERSOLD' | 'STABILIZING' | 'RECOVERING';
+/**
+ * The four investment states are DECLINING / OVERSOLD / STABILIZING / RECOVERING. NOT_ESTABLISHED and NOT_EVALUABLE are evaluation
+ * results (the evidence establishes none of the four, or cannot be judged); they are not additional investment states.
+ */
 export type TechnicalResult = TechnicalState | 'NOT_ESTABLISHED' | 'NOT_EVALUABLE';
 
 /** true / false = evidenced; null = the direction evidence is not available (never read as either). */

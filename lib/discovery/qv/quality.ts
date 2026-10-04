@@ -79,8 +79,8 @@ export function assessQuality(set: MetricSet): QualityAssessment {
   const fcf = readNumber(set, IN.fcf);
   const roic = readNumber(set, IN.roic);
   const leverage = readNumber(set, IN.leverage);
-  // FCF history is read only when it matters: a positive TTM figure needs none.
-  const needsHistory = fcf.value !== null && fcf.value <= 0;
+  // FCF history is read only when it matters: a NEGATIVE level needs the annual history; positive and breakeven levels need none here.
+  const needsHistory = fcf.value !== null && fcf.value < 0;
   const history = needsHistory ? readFcfHistory(set, IN.fcfHistory, P.fcfHistoryYears) : null;
 
   const reasons: ReasonCode[] = [];
@@ -134,6 +134,8 @@ export function assessQuality(set: MetricSet): QualityAssessment {
   }
   if (fcfPattern === 'POSITIVE') {
     reasons.push(qvReason(QV_REASON.QUALITY_FCF_POSITIVE, 'SUPPORTS', [fcf.metric]));
+  } else if (fcfPattern === 'BREAKEVEN') {
+    reasons.push(qvReason(QV_REASON.QUALITY_FCF_BREAKEVEN, 'CONCERN', [fcf.metric], { level: 'BREAKEVEN' }));
   } else if (fcfPattern === 'NEGATIVE_TEMPORARY') {
     reasons.push(qvReason(QV_REASON.QUALITY_FCF_NEGATIVE_TEMPORARY, 'CONCERN', [fcf.metric].concat(history ? [history.metric] : []), { pattern: fcfPattern }));
   } else if (fcfPattern === 'NEGATIVE_PERSISTENT') {

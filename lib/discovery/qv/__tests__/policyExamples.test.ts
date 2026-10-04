@@ -1,17 +1,18 @@
 // lib/discovery/qv/__tests__/policyExamples.test.ts
 
-// LEAPS-QV-0001 Gate 3 review round 2 -- the worked examples in docs/analysis/LEAPS-QV-0001-gate3-policy-decisions.md.
-// Each example shows the classification effect of a PROPOSED policy decision as the code behaves today, so the document
-// cannot drift from the implementation. Nothing here is a ratified decision.
+// LEAPS-QV-0001 Gate 3 review rounds 2-4 -- the worked examples in docs/analysis/LEAPS-QV-0001-gate3-policy-decisions.md.
+// Each example shows the classification effect of a policy decision as the code behaves today, so the document cannot drift
+// from the implementation. A1-A8 are RATIFIED (round 4); the focused ratified cases are in round4Policy.test.ts.
 
 import { describe, expect, it } from 'vitest';
 import { assessFundamentals, assessQuality, assessRisk, assessTechnical, growthTrajectoryOf, marginTrajectoryOf, classifyFcfPattern } from '..';
 import { evaluate, metricsWith, stateOf } from './qvFixtures';
 
-describe('policy decision examples (PROPOSED, not ratified)', () => {
+describe('policy decision examples (A1-A8 ratified, round 4)', () => {
   it('A1 revenue/EPS trajectory', () => {
     expect(growthTrajectoryOf(-2, 5)).toBe('DETERIORATING'); // negative and below trend
-    expect(growthTrajectoryOf(1, 12)).toBe('STABLE'); // positive but far below trend: STABLE under the proposal (open question)
+    expect(growthTrajectoryOf(1, 12)).toBe('STABLE'); // positive but far below trend: not DETERIORATING; slowdown context reported separately
+    expect(growthTrajectoryOf(-2, -5)).toBe('DETERIORATING'); // negative growth is DETERIORATING even above a negative trend
     expect(growthTrajectoryOf(3, 5)).toBe('STABLE');
     expect(growthTrajectoryOf(7, 5)).toBe('IMPROVING');
     expect(growthTrajectoryOf(-2, null)).toBe('DETERIORATING'); // adverse evidence stands without a trend
@@ -37,12 +38,11 @@ describe('policy decision examples (PROPOSED, not ratified)', () => {
     expect(assessQuality(metricsWith({ leverage: 2.5, roic: 5 })).result).toBe('PASS'); // ELEVATED leverage is not a weakness
   });
 
-  it('A5 technical: OVERSOLD line, one contradiction, relative-strength change versus acceleration', () => {
+  it('A5 technical: OVERSOLD confluence, one contradiction, relative strength no longer deteriorating', () => {
     expect(assessTechnical(metricsWith({ weeklyRsi: 30, weeklyRsiSlope: 0, relativeStrengthChange: -1 })).result).toBe('OVERSOLD');
     expect(assessTechnical(metricsWith({ weeklyRsi: 30, weeklyRsiSlope: -1 })).result).toBe('NOT_ESTABLISHED'); // RSI alone
     expect(assessTechnical(metricsWith({ weeklyRsi: 31, weeklyRsiSlope: 0, relativeStrengthChange: -1 })).result).toBe('NOT_ESTABLISHED');
-    // Relative strength falling more slowly (decelerating decline) is NOT eligible for STABILIZING under the strict
-    // first-difference rule (change >= 0), although it would satisfy "deterioration no longer accelerating".
+    // Relative strength still falling (even if more slowly) is not "no longer deteriorating": change >= 0 is required (Option A).
     expect(assessTechnical(metricsWith({ relativeStrengthChange: -3 })).result).toBe('NOT_ESTABLISHED');
   });
 

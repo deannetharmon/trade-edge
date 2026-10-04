@@ -540,10 +540,10 @@ Ian Investment/Data-Fitness Review: APPROVED
 Docs: docs/analysis/LEAPS-QV-0001-gate2b-sec-fundamentals.md
 
 ### Gate 2c
-Status: PROPOSED — NOT AUTHORIZED (specification only; no code)  
+Status: AUTHORIZED (Paul) — IMPLEMENTATION NOT STARTED; separate from Gate 3 algorithm acceptance; Gate 4 remains BLOCKED  
 Purpose: technical direction metrics (rsi_weekly_slope_1w, price_vs_sma50_gap_change_4w_pp, relative_return_126d_change_4w_pp), SPY benchmark/loader exposure/completed-bar enforcement, and fcf_annual_history_5y from the existing SEC annualSeries. Unblocks Gate 3 SETUP/ACTIONABLE in production.  
 Spec: docs/analysis/LEAPS-QV-0001-gate2c-technical-direction-and-fcf-history.md  
-Reviews required (none recorded): Ian, Alan, Quinn, Paul
+Reviews required for the implementation (none recorded yet): Alan, Quinn
 
 ### Gate 3
 Status: IMPLEMENTED — PENDING REVIEW (Quinn, Ian, Paul, Frank closure)  
@@ -551,6 +551,7 @@ Docs: docs/analysis/LEAPS-QV-0001-gate3-underlying-strategy.md
 Code: lib/discovery/qv/  
 Review round 1: CHANGES REQUIRED at e0398a9 — Technical State confluence (direction evidence), missing-trend semantics, assumptions review; corrections implemented, pending re-review. Open: Technical direction metrics (rsi_weekly_slope_1w, price_vs_sma50_gap_change_4w_pp, relative_return_126d_change_4w_pp) are not produced by the normalizer, so no candidate can reach SETUP/ACTIONABLE until they exist; Ian policy questions A1–A6, A8 (see Gate 3 doc); Gate 7 must pass previous state to the strategy. Ratification of A1–A8: NOT REVIEWED.  
 Review round 2 (baseline 76dee26): adverse Technical State confluence corrected (DECLINING needs 2+ distinct bearish feature groups; NOT_ESTABLISHED/OVERSOLD/unavailable kept distinct); Gate 2c amendment SPECIFIED, NOT AUTHORIZED: docs/analysis/LEAPS-QV-0001-gate2c-technical-direction-and-fcf-history.md; policy proposals for A1–A6, A8 with examples, NOT APPROVED: docs/analysis/LEAPS-QV-0001-gate3-policy-decisions.md.  
+Review round 4 (baseline 9a0e029 accepted; narrow policy-ratification correction): A1–A8 RATIFIED by Ian/Paul rulings. A1 negative growth DETERIORATING regardless of trend (slowdown context separate, no new threshold); A2 ±1 pp; A3 level (POSITIVE/BREAKEVEN/NEGATIVE) separate from annual non-overlapping trajectory, persistence = 2+ negative annual periods, TTM not double-counted, fail closed; A4 as ratified; A5 OVERSOLD never from RSI alone, DECLINING first with 2+ distinct groups, NOT_ESTABLISHED is an evaluation result not an investment state, relative strength Option A (no acceleration metric), price-return convention split-adjusted dividend-unadjusted; A6 UNKNOWN stays UNKNOWN, no WATCH cap, no event provider in Gate 3; A7 data limitation; A8 as ratified. Gate 2c AUTHORIZED (Paul), implementation NOT STARTED, separate from Gate 3 algorithm acceptance. Gate 4 BLOCKED.  
 Review round 3 (team review CHANGES REQUIRED at 7a913b4): OVERSOLD now needs non-RSI confirmation; adverse evidence preserved as a trace when data is missing; risk gate NOT_EVALUABLE when event coverage is UNKNOWN; A1/A3 alternatives with counterexamples and A2/A4/A5/A7/A8 REVIEW RECOMMENDATIONS recorded (nothing ratified); Gate 2c spec corrected (6.1 withdrawn implication, calendar/alignment/FCF contract, fixtures). Status tracks: Gate 3 algorithm = IMPLEMENTED — PENDING REVIEW; Gate 2c data = SPECIFIED, NOT AUTHORIZED; production integration = NOT STARTED; Gate 7 previous-state = NOT STARTED. Gate 4 blocked.  
 PRODUCTION BLOCKER: no candidate can reach SETUP/UNDERLYING ACTIONABLE until Gate 2c (or equivalent) exists — direction metrics, SPY benchmark (the loader fetches none, so the relative-strength level is UNAVAILABLE in production), technical metrics returned by the loader, completed-bar enforcement. Taxonomy gap (NOT_ESTABLISHED) and strict relative-strength change vs acceleration await Ian. Reviews: none recorded for Gate 2c or A1–A8.  
 Gate 3 Tests: see Gate Completion Report for the final counts  

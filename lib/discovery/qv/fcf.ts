@@ -9,7 +9,8 @@
 import type { Trajectory } from './reasons';
 import { QV_V1_0_POLICY } from './policy';
 
-export type FcfPattern = 'POSITIVE' | 'NEGATIVE_TEMPORARY' | 'NEGATIVE_PERSISTENT' | 'DETERIORATING_INTO_NEGATIVE' | 'NOT_EVALUABLE';
+export type FcfLevel = 'POSITIVE' | 'BREAKEVEN' | 'NEGATIVE';
+export type FcfPattern = 'POSITIVE' | 'BREAKEVEN' | 'NEGATIVE_TEMPORARY' | 'NEGATIVE_PERSISTENT' | 'DETERIORATING_INTO_NEGATIVE' | 'NOT_EVALUABLE';
 
 const FCF = QV_V1_0_POLICY.quality;
 
@@ -27,33 +28,55 @@ function strictlyRising(points: readonly number[]): boolean {
   return true;
 }
 
+/** Current FCF level from the TTM figure. Zero is BREAKEVEN, never negative. */
+export function fcfLevelOf(ttm: number | null): FcfLevel | null {
+  if (ttm === null) return null;
+  return ttm > 0 ? 'POSITIVE' : ttm < 0 ? 'NEGATIVE' : 'BREAKEVEN';
+}
+
+function annualHistoryUsable(history: readonly number[] | null): history is readonly number[] {
+  return history !== null && history.length >= FCF.fcfHistoryYears;
+}
+
 /**
- * `ttm` is the trailing-twelve-month FCF (null when not VALID); `history` the annual FCF points, oldest first (null when
- * there is no usable history). Positive TTM FCF is the expected case and needs no history. A non-positive TTM figure
- * cannot be called temporary or persistent without history, so it is NOT_EVALUABLE -- never assumed either way.
+ * Assumption A3 (ratified): current LEVEL and historical TRAJECTORY are separate.
+ *  - Level comes from TTM (POSITIVE / BREAKEVEN / NEGATIVE).
+ *  - History is ANNUAL, non-overlapping fiscal-year observations only (the last policy.quality.fcfHistoryYears). TTM overlaps the
+ *    latest fiscal year, so it is never counted as another annual observation and never double-counts toward persistence.
+ *  - PERSISTENT negative = NEGATIVE level and negative FCF in at least policy.quality.fcfPersistentNegativePoints annual periods.
+ *  - A NEGATIVE level with strictly falling annual history (but fewer negative years) is DETERIORATING_INTO_NEGATIVE; otherwise
+ *    NEGATIVE_TEMPORARY. A BREAKEVEN level is not a weakness and needs no history here.
+ *  - A NEGATIVE level without usable annual history is NOT_EVALUABLE (fail closed), never assumed either way.
  */
 export function classifyFcfPattern(ttm: number | null, history: readonly number[] | null): FcfPattern {
-  if (ttm === null) return 'NOT_EVALUABLE';
-  if (ttm > 0) return 'POSITIVE';
-  if (history === null || history.length < FCF.fcfHistoryYears) return 'NOT_EVALUABLE';
+  const level = fcfLevelOf(ttm);
+  if (level === null) return 'NOT_EVALUABLE';
+  if (level === 'POSITIVE') return 'POSITIVE';
+  if (level === 'BREAKEVEN') return 'BREAKEVEN';
+  if (!annualHistoryUsable(history)) return 'NOT_EVALUABLE';
   const recent = recentPoints(history);
   let negative = 0;
   recent.forEach((point) => {
-    if (point <= 0) negative += 1;
+    if (point < 0) negative += 1;
   });
-  if (recent[recent.length - 1] <= 0 || negative >= FCF.fcfPersistentNegativePoints) return 'NEGATIVE_PERSISTENT';
+  if (negative >= FCF.fcfPersistentNegativePoints) return 'NEGATIVE_PERSISTENT';
   if (strictlyFalling(recent)) return 'DETERIORATING_INTO_NEGATIVE';
   return 'NEGATIVE_TEMPORARY';
 }
 
-/** The cash-flow dimension of fundamental trajectory; null when it cannot be judged (never neutral). */
+/**
+ * The cash-flow dimension of fundamental trajectory; null when it cannot be judged (never neutral). Historical trajectory is read
+ * from the annual observations only. A POSITIVE or BREAKEVEN level needs the annual history to be judged.
+ */
 export function fcfTrajectory(ttm: number | null, history: readonly number[] | null): Trajectory | null {
   const pattern = classifyFcfPattern(ttm, history);
   if (pattern === 'NEGATIVE_PERSISTENT' || pattern === 'DETERIORATING_INTO_NEGATIVE') return 'DETERIORATING';
   if (pattern === 'NEGATIVE_TEMPORARY') return 'STABLE';
-  if (pattern === 'POSITIVE') {
-    if (history === null || history.length < FCF.fcfHistoryYears) return null;
-    return strictlyRising(recentPoints(history)) ? 'IMPROVING' : 'STABLE';
+  if (pattern === 'POSITIVE' || pattern === 'BREAKEVEN') {
+    if (!annualHistoryUsable(history)) return null;
+    const recent = recentPoints(history);
+    if (pattern === 'BREAKEVEN') return strictlyFalling(recent) ? 'DETERIORATING' : 'STABLE';
+    return strictlyRising(recent) ? 'IMPROVING' : 'STABLE';
   }
   return null;
 }

@@ -1,6 +1,6 @@
 # LEAPS-QV-0001 Gate 2c — Technical Direction Metrics and FCF History (data amendment)
 
-**Status: PROPOSED SPECIFICATION — NOT AUTHORIZED.** Prepared in the repository for Ian (investment), Quinn (architecture/quality), Paul (scope) and Alan (formulas/golden fixtures). Nothing in this document is implemented. Gate 3 stays pending; Gate 4 stays blocked. No reviewer approval is recorded here.
+**Status: AUTHORIZED by Paul as the required data-enablement dependency — IMPLEMENTATION NOT STARTED.** Gate 2c remains separate from Gate 3 algorithm acceptance. Gate 4 stays BLOCKED. Ratified QV-v1.0 decisions (round 4): relative strength Option A (change >= 0 STABILIZING, > 0 RECOVERING; described as "relative strength no longer deteriorating"); NO second-difference/acceleration metric in QV-v1.0 (Option B is rejected); split-adjusted, dividend-unadjusted price returns for both stock and SPY as the explicit QV-v1.0 price-return convention. Nothing in this document is implemented.
 
 ## 1. Why this amendment exists
 Gate 3 implements a strict, fail-closed reading of Section 45.8 (the relative-strength first-difference rule is stricter than the spec wording; see 6.1), so STABILIZING and RECOVERING need direction evidence the normalized layer does not produce, and a negative-FCF company needs annual FCF history. Until this amendment (or an equivalent) is built, the Gate 3 strategy fails closed and **no candidate can reach SETUP or UNDERLYING ACTIONABLE in production**.
@@ -64,8 +64,8 @@ Let `d = R(n−1) − R(n−21)` (this metric, a first difference) and `dp = R(n
 Gate 3 currently implements `d ≥ 0` (STABILIZING) and `d > 0` (RECOVERING) because it needs only this metric and fails safe. It is a review-time policy choice (A5), not a faithful reading of "no longer accelerating".
 
 Options:
-- **A (recommended for strictness, no extra data):** keep `d ≥ 0`, and amend the wording to "relative strength no longer deteriorating".
-- **B (adds one metric):** add `relative_return_126d_acceleration_4w_pp = d − dp` (min 167 bars; SPY aligned at six timestamps). Option B's `d ≥ 0 OR a ≥ 0` is a **union** of incomparable predicates: it admits `R = 0,−10,−18` (still falling) and is not a refinement of A. Choosing B needs an explicit Ian decision on whether a still-falling-but-decelerating case is stabilization.
+- **A (RATIFIED for QV-v1.0, no extra data):** keep `d ≥ 0` (STABILIZING) / `d > 0` (RECOVERING), described as "relative strength no longer deteriorating".
+- **B (REJECTED for QV-v1.0; not to be added):** add `relative_return_126d_acceleration_4w_pp = d − dp` (min 167 bars; SPY aligned at six timestamps). Option B's `d ≥ 0 OR a ≥ 0` is a **union** of incomparable predicates: it admits `R = 0,−10,−18` (still falling) and is not a refinement of A. Choosing B needs an explicit Ian decision on whether a still-falling-but-decelerating case is stabilization.
 
 ## 6.2 Exchange calendar and completed-session contract (no guessed closing time)
 - Sessions are defined by the exchange calendar for the listing exchange (US equities: NYSE/Nasdaq, `America/New_York`), including early closes (13:00), holidays and DST. No fixed UTC close, "after 21:00 UTC" or similar shortcut is allowed.

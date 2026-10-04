@@ -1,6 +1,19 @@
-# LEAPS-QV-0001 Gate 3 — Policy decisions for review (A1–A6, A8)
+# LEAPS-QV-0001 Gate 3 — Policy decisions (A1–A8)
 
-**Status: PROPOSALS ONLY. Nothing here is approved or ratified; no reviewer approval is recorded.** Each proposal states what the code does today, so Ian can accept, change or reject it. The worked examples are executed in `lib/discovery/qv/__tests__/policyExamples.test.ts` (and `technicalDirection.test.ts`), so they cannot drift from the implementation. A decision that changes a value is a policy change (`policy.ts`, fingerprint re-pin, new strategy version if a published version has been used); a decision that changes a rule needs a code change in the matching classifier.
+**Status (round 4): A1–A8 are RATIFIED by the final Ian/Paul rulings recorded in the ticket ledger (Gate 3 review round 4).** The sections below keep the earlier proposals and counterexamples as history; the ratified rulings are:
+
+| ID | Ratified ruling |
+|---|---|
+| A1 | Current negative growth is DETERIORATING regardless of a negative trend (-2% vs -5% trend ⇒ DETERIORATING). Positive growth below trend is NOT automatically DETERIORATING; the slowdown is reported separately (`FUNDAMENTAL_GROWTH_SLOWDOWN_CONTEXT`). No new percentage threshold. |
+| A2 | change < -1 pp DETERIORATING; -1 through +1 pp inclusive STABLE; > +1 pp IMPROVING. |
+| A3 | Level (POSITIVE / BREAKEVEN / NEGATIVE; zero is not negative) is separate from annual trajectory. TTM sets the level and is never counted as another annual observation. Persistent negative = at least two negative non-overlapping annual periods in the three-year window. Fail closed without annual history. |
+| A4 | Non-positive operating margin fails; HIGH leverage plus another material weakness fails; two material weaknesses fail; one weak ROIC or revenue dimension alone does not; all required Quality evidence must be evaluable for PASS. |
+| A5 | OVERSOLD is never from RSI alone (RSI <= 30 plus at least one non-RSI bearish group); DECLINING evaluated first and needs two distinct (never "statistically independent") bearish groups; NOT_ESTABLISHED is an evaluation result, not a fifth investment state; four investment states DECLINING / OVERSOLD / STABILIZING / RECOVERING. Relative strength Option A ("relative strength no longer deteriorating"): STABILIZING change >= 0, RECOVERING change > 0; no second-difference metric in QV-v1.0. Convention: split-adjusted, dividend-unadjusted price returns for stock and SPY (explicit v1 convention, not a dividend-immateriality claim). |
+| A6 | Earnings within 14 days informational, non-disqualifying; reliable material-event evidence may block SETUP/ACTIONABLE; UNKNOWN coverage stays UNKNOWN, never VERIFIED_EMPTY, and does NOT cap at WATCH in QV-v1.0. The typed event schema stays documented for later; no event provider in Gate 3. |
+| A7 | NOT_EVALUABLE / data limitation until historical leverage exists; no proxy. |
+| A8 | WATCH: Quality PASS + thesis intact but another SETUP requirement unmet. DISCOVERED: Quality fails or the evidence is materially weaker and there is no prior qualifying thesis. INVALIDATED: durable thesis break from a prior WATCH/SETUP/ACTIONABLE candidate. |
+
+Historical status (round 2/3, superseded by the table above): **PROPOSALS ONLY.** Each proposal states what the code does today, so Ian can accept, change or reject it. The worked examples are executed in `lib/discovery/qv/__tests__/policyExamples.test.ts` (and `technicalDirection.test.ts`), so they cannot drift from the implementation. A decision that changes a value is a policy change (`policy.ts`, fingerprint re-pin, new strategy version if a published version has been used); a decision that changes a rule needs a code change in the matching classifier.
 
 Questions are split below: **Part 1 — investment-policy** (Ian), **Part 2 — engineering/data** (Dane/Quinn/Paul).
 
