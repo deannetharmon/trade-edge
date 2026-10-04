@@ -582,7 +582,8 @@ Frank Gate/Scope Review: PASS
 ### Gate 4
 Status: BLOCKED — SPECIFICATION IN REVIEW (documentation only)  
 Spec/review package: docs/analysis/LEAPS-QV-0001-gate4-leaps-integration.md  
-Reviews required before any coding: Ian + Quinn (exit review as in Section 41), Paul scope confirmation, Frank authorization. None recorded.
+Reviews required before any coding: Ian + Quinn (exit review as in Section 41), Paul scope confirmation, Frank authorization. None recorded.  
+Specification review round 1: CHANGES REQUIRED at 6d7858c687470b7798f694771b64bb13720fcefb (acquisition completeness, comparator transitivity, quote-session policy, instrument metadata, existing-finder verification, three explanation corrections). Revision 1 addresses each item (spec Section 17); thresholds and weights remain PROPOSED; provider audit NOT performed (no authorized read-only provider access in the session; specific missing evidence listed in spec 11.1). No Ian, Quinn or Paul approval recorded. Gate 2c and Gate 3 remain CLOSED; Gate 4 implementation BLOCKED.
 
 ### Gates 5–8
 Status: BLOCKED
