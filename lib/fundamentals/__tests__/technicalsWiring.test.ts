@@ -219,21 +219,31 @@ describe('calendar failure reaching metric evaluation (handler -> loader -> buil
     expect(body.calendarIssue).toBeNull();
     expect(body.benchmarkCalendarIssue).toBe('SESSION_CALENDAR_UNAVAILABLE');
     expect(body.technicals.relative_return_126d_change_4w_pp).toMatchObject({ validity: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' });
+    expect(body.technicals.relative_return_126d_vs_benchmark_pct).toMatchObject({ validity: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' });
     expect(body.technicals.price_vs_sma50_gap_change_4w_pp.validity).toBe('VALID');
     expect(body.technicals.sma_50.validity).toBe('VALID');
     expect(body.metrics.operating_margin_ttm_pct.validity).toBe('VALID');
+  });
+
+  it('stock calendar failure also nulls the relative-strength level through the handler', async () => {
+    const { body } = await run('ACME', { stock: { closes: withClosedInterior(), issue: null, basis: PRICE_BASIS_QUOTE } });
+    expect(body.technicals.relative_return_126d_vs_benchmark_pct).toMatchObject({ validity: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' });
   });
 
   it('the loader itself enforces a supplied calendarIssue (flag reaches metric evaluation even for a clean series)', async () => {
     const base = { client: secClient(), closes: sessions(200, stockF), priceIssue: null, priceBasis: PRICE_BASIS_QUOTE, benchmark: sessions(200, spyF), benchmarkBasis: PRICE_BASIS_QUOTE, nowIso: () => NOW };
     const stockFlag = await loadSecFundamentals('ACME', { ...base, calendarIssue: 'SESSION_CALENDAR_UNAVAILABLE' });
     DIRECTION.forEach((id) => expect(stockFlag.technicals[id].validity, id).toBe('UNAVAILABLE'));
+    expect(stockFlag.technicals.relative_return_126d_vs_benchmark_pct.validity).toBe('UNAVAILABLE');
     expect(stockFlag.metrics.fcf_annual_history_5y.validity).toBe('VALID');
     const benchFlag = await loadSecFundamentals('ACME', { ...base, benchmarkCalendarIssue: 'SESSION_CALENDAR_UNAVAILABLE' });
     expect(benchFlag.technicals.relative_return_126d_change_4w_pp.validity).toBe('UNAVAILABLE');
+    expect(benchFlag.technicals.relative_return_126d_vs_benchmark_pct.validity).toBe('UNAVAILABLE');
+    expect(benchFlag.metrics.fcf_annual_history_5y.validity).toBe('VALID');
     expect(benchFlag.technicals.price_vs_sma50_gap_change_4w_pp.validity).toBe('VALID');
     const clean = await loadSecFundamentals('ACME', base);
     DIRECTION.forEach((id) => expect(clean.technicals[id].validity, id).toBe('VALID'));
+    expect(clean.technicals.relative_return_126d_vs_benchmark_pct.validity).toBe('VALID');
   });
 
   it('calendar flags are present (null) on the SEC provider-failure and not-covered paths too', async () => {

@@ -288,4 +288,34 @@ describe('whole-series calendar validation inside the metric layer (stock and be
     expect(benchFlag.relative_return_126d_change_4w_pp.reason).toBe('SESSION_CALENDAR_UNAVAILABLE');
     expect(benchFlag.price_vs_sma50_gap_change_4w_pp.validity).toBe('VALID');
   });
+
+  const LEVEL = 'relative_return_126d_vs_benchmark_pct';
+
+  it('LEVEL: an interior calendar-invalid STOCK bar cannot produce a VALID relative-strength level', () => {
+    const set = buildTechnicalMetrics(holidayBar(s, interior), ctx, b);
+    expect(set[LEVEL]).toMatchObject({ validity: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' });
+  });
+
+  it('LEVEL: an interior calendar-invalid BENCHMARK bar cannot produce a VALID level even though every required endpoint timestamp aligns', () => {
+    const badBench = holidayBar(b, interior);
+    const needed = [s.length - 1, s.length - 1 - 126, s.length - 1 - 20, s.length - 1 - 146].map((i) => s[i].t);
+    needed.forEach((t) => expect(badBench.some((bar) => bar.t === t), String(t)).toBe(true)); // endpoints present and aligned
+    const set = buildTechnicalMetrics(s, ctx, badBench) as Record<string, any>;
+    expect(set[LEVEL]).toMatchObject({ validity: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' });
+    expect(set.relative_return_126d_change_4w_pp).toMatchObject({ validity: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' });
+    expect(set.price_vs_sma50_gap_change_4w_pp.validity).toBe('VALID');
+    expect(set.sma_200.validity).toBe('UNAVAILABLE'); // only 160 bars: unrelated, unchanged
+  });
+
+  it('LEVEL: supplied flags (stock / benchmark) make the level UNAVAILABLE; clean inputs stay VALID', () => {
+    expect(buildTechnicalMetrics(s, { ...ctx, calendarUnavailable: true }, b)[LEVEL]).toMatchObject({ validity: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' });
+    expect(buildTechnicalMetrics(s, { ...ctx, benchmarkCalendarUnavailable: true }, b)[LEVEL]).toMatchObject({ validity: 'UNAVAILABLE', reason: 'SESSION_CALENDAR_UNAVAILABLE' });
+    expect(buildTechnicalMetrics(s, ctx, b)[LEVEL].validity).toBe('VALID');
+  });
+
+  it('LEVEL: malformed-benchmark and basis-mismatch diagnostics are preserved ahead of the calendar verdict', () => {
+    const dup = b.map((bar, i) => (i === 10 ? { ...bar, t: b[9].t } : bar));
+    expect(buildTechnicalMetrics(s, ctx, dup)[LEVEL]).toMatchObject({ validity: 'INVALID', reason: 'BARS_NOT_STRICTLY_ASCENDING' });
+    expect(buildTechnicalMetrics(s, { ...ctx, benchmarkBasis: 'X' }, holidayBar(b, interior))[LEVEL]).toMatchObject({ validity: 'INVALID', reason: 'ADJUSTMENT_BASIS_MISMATCH' });
+  });
 });

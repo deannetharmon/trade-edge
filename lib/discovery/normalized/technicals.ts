@@ -262,14 +262,21 @@ export function buildTechnicalMetrics(
     distance = (last.c / high - 1) * 100;
   }
 
+  // Calendar validity of the WHOLE series (fetch-boundary flags and direct validation) applies to every benchmark-derived metric.
+  const stockCalendarBad = !!context.calendarUnavailable || !seriesOnSessionDays(bars);
+  const benchmarkCalendarBad = !!context.benchmarkCalendarUnavailable || (!!benchmark && benchmark.length > 0 && !seriesOnSessionDays(benchmark));
   let relative: NormalizedMetric = unavailableMetric('relative_return_126d_vs_benchmark_pct', noBenchmarkReason, benchmarkProvenance);
-  if (benchmark && benchmark.length > 0) {
+  if (stockCalendarBad) {
+    relative = unavailableMetric('relative_return_126d_vs_benchmark_pct', 'SESSION_CALENDAR_UNAVAILABLE', benchmarkProvenance);
+  } else if (benchmark && benchmark.length > 0) {
     const benchProblem = barsProblem(benchmark);
     const benchLast = benchmark[benchmark.length - 1];
     if (basisMismatch) {
       relative = invalidMetric('relative_return_126d_vs_benchmark_pct', context.benchmarkBasis, 'ADJUSTMENT_BASIS_MISMATCH', benchmarkProvenance);
     } else if (benchProblem) {
       relative = invalidMetric('relative_return_126d_vs_benchmark_pct', 'benchmark', benchProblem, benchmarkProvenance);
+    } else if (benchmarkCalendarBad) {
+      relative = unavailableMetric('relative_return_126d_vs_benchmark_pct', 'SESSION_CALENDAR_UNAVAILABLE', benchmarkProvenance);
     } else if (benchLast.t !== last.t) {
       relative = invalidMetric('relative_return_126d_vs_benchmark_pct', benchLast.t, 'BENCHMARK_NOT_ALIGNED_TO_LAST_BAR', benchmarkProvenance);
     } else if (bars.length <= RELATIVE_RETURN_LOOKBACK_BARS) {
@@ -317,10 +324,10 @@ export function buildTechnicalMetrics(
     const early = guarded(id, true);
     if (early) return early;
     if (!benchmark || benchmark.length === 0) return unavailableMetric(id, noBenchmarkReason, benchmarkProvenance);
-    if (context.benchmarkCalendarUnavailable || !seriesOnSessionDays(benchmark)) return unavailableMetric(id, 'SESSION_CALENDAR_UNAVAILABLE', benchmarkProvenance);
     if (basisMismatch) return invalidMetric(id, context.benchmarkBasis, 'ADJUSTMENT_BASIS_MISMATCH', benchmarkProvenance);
     const benchProblem = barsProblem(benchmark);
     if (benchProblem) return invalidMetric(id, 'benchmark', benchProblem, benchmarkProvenance);
+    if (benchmarkCalendarBad) return unavailableMetric(id, 'SESSION_CALENDAR_UNAVAILABLE', benchmarkProvenance);
     const benchLast = benchmark[benchmark.length - 1];
     if (benchLast.t !== last.t) return invalidMetric(id, benchLast.t, 'BENCHMARK_NOT_ALIGNED_TO_LAST_BAR', benchmarkProvenance);
     const needed = RELATIVE_RETURN_LOOKBACK_BARS + DIRECTION_LOOKBACK_BARS + 1;

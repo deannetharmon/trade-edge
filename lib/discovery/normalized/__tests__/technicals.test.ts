@@ -6,6 +6,7 @@ import {
   barsProblem,
   buildTechnicalMetrics,
   daysFromCivil,
+  isSessionDay,
   periodCloses,
   simpleMovingAverage,
   wilderRsiSeries,
@@ -24,6 +25,14 @@ function bars(n: number, f: (i: number) => number, endDay: number = LAST_DAY): D
     const wd = (((d + 4) % 7) + 7) % 7;
     if (wd !== 0 && wd !== 6) days.push(d);
   }
+  days.reverse();
+  return days.map((d, i) => ({ t: d * 86400 + OPEN, c: f(i) }));
+}
+
+/** Like bars() but only on real exchange sessions (the relative-return level now requires calendar-valid series). */
+function sessionBars(n: number, f: (i: number) => number, endDay: number = LAST_DAY): DailyBar[] {
+  const days: number[] = [];
+  for (let d = endDay; days.length < n; d -= 1) if (isSessionDay(d) === true) days.push(d);
   days.reverse();
   return days.map((d, i) => ({ t: d * 86400 + OPEN, c: f(i) }));
 }
@@ -171,22 +180,22 @@ describe('buildTechnicalMetrics', () => {
   });
 
   describe('relative return vs benchmark', () => {
-    const stock = bars(300, (i) => 100 * Math.pow(1.002, i));
+    const stock = sessionBars(300, (i) => 100 * Math.pow(1.002, i));
     it('is the difference of the 126-bar returns', () => {
-      const bench = bars(300, () => 50);
+      const bench = sessionBars(300, () => 50);
       const set = buildTechnicalMetrics(stock, ctx, bench);
       const expected = (stock[299].c / stock[299 - 126].c - 1) * 100;
       expect(value(set, 'relative_return_126d_vs_benchmark_pct')).toBeCloseTo(expected, 10);
     });
     it('is INVALID when the benchmark is not aligned to the last bar', () => {
-      const shifted = bars(300, () => 50, daysFromCivil(2026, 10, 1));
+      const shifted = sessionBars(300, () => 50, daysFromCivil(2026, 10, 1));
       expect(buildTechnicalMetrics(stock, ctx, shifted).relative_return_126d_vs_benchmark_pct.validity).toBe('INVALID');
     });
     it('is INVALID when the benchmark is malformed and UNAVAILABLE when short', () => {
-      const bad = bars(300, () => 50);
+      const bad = sessionBars(300, () => 50);
       bad[10] = { t: bad[9].t, c: 1 };
       expect(buildTechnicalMetrics(stock, ctx, bad).relative_return_126d_vs_benchmark_pct.validity).toBe('INVALID');
-      expect(buildTechnicalMetrics(bars(100, () => 10), ctx, bars(100, () => 10)).relative_return_126d_vs_benchmark_pct.validity).toBe('UNAVAILABLE');
+      expect(buildTechnicalMetrics(sessionBars(100, () => 10), ctx, sessionBars(100, () => 10)).relative_return_126d_vs_benchmark_pct.validity).toBe('UNAVAILABLE');
     });
   });
 });
