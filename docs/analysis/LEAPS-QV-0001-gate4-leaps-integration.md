@@ -38,30 +38,42 @@ interface LeapsChainSnapshot {
 interface AcquisitionReport {
   coverage: 'COMPLETE' | 'RESTRICTED' | 'FAILED';             // COMPLETE only when no restriction below bound
   failure?: string;                                           // provider reason code when FAILED
-  expirations: { inWindow: number; selected: number; omittedByCap: number };
-  contracts: {
-    considered: number;                                       // all calls in the selected-window expirations (from the nested chain)
+  // UNITS ARE NEVER MIXED: `expirations.*` count expirations; every `contracts.*` field counts contracts.
+  expirations: { inWindow: number; selected: number; omittedByCap: number };               // expiration counts
+  contracts: {                                                                              // contract counts
+    candidatesInSelectedExpirations: number;                  // calls with K < S in selected expirations (from the nested chain)
     excludedProvablyIneligible: number;                       // strike >= spot (10, stage 3a); NOT a restriction
-    selectedForQuote: number; omittedByStrikeCap: number; omittedBySymbolCap: number;
-    quoteChunksFailed: number; contractsInFailedChunks: number; quotedOk: number;
+    selectedForQuote: number;
+    omittedByStrikeCap: number; omittedBySymbolCap: number;   // contracts, known from the nested chain
+    omittedInOmittedExpirations: number | null;               // candidate contracts (K < S) inside omitted expirations; null = UNKNOWN (strike list absent from the nested response). Never estimated.
+    quoteChunksFailed: number;                                // chunk count (a count of requests, not contracts)
+    quoteRowsMissing: number;                                 // selected contracts with no usable quote row, INCLUDING every contract in a failed chunk
+    quoteRowsReceived: number;
   };
-  restrictions: Array<{ kind: 'EXPIRATION_CAP' | 'STRIKE_CAP' | 'SYMBOL_CAP' | 'CHUNK_FAILURE'; limit?: number; omitted: number }>;
+  restrictions: Array<
+    | { kind: 'EXPIRATION_CAP'; limit: number; omittedExpirations: number; omittedContracts: number | null }   // null = unknown
+    | { kind: 'STRIKE_CAP' | 'SYMBOL_CAP'; limit: number; omittedContracts: number }
+    | { kind: 'CHUNK_FAILURE'; failedChunks: number; contractsInFailedChunks: number }                          // those contracts are counted in quoteRowsMissing, not in "omitted"
+  >;
 }
 // Output
 interface LeapsEvaluation {
   symbol: string;
   policyVersion: string;
   contractStatus: 'EVALUATED' | 'NOT_EVALUATED' | 'DATA_UNAVAILABLE' | 'NO_SUITABLE_CONTRACT' | 'NO_ELIGIBLE_IN_SUBSET';
-  rankingScope: 'COMPLETE_CHAIN' | 'EVALUATED_SUBSET' | null; // COMPLETE_CHAIN only if coverage COMPLETE AND notEvaluable = 0 (every candidate has a definitive result)
-  acquisition: AcquisitionReport;                             // always echoed: considered / selected / omitted
+  rankingScope: 'COMPLETE_CHAIN' | 'EVALUATED_SUBSET' | null; // COMPLETE_CHAIN only if coverage COMPLETE AND counts.unresolvedTotal = 0 (every candidate has a definitive result)
+  acquisition: AcquisitionReport;                             // always echoed: candidate / selected / omitted (expirations and contracts in separate fields)
   reasons: LeapsReason[];                                     // deterministic codes + explanation (Section 5.4)
   contracts: ContractEvaluation[];                            // ALL evaluated contracts, ranked first, then rejected
-  counts: {
-    candidates: number;       // considered minus excludedProvablyIneligible
-    notAcquired: number;      // omittedByCap (expiration/strike/symbol) + contracts in failed chunks
-    quoted: number;           // acquired with a quote row
-    eligible: number; ineligible: number;
-    notEvaluable: number;     // acquired but DATA_UNAVAILABLE (required data unresolved)
+  counts: {                   // ALL CONTRACT COUNTS unless named otherwise
+    selected: number;                      // contracts chosen for quoting
+    eligible: number;                      // definitive: all gates pass
+    ineligible: number;                    // definitive: a verified gate failure
+    quoteRowsMissing: number;              // selected, no usable quote row (includes contracts in failed chunks)
+    acquiredNotEvaluable: number;          // quote row received, but a required input is DATA_UNAVAILABLE / STALE / INVALID
+    unresolvedTotal: number;               // = quoteRowsMissing + acquiredNotEvaluable (disjoint; see Section 6 identity)
+    omittedExpirations: number;            // EXPIRATIONS (not contracts)
+    omittedContractsByDesign: number | null; // contracts not selected because of an expiration/strike/symbol cap; null = UNKNOWN (never invented)
   };
 }
 interface ContractEvaluation {
@@ -75,7 +87,12 @@ interface ContractEvaluation {
 }
 ```
 
-The underlying's own `StrategyEvaluation` is carried alongside, unmodified: `QvLeapsResult = { underlying: StrategyEvaluation; leaps: LeapsEvaluation }`. Gate 7 (persistence) and Gate 6 (UI) read this shape; neither is built here. **Any displayed ranking must carry `rankingScope` and both gap counts.** `COMPLETE_CHAIN` means the ranking is exhaustive: acquisition was complete **and** no candidate is `DATA_UNAVAILABLE`. Otherwise it is `EVALUATED_SUBSET` and the explanation template is: "Ranked among the N contracts that could be evaluated. A contracts were not acquired (reasons) and B contracts were acquired but could not be evaluated (missing or invalid required data). A better contract may exist among them." Eligible results are always preserved and shown; the scope label only prevents them from implying an exhaustive ranking. "Contracts not acquired" (A) and "acquired but not evaluable" (B) are always reported separately.
+The underlying's own `StrategyEvaluation` is carried alongside, unmodified: `QvLeapsResult = { underlying: StrategyEvaluation; leaps: LeapsEvaluation }`. Gate 7 (persistence) and Gate 6 (UI) read this shape; neither is built here. **Any displayed ranking must carry `rankingScope` and both gap figures.** `COMPLETE_CHAIN` means the ranking is exhaustive: acquisition was complete **and** `unresolvedTotal = 0`. Otherwise it is `EVALUATED_SUBSET`.
+
+**Subset-ranking disclosure (units kept separate; no invented numbers).** Template: "Ranked among the N contracts that could be evaluated. [C] [D] A better contract may exist among them." where
+- C = "X expirations and M contracts were not acquired because of acquisition limits (reasons)" when `omittedExpirations > 0` or `omittedContractsByDesign > 0`. X is an expiration count. M is the contract count taken from the nested chain; **if `omittedContractsByDesign` is `null` the text is "an unknown number of contracts" and no figure is shown**. M is never estimated, interpolated or defaulted.
+- D = "U contracts could not be evaluated (R had no usable quote and V had missing or invalid required data)" when `unresolvedTotal > 0`, with U = `unresolvedTotal`, R = `quoteRowsMissing`, V = `acquiredNotEvaluable`.
+Eligible results are always preserved and shown; the scope label only prevents them from implying an exhaustive ranking.
 
 ## 3. Observable metrics (no thresholds)
 
@@ -184,7 +201,7 @@ Outcomes: **any evidence missing -> `DATA_UNAVAILABLE`** (`INSTRUMENT_METADATA_U
 - **Incomplete acquisition** (a cap binds, or a market-data chunk fails): `coverage = RESTRICTED`. The chain client today skips a failed 100-symbol chunk silently (`try { ... } catch { continue; }`); Gate 4 acquisition must count it (`CHUNK_FAILURE`). A RESTRICTED result can be `EVALUATED` with `rankingScope = EVALUATED_SUBSET`, `NO_ELIGIBLE_IN_SUBSET` (only when nothing selected is unresolved), or `DATA_UNAVAILABLE` (Section 6 precedence); it is **never `NO_SUITABLE_CONTRACT`**, because omitted contracts might include an eligible one. Data failures are never relabelled as "none eligible".
 - Token expiry (TastyTrade access tokens last about 15 minutes; all calls browser-side): `LEAPS_AUTH_EXPIRED`, a provider failure for that underlying; other underlyings continue after one token-refresh retry.
 - **Verified-empty results** (only under `COMPLETE` coverage): no expirations in the DTE window `LEAPS_NO_LEAPS_EXPIRATIONS`; expirations exist but no call below spot `LEAPS_NO_CONTRACTS_IN_WINDOW`. Status `NO_SUITABLE_CONTRACT` with that reason.
-- Every selected contract unresolved (quote rows missing, failed chunks, or all `DATA_UNAVAILABLE`), including a restricted search with **zero usable quotes**: `LEAPS_ALL_QUOTES_UNAVAILABLE` (or `LEAPS_ALL_CONTRACTS_DATA_UNAVAILABLE` when rows arrived but none were evaluable) -> `DATA_UNAVAILABLE`.
+- `unresolvedTotal = selected` with zero eligible and zero definitively ineligible (quote rows missing, failed chunks, or all `DATA_UNAVAILABLE`), including a restricted search with **zero usable quotes**: `LEAPS_ALL_QUOTES_UNAVAILABLE` (or `LEAPS_ALL_CONTRACTS_DATA_UNAVAILABLE` when rows arrived but none were evaluable) -> `DATA_UNAVAILABLE`.
 - Underlying quote unavailable, unparseable, future-dated or stale: `LEAPS_UNDERLYING_QUOTE_UNAVAILABLE` -> `DATA_UNAVAILABLE`.
 - Failure isolation: a failure for one underlying never affects another, the Gate 3 evaluation, or Find LEAPS.
 
@@ -198,35 +215,44 @@ Each reason carries a fixed template explanation, the observed value and the thr
 
 ## 6. Contract status derivation (explicit precedence; order is fixed)
 
-**Definitions.** *Candidate* = a call in the selected-window expirations that is not provably excluded (strike >= spot, Section 10 stage 3a). *Not acquired by design* = candidates omitted by an expiration, strike or symbol cap. *Selected* = candidates chosen for quoting. *Unresolved* = selected contracts without a definitive eligibility result: the quote row is missing (including contracts in a failed chunk), or a required input is `DATA_UNAVAILABLE`/STALE/INVALID (Section 5.1). *Definitively ineligible* = evaluated with a verified gate failure. Acquisition coverage is `COMPLETE` only when nothing is omitted by design and no chunk failed; it says nothing about evaluation.
+**Definitions (contract counts unless stated).** *Candidate* = a call in the selected-window expirations that is not provably excluded (strike >= spot, Section 10 stage 3a). *Not acquired by design* = candidates omitted by an expiration, strike or symbol cap (`omittedContractsByDesign`; `null` = unknown; the omitted **expirations** are a separate expiration count, `omittedExpirations`). *Selected* = candidates chosen for quoting. Each selected contract falls into **exactly one** of four disjoint classes:
+1. **eligible** (definitive, all gates pass);
+2. **ineligible** (definitive, a verified gate failure);
+3. **quoteRowsMissing** (no usable quote row, including every contract in a failed chunk);
+4. **acquiredNotEvaluable** (row received, but a required input is `DATA_UNAVAILABLE`/STALE/INVALID, Section 5.1).
+
+**Identities (asserted by test, so no contract is double-counted or dropped):** `unresolvedTotal = quoteRowsMissing + acquiredNotEvaluable`; `selected = eligible + ineligible + unresolvedTotal`. Contracts in failed chunks are counted **only** in `quoteRowsMissing` (never also as "omitted"); contracts omitted by design are **not** selected and never enter `unresolvedTotal`; they are reported only through `omittedContractsByDesign`/`omittedExpirations`. Acquisition coverage is `COMPLETE` only when nothing is omitted by design and no chunk failed; it says nothing about evaluation. *Zero usable quotes* means `eligible = 0`, `ineligible = 0` and `unresolvedTotal = selected > 0`.
 
 **Precedence:**
 1. Underlying not `SETUP`/`ACTIONABLE` -> `NOT_EVALUATED` (no acquisition).
 2. Underlying quote unavailable/invalid/stale, or coverage `FAILED` -> `DATA_UNAVAILABLE`.
-3. **Any contract `ELIGIBLE` -> `EVALUATED`.** All eligible contracts are preserved and ranked. `rankingScope = COMPLETE_CHAIN` only if coverage is `COMPLETE` **and** unresolved = 0; otherwise `EVALUATED_SUBSET`, with reasons `LEAPS_RANKING_IS_EVALUATED_SUBSET` and the two separate counts: `notAcquired` (omitted by design + contracts in failed chunks) and `notEvaluable` (acquired but unresolved). An unresolved or unacquired contract might be eligible and outrank the returned ones, and the label says so.
-4. **No eligible contract and unresolved > 0 -> `DATA_UNAVAILABLE`** (reasons by unresolved cause, with counts of definitive ineligible, unresolved and not-acquired). This holds whether or not the search was restricted.
-5. No eligible contract, unresolved = 0, coverage `RESTRICTED` (contracts omitted by design) -> `NO_ELIGIBLE_IN_SUBSET`, with considered/selected/omitted counts and the dominant failing gates of the evaluated subset (the subset may be empty when omitted expirations remain).
-6. No eligible contract, unresolved = 0, coverage `COMPLETE` -> `NO_SUITABLE_CONTRACT` with the dominant failing gates (counts per gate) as reasons; or, for a verified-empty complete search, `NO_SUITABLE_CONTRACT` with the specific reason `LEAPS_NO_LEAPS_EXPIRATIONS` (no expiration in the DTE window) or `LEAPS_NO_CONTRACTS_IN_WINDOW` (every call is at or above spot).
+3. **Any contract `ELIGIBLE` -> `EVALUATED`.** All eligible contracts are preserved and ranked. `rankingScope = COMPLETE_CHAIN` only if coverage is `COMPLETE` **and** `unresolvedTotal = 0`; otherwise `EVALUATED_SUBSET`, with reason `LEAPS_RANKING_IS_EVALUATED_SUBSET` and the separate figures `omittedExpirations` (expirations), `omittedContractsByDesign` (contracts or unknown), `quoteRowsMissing` and `acquiredNotEvaluable` (contracts), whose sum is `unresolvedTotal`. An unresolved or unacquired contract might be eligible and outrank the returned ones, and the label says so.
+4. **No eligible contract and `unresolvedTotal > 0` -> `DATA_UNAVAILABLE`** (reasons by unresolved cause with `quoteRowsMissing`, `acquiredNotEvaluable`, definitive ineligible, and the omitted figures). This holds whether or not the search was restricted.
+5. No eligible contract, `unresolvedTotal = 0`, coverage `RESTRICTED` (contracts omitted by design) -> `NO_ELIGIBLE_IN_SUBSET`, with the candidate, selected and omitted figures (expirations and contracts separately; unknown stays unknown) and the dominant failing gates of the evaluated subset (the subset may be empty when omitted expirations remain).
+6. No eligible contract, `unresolvedTotal = 0`, coverage `COMPLETE` -> `NO_SUITABLE_CONTRACT` with the dominant failing gates (counts per gate) as reasons; or, for a verified-empty complete search, `NO_SUITABLE_CONTRACT` with the specific reason `LEAPS_NO_LEAPS_EXPIRATIONS` (no expiration in the DTE window) or `LEAPS_NO_CONTRACTS_IN_WINDOW` (every call is at or above spot).
 
-**Decision table (fixtures for acceptance test 3; `elig`/`inel`/`unres` are counts among selected contracts, `omit` = omitted by design, `fail` = contracts in failed chunks, counted as unresolved):**
-| # | Coverage | elig | inel | unres | omit | fail | contractStatus | rankingScope | Notes |
-|---|---|---|---|---|---|---|---|---|---|
-| D1 | COMPLETE | 2 | 1 | 0 | 0 | 0 | EVALUATED | COMPLETE_CHAIN | exhaustive |
-| D2 | COMPLETE | 1 | 1 | 1 | 0 | 0 | EVALUATED | EVALUATED_SUBSET | unresolved one may outrank; counts A=0, B=1 |
-| D3 | RESTRICTED | 1 | 2 | 0 | 5 | 0 | EVALUATED | EVALUATED_SUBSET | A=5, B=0 |
-| D4 | RESTRICTED | 1 | 0 | 2 | 3 | 0 | EVALUATED | EVALUATED_SUBSET | A=3, B=2 reported separately |
-| D5 | COMPLETE | 0 | 2 | 1 | 0 | 0 | DATA_UNAVAILABLE | null | precedence 4 over 6 |
-| D6 | COMPLETE | 0 | 3 | 0 | 0 | 0 | NO_SUITABLE_CONTRACT | null | gate counts as reasons |
-| D7 | RESTRICTED | 0 | 3 | 0 | 4 | 0 | NO_ELIGIBLE_IN_SUBSET | null | never NO_SUITABLE_CONTRACT |
-| D8 | RESTRICTED | 0 | 2 | 1 | 4 | 0 | DATA_UNAVAILABLE | null | data failure not relabelled (5 not reached) |
-| D9 | RESTRICTED | 0 | 0 | 0 | 0 | 100 | DATA_UNAVAILABLE | null | all selected in failed chunks, **zero usable quotes**; `LEAPS_ALL_QUOTES_UNAVAILABLE` |
-| D10 | RESTRICTED | 0 | 0 | 40 | 60 | 0 | DATA_UNAVAILABLE | null | rows arrived, none evaluable, **zero usable**; cap also omitted 60 |
-| D11 | COMPLETE | 0 | 0 | 0 | 0 | 0 | NO_SUITABLE_CONTRACT | null | no expiration in window: `LEAPS_NO_LEAPS_EXPIRATIONS` |
-| D12 | COMPLETE | 0 | 0 | 0 | 0 | 0 | NO_SUITABLE_CONTRACT | null | every call >= spot: `LEAPS_NO_CONTRACTS_IN_WINDOW` |
-| D13 | RESTRICTED | 0 | 0 | 0 | 2 expirations | 0 | NO_ELIGIBLE_IN_SUBSET | null | selected expirations held only calls >= spot; omitted expirations remain |
-| D14 | FAILED | - | - | - | - | - | DATA_UNAVAILABLE | null | `LEAPS_CHAIN_PROVIDER_FAILURE:<code>` |
-| D15 | (underlying `WATCH`) | - | - | - | - | - | NOT_EVALUATED | null | zero provider calls |
-| D16 | COMPLETE | 1 | 0 | 0 | 0 | 0 | EVALUATED | COMPLETE_CHAIN | single eligible contract, ranked 1 |
+**Decision table (fixtures for acceptance test 3).** Columns: `elig`/`inel`/`miss`/`nev` are counts of **selected contracts** (`miss` = `quoteRowsMissing`, `nev` = `acquiredNotEvaluable`); `unres` = `miss + nev` (the formula, not an independent input); `omitExp` = omitted **expirations**; `omitC` = contracts not acquired by design (number or `unknown`). Rule = the Section 6 precedence step that decides.
+| # | Coverage | elig | inel | miss | nev | unres | omitExp | omitC | Rule | contractStatus | rankingScope | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| D1 | COMPLETE | 2 | 1 | 0 | 0 | 0 | 0 | 0 | 3 | EVALUATED | COMPLETE_CHAIN | exhaustive |
+| D2 | COMPLETE | 1 | 1 | 0 | 1 | 1 | 0 | 0 | 3 | EVALUATED | EVALUATED_SUBSET | unresolved one may outrank; disclosure D only |
+| D3 | RESTRICTED | 1 | 2 | 0 | 0 | 0 | 0 | 5 | 3 | EVALUATED | EVALUATED_SUBSET | disclosure C only (5 contracts) |
+| D4 | RESTRICTED | 1 | 0 | 0 | 2 | 2 | 0 | 3 | 3 | EVALUATED | EVALUATED_SUBSET | C (3) and D (2) reported separately |
+| D5 | COMPLETE | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 4 | DATA_UNAVAILABLE | null | rule 4 before 6 |
+| D6 | COMPLETE | 0 | 3 | 0 | 0 | 0 | 0 | 0 | 6 | NO_SUITABLE_CONTRACT | null | gate counts as reasons |
+| D7 | RESTRICTED | 0 | 3 | 0 | 0 | 0 | 0 | 4 | 5 | NO_ELIGIBLE_IN_SUBSET | null | never NO_SUITABLE_CONTRACT |
+| D8 | RESTRICTED | 0 | 2 | 1 | 0 | 1 | 0 | 4 | 4 | DATA_UNAVAILABLE | null | data failure not relabelled; rule 5 not reached |
+| D9 | RESTRICTED | 0 | 0 | 100 | 0 | **100** | 0 | 0 | 4 | DATA_UNAVAILABLE | null | all 100 selected contracts in failed chunks: `unres = 100 + 0 = 100 > 0`, zero usable quotes; `LEAPS_ALL_QUOTES_UNAVAILABLE` |
+| D10 | RESTRICTED | 0 | 0 | 0 | 40 | 40 | 0 | 60 | 4 | DATA_UNAVAILABLE | null | rows arrived, none evaluable; 60 contracts omitted by cap; `LEAPS_ALL_CONTRACTS_DATA_UNAVAILABLE` |
+| D11 | COMPLETE | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6 | NO_SUITABLE_CONTRACT | null | no expiration in window: `LEAPS_NO_LEAPS_EXPIRATIONS` |
+| D12 | COMPLETE | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6 | NO_SUITABLE_CONTRACT | null | every call >= spot: `LEAPS_NO_CONTRACTS_IN_WINDOW` |
+| D13a | RESTRICTED | 0 | 0 | 0 | 0 | 0 | 2 | 14 | 5 | NO_ELIGIBLE_IN_SUBSET | null | selected expirations held only calls >= spot; 2 expirations omitted, **14 candidate contracts** counted from the nested chain |
+| D13b | RESTRICTED | 0 | 0 | 0 | 0 | 0 | 2 | unknown | 5 | NO_ELIGIBLE_IN_SUBSET | null | as D13a but the omitted expirations' strike lists are absent: contract count **unknown**, shown as "an unknown number of contracts", never estimated |
+| D14 | FAILED | - | - | - | - | - | - | - | 2 | DATA_UNAVAILABLE | null | `LEAPS_CHAIN_PROVIDER_FAILURE:<code>` |
+| D15 | (underlying `WATCH`) | - | - | - | - | - | - | - | 1 | NOT_EVALUATED | null | zero provider calls |
+| D16 | COMPLETE | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 3 | EVALUATED | COMPLETE_CHAIN | single eligible contract, ranked 1 |
+
+Check of the identities on every row with selected contracts: D1 3=2+1+0; D2 3=1+1+1; D3 3=1+2; D4 2=1+0+2 (omitted 3 are not selected); D5 3=0+2+1; D8 3=0+2+1; D9 100=0+0+100; D10 40=0+0+40 (60 omitted are not selected).
 
 ## 7. Proposed eligibility thresholds — ALL UNAPPROVED `[IAN]`
 
@@ -317,7 +343,7 @@ Score: cost 35×(1−13.793103/30)=18.908046; carry 15×(1−6.896552/20)=9.8275
 5. **Quotes:** `market-data/by-type` in chunks of 100. A failed chunk is counted (`CHUNK_FAILURE`, contracts in it omitted) -> coverage `RESTRICTED`.
 6. **Evaluate and rank** (pure).
 
-**Coverage rule:** `COMPLETE` only if no restriction applied (no expiration cap, strike cap, symbol cap or chunk failure) and the chain parsed. Acquisition completeness is **not** evaluation completeness: `rankingScope = COMPLETE_CHAIN` additionally requires that no candidate be unresolved (Section 6). Otherwise `RESTRICTED`; a failed chain is `FAILED`. Eligibility-preserving coverage is claimed **only** for exclusion 3a (proven above); every other omission is a restriction. The acquisition report always carries `considered`, `selected` and `omitted` counts per reason (Section 2), and any returned ranking states its `rankingScope`. Typical LEAPS ladders are expected to be small (a few expirations in a 365-900 day window), so the caps should rarely bind; the audit (11.1) must measure real ladder sizes and Ian/Quinn may raise the caps, but a binding cap is always visible.
+**Coverage rule:** `COMPLETE` only if no restriction applied (no expiration cap, strike cap, symbol cap or chunk failure) and the chain parsed. Acquisition completeness is **not** evaluation completeness: `rankingScope = COMPLETE_CHAIN` additionally requires `unresolvedTotal = 0` (Section 6). Otherwise `RESTRICTED`; a failed chain is `FAILED`. Eligibility-preserving coverage is claimed **only** for exclusion 3a (proven above); every other omission is a restriction. The acquisition report always carries candidate, selected and omitted figures per reason, with expiration counts and contract counts kept separate (an omitted-contract count that cannot be derived from the nested chain is `null`/unknown, never estimated) (Section 2), and any returned ranking states its `rankingScope`. Typical LEAPS ladders are expected to be small (a few expirations in a 365-900 day window), so the caps should rarely bind; the audit (11.1) must measure real ladder sizes and Ian/Quinn may raise the caps, but a binding cap is always visible.
 - **Gate 3 -> Gate 4 handoff:** an orchestrator takes `{symbol, StrategyEvaluation}` pairs and calls acquisition + evaluator per qualifying underlying, returning `QvLeapsResult`. It never mutates the evaluation or lifecycle state.
 - **Persistence/UI/sizing/scenarios:** none in Gate 4.
 
@@ -335,6 +361,23 @@ Score: cost 35×(1−13.793103/30)=18.908046; carry 15×(1−6.896552/20)=9.8275
 6. Observed behavior of a failed or partial `market-data/by-type` chunk.
 7. Real ladder sizes (expirations in the 365-900 day window; strikes below spot per expiration) for about five liquid and illiquid underlyings, to size `N`, the expiration cap and the symbol cap.
 Any value whose unit or meaning cannot be established from real rows stays UNAVAILABLE in the QV path.
+
+**Required access (provider-audit access status: NOT AVAILABLE in this session; no capture workflow exists in the tools provided).** One of: (a) a session linked to Dean's browser with the user's own TastyTrade session, running a read-only capture script; or (b) Dean or another authorized person runs read-only `GET`s for about five underlyings (liquid and illiquid) during regular hours and again after hours, and supplies sanitized JSON (no tokens, headers, account numbers; instrument and market-data fields only), committed under `lib/discovery/leaps/__fixtures__/`. No credential is ever committed or pasted into the repository.
+
+**Which missing evidence prevents implementation:**
+| # | Evidence | Blocks implementation? | Why / what happens if absent |
+|---|---|---|---|
+| 1 | nested chain: shares-per-contract, root, expiration/settlement type | **BLOCKS 4a/4b** | Positive instrument evidence (4.4) is required; without it every contract is `DATA_UNAVAILABLE` and the QV path cannot produce a result |
+| 2 | instrument deliverable records | **BLOCKS** the 4.4 rule (decision I8) | Decides whether the deliverable check is a record or the OCC-root fallback |
+| 3a | `bid`, `ask`, `delta`, `open-interest` presence and format | **BLOCKS 4a/4b** | Required inputs (5.1 rule 2) |
+| 3b | option quote-timestamp field, format, unit, semantics | **BLOCKS 4a/4b** | Freshness, skew and every quote mode (4.3) depend on it; unparseable stays `DATA_UNAVAILABLE` |
+| 3c | delayed-feed flag | **BLOCKS** the DELAYED mode only | Absent flag: DELAYED cannot be proven, so only LIVE and LAST_SESSION rules would apply (decision I6) |
+| 3d | implied-volatility unit | Non-blocking | Optional observable; stays UNAVAILABLE until the unit is verified |
+| 3e | `theta`, `vega`, `volume`, bid/ask size | Non-blocking | Optional (5.1 rule 3); bid/ask size is not used by any v1 gate or score |
+| 4 | underlying quote and its timestamp | **BLOCKS 4a** | `S` and freshness (11.4); no timestamp means `LEAPS_UNDERLYING_QUOTE_UNAVAILABLE` for all |
+| 5 | after-hours vs regular-hours behavior | **BLOCKS** quote-mode policy (4b) | Confirms last-session timestamps and the evidence window `W` |
+| 6 | failed/partial `market-data/by-type` chunk behavior | **BLOCKS 4a** acceptance only | Needed to build a faithful chunk-failure fixture; the counting rule itself does not depend on it |
+| 7 | real ladder sizes | Non-blocking for coding; **blocks cap ratification** (Q3) | Caps stay proposed until measured |
 
 ### 11.2 Additive acquisition changes
 Timestamped underlying quote (today `getQuote` returns a bare number); the QV metric wrapper with a required verified multiplier (4.4); counted chunk failures; call-only source filter; a session-open helper on the Gate 2c calendar (4.1). No existing function signature changes.
@@ -359,7 +402,7 @@ The Find LEAPS scan is implemented inline in `app/screener/page.tsx` (`runLeapsS
 ## 13. Acceptance tests (Gate 4 implementation, for Alan/Quinn)
 1. **Independent numeric fixtures:** Section 9 values (A, E, B, C) and the Section 8 matched examples (overlap, maturity bias, leverage 3.4 vs 1.7) computed by an independent script and embedded as literals; every Section 3 metric for A and E; scores to 6 decimals.
 2. **Boundaries:** each gate at, just below and just above its threshold (DTE 364/365/366 and 899/900/901; delta 0.6999/0.70, 0.85/0.8501; OI 99/100; spread 10.0/10.0001; extrinsic 20.0/20.0001; LIVE age 15:00/15:01; skew 60 s/61 s; future timestamp 5 s/6 s); floating-point cases (`5/25 x 100`).
-3. **Acquisition and evaluation completeness (decision table):** every row D1-D16 of Section 6 as a fixture asserting status, `rankingScope`, the separate `notAcquired` and `notEvaluable` counts and the reason codes, including restricted acquisition with zero usable quotes (D9, D10), the precedence cases (D5, D8), and a complete search with one unresolved contract keeping its eligible results as `EVALUATED_SUBSET` (D2). Also: a strike cap, expiration cap, symbol cap and a failed chunk each make coverage `RESTRICTED` with correct considered/selected/omitted counts; a restricted search with no eligible contract returns `NO_ELIGIBLE_IN_SUBSET`, never `NO_SUITABLE_CONTRACT`; a restricted search with an eligible contract states `rankingScope = EVALUATED_SUBSET`; selection order is deterministic (permuted chain input gives identical selection); strikes `>= S` are excluded as provably ineligible without restricting coverage, and an invariant test fails if `extrinsicPctMax >= 100`; coverage `COMPLETE` with all contracts verified ineligible -> `NO_SUITABLE_CONTRACT`; verified-empty chains.
+3. **Acquisition and evaluation completeness (decision table):** every row D1-D16 (with D13a/D13b) of Section 6 as a fixture asserting status, `rankingScope`, the figures `quoteRowsMissing`, `acquiredNotEvaluable`, `unresolvedTotal`, `omittedExpirations` and `omittedContractsByDesign` (number or unknown), the identities of Section 6 (`unresolvedTotal = miss + nev`; `selected = elig + inel + unres`) and the reason codes, including restricted acquisition with zero usable quotes (D9, D10), the precedence cases (D5, D8), and a complete search with one unresolved contract keeping its eligible results as `EVALUATED_SUBSET` (D2). Also: a strike cap, expiration cap, symbol cap and a failed chunk each make coverage `RESTRICTED` with correct candidate/selected/omitted figures in separate expiration and contract units; an unknown omitted-contract count renders as "an unknown number of contracts" and never as a number; a restricted search with no eligible contract returns `NO_ELIGIBLE_IN_SUBSET`, never `NO_SUITABLE_CONTRACT`; a restricted search with an eligible contract states `rankingScope = EVALUATED_SUBSET`; selection order is deterministic (permuted chain input gives identical selection); strikes `>= S` are excluded as provably ineligible without restricting coverage, and an invariant test fails if `extrinsicPctMax >= 100`; coverage `COMPLETE` with all contracts verified ineligible -> `NO_SUITABLE_CONTRACT`; verified-empty chains.
 4. **Unsuitable / data failures:** chain failure, auth expiry, missing/stale/skewed/future/unparseable timestamps, crossed market, zero bid, missing delta/OI/bid/ask (UNAVAILABLE, not 0), duplicate OCC, a put in a call-only chain (INVALID), underlying quote missing, per-underlying failure isolation, `COMPLETE` coverage with one `DATA_UNAVAILABLE` contract -> `DATA_UNAVAILABLE`.
 5. **Quote modes and precedence:** the ten worked cases of 4.3 as fixtures (Friday evening delayed-labelled, Saturday, Monday pre-open, Monday open delayed and not delayed, holiday weekend), the evidence-window cases under `W` = 60 (near-open Friday quote rejected, near-close accepted, early-close window 12:00-13:00); LIVE, DELAYED and LAST_SESSION each with fresh, stale, future and mismatched-label cases; a delayed label never relaxes freshness; a last-session quote during regular hours is STALE; a delay label never switches a closed-market snapshot to the 30-minute rule; a quote from a session earlier than the latest completed one is STALE; the underlying quote is held to the same rule; no price is ever labelled executable.
 6. **Instrument metadata:** missing multiplier or deliverable evidence -> `DATA_UNAVAILABLE`; shares-per-contract 100 with an adjusted indicator or mismatched OCC root -> `INELIGIBLE` `CONTRACT_NON_STANDARD_DELIVERABLE`; verified non-100 -> `INELIGIBLE`; the QV wrapper never yields a VALID multiplier-dependent metric from the default 100.
@@ -376,17 +419,39 @@ No Bear/Base/Bull scenarios (Gate 5), no scenario engine, QV UI (Gate 6), snapsh
 ## 15. Interfaces left for later gates (not built here)
 Gate 5 consumes `{ occSymbol, expiration, strike, debitPerContract (= mid × M), breakevenPrice, multiplier }` from a `ContractEvaluation`; the entry-price assumption (mid) is part of that contract so scenarios use the same debit. Gate 6 reads `QvLeapsResult` and reason codes. Gate 7 serialises `QvLeapsResult` with `policyVersion`.
 
-## 16. Review package
+## 16. Review package: consolidated decision matrix
 
-**Decisions requiring Ian:** (1) DTE window 365-900 (vs the 180 floor of Find LEAPS); (2) extrinsic ceiling 20 vs 25 for 2-year contracts; (3) mid-with-indicative-ask entry assumption; (4) volume, debit, leverage, theta, vega, IV observable-only, **including that "no leverage gate" is an investment proposal** (8.4); (5) ranking weights, ramps and tie-breaker order, **and whether the overlap among cost, carry and breakeven (8.2) and the maturity bias of the carry component (8.3) are acceptable or the components should be merged / replaced**; (6) DELAYED allowance (30 min) and LAST_SESSION discovery use, **including the evidence window `W` (anywhere in session / final 60 min proposed / final 30 min) that decides how close to the close weekend-ranking evidence must be (4.3)**; (7) 60 s quote skew; (8) the OCC-root-plus-shares-per-contract sufficiency rule if the provider lacks deliverable records (4.4); (9) missing optional metrics do not affect the score; (10) IV observable-only, provider IV Rank informational.
+One matrix replaces the earlier per-reviewer lists. Every value is **PROPOSED**; no ruling is recorded. `Blocks`: **4a** = provider audit and acquisition module; **4b** = pure evaluator, policy and ranking; **4c** = orchestration and Find LEAPS equivalence; "No" = may be settled at gate review without stopping the start of work.
 
-**Questions for Quinn:** (1) additive acquisition module rather than extending `getPmccChain`; (2) the coverage model (`COMPLETE`/`RESTRICTED`/`FAILED`), the status precedence and decision table D1-D16 (Section 6), the `rankingScope` rule (acquisition complete **and** no unresolved candidate), and the `K >= S` provable exclusion; (3) caps (6 expirations, N = 40, 240 symbols, 25 underlyings, concurrency 3, 20 s) and the selection priorities (730-day DTE target, 0.80·S strike target); (4) the Find LEAPS production-path harness design and which observable surface (rendered rows vs `persistLeapsSession`); (5) the canonical quantized comparator and fixture `T`; (6) policy fingerprint and extending isolation guards; (7) the 5 s future-timestamp tolerance; (8) whether Gate 4 splits into 4a (provider audit + acquisition), 4b (pure evaluator and ranking), 4c (orchestration + equivalence).
+| ID | Owner | Decision | Proposed choice | Alternative | Rationale | Blocks |
+|---|---|---|---|---|---|---|
+| I1 | Ian | DTE window | 365-900 | 180-900 (Find LEAPS floor) | Keeps time-value carry and decay profile of a true long-dated hold; Find LEAPS's 180 is a different product | 4b |
+| I2 | Ian | Extrinsic ceiling | 20% of mid-based cost, as % of S | 25% for 2-year contracts | Matches the existing server policy; 25 may admit expensive time value | 4b |
+| I3 | Ian | Entry price | mid, with the ask-based breakeven as a sensitivity | ask, or mid only | Gate 2 and Find LEAPS convention; no price labelled executable | 4b |
+| I4 | Ian | Observable-only metrics | volume, debit, leverage, theta, vega, IV (no gate) | add a leverage gate | Leverage is not fixed by delta and extrinsic alone (8.4); avoid an untested investment constraint | 4b |
+| I5 | Ian | Ranking weights and form | cost 35, carry 15, breakeven 20, liquidity 30; quantized comparator | merge cost+breakeven (70 points follow extrinsic) or drop carry (maturity bias) | Overlap (8.2) and bias (8.3) are shown with matched examples; Ian decides whether acceptable | 4b |
+| I6 | Ian | Quote modes | DELAYED <= 30 min (open only); LAST_SESSION evidence window `W` = final 60 min | `W` = anywhere in session, or final 30 min | Weekend discovery must use close-adjacent evidence without rejecting normal after-hours data | 4b |
+| I7 | Ian | Quote skew | 60 s | 30 s or 120 s | Option and underlying quotes must describe the same moment | 4b |
+| I8 | Ian + Quinn | Deliverable evidence rule | deliverable record if the provider has one; OCC-root equality plus shares-per-contract = 100 only if the audit finds no record | require a record always (else `DATA_UNAVAILABLE`) | Positive evidence for standard deliverable (4.4) | 4a, 4b (needs audit items 1-2) |
+| I9 | Ian | Missing optional metrics | no effect on eligibility or score; flagged | score penalty | Avoids hidden imputation | 4b |
+| I10 | Ian | IV | observable-only; provider IV Rank informational; internal stays UNAVAILABLE | include provider IVR in score | No stored IV history; Gate 2b ruling | No |
+| Q1 | Quinn | Acquisition module | new additive `leapsQvChainClient` | extend `getPmccChain` | Existing function hides chunk failures and drops fields; changing it touches Find LEAPS | 4a |
+| Q2 | Quinn | Coverage model | COMPLETE/RESTRICTED/FAILED, precedence rules 1-6, D1-D16 (D13a/b), `unresolvedTotal` identities, `K >= S` provable exclusion | none proposed | Fixes status honesty under restriction and failure | 4b |
+| Q3 | Quinn | Caps | 6 expirations, N = 40, 240 symbols, 25 underlyings, concurrency 3, 20 s | larger caps after measured ladders | Acquisition cost control; every binding cap is reported | 4a (ratify after audit item 7) |
+| Q4 | Quinn | Find LEAPS regression surface | production-path RTL harness; rendered rows, `persistLeapsSession` as fallback | persisted payload only | Real path, goldens pre-recorded in a separate commit | 4c |
+| Q5 | Quinn | Comparator | quantized integer keys + lexicographic chain ending in OCC symbol; fixture T | epsilon compare (rejected: not transitive) | Total order independent of input order | 4b |
+| Q6 | Quinn | Policy pinning and guards | fingerprint test; isolation and `noInvestmentLogic` guards extended | none | Prevents silent threshold drift | 4b |
+| Q7 | Quinn | Future-timestamp tolerance | 5 s | 0 s or 30 s | Clock skew allowance without admitting future data | 4b |
+| Q8 | Quinn | Gate split | 4a audit+acquisition, 4b evaluator+ranking, 4c orchestration+equivalence | single gate | Each slice independently testable; one push per slice | Structure (before any 4x) |
+| P1 | Paul | SETUP underlyings in chain retrieval | included | ACTIONABLE only | SETUP is a qualifying state in Gate 3 | 4c |
+| P2 | Paul | No production `StrategyInput` assembler | tested orchestrator with no production caller is an acceptable Gate 4 exit | build assembler in Gate 4 | Assembler belongs to Gate 7 / separate ticket | 4c |
+| P3 | Paul | Debit and capital | shown, no sizing | none | Sizing is a later gate | No |
+| P4 | Paul | Cross-underlying "best contract" | deferred to Gate 6 | include in Gate 4 | Underlying and contract rankings are separate | No |
+| P5 | Paul | Provider audit ownership | part of Gate 4 (as 4a) | separate Gate 2d data amendment | Audit gates the acquisition design | 4a |
+| P6 | Paul | Session-open helper on the Gate 2c calendar | small additive change in Gate 4 | duplicate calendar logic in `lib/discovery/leaps/` | One calendar source of truth | 4a, 4b |
+| F1 | Frank | Authorization | implementation stays BLOCKED until the rulings above that block a slice, Paul's scope and the provider audit evidence for that slice are recorded in the ledger | none | No approvals are recorded in this document | all |
 
-**Scope questions for Paul:** (1) SETUP included in chain retrieval; (2) no production `StrategyInput` assembler: is a tested orchestrator with no production caller acceptable as Gate 4 exit; (3) debit/capital shown but no sizing; (4) cross-underlying "best contract" presentation deferred to Gate 6; (5) is the provider audit part of Gate 4 or a separate Gate 2d data amendment; (6) a session-open helper on the Gate 2c calendar is a small additive change outside `lib/discovery/leaps/` — acceptable in Gate 4?
-
-**For Frank (authorization):** implementation stays BLOCKED until Ian's rulings, Quinn's architecture/test answers, Paul's scope confirmation and the completed provider audit are recorded in the ledger. No approvals are recorded here.
-
-**Implementation readiness:** NOT READY. Blocking: Ian rulings (Sections 7-8), the provider audit (11.1, not performed; specific evidence listed), Quinn's acquisition/limit/harness decisions. Closed and available: Gate 2 contract metrics, Gate 3 evaluation, Gate 2c data and calendar.
+**Implementation readiness:** NOT READY. Blocking: Ian rulings I1-I9, Quinn rulings Q1-Q3 and Q8, Paul rulings P5-P6, and the provider evidence marked BLOCKS in 11.1 (access not available in this session). Closed and available: Gate 2 contract metrics, Gate 3 evaluation, Gate 2c data and calendar.
 
 ## 17. Revision 1 — response to review round 1 (CHANGES REQUIRED at 6d7858c)
 | # | Review item | Response (where) |
@@ -410,3 +475,12 @@ Thresholds and weights remain PROPOSED. No Ian, Quinn or Paul approval is record
 | R2 | Data failures preserved in restricted searches | Explicit five-step precedence: eligible -> `EVALUATED`; else unresolved data -> `DATA_UNAVAILABLE`; else restricted -> `NO_ELIGIBLE_IN_SUBSET`; else complete -> `NO_SUITABLE_CONTRACT` / verified-empty reason; decision-table fixtures D1-D16 including restricted acquisition with zero usable quotes (D9, D10) (Sections 5.2, 6, 13) |
 | R3 | Quote-mode precedence | Session state and feed delay separated into two dimensions; precedence table (market closed -> LAST_SESSION regardless of a delay label; open + delayed -> DELAYED; open -> LIVE); ten worked cases covering Friday evening, Saturday and Monday pre-open; LAST_SESSION evidence window `W` (anywhere / final 60 min proposed / final 30 min) marked for investment review (Section 4.3, 16) |
 Thresholds and weights remain PROPOSED; provider evidence remains outstanding (11.1); no Ian, Quinn or Paul approval is recorded.
+
+### Revision 3 — response to the review of revision 2 (documentation corrections at a936e30)
+| # | Review item | Response (where) |
+|---|---|---|
+| C1 | Failed-chunk counts | `unresolvedTotal = quoteRowsMissing + acquiredNotEvaluable`; `selected = eligible + ineligible + unresolvedTotal`; contracts in failed chunks counted once, in `quoteRowsMissing`; D9 now reads `miss 100, unres 100` and reaches `DATA_UNAVAILABLE` by rule 4 (Sections 2, 6) |
+| C2 | Omitted-count units | Expiration counts and contract counts in separate fields and columns; D13 split into D13a (14 candidate contracts from the nested chain) and D13b (unknown); the disclosure states a contract count only when known and otherwise says "an unknown number of contracts" (Sections 2, 6, 10, 13) |
+| M1 | Decision matrix | One matrix of Ian, Quinn, Paul and Frank decisions with proposed choice, alternative, rationale and blocking status (Section 16) |
+| M2 | Provider-audit checklist | Retained; each missing item classified as blocking or not; access status and required access stated (11.1) |
+Thresholds, weights and quote windows remain PROPOSED; provider access is NOT AVAILABLE; no Ian, Quinn, Paul or Frank approval is recorded.
