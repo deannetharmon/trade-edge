@@ -10,6 +10,13 @@ Script: `scripts/leaps-provider-audit/leaps-provider-audit.js` (browser-console 
 - Sanitizes output (credential-like keys and values redacted), re-scans it, and **downloads nothing if anything secret-like survives**.
 - Preserves raw values, missing fields and provider errors. It does not infer units or timestamp meaning.
 
+## Option instrument lookups (revision 1.1.0, export format `leaps-provider-audit/v2`)
+The bulk instrument endpoint `GET /instruments/equity-options?symbol[]=<OCC>` returns **HTTP 403 "Token has insufficient scopes for this request."** for the TradeEdge OAuth client (scopes requested: `read trade openid`). Individual instrument, option chain and market-data reads succeed.
+
+- **Evidence preserved:** the bulk endpoint is called **once per run** (first symbol with an in-window sample). Its status and sanitized error body are kept in `results[].optionInstrumentsBulkProbe`; later symbols record `PROBED_ONCE_PER_RUN`. A 403 there does not stop the capture. Its records, if it ever succeeds, are not used. `bulkProbe: false` skips the call.
+- **Capture:** the same sample (up to 6 in-window calls spread across expirations, plus up to 2 non-primary-root calls) is fetched one symbol at a time with `GET /instruments/equity-options/{url-encoded OCC symbol}`. The space-padded OCC symbol is preserved exactly. Results are in `results[].optionInstruments` (`lookups[]` per symbol with HTTP status, `records`, `fieldPresence`, `attempted/succeeded/failed`). A failed lookup is recorded and the rest continue.
+- **Cap unchanged:** `maxRequests` (default 150) still bounds the whole run; if it runs out mid-sample, the remaining lookups are recorded as skipped with `REQUEST_BUDGET_EXHAUSTED`.
+
 ## Run it
 1. Open TradeEdge (production or a preview URL) in Chrome, signed in with TastyTrade connected.
 2. Open DevTools Console (Windows/Linux `Ctrl+Shift+J`, Mac `Cmd+Option+J`). If Chrome blocks pasting, type `allow pasting` and press Enter.
@@ -28,7 +35,7 @@ Script: `scripts/leaps-provider-audit/leaps-provider-audit.js` (browser-console 
 7. Optional but useful for the Saturday/holiday cases of spec 4.3: a third run with `sessionLabel: 'WEEKEND_CLOSED'` on a weekend.
 8. Attach the downloaded files to the chat. They contain no credentials by construction; the console line `[leaps-audit] saved ...` confirms the redaction count.
 
-Expected volume: about 9 requests per symbol (cap 150, 200 ms apart), roughly 1 minute for five symbols.
+Expected volume: about 14 requests per symbol plus one bulk probe per run (cap 150, 200 ms apart), roughly 70 requests and under 1 minute for five symbols.
 
 ## Expected output files (one per run, never merged)
 - `leaps-provider-audit_REGULAR_HOURS_<UTC compact time>.json`
@@ -46,7 +53,7 @@ Each file records the declared session label, capture start/finish (UTC), the Ne
 | 11.1 item | Location in `results[]` |
 |---|---|
 | 1 nested chain fields (shares-per-contract, root, expiration/settlement type) | `nestedChain.items[].itemFields`, `expirationFieldPresence`, `inWindowStrikeFieldPresence` |
-| 2 instrument deliverable records | `optionInstruments`, `optionInstrumentSingle`, `equityInstrument` |
+| 2 instrument deliverable records | `optionInstruments` (individual lookups), `optionInstrumentsBulkProbe` (403 evidence), `equityInstrument` |
 | 3 option rows (bid/ask/size, greeks, IV, volume, OI, quote-time, delayed flag) | `optionQuotes.fieldPresence` (per-field present/absent/null/types/raw samples; `timestampLike` flagged) and `optionQuotes.items` |
 | 4 underlying quote and timestamp | `underlyingQuote` |
 | 5 after-hours vs regular hours | compare the separate files (`capture.declaredSessionLabel`, `capture.newYorkWallClock`) |
@@ -56,4 +63,4 @@ Each file records the declared session label, capture start/finish (UTC), the Ne
 Chunk failures that cannot be observed safely are **not** provoked; they are covered later with injected failures in tests.
 
 ## Validation of the tool (synthetic only)
-`lib/scans/__tests__/leapsProviderAuditScript.test.ts` (20 tests) runs the script against synthetic provider responses: allow-list, sanitizer with planted secrets, missing/null/mixed-type fields, chunk failure and partial response, 401 and budget stops, deterministic output, and static guards (no storage/cookie access, one GET-only network call). This validates the tooling, not the provider.
+`lib/scans/__tests__/leapsProviderAuditScript.test.ts` (23 tests) runs the script against synthetic provider responses: allow-list, sanitizer with planted secrets, missing/null/mixed-type fields, chunk failure and partial response, 401 and budget stops, bulk 403 probe once per run, individual URL-encoded lookups including a failed lookup and a cap stop mid-sample, deterministic output, and static guards (no storage/cookie access, one GET-only network call). This validates the tooling, not the provider.

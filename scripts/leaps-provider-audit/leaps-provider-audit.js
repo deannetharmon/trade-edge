@@ -10,6 +10,11 @@
 // SAFETY (each point is enforced in code and asserted by tests):
 //   * GET only, to one same-origin URL (/api/tastytrade/proxy) with a path
 //     allow-list of five read-only endpoint shapes. No orders, no account paths.
+//   * Option instrument records are captured ONE SYMBOL AT A TIME via
+//     GET /instruments/equity-options/{url-encoded OCC symbol}. The bulk form
+//     (/instruments/equity-options?symbol[]=...) returns HTTP 403 "Token has
+//     insufficient scopes for this request." for this OAuth client; it is probed
+//     at most ONCE per run so the 403 is preserved as evidence (bulkProbe: false skips it).
 //   * No localStorage / sessionStorage / document.cookie / Authorization access.
 //   * Output is sanitized (credential-like keys and values redacted) and then
 //     re-scanned; if anything secret-like survives, NOTHING is downloaded.
@@ -28,8 +33,9 @@
 })(this, function () {
   'use strict';
 
-  var FORMAT = 'leaps-provider-audit/v1';
-  var TOOL_VERSION = '1.0.0';
+  var FORMAT = 'leaps-provider-audit/v2';
+  var ACCEPTED_FORMATS = ['leaps-provider-audit/v1', FORMAT];
+  var TOOL_VERSION = '1.1.0';
   var PROXY = '/api/tastytrade/proxy';
   var SESSION_LABELS = ['REGULAR_HOURS', 'AFTER_HOURS', 'WEEKEND_CLOSED'];
 
@@ -233,6 +239,7 @@
       chunkSize: Math.min(100, o.chunkSize || 100),
       maxQuoteSymbols: o.maxQuoteSymbols != null ? o.maxQuoteSymbols : 300,
       optionInstrumentSample: o.optionInstrumentSample != null ? o.optionInstrumentSample : 6,
+      bulkProbe: o.bulkProbe !== false,           // one bulk-endpoint call per run, kept only as 403 evidence
       maxRequests: o.maxRequests != null ? o.maxRequests : 150,
       delayMs: o.delayMs != null ? o.delayMs : 200,
     };
@@ -294,6 +301,7 @@
     function clean(v, path) { return sanitize(v, path, redactions).value; }
 
     var results = [];
+    var bulkProbedOn = null;
     for (var si = 0; si < symbols.length; si++) {
       var symbol = symbols[si];
       var isIndex = cfg.indexSymbols.indexOf(symbol) >= 0;
@@ -397,21 +405,49 @@
           for (var k = 0; k < byDte.length && sample.length < cfg.optionInstrumentSample; k += step) sample.push(byDte[k].occ);
           windowCalls.filter(function (c) { return c.item > 0; }).slice(0, 2).forEach(function (c) { if (sample.indexOf(c.occ) < 0) sample.push(c.occ); });
           sample = sample.slice(0, 25);
-          var batchPath = '/instruments/equity-options?' + sample.map(function (s) { return 'symbol[]=' + encodeURIComponent(s); }).join('&');
-          var batch = await get(batchPath, 'option-instruments-batch');
-          if (!batch.skipped) {
-            if (batch.rec.ok) {
-              var br = extractRecords(batch.json);
-              var recs = clean(br.records, base + '.optionInstruments.records');
-              out.optionInstruments = { requestedSymbols: sample, recordShape: br.shape, recordCount: recs.length, records: recs, fieldPresence: fieldPresence(recs) };
-            } else out.optionInstruments = { requestedSymbols: sample, httpStatus: batch.rec.httpStatus, error: batch.rec.errorBody || batch.rec.bodySnippet || batch.rec.networkError || null };
+          // 4a. bulk endpoint: evidence probe only (once per run). Its records are never
+          //     used; a 403 here is the expected, documented scope restriction.
+          if (cfg.bulkProbe && bulkProbedOn === null) {
+            bulkProbedOn = symbol;
+            var batchPath = '/instruments/equity-options?' + sample.map(function (s) { return 'symbol[]=' + encodeURIComponent(s); }).join('&');
+            var batch = await get(batchPath, 'option-instruments-bulk-probe');
+            if (!batch.skipped) {
+              out.optionInstrumentsBulkProbe = {
+                purpose: 'evidence only; records come from the individual lookups below',
+                requestedSymbols: sample, httpStatus: batch.rec.httpStatus, ok: batch.rec.ok,
+                error: batch.rec.ok ? null : (batch.rec.errorBody || batch.rec.bodySnippet || batch.rec.networkError || null),
+                recordCount: batch.rec.ok ? extractRecords(batch.json).records.length : null,
+              };
+            }
+          } else {
+            out.optionInstrumentsBulkProbe = { skipped: true, reason: cfg.bulkProbe ? 'PROBED_ONCE_PER_RUN' : 'BULK_PROBE_DISABLED', probedOnSymbol: bulkProbedOn };
           }
-          var single = await get('/instruments/equity-options/' + encodeURIComponent(sample[0]), 'option-instrument-single');
-          if (!single.skipped) {
-            out.optionInstrumentSingle = single.rec.ok
-              ? { requestedSymbol: sample[0], recordShape: extractRecords(single.json).shape, data: clean(single.json && single.json.data, base + '.optionInstrumentSingle') }
-              : { requestedSymbol: sample[0], httpStatus: single.rec.httpStatus, error: single.rec.errorBody || single.rec.bodySnippet || single.rec.networkError || null };
+
+          // 4b. the same sample, one URL-encoded OCC symbol per request
+          var lookups = [], instRecs = [];
+          for (var li = 0; li < sample.length; li++) {
+            var one = await get('/instruments/equity-options/' + encodeURIComponent(sample[li]), 'option-instrument-individual');
+            if (one.skipped) { lookups.push({ requestedSymbol: sample[li], skipped: true, reason: state.aborted }); break; }
+            if (one.rec.ok) {
+              var orr = extractRecords(one.json);
+              var oRecs = clean(orr.records, base + '.optionInstruments.lookups[' + li + ']');
+              instRecs = instRecs.concat(oRecs);
+              lookups.push({ requestedSymbol: sample[li], httpStatus: one.rec.httpStatus, ok: true, recordShape: orr.shape, recordCount: oRecs.length });
+            } else {
+              lookups.push({ requestedSymbol: sample[li], httpStatus: one.rec.httpStatus, ok: false, error: one.rec.errorBody || one.rec.bodySnippet || one.rec.networkError || null });
+            }
           }
+          out.optionInstruments = {
+            method: 'individual GET /instruments/equity-options/{url-encoded OCC symbol}',
+            requestedSymbols: sample,
+            attempted: lookups.filter(function (l) { return !l.skipped; }).length,
+            succeeded: lookups.filter(function (l) { return l.ok; }).length,
+            failed: lookups.filter(function (l) { return l.ok === false; }).length,
+            lookups: lookups,
+            recordCount: instRecs.length,
+            records: instRecs,
+            fieldPresence: fieldPresence(instRecs),
+          };
 
           // 5. option quotes in chunks; record partial-response behavior
           var cands = windowCalls.filter(function (c) { return spot == null || (c.strike != null && c.strike < spot); });
@@ -506,7 +542,7 @@
   // Structural check of an export (also usable on a downloaded file's parsed JSON).
   function validate(exp) {
     var problems = [];
-    if (!exp || exp.format !== FORMAT) problems.push('format must be ' + FORMAT);
+    if (!exp || ACCEPTED_FORMATS.indexOf(exp.format) < 0) problems.push('format must be one of ' + ACCEPTED_FORMATS.join(', '));
     if (!exp || !exp.capture || SESSION_LABELS.indexOf(exp.capture.declaredSessionLabel) < 0) problems.push('capture.declaredSessionLabel missing or invalid');
     if (!exp || !exp.capture || !exp.capture.captureStartedAtUtc) problems.push('capture.captureStartedAtUtc missing');
     if (!exp || !exp.requests || !Array.isArray(exp.requests.log)) problems.push('requests.log missing');

@@ -38,7 +38,7 @@ function nestedBody(withSecondItem = false): any {
   return { data: { items: withSecondItem ? [mk('AAPL'), mk('AAPL1')] : [mk('AAPL')] } };
 }
 
-interface Behaviour { nested?: (p: string) => any; quoteChunk?: (idx: number, syms: string[]) => any; status401At?: number }
+interface Behaviour { nested?: (p: string) => any; quoteChunk?: (idx: number, syms: string[]) => any; status401At?: number; singleStatus?: (occ: string) => number }
 
 function makeFetch(b: Behaviour = {}) {
   const calls: Array<{ url: string; init: any; path: string }> = [];
@@ -56,8 +56,14 @@ function makeFetch(b: Behaviour = {}) {
     if (path.startsWith('/instruments/equities/')) return res(200, { data: { symbol: 'AAPL', 'is-etf': false, 'is-index': false, 'streamer-symbol': 'AAPL', 'account-number': '5WX12345' } });
     if (path.startsWith('/market-data/by-type?equity=')) return res(200, { data: { items: [{ symbol: 'AAPL', last: '200.10', bid: '200.05', ask: '200.15', 'updated-at': '2026-10-05T14:59:58.000Z' }] } });
     if (path.endsWith('/nested')) return b.nested ? b.nested(path) : res(200, nestedBody());
-    if (path.startsWith('/instruments/equity-options?')) return res(200, { data: { items: [{ symbol: occ('2028-06-16', 200, 'C'), 'shares-per-contract': 100, 'root-symbol': 'AAPL', Authorization: 'Bearer abc123secret' }] } });
-    if (path.startsWith('/instruments/equity-options/')) return res(200, { data: { symbol: occ('2028-06-16', 200, 'C'), 'shares-per-contract': 100 } });
+    // The bulk form is scope-restricted for this OAuth client (observed live): synthetic 403.
+    if (path.startsWith('/instruments/equity-options?')) return res(403, { error: { code: 'insufficient_scopes', message: 'Token has insufficient scopes for this request.' } });
+    if (path.startsWith('/instruments/equity-options/')) {
+      const sym = decodeURIComponent(path.slice('/instruments/equity-options/'.length));
+      const st = b.singleStatus ? b.singleStatus(sym) : 200;
+      if (st !== 200) return res(st, { error: { code: 'not_found', message: 'no such instrument' } });
+      return res(200, { data: { symbol: sym, 'shares-per-contract': 100, 'root-symbol': sym.slice(0, 6).trim(), Authorization: 'Bearer abc123secret' } });
+    }
     if (path.startsWith('/market-data/by-type?equity-option=')) {
       const syms = path.split('&').map(p => decodeURIComponent(p.replace(/^.*?equity-option=/, '')));
       const idx = chunkIdx++;
@@ -198,7 +204,7 @@ describe('run(): synthetic end to end', () => {
     expect(audit.validate(JSON.parse(text))).toEqual({ ok: true, problems: [] });
 
     // capture and session context
-    expect(exported.format).toBe('leaps-provider-audit/v1');
+    expect(exported.format).toBe('leaps-provider-audit/v2');
     expect(exported.capture.declaredSessionLabel).toBe('REGULAR_HOURS');
     expect(exported.capture.newYorkWallClock).toEqual({ nyDate: '2026-10-05', nyTime: '11:00:00', nyWeekday: 'Monday' });
     expect(exported.complete).toBe(true);
@@ -234,16 +240,67 @@ describe('run(): synthetic end to end', () => {
 
     // redaction was recorded
     expect(exported.redaction.count).toBeGreaterThan(0);
-    expect(res.optionInstruments.recordCount).toBe(1);
-    expect(res.optionInstrumentSingle.data['shares-per-contract']).toBe(100);
+    // bulk endpoint: probed once, 403 preserved as evidence, never used for records
+    expect(res.optionInstrumentsBulkProbe).toMatchObject({ httpStatus: 403, ok: false, recordCount: null });
+    expect(JSON.stringify(res.optionInstrumentsBulkProbe.error)).toContain('insufficient scopes');
+    expect(calls.filter(c => c.path.startsWith('/instruments/equity-options?'))).toHaveLength(1);
+    expect(exported.complete).toBe(true); // a 403 on the probe does not abort the capture
+
+    // the same sample captured one symbol at a time
+    const oi = res.optionInstruments;
+    expect(oi.requestedSymbols).toEqual(res.optionInstrumentsBulkProbe.requestedSymbols);
+    expect(oi.requestedSymbols).toHaveLength(6);
+    expect(oi).toMatchObject({ attempted: 6, succeeded: 6, failed: 0, recordCount: 6 });
+    expect(oi.records.map((r: any) => r.symbol)).toEqual(oi.requestedSymbols); // padded OCC preserved
+    expect(fld(oi.fieldPresence, 'shares-per-contract').present).toBe(6);
+    expect(oi.records[0].Authorization).toBe('[REDACTED]');
+    const singles = calls.filter(c => c.path.startsWith('/instruments/equity-options/'));
+    expect(singles).toHaveLength(6);
+    for (const c of singles) {
+      expect(c.path).toMatch(/^\/instruments\/equity-options\/[A-Z]+%20%20\d{6}C\d{8}$/); // one URL-encoded OCC symbol
+    }
+  });
+
+  it('probes the bulk endpoint once per run, and not at all when bulkProbe is false', async () => {
+    const two = await runWith({}, { symbols: ['AAPL', 'MSFT'] });
+    expect(two.calls.filter(c => c.path.startsWith('/instruments/equity-options?'))).toHaveLength(1);
+    expect(two.exported.results[1].optionInstrumentsBulkProbe).toEqual({ skipped: true, reason: 'PROBED_ONCE_PER_RUN', probedOnSymbol: 'AAPL' });
+    expect(two.exported.results[1].optionInstruments.succeeded).toBe(6);
+
+    const off = await runWith({}, { bulkProbe: false });
+    expect(off.calls.some(c => c.path.startsWith('/instruments/equity-options?'))).toBe(false);
+    expect(off.exported.results[0].optionInstrumentsBulkProbe).toMatchObject({ skipped: true, reason: 'BULK_PROBE_DISABLED' });
+    expect(off.exported.results[0].optionInstruments.succeeded).toBe(6);
+  });
+
+  it('records a failed individual lookup and continues with the rest of the sample', async () => {
+    let first: string | null = null;
+    const { exported } = await runWith({ singleStatus: s => { first = first ?? s; return s === first ? 404 : 200; } });
+    const oi = exported.results[0].optionInstruments;
+    expect(oi).toMatchObject({ attempted: 6, succeeded: 5, failed: 1, recordCount: 5 });
+    expect(oi.lookups[0]).toMatchObject({ httpStatus: 404, ok: false });
+    expect(exported.results[0].optionQuotes.chunks.length).toBeGreaterThan(0);
+    expect(exported.complete).toBe(true);
+  });
+
+  it('stops individual lookups at the request cap and records where it stopped', async () => {
+    // 3 base calls + 1 bulk probe + 2 individual = 6
+    const { exported, calls } = await runWith({}, { maxRequests: 6 });
+    expect(calls.length).toBe(6);
+    const oi = exported.results[0].optionInstruments;
+    expect(oi).toMatchObject({ attempted: 2, succeeded: 2 });
+    expect(oi.lookups[2]).toMatchObject({ skipped: true, reason: 'REQUEST_BUDGET_EXHAUSTED' });
+    expect(exported.abortedReason).toBe('REQUEST_BUDGET_EXHAUSTED');
   });
 
   it('keeps a non-primary chain item (adjusted root) and samples its instrument records', async () => {
     const { exported, calls } = await runWith({ nested: () => ({ status: 200, ok: true, headers: { get: () => 'application/json' }, text: async () => JSON.stringify(nestedBody(true)) }) });
     expect(exported.results[0].nestedChain.itemCount).toBe(2);
     expect(exported.results[0].nestedChain.items[1].itemFields['root-symbol']).toBe('AAPL1');
-    const batch = calls.find(c => c.path.startsWith('/instruments/equity-options?'))!;
-    expect(decodeURIComponent(batch.path)).toContain('AAPL  ');
+    const sample = exported.results[0].optionInstruments.requestedSymbols as string[];
+    const singles = calls.filter(c => c.path.startsWith('/instruments/equity-options/')).map(c => decodeURIComponent(c.path.split('/').pop()!));
+    expect(singles).toEqual(sample);
+    expect(singles.some(s => s.startsWith('AAPL  '))).toBe(true);
   });
 
   it('preserves provider errors and non-JSON bodies explicitly', async () => {
