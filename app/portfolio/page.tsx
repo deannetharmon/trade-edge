@@ -228,6 +228,8 @@ import { BASE, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
 import { buildSnapshotCapacityReport } from '@/lib/portfolio-snapshot/capacity';
 import type { StockSellOrder } from '@/lib/portfolio/stockOrderBuilder';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
+import { PercentPriceInputs, formatPct } from '@/features/portfolio/components/PercentPriceInputs';
+import { keptPct, roundToTick, sentPriceNote, stopPctOfCredit as stopPctOfCreditExact, tickTableFromNestedChain, type TickTable } from '@/lib/portfolio/tickSize';
 import { useAutoRefreshPause, usePortfolioAutoRefresh } from '@/components/portfolio-data/usePortfolioAutoRefresh';
 import { keepLiveSelections, refreshFreshness } from '@/lib/portfolio-data/autoRefreshPolicy';
 import { EquityHoldingsSection, isEquityDisplayEnabled, resolvePositionsWorkspaceState } from '@/components/portfolio-data/EquityHoldingsSection';
@@ -2998,6 +3000,37 @@ function ThemeToggle({ theme, setTheme, accent, setAccent }: {
 type BatchStatus = 'enriching' | 'ready' | 'submitting' | 'done' | 'error';
 
 // ── Batch Confirm Modal ─────────────────────────────────────────────────────
+// ORDER-PCT-INPUT-0001: closes whose limit is a profit target on a credit position get a "% of credit kept" box.
+function isKeptPctAction(action: ActionType): boolean {
+  return action === 'PLACE_GTC' || action === 'TAKE_PROFIT';
+}
+
+function BatchKeptPctInput({ pct, note, th, onPctChange }: {
+  pct: number | null;
+  note: string | null;
+  th: typeof THEMES[Theme];
+  onPctChange: (pct: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <label className="flex items-center justify-end gap-1">
+        <span className={`text-[9px] ${th.textFaint}`}>% of credit kept</span>
+        <input
+          type="number" inputMode="decimal" step="1" aria-label="Profit target as percent of credit kept"
+          value={draft ?? (pct == null ? '' : formatPct(pct))}
+          onChange={e => { setDraft(e.target.value); const v = parseFloat(e.target.value); if (Number.isFinite(v)) onPctChange(v); }}
+          onBlur={() => setDraft(null)}
+          className="w-16 text-xs font-bold text-right px-1.5 py-0.5 rounded border border-emerald-500/40 text-emerald-400 bg-transparent outline-none focus:border-emerald-500"
+          style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
+        />
+        <span className={`text-[10px] ${th.textFaint}`}>%</span>
+      </label>
+      {note && <span className={`text-[9px] ${th.textFaint}`}>{note}</span>}
+    </div>
+  );
+}
+
 function BatchConfirmModal({
   items: initialItems,
   onClose,
@@ -3032,6 +3065,9 @@ function BatchConfirmModal({
   const [verdicts, setVerdicts] = useState<Record<string, ActionVerdict>>({});
   const [overrides, setOverrides] = useState<Set<string>>(new Set());
   const [limitOverrides, setLimitOverrides] = useState<Record<string, string>>({});
+  // ORDER-PCT-INPUT-0001: per-position tick tables (null = unavailable: whole cents) and the % the trader typed.
+  const [batchTickTables, setBatchTickTables] = useState<Record<string, TickTable | null>>({});
+  const [typedKeptPct, setTypedKeptPct] = useState<Record<string, number>>({});
 
   // GTC override confirmation
   const [gtcConfirmed, setGtcConfirmed] = useState<Set<string>>(new Set());
@@ -3339,6 +3375,18 @@ function BatchConfirmModal({
         }
 
         if (!cancelled) setStatus('ready');
+        if (!cancelled) {
+          const keptPctItems = enriched.filter(i => isKeptPctAction(i.action) && i.closeIdentity?.entryPriceEffect === 'Credit');
+          void Promise.all(keptPctItems.map(async i => {
+            const leg = i.pos.legs.find(l => l.direction === 'Short') ?? i.pos.legs[0];
+            try {
+              const chain = await ttFetch(`/option-chains/${encodeURIComponent(i.pos.symbol)}/nested`, await getAccessToken());
+              return [i.pos.key, leg ? tickTableFromNestedChain(chain, leg.symbol) : null] as const;
+            } catch {
+              return [i.pos.key, null] as const;
+            }
+          })).then(entries => { if (!cancelled) setBatchTickTables(Object.fromEntries(entries)); });
+        }
       } catch (e: any) {
         if (!cancelled) { setErrorMsg(e.message); setStatus('error'); }
       }
@@ -4131,18 +4179,39 @@ function BatchConfirmModal({
                         )}
                       </div>
                       <div className="text-right shrink-0 space-y-1 min-w-[140px]">
+                        {isKeptPctAction(item.action) && item.closeIdentity?.entryPriceEffect === 'Credit' && !isExcluded && (() => {
+                          const credit = item.closeIdentity!.entryPricePointsPerUnit;
+                          const effLimit = parseFloat(limitOverrides[item.pos.key] ?? item.limitPrice.toFixed(2));
+                          const shownPct = keptPct(credit, effLimit);
+                          const typed = typedKeptPct[item.pos.key];
+                          return (
+                            <BatchKeptPctInput
+                              pct={shownPct}
+                              note={typed != null ? sentPriceNote(typed, effLimit, shownPct) : null}
+                              th={th}
+                              onPctChange={pct => {
+                                if (pct >= 100 || credit <= 0) return;
+                                setTypedKeptPct(prev => ({ ...prev, [item.pos.key]: pct }));
+                                setLimitOverrides(prev => ({ ...prev, [item.pos.key]: roundToTick(credit * (1 - pct / 100), batchTickTables[item.pos.key] ?? null).toFixed(2) }));
+                              }}
+                            />
+                          );
+                        })()}
                         <div className="flex items-center justify-end gap-1">
-                          <span className={`text-[9px} ${th.textFaint}`}>Limit $</span>
+                          <span className={`text-[9px] ${th.textFaint}`}>Limit $</span>
                           <input
                             type="number"
                             step="0.01"
                             min="0.01"
                             value={limitOverrides[item.pos.key] ?? item.limitPrice.toFixed(2)}
-                            onChange={e => setLimitOverrides(prev => ({ ...prev, [item.pos.key]: e.target.value }))}
+                            onChange={e => {
+                              setTypedKeptPct(prev => { const n = { ...prev }; delete n[item.pos.key]; return n; });
+                              setLimitOverrides(prev => ({ ...prev, [item.pos.key]: e.target.value }));
+                            }}
                             onBlur={e => {
                               const v = parseFloat(e.target.value);
                               if (isNaN(v) || v <= 0) setLimitOverrides(prev => { const n = { ...prev }; delete n[item.pos.key]; return n; });
-                              else setLimitOverrides(prev => ({ ...prev, [item.pos.key]: v.toFixed(2) }));
+                              else setLimitOverrides(prev => ({ ...prev, [item.pos.key]: roundToTick(v, batchTickTables[item.pos.key] ?? null).toFixed(2) }));
                             }}
                             className={`w-20 text-xs font-bold text-right px-1.5 py-0.5 rounded border ${item.priceError != null ? 'border-red-500/60 text-red-400' : 'border-blue-500/40 text-blue-400'} bg-transparent outline-none focus:ac-border`}
                             style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
@@ -6562,6 +6631,11 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
   // STOP-TARGET-DIALOG-0001: which orders to place when no GTC exists yet. With an existing GTC both are locked on.
   const [includeTarget, setIncludeTarget] = useState(false);
   const [includeStop, setIncludeStop] = useState(true);
+  // ORDER-PCT-INPUT-0001: the contract's tick table (null = unavailable: whole cents, broker validates on submit).
+  const [tickTable, setTickTable] = useState<TickTable | null>(null);
+  const [tickTableUnavailable, setTickTableUnavailable] = useState(false);
+  const [targetTypedPct, setTargetTypedPct] = useState<number | null>(null);
+  const [stopTypedPct, setStopTypedPct] = useState<number | null>(null);
 
   // Mounted guard — prevents state updates after unmount
   const mountedRef = useRef(true);
@@ -6728,11 +6802,25 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
     setLivePriceError(null);
     setProfitProtectionStage(null);
 
+    setTickTable(null);
+    setTickTableUnavailable(false);
+    setTargetTypedPct(null);
+    setStopTypedPct(null);
+
     // Step 1: fetch live price first so bounds are accurate
     setLivePriceLoading(true);
     try {
       const token = await getAccessToken();
       if (!mountedRef.current) return;
+      const tickLeg = pos.legs.find(l => l.direction === 'Short') ?? pos.legs[0];
+      void ttFetch(`/option-chains/${encodeURIComponent(pos.symbol)}/nested`, token)
+        .then(chain => {
+          if (!mountedRef.current) return;
+          const table = tickLeg ? tickTableFromNestedChain(chain, tickLeg.symbol) : null;
+          setTickTable(table);
+          setTickTableUnavailable(table == null);
+        })
+        .catch(() => { if (mountedRef.current) setTickTableUnavailable(true); });
       const fresh = await fetchFreshPositionPrice(pos, token);
       if (!mountedRef.current) return;
       // TE-0002 corrective round: a newly opened position (no working stop
@@ -7167,7 +7255,6 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
 
   const stopParsed  = parseFloat(stopPrice || '0');
   const gtcParsed   = parseFloat(gtcPrice  || '0');
-  const stopMultipleDisplay = creditPerContract > 0 ? (stopParsed / creditPerContract).toFixed(1) : '—';
   // STOP-SLIDER-0001: the stop expressed as a percent of the original credit (200% = 2.0x).
   const stopPctOfCredit = creditStopPctFromTrigger(creditPerContract, stopParsed);
   const gtcPctDisplay       = creditPerContract > 0 ? Math.round((1 - gtcParsed / creditPerContract) * 100) : 0;
@@ -7344,7 +7431,8 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                 customLabel={stopPctOfCredit != null && !isCreditStopPctInSliderRange(stopPctOfCredit) ? CREDIT_STOP_CUSTOM_LABEL : undefined}
                 description={stopParsed > 0 ? describeCreditStopReadout(stopParsed, stopPctOfCredit, stopOutcomePnlDollars) : 'Drag to choose a stop'}
                 onChange={pct => {
-                  setStopPrice(creditStopTriggerFromPct(creditPerContract, pct).toFixed(2));
+                  setStopTypedPct(null);
+                  setStopPrice(roundToTick(creditStopTriggerFromPct(creditPerContract, pct), tickTable).toFixed(2));
                   // Same provenance as typing a ×credit multiple: an explicit
                   // choice anchored to the original credit.
                   setStopPriceSource('MANUAL');
@@ -7353,7 +7441,41 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                 }}
               />
             )}
-            {stopError && <p className="mt-1 text-[10px] text-red-400">{stopError}</p>}
+            {stopOn && creditPerContract > 0 && (
+              <PercentPriceInputs
+                tone="stop"
+                pctLabel="Stop % of original credit"
+                priceLabel="Stop trigger $"
+                pct={stopPctOfCreditExact(creditPerContract, stopParsed)}
+                price={stopPrice}
+                inputClassName={`${th.inputBorder} ${th.input}`}
+                labelClassName={th.textFaint}
+                error={stopError}
+                note={stopTypedPct != null ? sentPriceNote(stopTypedPct, stopParsed, stopPctOfCreditExact(creditPerContract, stopParsed)) : null}
+                onPctChange={pct => {
+                  if (pct <= 0) return;
+                  setStopTypedPct(pct);
+                  setStopPrice(roundToTick(creditPerContract * pct / 100, tickTable).toFixed(2));
+                  // Same provenance as the slider: an explicit original-credit anchor.
+                  setStopPriceSource('MANUAL');
+                  setStopBasisOverride('ORIGINAL_CREDIT');
+                  setProfitProtectionStage(null);
+                }}
+                onPriceChange={raw => {
+                  setStopTypedPct(null);
+                  setStopPrice(raw);
+                  // A direct dollar edit is a manual absolute stop, never re-labeled "×credit" later (TE-0002).
+                  setStopPriceSource('MANUAL');
+                  setStopBasisOverride('MANUAL_ABSOLUTE');
+                  setProfitProtectionStage(null);
+                }}
+                onPriceBlur={() => { const v = parseFloat(stopPrice); if (Number.isFinite(v) && v > 0) setStopPrice(roundToTick(v, tickTable).toFixed(2)); }}
+              />
+            )}
+            {stopOn && (pos.intent === 'acquisition' || pos.intent === 'wheel') && (
+              <p className={`mt-1 text-[10px] ${th.textFaint}`}>{pos.intent === 'wheel' ? 'Wheel' : 'Acquire'}: assignment is the plan, so a stop is optional.</p>
+            )}
+            {stopError && !(stopOn && creditPerContract > 0) && <p className="mt-1 text-[10px] text-red-400">{stopError}</p>}
             {stopOn && !stopError && stopParsed > 0 && stopProximityWarning(stopParsed, effectiveLiveDisplay) && (
               <p className="mt-1 text-[10px] font-semibold text-amber-300">⚠ {stopProximityWarning(stopParsed, effectiveLiveDisplay)}</p>
             )}
@@ -7380,10 +7502,33 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                 maxLabel={`${TARGET_PCT_MAX}% profit`}
                 customLabel={targetPctCaptured != null && !isTargetPctInSliderRange(targetPctCaptured) ? TARGET_CUSTOM_LABEL : undefined}
                 description={gtcParsed > 0 ? describeTargetReadout(gtcParsed, targetPctCaptured, gtcProfitDollars) : 'Drag to choose a target'}
-                onChange={pct => setGtcPrice(targetPriceFromPct(creditPerContract, pct).toFixed(2))}
+                onChange={pct => { setTargetTypedPct(null); setGtcPrice(roundToTick(targetPriceFromPct(creditPerContract, pct), tickTable).toFixed(2)); }}
               />
             )}
-            {gtcError && <p className="mt-1 text-[10px] text-red-400">{gtcError}</p>}
+            {targetOn && creditPerContract > 0 && (
+              <PercentPriceInputs
+                tone="target"
+                pctLabel="Profit target % of credit kept"
+                priceLabel="Limit $ (buy to close)"
+                pct={keptPct(creditPerContract, gtcParsed)}
+                price={gtcPrice}
+                inputClassName={`${th.inputBorder} ${th.input}`}
+                labelClassName={th.textFaint}
+                error={gtcError}
+                note={targetTypedPct != null ? sentPriceNote(targetTypedPct, gtcParsed, keptPct(creditPerContract, gtcParsed)) : null}
+                onPctChange={pct => {
+                  if (pct >= 100) return;
+                  setTargetTypedPct(pct);
+                  setGtcPrice(roundToTick(creditPerContract * (1 - pct / 100), tickTable).toFixed(2));
+                }}
+                onPriceChange={raw => { setTargetTypedPct(null); setGtcPrice(raw); }}
+                onPriceBlur={() => { const v = parseFloat(gtcPrice); if (Number.isFinite(v) && v > 0) setGtcPrice(roundToTick(v, tickTable).toFixed(2)); }}
+              />
+            )}
+            {(targetOn || stopOn) && tickTableUnavailable && (
+              <p className={`mt-1 text-[9px] ${th.textFaint}`}>Tick table unavailable: prices are rounded to whole cents and the broker validates on submit.</p>
+            )}
+            {gtcError && !(targetOn && creditPerContract > 0) && <p className="mt-1 text-[10px] text-red-400">{gtcError}</p>}
             {needsOco && (
               <p className="mt-1 text-[10px] text-yellow-300">⚠ Replaces existing GTC (${existingGtcPrice.toFixed(2)}). It is cancelled, then an OCO pair is placed — one fills, the other cancels.</p>
             )}
@@ -7488,70 +7633,16 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
                     Profit target valid range: ${gtcMin.toFixed(2)} – ${Math.min(gtcMax, effectiveLiveDisplay - 0.01).toFixed(2)}
                   </p>
                 )}
-                {targetOn && (
-                  <div className="flex items-center gap-2">
-                    <span className={`text-[10px] ${th.textFaint} w-28 shrink-0`}>Profit target $</span>
-                    <input
-                      type="number" min={gtcMin} max={gtcMax} step="0.01" value={gtcPrice}
-                      onChange={e => setGtcPrice(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter' && !hasErrors && !confirming) setConfirming(true); if (e.key === 'Escape') setOpen(false); }}
-                      className={`flex-1 text-[11px] px-2 py-1.5 rounded border ${
-                        gtcError ? 'border-red-500' : th.inputBorder
-                      } ${th.input} text-emerald-400 outline-none focus:border-emerald-500`}
-                      style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
-                    />
-                  </div>
-                )}
                 {stopOn && (
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-[10px] ${th.textFaint} w-28 shrink-0`}>Stop trigger</span>
-                    <input
-                      type="number" min="0.1" step="0.1"
-                      value={stopMultipleDisplay === '—' ? '' : stopMultipleDisplay}
-                      onChange={e => {
-                        const mult = parseFloat(e.target.value);
-                        if (!isNaN(mult) && creditPerContract > 0) setStopPrice((mult * creditPerContract).toFixed(2));
-                        // TE-0002: still an explicit choice of an original-credit
-                        // multiple -- record it as such, not as an opaque manual
-                        // absolute price.
-                        setStopPriceSource('MANUAL');
-                        setStopBasisOverride('ORIGINAL_CREDIT');
-                        setProfitProtectionStage(null);
-                      }}
-                      onKeyDown={e => { if (e.key === 'Enter' && !hasErrors && !confirming) setConfirming(true); if (e.key === 'Escape') setOpen(false); }}
-                      className={`w-16 text-[11px] px-2 py-1.5 rounded border ${
-                        stopError ? 'border-red-500' : th.inputBorder
-                      } ${th.input} text-orange-400 outline-none focus:border-orange-500`}
-                      style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
-                    />
-                    <span className={`text-[10px] ${th.textFaint} shrink-0`}>× original credit (${creditPerContract.toFixed(2)}) =</span>
-                    <input
-                      type="number" min={stopMin} max={stopMax} step="0.01" value={stopPrice}
-                      onChange={e => {
-                        setStopPrice(e.target.value);
-                        // TE-0002: a direct dollar edit is no longer expressed
-                        // relative to any anchor -- record it as a manual
-                        // absolute stop, never re-labeled "×credit" later.
-                        setStopPriceSource('MANUAL');
-                        setStopBasisOverride('MANUAL_ABSOLUTE');
-                        setProfitProtectionStage(null);
-                      }}
-                      onKeyDown={e => { if (e.key === 'Enter' && !hasErrors && !confirming) setConfirming(true); if (e.key === 'Escape') setOpen(false); }}
-                      className={`flex-1 text-[11px] px-2 py-1.5 rounded border ${
-                        stopError ? 'border-red-500' : th.inputBorder
-                      } ${th.input} text-orange-400 outline-none focus:border-orange-500`}
-                      style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
-                    />
-                  </div>
                   {!stopError && effectiveLiveDisplay != null && (
-                    <p className={`text-[9px] ${th.textFaint} mt-0.5 ml-28`}>
-                      valid range: ${Math.max(stopMin, effectiveLiveDisplay + 0.01).toFixed(2)} – ${stopMax.toFixed(2)}
+                    <p className={`text-[9px] ${th.textFaint} mt-0.5`}>
+                      Stop valid range: ${Math.max(stopMin, effectiveLiveDisplay + 0.01).toFixed(2)} – ${stopMax.toFixed(2)}
                     </p>
                   )}
                   {!stopError && stopPctOfMaxRisk != null && (
-                    <p className={`text-[9px] ${th.textFaint} ml-28`}>
-                      = {stopPctOfMaxRisk.toFixed(0)}% of max risk (${reliableMaxRisk!.toFixed(2)})
+                    <p className={`text-[9px] ${th.textFaint}`}>
+                      Stop = {stopPctOfMaxRisk.toFixed(0)}% of max risk (${reliableMaxRisk!.toFixed(2)})
                     </p>
                   )}
                 </div>
