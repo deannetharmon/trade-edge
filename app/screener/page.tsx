@@ -11279,7 +11279,7 @@ export default function Home() {
     activeSession?.status === 'running' ? activeSession.requestedStrategy : null;
 
   return (
-    <div className={`min-h-screen ${th.bg} text-slate-100 transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
+    <div className={`min-h-screen max-w-full overflow-x-clip ${th.bg} text-slate-100 transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
       <CcCapacityShadowSnapshotBridge onPortfolioData={captureCcCapacityShadowSnapshot} />
       <span role="status" aria-live="polite" className="sr-only">{scanLiveMessage}</span>
       {/* Header */}
@@ -11310,7 +11310,7 @@ export default function Home() {
             <ThemeToggle theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
           </div>
         </div>
-        <div className={`flex items-center gap-0 w-full border-t border-white/10`}>
+        <div className={`flex items-center gap-0 w-full border-t border-white/10 overflow-x-auto whitespace-nowrap`}>
           <a href="/"            className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HOME</a>
           <a href="/portfolio"   className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PORTFOLIO</a>
           <span className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>SCREENER</span>

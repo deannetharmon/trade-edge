@@ -10831,11 +10831,11 @@ export default function PortfolioPage() {
   }
 
   return (
-    <div className={`min-h-screen ${th.bg} pb-24 transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
+    <div className={`min-h-screen max-w-full overflow-x-clip ${th.bg} pb-24 transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
 
       {/* Header */}
       <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-3 sticky top-0 z-50 flex flex-col`}>
-        <div className="flex items-center justify-between w-full pb-2">
+        <div className="flex items-center justify-between w-full pb-2 gap-3">
           <div className="flex items-center gap-3">
             <svg width="46" height="46" viewBox="-26 -26 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
               <circle r="18" stroke="#00d4aa" strokeWidth="0.8" opacity="0.3"/>
@@ -10854,7 +10854,7 @@ export default function PortfolioPage() {
               <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
             </div>
           </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0 overflow-x-auto whitespace-nowrap [&>*]:shrink-0">
           <span className={`text-[10px] font-bold ${marketStatus.open ? 'text-emerald-400' : 'text-yellow-400'}`}>{marketStatus.label}</span>
           {lastRefresh && <span className="text-[10px] text-white/30">Updated {lastRefresh.toLocaleTimeString()}</span>}
           {/* Dry Run toggle — always visible */}
@@ -10910,7 +10910,7 @@ export default function PortfolioPage() {
           <ThemeToggle theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
           </div>
         </div>
-        <div className="flex items-center gap-0 w-full border-t border-white/10">
+        <div className="flex items-center gap-0 w-full border-t border-white/10 overflow-x-auto whitespace-nowrap">
           <Link href="/"              className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HOME</Link>
           <span                       className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>PORTFOLIO</span>
           <Link href="/screener"      className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">SCREENER</Link>
@@ -10926,7 +10926,7 @@ export default function PortfolioPage() {
 
       {/* Sub-tab bar */}
       <div className={`${th.sidebar} border-b ${th.border} px-6 sticky top-[85px] z-40`}>
-        <div className="flex gap-0">
+        <div className="flex gap-0 overflow-x-auto whitespace-nowrap">
           {([
             { key: 'todays-priorities', label: "Today's Priorities", icon: '✦' },
             { key: 'briefing', label: 'Briefing', icon: '☀' },
