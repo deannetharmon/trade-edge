@@ -39,7 +39,7 @@ The 20% rule reads as "close now" although its purpose is "protect the profit wi
 - **Reason line states the numbers:** "Up 22% of credit at mid (close-now: +18%) · no profit-target order." (`describeUnprotectedProfit`), in both the intent reason and the legacy primary reason.
 - **Informational tone** in the Positions table (`PositionsWorkspace.tsx` `recommendationTone`), not green.
 - **No flip-flopping:** `lib/portfolio-data/recommendationHysteresis.ts`, applied in `attachSnapshotHistory`. A changed recommendation shows only when a second consecutive refresh confirms it, both directions; the pending one is kept on `Position.recommendationPending`.
-- Tests: `recommendationHysteresis.test.ts` (8), `percentUnits.test.ts` (SET_PROFIT_TARGET and reason text), `recommendationScorecard.test.ts` (updated tie-break). Full suite 474 files / 6,832 tests; TypeScript check clean.
+- Tests: `takeProfitBasis.test.ts` (5, Alan's golden fixtures), `recommendationHysteresis.test.ts` (8), `percentUnits.test.ts` (SET_PROFIT_TARGET and reason text), `recommendationScorecard.test.ts` (updated tie-break). Full suite 474 files / 6,832 tests; TypeScript check clean.
 
 ## Deviations for Ian to confirm
 
