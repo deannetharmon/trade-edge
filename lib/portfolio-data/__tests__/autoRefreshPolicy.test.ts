@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 import {
   AUTO_REFRESH_INTERVAL_MS,
   isAutoRefreshDue,
-  isEarlyCloseToday,
   keepLiveSelections,
   portfolioMarketPhase,
   refreshFreshness,
@@ -36,11 +35,15 @@ describe('portfolioMarketPhase', () => {
     expect(portfolioMarketPhase(at('2026-11-26T16:00:00Z')).phase).toBe('CLOSED'); // Thanksgiving
   });
 
-  it('honours the 13:00 early close (day after Thanksgiving, EST)', () => {
-    const friday = at('2026-11-27T17:59:00Z'); // 12:59 New York
-    expect(isEarlyCloseToday(friday)).toBe(true);
-    expect(portfolioMarketPhase(friday).phase).toBe('OPEN');
-    expect(portfolioMarketPhase(at('2026-11-27T18:00:00Z')).phase).toBe('CLOSED');
+  it('treats a 13:00 early close as a 16:00 close (documented limit: display-only cost)', () => {
+    expect(portfolioMarketPhase(at('2026-11-27T19:00:00Z')).phase).toBe('OPEN'); // 14:00 New York, day after Thanksgiving
+    expect(portfolioMarketPhase(at('2026-11-27T21:00:00Z')).phase).toBe('CLOSED'); // 16:00 New York (EST)
+  });
+
+  it('handles standard time (EST, UTC-5) as well as daylight time', () => {
+    const decOpen = at('2026-12-07T14:30:00Z'); // Monday 9:30 New York
+    expect(portfolioMarketPhase(decOpen - 1).phase).toBe('CLOSED');
+    expect(portfolioMarketPhase(decOpen).phase).toBe('SETTLING');
   });
 
   it('uses the New York date in the evening (UTC already the next day)', () => {
