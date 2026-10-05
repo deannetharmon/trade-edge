@@ -14,7 +14,7 @@ The Portfolio page loaded once when opened and never again (`app/portfolio/page.
 |---|---|
 | During the session, refresh every 2 minutes while the tab is visible | `lib/portfolio-data/autoRefreshPolicy.ts` `isAutoRefreshDue` |
 | Returning to the tab checks immediately (refreshes if 2+ minutes old) | `components/portfolio-data/usePortfolioAutoRefresh.ts` |
-| Session from the exchange calendar: holidays and 13:00 early closes included | `portfolioMarketPhase` (reuses `lib/discovery/normalized/exchangeCalendar.ts`) |
+| Session: Mon-Fri 9:30-16:00 New York minus NYSE holidays (`lib/scans/nyseCalendar.ts`); 13:00 early closes treated as 16:00 (display-only cost; lib/discovery may not be imported here) | `portfolioMarketPhase` |
 | After the close and on non-session days: refresh once if the data predates the last close, then stop; label "Closing values · updated 4:05 PM ET" | `isAutoRefreshDue`, `refreshFreshness` |
 | First 15 minutes after the open: note "Market opening: quotes are wide, recommendations settle by 9:45 AM ET" | `refreshFreshness` |
 | "Updated N min ago", amber after 5 minutes during the session | `refreshFreshness`, page header |
