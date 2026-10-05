@@ -25,7 +25,7 @@ So the profit target has no percentage anywhere, and the stop percentage can onl
 4. **Credit positions only.** Debit positions (LEAPS, bought options) keep today's controls.
 5. **Every existing gate unchanged:** price min/max and valid-range checks, `submitCloseOrderIfSafe`, OCO body, stop provenance (`stopPriceSource` / `stopBasisOverride`: typing a % is an ORIGINAL_CREDIT anchor, typing $ is MANUAL_ABSOLUTE, as the ×credit and $ boxes record today).
 
-**Out:** changing default levels or the stop policy; debit-position percent inputs; GTC-REPLACE-0001.
+**Out:** changing default levels or the stop policy (except Ian's Acquire/Wheel "stop starts unchecked" ruling below); debit-position percent inputs; GTC-REPLACE-0001.
 
 ## Rulings (2026-10-05)
 
