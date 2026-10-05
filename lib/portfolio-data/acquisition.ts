@@ -1856,6 +1856,10 @@ export async function loadPositions(
         avgOpenPrice: parseBrokerEntryPremium(l['average-open-price']),
         currentPrice: currentPrices[l.symbol?.replace(/\s+/g, '')] ?? null,
         currentDelta: deltaMap[l.symbol?.replace(/\s+/g, '')] ?? null,
+        // PORTFOLIO-SUMMARY-0001: the broker's previous-close mark and the
+        // leg's open time, for the 1-day P/L change (TastyTrade's P/L Day basis).
+        closePrice: parseBrokerEntryPremium(l['close-price']),
+        openedAt: typeof l['created-at'] === 'string' ? l['created-at'] : null,
       };
     });
 

@@ -27,6 +27,10 @@ export interface PositionLeg {
   // unavailable entry economics.
   avgOpenPrice: number | null;
   currentPrice: number | null;
+  // PORTFOLIO-SUMMARY-0001: broker previous-close mark (per share) and the
+  // leg's open timestamp; absent on legs built before this field existed.
+  closePrice?: number | null;
+  openedAt?: string | null;
   // TELEMETRY-METRIC-DIRECTION-0001: per-leg current delta, sourced from
   // the same deltaMap already built during acquisition (broker-reported
   // per-instrument Greeks) -- was being captured but never carried

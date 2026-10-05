@@ -4,12 +4,14 @@ import Link from 'next/link';
 import { ChartLinkButton } from '@/components/ChartLinkButton';
 import { IntentSelect } from './IntentSelect';
 import { useAutoRefreshPause } from '@/components/portfolio-data/usePortfolioAutoRefresh';
+import { PortfolioSummaryStrip } from './PortfolioSummaryStrip';
+import { buildPortfolioSummary, positionInSummaryGroup, type SummaryGroupKey } from './model/portfolioSummary';
 import { sameWidths } from './model/stockColumnAlignment';
 import { nextEarningsLine } from './model/nextEarnings';
 import { buildValueSplit } from './model/extrinsic';
 import { extrinsicTone, intrinsicTone, ivTone } from './model/valueTone';
 import { intentFamilyFor } from '@/lib/positionIntent/vocabulary';
-import type { PositionIntent } from '@/lib/portfolio-data/types';
+import type { PendingOrder, PositionIntent } from '@/lib/portfolio-data/types';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ActionType, Position } from '@/lib/portfolio-data/types';
 import { netEdgeLive, netEdgePeak, netEdgeColor, netEdgeDayChangePct, netEdgeDaysTracked, netEdgeRolledOver } from '@/lib/portfolio-data/acquisition';
@@ -807,9 +809,31 @@ function ColumnsDialog({ selected, setSelected, preset, onClose, onApply }: { se
   return <DialogShell title="Customize columns" onClose={onClose}><div className="grid gap-2 sm:grid-cols-2">{ANALYSIS_COLUMNS.map(column => <label key={column.id} className="flex min-h-11 items-center gap-2 rounded border border-white/10 px-3 text-xs"><input type="checkbox" checked={selected.includes(column.id)} disabled={column.id === 'identity'} onChange={() => toggle(column.id)} /><span><b className="block">{column.label}</b><span className="text-white/50">{column.group}</span></span></label>)}</div><div className="mt-5 flex justify-between"><button onClick={() => setSelected(columnsForView(preset === 'custom' ? 'management' : preset))} className="min-h-11 px-3 text-xs">Reset to preset</button><div className="flex gap-2"><button onClick={onClose} className="min-h-11 rounded border border-white/20 px-4 text-xs">Cancel</button><button disabled={selected.length < 2} onClick={onApply} className="min-h-11 rounded bg-teal-500 px-4 text-xs font-bold text-slate-950 disabled:opacity-40">Apply</button></div></div></DialogShell>;
 }
 
-export function PositionsWorkspace({ model, th, getManagementActions, onExecute, renderStopControl, onAnalyze, renderAnalysisConversation, onFindPmccShortCall, onIntentChange, onRefresh, sellDeps }: { model: PositionsWorkspaceModel; th: typeof THEMES[Theme]; sellDeps?: SellStockDialogDeps } & ManagementActionProps) {
+export function PositionsWorkspace({ model: fullModel, th, getManagementActions, onExecute, renderStopControl, onAnalyze, renderAnalysisConversation, onFindPmccShortCall, onIntentChange, onRefresh, sellDeps, pendingOrders = [], cashBalance = null }: { model: PositionsWorkspaceModel; th: typeof THEMES[Theme]; sellDeps?: SellStockDialogDeps; pendingOrders?: PendingOrder[]; cashBalance?: number | null } & ManagementActionProps) {
+  // PORTFOLIO-SUMMARY-0001: one strip above both tabs; always the whole portfolio. A tile (or the largest-exposure line)
+  // narrows both lists below; the strip's own numbers never change with the filter.
+  const [summaryGroup, setSummaryGroup] = useState<SummaryGroupKey | null>(null);
+  const [summarySymbol, setSummarySymbol] = useState<string | null>(null);
+  const summary = useMemo(() => buildPortfolioSummary({
+    rows: fullModel.analysisRows.map(row => ({ position: row.position, needsAttention: row.needsAttention })),
+    equities: fullModel.symbolGroups.flatMap(group => group.equities),
+    pendingOrders,
+    cashBalance,
+    nowMs: Date.now(),
+  }), [fullModel, pendingOrders, cashBalance]);
+  const model = useMemo<PositionsWorkspaceModel>(() => {
+    if (summaryGroup == null && summarySymbol == null) return fullModel;
+    const keep = (position: Position) => (summarySymbol == null || position.symbol === summarySymbol) && positionInSummaryGroup(position, summaryGroup);
+    return {
+      ...fullModel,
+      symbolGroups: fullModel.symbolGroups.filter(group =>
+        (summarySymbol == null || group.symbol === summarySymbol) &&
+        (summaryGroup == null || group.options.some(keep) || (summaryGroup === 'EQUITY' && group.equities.length > 0))),
+      analysisRows: fullModel.analysisRows.filter(row => keep(row.position)),
+    };
+  }, [fullModel, summaryGroup, summarySymbol]);
   const [view, setView] = useState<'portfolio' | 'analysis'>('portfolio');
   useEffect(() => { const loaded = loadPreferences(); setView(loaded.workspaceView); }, []);
   const switchView = (next: 'portfolio' | 'analysis') => { setView(next); const loaded = loadPreferences(); savePreferences({ ...loaded, workspaceView: next }); };
-  return <section className="p-4 sm:p-6" aria-label="Positions workspace"><div role="tablist" aria-label="Positions workspace views" className={`mb-4 flex gap-1 border-b ${th.border}`}>{(['portfolio', 'analysis'] as const).map(item => <button key={item} role="tab" aria-selected={view === item} onClick={() => switchView(item)} className={`min-h-11 border-b-2 px-4 text-xs font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-teal-400 ${view === item ? 'border-teal-400 text-white' : `border-transparent ${th.textFaint}`}`}>{item === 'portfolio' ? 'Portfolio' : 'Position Analysis'}</button>)}</div>{view === 'portfolio' ? <PortfolioView groups={model.symbolGroups} th={th} renderStopControl={renderStopControl} onIntentChange={onIntentChange} /> : <AnalysisView model={model} th={th} getManagementActions={getManagementActions} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} renderAnalysisConversation={renderAnalysisConversation} onFindPmccShortCall={onFindPmccShortCall} onIntentChange={onIntentChange} onRefresh={onRefresh} sellDeps={sellDeps} />}</section>;
+  return <section className="p-4 sm:p-6" aria-label="Positions workspace"><PortfolioSummaryStrip summary={summary} selected={summaryGroup} onSelect={group => { setSummarySymbol(null); setSummaryGroup(group); }} onSelectSymbol={symbol => { setSummaryGroup(null); setSummarySymbol(current => current === symbol ? null : symbol); }} />{summarySymbol && <p className={`mb-2 text-xs ${th.textFaint}`}>Showing {summarySymbol} only · <button type="button" onClick={() => setSummarySymbol(null)} className="min-h-11 underline">Show all</button></p>}<div role="tablist" aria-label="Positions workspace views" className={`mb-4 flex gap-1 border-b ${th.border}`}>{(['portfolio', 'analysis'] as const).map(item => <button key={item} role="tab" aria-selected={view === item} onClick={() => switchView(item)} className={`min-h-11 border-b-2 px-4 text-xs font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-teal-400 ${view === item ? 'border-teal-400 text-white' : `border-transparent ${th.textFaint}`}`}>{item === 'portfolio' ? 'Portfolio' : 'Position Analysis'}</button>)}</div>{view === 'portfolio' ? <PortfolioView groups={model.symbolGroups} th={th} renderStopControl={renderStopControl} onIntentChange={onIntentChange} /> : <AnalysisView model={model} th={th} getManagementActions={getManagementActions} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} renderAnalysisConversation={renderAnalysisConversation} onFindPmccShortCall={onFindPmccShortCall} onIntentChange={onIntentChange} onRefresh={onRefresh} sellDeps={sellDeps} />}</section>;
 }

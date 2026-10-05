@@ -11248,6 +11248,8 @@ export default function PortfolioPage() {
               )}
               <PositionsWorkspace
                 model={positionsWorkspaceModel}
+                pendingOrders={pendingOrders}
+                cashBalance={balances?.cashBalance ?? null}
                 sellDeps={sellDeps}
                 th={th}
                 getManagementActions={position => (['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[])

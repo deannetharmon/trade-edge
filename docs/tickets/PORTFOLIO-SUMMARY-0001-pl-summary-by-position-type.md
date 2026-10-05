@@ -2,7 +2,7 @@
 
 ## Status
 
-**APPROVED 2026-10-05 (Dean, Ian, Diane, Paul, Quinn) — queued after TAKEPROFIT-BASIS-0001.** Display only: no recommendation, scoring or order change. Ian and Diane shaped it (below).
+**IMPLEMENTED 2026-10-05** (approved by Dean, Ian, Diane, Paul, Quinn). Display only: no recommendation, scoring or order change. Ian and Diane shaped it (below).
 
 Mock (interactive): https://claude.ai/artifact/GaxxUqLfRSa4zABBsXGmvv
 
@@ -74,3 +74,19 @@ Realized P/L (Trade Log), Greeks other than theta, DTE buckets, any recommendati
 - 1D total reconciles with TastyTrade's P/L Day (the mock's sample differs: +$177 from the copied rows vs +$215.73 on Dean's screen; find the missing position or the same-day-open rule).
 - Cash to deploy: negative path, working-order path, missing balance shows "Unavailable", never $0.
 - Filter click sets the existing strategy filter; the strip's numbers do not change when filtered.
+
+## As built
+
+- `features/portfolio/positions-workspace/model/portfolioSummary.ts` (pure builder) and `PortfolioSummaryStrip.tsx`, mounted once in `PositionsWorkspace` above the Portfolio / Position Analysis tabs. A tile click narrows both lists (symbol groups and analysis rows); the largest-exposure line narrows to that symbol. The strip is always built from the unfiltered model.
+- Groups from `resolvePositionStrategyFilterKey` / leg shape: CSP and naked puts → Short puts; CC and naked calls → Short calls; BPS/BCS/IC → Credit spreads; LEAP → LEAPS; PMCC; long puts/calls → Long options; equities → Equity; anything else → Other (so the groups always partition the portfolio).
+- Capital from `buildCapitalViewModel` (CSP cash required, spread max risk, long-option debit) and equity cost basis; covered-call capital is shares, not dollars, so it is not added.
+- 1D: each option leg now carries the broker's `close-price` and `created-at` (`lib/portfolio-data/acquisition.ts`, `PositionLeg.closePrice` / `openedAt`); legs opened today count from their open price. Equities have no previous close yet, so a portfolio with stock shows 1D as partial.
+- 1W: latest daily snapshot at least 7 days old; opened since → from entry; older without history → unavailable (partial).
+- Cash to deploy: `cashBalance` (already loaded) minus short-put and spread capital minus opening-order cash (`openingOrderCash`: short put = strike × 100, debit = limit × 100, credit spread = (width − credit) × 100; closing orders 0; unrecognised shapes and naked short calls excluded and counted).
+- Exposure limit: `DEFAULT_EXPOSURE_LIMIT_PCT = 25` in the builder (a parameter, not hard-coded in the component). A settings control is not built yet.
+- Tests: `portfolioSummary.test.ts` (19) and a strip render test in `PositionsWorkspace.test.tsx`. Full suite 476 files; TypeScript check clean.
+
+## Open
+
+- Reconcile the 1D total against TastyTrade's P/L Day on a live account (the mock's sample differed by about $39).
+- Equity 1D needs a previous close for stock holdings.

@@ -51,6 +51,7 @@ Push any branch with local commits, but batch the session's completed work into 
 - When CI or Vercel exposes a compiler/build-pattern defect, fix the reported instance and search the touched/new sibling code for the same construct before pushing again (for example Map/Set iterator spreads that differ across TypeScript targets). Do not wait for repeated deployments to discover identical occurrences one at a time.
 - Vercel preview is the authoritative production-build validation. A PR/ticket gate is not merge-ready or complete until required GitHub CI is green AND the current PR-head Vercel preview is Ready. Vercel should confirm the change, not be treated as optional after CI passes.
 - Dane may report implementation complete after the appropriate fast developer checks. Frank must not close a gate or authorize merge until the required CI and Vercel preview checks above are green.
+- Merging (Dean, 2026-10-05): Dean is the only developer and always wants finished work in production. Once a slice is complete and CI is green on its head (Vercel preview Ready when it can be checked), merge it to `main` without asking.
 - Never patch blind: verify exact file content against the repo before writing patches.
 
 ## page.tsx working-file rule

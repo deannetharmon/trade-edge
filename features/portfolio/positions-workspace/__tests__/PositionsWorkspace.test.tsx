@@ -576,3 +576,38 @@ describe('missing recommendation (DECIDE-0001 S3-0a)', () => {
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
   });
 });
+
+// PORTFOLIO-SUMMARY-0001
+describe('P/L summary strip', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ notes: {} }) }));
+  });
+
+  const spread = {
+    ...position, key: 'SPY-1', symbol: 'SPY', strategy: 'BPS', pnl: 40, maxRisk: 350, entryCredit: 150,
+    legs: [
+      { symbol: 'SPY   261106P00500000', optionType: 'P', strikePrice: 500, direction: 'Short', quantity: 1, avgOpenPrice: 2.5, currentPrice: 2.0 },
+      { symbol: 'SPY   261106P00495000', optionType: 'P', strikePrice: 495, direction: 'Long', quantity: 1, avgOpenPrice: 1.0, currentPrice: 0.6 },
+    ],
+  } as unknown as Position;
+  const twoModel: PositionsWorkspaceModel = {
+    ...model,
+    analysisRows: [...model.analysisRows, { id: spread.key, position: spread, symbol: 'SPY', strategy: 'BPS', needsAttention: true }],
+  };
+
+  it('shows the whole-portfolio total and a tile per held group; a tile narrows the list but not the strip', async () => {
+    const user = userEvent.setup();
+    render(<PositionsWorkspace model={twoModel} th={THEMES.dark} cashBalance={20000} />);
+    const strip = screen.getByRole('region', { name: 'P/L by position type' });
+    expect(within(strip).getByRole('button', { name: /Total/ })).toHaveTextContent('+$65');
+    expect(within(strip).getByRole('button', { name: /Credit spreads/ })).toHaveTextContent('1 need attention');
+    expect(strip).toHaveTextContent('Cash to deploy (no margin)');
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getByText('2 of 2 option positions')).toBeInTheDocument();
+    await user.click(within(strip).getByRole('button', { name: /Credit spreads/ }));
+    expect(within(strip).getByRole('button', { name: /Credit spreads/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('1 of 1 option positions')).toBeInTheDocument();
+    expect(within(strip).getByRole('button', { name: /Total/ })).toHaveTextContent('+$65');
+  });
+});
