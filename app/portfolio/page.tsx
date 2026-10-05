@@ -228,6 +228,8 @@ import { BASE, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
 import { buildSnapshotCapacityReport } from '@/lib/portfolio-snapshot/capacity';
 import type { StockSellOrder } from '@/lib/portfolio/stockOrderBuilder';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
+import { useAutoRefreshPause, usePortfolioAutoRefresh } from '@/components/portfolio-data/usePortfolioAutoRefresh';
+import { keepLiveSelections, refreshFreshness } from '@/lib/portfolio-data/autoRefreshPolicy';
 import { EquityHoldingsSection, isEquityDisplayEnabled, resolvePositionsWorkspaceState } from '@/components/portfolio-data/EquityHoldingsSection';
 import { PositionsWorkspace, isPositionsWorkspaceV2Enabled } from '@/features/portfolio/positions-workspace/PositionsWorkspace';
 import { DebitStopObservation, STOP_CLASSIFICATION_COPY, STOP_CONTROL_LABELS, StopEvidencePanel } from '@/components/portfolio-data/StopEvidencePanel';
@@ -3010,6 +3012,7 @@ function BatchConfirmModal({
   th: typeof THEMES[Theme];
 }) {
   const [status, setStatus] = useState<BatchStatus>('enriching');
+  useAutoRefreshPause(true);
   const [batchItems, setBatchItems] = useState<BatchOrderItem[]>([]);
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [orderResults, setOrderResults] = useState<OrderResult[]>([]);
@@ -5760,6 +5763,7 @@ function assessExtendConditions(pos: Position): {
 
 function ExtendProfitButton({ pos, th }: { pos: Position; th: typeof THEMES[Theme] }) {
   const [open, setOpen] = useState(false);
+  useAutoRefreshPause(open);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<'success' | 'error' | null>(null);
   const [resultMsg, setResultMsg] = useState('');
@@ -6321,6 +6325,7 @@ function StandaloneLeapsStopControl({ pos, th }: { pos: Position; th: typeof THE
   const eligibility = evaluateStandaloneLeapsStopEligibility(pos);
   const [choice, setChoice] = useState<StandaloneLeapsStopLossPct>(DEBIT_STOP_LOSS_PCT_DEFAULT);
   const [open, setOpen] = useState(false);
+  useAutoRefreshPause(open);
   const [confirming, setConfirming] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [result, setResult] = useState<string | null>(null);
@@ -6476,6 +6481,7 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
 
   // ── State ─────────────────────────────────────────────────────────────────
   const [open, setOpen]       = useState(false);
+  useAutoRefreshPause(open);
   const [loading, setLoading] = useState(false);
   const [phase, setPhase]     = useState('');
   const [result, setResult]   = useState<'success' | 'error' | null>(null);
@@ -10481,6 +10487,24 @@ export default function PortfolioPage() {
     });
   }, [refreshPortfolioData]);
 
+  // PORTFOLIO-AUTOREFRESH-0001: the automatic refresh keeps the trader's
+  // checkbox selections (only positions that no longer exist drop out) and
+  // never navigates to /login on its own. Order dialogs pause it.
+  const fetchPositionsInBackground = useCallback(async () => {
+    const result = await refreshPortfolioData({
+      onRawPositionsLoaded: captureSnapshotsIfNeeded,
+      onSnapshotHistoryAttached: captureLifecycleSnapshotsIfNeeded,
+      background: true,
+    });
+    if (result.status === 'success') {
+      const liveKeys = result.positions.map(p => p.key);
+      setChecked(prev => keepLiveSelections(prev, liveKeys));
+    }
+    return result;
+  }, [refreshPortfolioData]);
+  const freshnessNowMs = usePortfolioAutoRefresh({ refresh: fetchPositionsInBackground, lastRefresh, loading });
+  const freshness = refreshFreshness(freshnessNowMs, lastRefresh ? lastRefresh.getTime() : null);
+
   const sellDeps = useMemo(() => ({
     onRefreshCapacity: async (accountNumber: string) => {
       const result = await fetchPositions();
@@ -10856,7 +10880,8 @@ export default function PortfolioPage() {
           </div>
         <div className="flex items-center gap-3 min-w-0 overflow-x-auto whitespace-nowrap [&>*]:shrink-0">
           <span className={`text-[10px] font-bold ${marketStatus.open ? 'text-emerald-400' : 'text-yellow-400'}`}>{marketStatus.label}</span>
-          {lastRefresh && <span className="text-[10px] text-white/30">Updated {lastRefresh.toLocaleTimeString()}</span>}
+          {freshness && <span className={`text-[10px] ${freshness.tone === 'stale' ? 'text-amber-400 font-bold' : 'text-white/30'}`} title={lastRefresh ? `Last refresh ${lastRefresh.toLocaleTimeString()}` : undefined}>{freshness.text}</span>}
+          {freshness?.settlingNote && <span className="text-[10px] text-white/50">{freshness.settlingNote}</span>}
           {/* Dry Run toggle — always visible */}
           <button
             onClick={() => { const next = !dryRunMode; setDryRunMode(next); setDryRun(next); }}

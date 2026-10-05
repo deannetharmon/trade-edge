@@ -64,7 +64,13 @@ export interface RefreshPositionsCallbacks {
   // Called once the snapshot-history attachment resolves -- matches
   // captureLifecycleSnapshotsIfNeeded's original call site exactly.
   onSnapshotHistoryAttached?: (positions: Position[]) => void;
+  // PORTFOLIO-AUTOREFRESH-0001: an automatic refresh the trader did not ask
+  // for. An expired session then shows an error instead of navigating away
+  // to /login mid-session; the trader's next manual action signs in again.
+  background?: boolean;
 }
+
+export const BACKGROUND_SESSION_EXPIRED_MESSAGE = 'Auto-refresh stopped: the TastyTrade session expired. Click Refresh or Reconnect to continue.';
 
 export type PortfolioRefreshResult =
   | { status: 'success'; positions: Position[]; snapshot: PortfolioSnapshot | null }
@@ -270,6 +276,10 @@ export function PortfolioDataProvider({ children }: { children: ReactNode }) {
       if (generation !== refreshGenerationRef.current) return { status: 'superseded' };
       const message = e instanceof Error ? e.message : String(e ?? 'Portfolio refresh failed');
       if (message === 'Not authenticated' || message === 'Session expired') {
+        if (callbacks?.background) {
+          setError(BACKGROUND_SESSION_EXPIRED_MESSAGE);
+          return { status: 'error', message };
+        }
         window.location.href = '/login';
         return { status: 'error', message };
       }

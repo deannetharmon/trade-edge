@@ -2,6 +2,13 @@
 
 Last updated: 2026-10-01 (LEV-0001 Gate 10 review)
 
+## Portfolio queue — 2026-10-05 (Dean, after the GGLL and SOXL reviews)
+
+1. **PORTFOLIO-AUTOREFRESH-0001** — IMPLEMENTED, pending CI and Vercel preview. The open Portfolio page refreshes every 2 minutes during market hours, pauses during order dialogs, keeps selections, labels closing values and the settling window. Ticket: `docs/tickets/PORTFOLIO-AUTOREFRESH-0001-portfolio-page-auto-refresh.md`.
+2. **TAKEPROFIT-BASIS-0001** — APPROVED, not started. The 20% "unprotected profit" rule becomes "Set Profit Target" and needs a positive close-now P/L; no flip-flopping between refreshes; reason text shows the number and basis. Ticket: `docs/tickets/TAKEPROFIT-BASIS-0001-take-profit-on-executable-price.md`.
+3. **DECIDE-0001 S3-0** — approved 2026-09-27, not built. Removes contradicting signals such as the Cut Losses button on Acquire positions recommended Hold (TQQQ, METU).
+4. **GTC-REPLACE-0001** — DRAFT, Quinn review and Dean approval pending; starts with a dry-run proof. A close that replaces a bracket must keep its stop; stop-market brackets are rebuilt exactly. Ticket: `docs/tickets/GTC-REPLACE-0001-preserve-bracket-stop-on-close-replacement.md`.
+
 ## Current status — 2026-10-01 (LEV-0001 Gate 10 review)
 
 - **Active work:** LEV-0001 v2, issue #52. Gates 0–9 implementation merged. Gate 9 PR #63 merged as `aa2fbe3`.

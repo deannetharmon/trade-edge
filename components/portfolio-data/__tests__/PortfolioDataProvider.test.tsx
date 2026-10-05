@@ -27,6 +27,7 @@ vi.mock('@/lib/portfolio-intelligence/dashboardComposition', () => ({
 }));
 
 import {
+  BACKGROUND_SESSION_EXPIRED_MESSAGE,
   PortfolioDataProvider,
   usePortfolioData,
   type PortfolioDataContextValue,
@@ -229,5 +230,16 @@ describe('PortfolioDataProvider refresh contract', () => {
     await act(async () => { result = await context.refresh(); });
     expect(result).toEqual({ status: 'error', message: 'Broker unavailable' });
     expect(screen.getByTestId('error')).toHaveTextContent('Broker unavailable');
+  });
+
+  // PORTFOLIO-AUTOREFRESH-0001
+  it('a background refresh with an expired session shows an error instead of navigating to /login', async () => {
+    acquisition.loadPositions.mockRejectedValue(new Error('Session expired'));
+    const before = window.location.href;
+    let result!: PortfolioRefreshResult;
+    await act(async () => { result = await context.refresh({ background: true }); });
+    expect(result).toEqual({ status: 'error', message: 'Session expired' });
+    expect(window.location.href).toBe(before);
+    expect(screen.getByTestId('error')).toHaveTextContent(BACKGROUND_SESSION_EXPIRED_MESSAGE);
   });
 });

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { ChartLinkButton } from '@/components/ChartLinkButton';
 import { IntentSelect } from './IntentSelect';
+import { useAutoRefreshPause } from '@/components/portfolio-data/usePortfolioAutoRefresh';
 import { sameWidths } from './model/stockColumnAlignment';
 import { nextEarningsLine } from './model/nextEarnings';
 import { buildValueSplit } from './model/extrinsic';
@@ -100,6 +101,7 @@ function AggregateValue({ aggregate, absent }: { aggregate: FinancialAggregate; 
 function DialogShell({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { closeRef.current?.focus(); }, []);
+  useAutoRefreshPause(true); // PORTFOLIO-AUTOREFRESH-0001
   return <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <section role="dialog" aria-modal="true" aria-labelledby="workspace-dialog-title" className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-xl border border-white/20 bg-slate-950 p-5 text-white shadow-2xl" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}>
       <header className="mb-4 flex items-center justify-between"><h2 id="workspace-dialog-title" className="text-base font-semibold">{title}</h2><button ref={closeRef} type="button" onClick={onClose} className="min-h-11 min-w-11 rounded border border-white/20 focus:outline-none focus:ring-2 focus:ring-teal-400" aria-label={`Close ${title}`}>×</button></header>

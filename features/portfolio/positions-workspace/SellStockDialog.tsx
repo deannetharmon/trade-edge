@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react';
 import { submitStockSellOrderIfSafe } from '@/lib/portfolio/stockOrderSubmission';
 import type { SnapshotCapacityReport } from '@/lib/portfolio-snapshot/capacity';
 import type { StockHoldingRow } from './model/stockHoldings';
+import { useAutoRefreshPause } from '@/components/portfolio-data/usePortfolioAutoRefresh';
 
 export interface SellStockDialogDeps {
   /** Fetches a FRESH SnapshotCapacityReport (never the one already on screen) for this account, used both for the dialog's own display and passed through to the submit-time gate. */
@@ -28,6 +29,7 @@ type Phase = 'loading' | 'form' | 'confirm' | 'placing' | 'done' | 'error';
 
 export function SellStockDialog({ row, deps, onClose }: { row: StockHoldingRow; deps: SellStockDialogDeps; onClose: () => void }) {
   const [phase, setPhase] = useState<Phase>('loading');
+  useAutoRefreshPause(true); // PORTFOLIO-AUTOREFRESH-0001
   const [report, setReport] = useState<SnapshotCapacityReport | null>(null);
   const [error, setError] = useState('');
   const [orderId, setOrderId] = useState('');
