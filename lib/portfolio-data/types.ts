@@ -283,6 +283,10 @@ export interface Position {
   // consume it without another data-plumbing pass. Null when the position
   // needs no action (the old system's "hold" case).
   portfolioObjective?: PortfolioObjective | null;
+  // TAKEPROFIT-BASIS-0001: a different recommendation seen on the latest
+  // refresh but not yet confirmed by a second consecutive one; the shown
+  // recommendation stays put until it is (see recommendationHysteresis.ts).
+  recommendationPending?: { key: string; label: string } | null;
 }
 
 

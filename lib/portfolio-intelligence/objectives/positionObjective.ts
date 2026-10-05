@@ -67,6 +67,7 @@ import { defaultActionabilityForPriority } from '../actionability';
 import type { LiquidityTier } from '@/lib/positionValuation';
 import type { QuoteQuality } from '@/lib/portfolio/stopLossPolicy';
 import {
+  describeUnprotectedProfit,
   selectManagementIntent,
   type ManagementIntentContext,
   type ManagementIntentEvidence,
@@ -931,8 +932,12 @@ export function evaluatePositionObjective(
   const pricingVerificationUnresolved =
     !marketableDecisionEligible &&
     (pricingConflictRequiresVerification || input.priorPricingVerificationUnresolved === true);
+  // TAKEPROFIT-BASIS-0001 (Ian): the profit must be capturable -- when a
+  // close-now (marketable) reading exists it must be positive. Without one the
+  // nudge still shows: it only suggests placing a target order, never closing.
   const meaningfulUnprotectedProfit =
-    shortPremium && input.hasGtc === false && pnlPct != null && pnlPct >= 20 && dte != null && dte > 14;
+    shortPremium && input.hasGtc === false && pnlPct != null && pnlPct >= 20 && dte != null && dte > 14 &&
+    (marketablePnlPct == null || marketablePnlPct > 0);
   const earningsUpcoming = isUpcomingBeforeExpiration(input.earningsDate, input.expDate, now);
   const daysUntilEarnings = daysUntil(input.earningsDate, now);
   const earningsActionable = earningsUpcoming
@@ -959,6 +964,8 @@ export function evaluatePositionObjective(
     itmOrCriticalBuffer,
     profitTargetReached,
     meaningfulUnprotectedProfit,
+    unprotectedProfitMidPct: meaningfulUnprotectedProfit ? pnlPct : null,
+    unprotectedProfitCloseNowPct: meaningfulUnprotectedProfit ? marketablePnlPct : null,
     earningsActionable,
     earningsProximityFraction,
     rollFlagged,
@@ -1033,7 +1040,7 @@ export function evaluatePositionObjective(
   } else if (meaningfulUnprotectedProfit) {
     legacy = makeLegacyRecommendation(
       input, 'place-gtc', 'medium', 78,
-      `Position has profit (${pnlPct!.toFixed(0)}%) but no working GTC detected.`,
+      describeUnprotectedProfit(pnlPct, marketablePnlPct),
       'Place or verify a profit-target GTC order.',
       supportingReasons, now, intentResult,
     );

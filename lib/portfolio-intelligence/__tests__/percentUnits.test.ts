@@ -51,9 +51,10 @@ describe('recommendations read a small profit as small', () => {
     expect(legacyRecommendation.managementIntent?.intent).not.toBe('TAKE_PROFIT');
   });
 
-  it('a genuine 22% profit with no target order still gets the unprotected-profit nudge (rule unchanged)', () => {
+  it('a genuine 22% profit with no target order gets the Set Profit Target nudge (threshold unchanged)', () => {
     const { legacyRecommendation } = evaluatePositionObjective(soxl({ pnlPct: 22, marketablePnlPct: 18 }), NOW);
-    expect(legacyRecommendation.managementIntent?.reasons ?? []).toContain('Position has meaningful profit but no working profit-target order.');
+    expect(legacyRecommendation.managementIntent?.intent).toBe('SET_PROFIT_TARGET');
+    expect(legacyRecommendation.managementIntent?.reasons ?? []).toContain('Up 22% of credit at mid (close-now: +18%) · no profit-target order.');
   });
 
   it('a strike 0.5% away is read as 0.5%, not 50%', () => {

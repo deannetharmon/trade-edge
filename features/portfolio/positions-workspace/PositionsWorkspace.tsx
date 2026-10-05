@@ -575,6 +575,8 @@ export function recommendationTone(position: Position): SemanticTone {
   // informational rather than the same urgent red used for a breach the
   // trader didn't already plan for.
   if (position.recommendation.managementIntent?.quietConfirmation) return 'informational';
+  // TAKEPROFIT-BASIS-0001 (Ian): placing a target order is informational, not an exit.
+  if (position.recommendation.managementIntent?.intent === 'SET_PROFIT_TARGET') return 'informational';
   const label = position.recommendation.label.toLowerCase();
   if (label.includes('profit')) return 'positive';
   if (label.includes('cut') || label.includes('close')) return 'negative';

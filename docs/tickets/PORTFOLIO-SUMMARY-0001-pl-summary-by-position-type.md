@@ -2,7 +2,7 @@
 
 ## Status
 
-**DRAFT 2026-10-05 — mock ready; Dean (mock), Paul (scope), Quinn (tests) pending.** Display only: no recommendation, scoring or order change. Ian and Diane shaped it (below).
+**APPROVED 2026-10-05 (Dean, Ian, Diane, Paul, Quinn) — queued after TAKEPROFIT-BASIS-0001.** Display only: no recommendation, scoring or order change. Ian and Diane shaped it (below).
 
 Mock (interactive): https://claude.ai/artifact/GaxxUqLfRSa4zABBsXGmvv
 
@@ -61,7 +61,13 @@ Group membership comes from the existing classification (`classifyPositionLifecy
 
 Realized P/L (Trade Log), Greeks other than theta, DTE buckets, any recommendation or order behaviour.
 
-## Quinn (to confirm)
+## Quinn (approved with conditions)
+
+- 1W: feasible as specified (`PositionSnapshot.pnl` per day).
+- 1D: the app does not read a previous close today. Before build, check whether TastyTrade's position response carries a previous-close mark (likely what its P/L Day uses); else use the quote's `prev-close` (present on ~98% of option rows in the 2026-10-05 audit). Rows with neither: "1D partial (10 of 11)".
+- Cash to deploy: count only opening working orders; closing orders free capital. Test both.
+
+## Tests
 
 - The Total tile's P/L equals the sum of the rows; each group equals the sum of its rows; groups partition the portfolio (no position in two groups, none missing).
 - Partial data never shows as a complete total ("2 of 5 priced").

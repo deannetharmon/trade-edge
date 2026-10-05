@@ -76,6 +76,8 @@ export const DEFAULT_PRIORITY_SCORE_CONFIG: PriorityScoreConfig = {
   managementIntentUrgency: {
     CUT_LOSSES: 1,
     TAKE_PROFIT: 0.85,
+    // TAKEPROFIT-BASIS-0001: informational (place a target order), not an exit.
+    SET_PROFIT_TARGET: 0.5,
     ROLL_POSITION: 0.8,
     REDUCE_RISK: 0.75,
     REPLACE_WORKING_ORDER: 0.6,

@@ -101,14 +101,15 @@ describe('Scorecard: excluded intents never appear, even in the full candidate l
 
 describe('Scorecard: decision margin and confidence tier', () => {
   it('margin 0 (a tie broken only by tie-break order) is Low confidence', () => {
-    // TAKE_PROFIT (40) and HOLD_POSITION (10 baseline + 30 technical-aligned)
-    // both land on 40; TAKE_PROFIT wins the tie per INTENT_TIE_BREAK_ORDER.
+    // SET_PROFIT_TARGET (40; TAKEPROFIT-BASIS-0001, formerly TAKE_PROFIT) and
+    // HOLD_POSITION (10 baseline + 30 technical-aligned) both land on 40;
+    // SET_PROFIT_TARGET wins the tie per INTENT_TIE_BREAK_ORDER.
     const result = selectManagementIntent({
       context: 'credit-spread',
       meaningfulUnprotectedProfit: true,
       technicalAlignment: 'aligned',
     });
-    expect(result.intent).toBe('TAKE_PROFIT');
+    expect(result.intent).toBe('SET_PROFIT_TARGET');
     expect(result.winnerScore).toBe(40);
     expect(result.runnerUpIntent).toBe('HOLD_POSITION');
     expect(result.runnerUpScore).toBe(40);

@@ -20,6 +20,7 @@
 // of this module and were not touched -- they remain entirely in
 // app/portfolio/page.tsx.
 
+import { confirmRecommendationChange } from './recommendationHysteresis';
 import type {
   ActionType, PositionIntent, StopStatus, StopLossInfo, Recommendation,
   PositionLeg, Position, PendingOrderLeg, PendingOrder, PositionSnapshot,
@@ -372,7 +373,10 @@ export function attachSnapshotHistory(
       previous?.recommendation?.kind === 'verify-pricing';
     const trendDirection = trendStore[p.symbol.toUpperCase()];
     const { recommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence } = scorePortfolioPositionObjective(withHealth, new Date(), priorPricingVerificationUnresolved, trendDirection);
-    return { ...withHealth, recommendation, portfolioObjective: objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence };
+    // TAKEPROFIT-BASIS-0001: a changed recommendation shows only once a second
+    // consecutive refresh confirms it (urgent ones at once).
+    const confirmed = confirmRecommendationChange(previous, { recommendation, portfolioObjective: objective });
+    return { ...withHealth, ...confirmed, valuation, liquidityTrapTriggered, pricingDecisionEvidence };
   });
   return enriched.sort((a, b) => {
     const aPriority = canonicalRecommendationPriority(a.recommendation);

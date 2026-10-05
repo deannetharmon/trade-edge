@@ -76,6 +76,10 @@ import {
 export type ManagementIntent =
   | 'HOLD_POSITION'
   | 'TAKE_PROFIT'
+  // TAKEPROFIT-BASIS-0001 (Ian): a short-premium position with a capturable
+  // profit (>= 20% of credit at mid AND positive at close-now) but no working
+  // profit-target order. The action is to place the target, not to close.
+  | 'SET_PROFIT_TARGET'
   | 'CUT_LOSSES'
   | 'REDUCE_RISK'
   | 'ROLL_POSITION'
@@ -90,6 +94,7 @@ export type ManagementIntent =
 export const MANAGEMENT_INTENT_LABEL: Record<ManagementIntent, string> = {
   HOLD_POSITION: 'Hold Position',
   TAKE_PROFIT: 'Take Profit',
+  SET_PROFIT_TARGET: 'Set Profit Target',
   CUT_LOSSES: 'Cut Losses',
   REDUCE_RISK: 'Reduce Risk',
   ROLL_POSITION: 'Roll Position',
@@ -113,10 +118,10 @@ export type ManagementIntentContext =
 
 // Ticket #2's "Relevant Intent Set" examples, verbatim.
 const RELEVANT_INTENTS: Record<ManagementIntentContext, ManagementIntent[]> = {
-  'credit-spread': ['HOLD_POSITION', 'TAKE_PROFIT', 'CUT_LOSSES', 'REDUCE_RISK', 'ROLL_POSITION'],
-  'wheel-csp': ['HOLD_POSITION', 'TAKE_PROFIT', 'ACCEPT_ASSIGNMENT', 'ROLL_POSITION', 'CUT_LOSSES'],
-  'covered-call': ['HOLD_POSITION', 'TAKE_PROFIT', 'ACCEPT_ASSIGNMENT', 'ROLL_POSITION', 'REDUCE_RISK'],
-  'other-position': ['HOLD_POSITION', 'TAKE_PROFIT', 'CUT_LOSSES', 'REDUCE_RISK'],
+  'credit-spread': ['HOLD_POSITION', 'TAKE_PROFIT', 'SET_PROFIT_TARGET', 'CUT_LOSSES', 'REDUCE_RISK', 'ROLL_POSITION'],
+  'wheel-csp': ['HOLD_POSITION', 'TAKE_PROFIT', 'SET_PROFIT_TARGET', 'ACCEPT_ASSIGNMENT', 'ROLL_POSITION', 'CUT_LOSSES'],
+  'covered-call': ['HOLD_POSITION', 'TAKE_PROFIT', 'SET_PROFIT_TARGET', 'ACCEPT_ASSIGNMENT', 'ROLL_POSITION', 'REDUCE_RISK'],
+  'other-position': ['HOLD_POSITION', 'TAKE_PROFIT', 'SET_PROFIT_TARGET', 'CUT_LOSSES', 'REDUCE_RISK'],
   'pending-order': ['REPLACE_WORKING_ORDER', 'HOLD_POSITION'],
   'idle-cash': ['DEPLOY_IDLE_CASH', 'HOLD_POSITION'],
 };
@@ -156,6 +161,10 @@ export interface ManagementIntentEvidence {
   itmOrCriticalBuffer?: boolean;
   profitTargetReached?: boolean;
   meaningfulUnprotectedProfit?: boolean; // existing "profit but no working GTC" signal
+  // TAKEPROFIT-BASIS-0001: the numbers behind meaningfulUnprotectedProfit, so
+  // the reason line states what the rule acted on (whole percent of credit).
+  unprotectedProfitMidPct?: number | null;
+  unprotectedProfitCloseNowPct?: number | null;
 
   // Earnings: whether an earnings event is inside the actionable review
   // window. true = inside window (actionable), false = outside (existing
@@ -357,6 +366,14 @@ function bump(
   scores[intent] = current;
 }
 
+// TAKEPROFIT-BASIS-0001: "Up 22% of credit at mid (close-now: +3%) · no profit-target order."
+export function describeUnprotectedProfit(midPct: number | null | undefined, closeNowPct: number | null | undefined): string {
+  if (midPct == null || !Number.isFinite(midPct)) return 'Position has meaningful profit but no working profit-target order.';
+  const signed = (v: number) => `${v >= 0 ? '+' : ''}${Math.round(v)}%`;
+  const closeNow = closeNowPct != null && Number.isFinite(closeNowPct) ? ` (close-now: ${signed(closeNowPct)})` : '';
+  return `Up ${Math.round(midPct)}% of credit at mid${closeNow} · no profit-target order.`;
+}
+
 function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<ManagementIntent, ScoreEntry>> {
   const scores: Partial<Record<ManagementIntent, ScoreEntry>> = {};
 
@@ -381,10 +398,10 @@ function scoreCandidates(evidence: ManagementIntentEvidence): Partial<Record<Man
       evidenceField: 'profitTargetReached',
     });
   } else if (evidence.meaningfulUnprotectedProfit) {
-    bump(scores, 'TAKE_PROFIT', W.unprotectedProfit, {
+    bump(scores, 'SET_PROFIT_TARGET', W.unprotectedProfit, {
       id: 'unprotected-profit',
       label: 'Unprotected profit',
-      explanation: 'Position has meaningful profit but no working profit-target order.',
+      explanation: describeUnprotectedProfit(evidence.unprotectedProfitMidPct, evidence.unprotectedProfitCloseNowPct),
       evidenceField: 'meaningfulUnprotectedProfit',
     });
   }
@@ -670,6 +687,7 @@ const INTENT_TIE_BREAK_ORDER: ManagementIntent[] = [
   'CUT_LOSSES',
   'ACCEPT_ASSIGNMENT',
   'TAKE_PROFIT',
+  'SET_PROFIT_TARGET',
   'REDUCE_RISK',
   'ROLL_POSITION',
   'REPLACE_WORKING_ORDER',
