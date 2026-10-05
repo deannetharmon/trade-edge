@@ -10,6 +10,7 @@ Last updated: 2026-10-01 (LEV-0001 Gate 10 review)
 3. **DECIDE-0001 S3-0** — approved 2026-09-27, not built. Removes contradicting signals such as the Cut Losses button on Acquire positions recommended Hold (TQQQ, METU).
 4. **GTC-REPLACE-0001** — DRAFT, Quinn review and Dean approval pending; starts with a dry-run proof. A close that replaces a bracket must keep its stop; stop-market brackets are rebuilt exactly. Ticket: `docs/tickets/GTC-REPLACE-0001-preserve-bracket-stop-on-close-replacement.md`.
 5. **ORDER-PCT-INPUT-0001** — IMPLEMENTED, pending CI and Vercel preview; mock (https://claude.ai/artifact/Ln4e9PgkBBkNU19pnvdRD6). Percent and price boxes kept in sync for profit targets (% of credit kept) and stops (% of original credit). Diane, Ian (defaults), Quinn pending. Ticket: `docs/tickets/ORDER-PCT-INPUT-0001-percent-and-price-inputs.md`.
+6. **PORTFOLIO-SUMMARY-0001** — DRAFT, mock ready (https://claude.ai/artifact/GaxxUqLfRSa4zABBsXGmvv). P/L summary tiles by position type on Positions and Position Analysis: P/L, capital and theta, 1D/1W change, needs-attention, cash to deploy (no margin), largest exposure (25% limit). Paul and Quinn pending. Ticket: `docs/tickets/PORTFOLIO-SUMMARY-0001-pl-summary-by-position-type.md`.
 
 ## Current status — 2026-10-01 (LEV-0001 Gate 10 review)
 
