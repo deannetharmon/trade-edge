@@ -2,7 +2,7 @@
 
 ## Status
 
-**DRAFT 2026-10-05 — mock ready for Diane and Dean; Ian (defaults) and Quinn (safety gates) pending.** Order-entry UI: do not build before the mock is approved.
+**MOCK APPROVED 2026-10-05 (Dean, Diane with changes, Ian with rulings) — Quinn pending.** Order-entry UI: build after Quinn's review.
 
 Mock (interactive): https://claude.ai/artifact/Ln4e9PgkBBkNU19pnvdRD6
 
@@ -27,9 +27,18 @@ So the profit target has no percentage anywhere, and the stop percentage can onl
 
 **Out:** changing default levels or the stop policy; debit-position percent inputs; GTC-REPLACE-0001.
 
+## Rulings (2026-10-05)
+
+**Diane (approve with changes):**
+- The stop's "If triggered" line is risk context: calm orange like its label, not bold. The target line stays green.
+- An invalid entry shows directly under the box typed in; submit stays disabled until fixed.
+- Each %/$ pair stacks vertically below ~420 px.
+
+**Ian (approve with rulings):**
+- Prices sent are rounded to a valid tick for the contract (TastyTrade tick table: $0.01 below $3.00, $0.05 at or above, per the chain's `tick-sizes`), then the % shown is recomputed from the sent price, e.g. "30% (sent: $3.80, 29.6%)".
+- Defaults: target 50%, stop 200% for spreads and Income puts. Acquire and Wheel cash-secured puts: stop **Include starts unchecked** (assignment is the plan; consistent with ACQUIRE-WHEEL-LIVE-0001). The trader can still check it.
+
 ## Open
 
-- Diane: approve the mock (layout, wording "% of credit kept", exact prices no longer collapsed).
-- Ian: confirm defaults (50% target, 200% stop) and the rounding (whole percent shown, price to the cent is what is sent).
 - Quinn: tests that both directions round-trip, invalid entries keep the submit blocked, provenance is recorded as above, and the order body sent is unchanged for the same price.
 - Seen while reading: the Review order `Limit $` label has a broken class `text-[9px}` (~4135); fix in this ticket.
