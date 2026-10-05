@@ -4,6 +4,7 @@ Last updated: 2026-10-01 (LEV-0001 Gate 10 review)
 
 ## Portfolio queue — 2026-10-05 (Dean, after the GGLL and SOXL reviews)
 
+0. **PCT-UNITS-0001** — FIXED 2026-10-05. Recommendations and the health score multiplied any P/L % or buffer % between -1 and 1 by 100 (0.4% read as 40%), producing the false SOXL "Take Profit" and making a strike 0.5% away look 50% away. Now read as given; IV/IVR/POP normalizers (which genuinely receive 0.63-style values) unchanged. Ian approved (units bug, no threshold change). Test: `lib/portfolio-intelligence/__tests__/percentUnits.test.ts` (5 of 7 fail on the old code).
 1. **PORTFOLIO-AUTOREFRESH-0001** — IMPLEMENTED, pending CI and Vercel preview. The open Portfolio page refreshes every 2 minutes during market hours, pauses during order dialogs, keeps selections, labels closing values and the settling window. Ticket: `docs/tickets/PORTFOLIO-AUTOREFRESH-0001-portfolio-page-auto-refresh.md`.
 2. **TAKEPROFIT-BASIS-0001** — APPROVED, not started. The 20% "unprotected profit" rule becomes "Set Profit Target" and needs a positive close-now P/L; no flip-flopping between refreshes; reason text shows the number and basis. Ticket: `docs/tickets/TAKEPROFIT-BASIS-0001-take-profit-on-executable-price.md`.
 3. **DECIDE-0001 S3-0** — approved 2026-09-27, not built. Removes contradicting signals such as the Cut Losses button on Acquire positions recommended Hold (TQQQ, METU).

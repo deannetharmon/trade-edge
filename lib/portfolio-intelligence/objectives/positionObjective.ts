@@ -271,13 +271,18 @@ function classifyIntentContext(
 // -- helpers, moved verbatim from recommendation-rules.ts (behavior-critical, unchanged) --
 
 // PI-0008A: exported alongside daysUntil()/isUpcomingBeforeExpiration() above
-// -- remainingOpportunity.ts's caller (app/portfolio/page.tsx) needs the same
-// fraction-vs-percent normalization this module already applies to pnlPct/
-// buffer before evaluating its own trigger branches, so evidence handed to
-// calculateRemainingOpportunity() is normalized exactly the same way.
+// so evidence handed to calculateRemainingOpportunity() is read exactly the
+// same way as this module's own pnlPct/marketablePnlPct/buffer.
+//
+// PCT-UNITS-0001: every caller supplies whole percentages (pnl / credit * 100,
+// buffer = distance to strike in %). This used to guess that any value between
+// -1 and 1 was a fraction and multiply it by 100, so a position up 0.93% read
+// as up 93% (Dean's SOXL "Take Profit" at -$20 close-now) and a strike 0.5%
+// away read as 50% away. Values are now taken as given; only non-finite
+// values are rejected.
 export function normalizePositionObjectivePct(value: number | null | undefined): number | null {
   if (value == null || !Number.isFinite(value)) return null;
-  return Math.abs(value) <= 1 ? value * 100 : value;
+  return value;
 }
 
 function hasHealthFactor(input: PositionObjectiveInput, key: string): boolean {

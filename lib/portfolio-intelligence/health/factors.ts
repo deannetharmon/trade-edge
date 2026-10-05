@@ -12,6 +12,14 @@ export function normalizePercent(value: number | null | undefined): number | nul
   return Math.abs(value) <= 1 ? value * 100 : value;
 }
 
+// PCT-UNITS-0001: P/L % and strike buffer % always arrive as whole
+// percentages; unlike IV/IVR/HV (which some sources send as 0.63), a value
+// between -1 and 1 here is a genuinely small percentage and must not be
+// multiplied by 100.
+export function finitePercent(value: number | null | undefined): number | null {
+  return value == null || !Number.isFinite(value) ? null : value;
+}
+
 export function factor(
   key: string,
   label: string,

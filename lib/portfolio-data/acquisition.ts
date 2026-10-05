@@ -315,8 +315,8 @@ export function scorePortfolioRemainingOpportunity(pos: Position) {
   const supportedCreditEntry = hasSupportedCreditEntryEconomics(pos);
   return calculateRemainingOpportunity({
     creditReceived: supportedCreditEntry ? pos.entryCredit! : null,
-    // Same fraction-vs-percent normalization evaluatePositionObjective()
-    // already applies to these two fields before using them -- keeps this
+    // Same reading evaluatePositionObjective() applies to these two fields
+    // (whole percentages, finite only -- PCT-UNITS-0001) -- keeps this
     // metric's captured/remaining percentages consistent with the
     // recommendation engine's own reading of the same position.
     pnlPct: supportedCreditEntry ? normalizePositionObjectivePct(pos.pnlPct) : null,

@@ -1,7 +1,7 @@
 // lib/portfolio-intelligence/health/score.ts
 
 import type { PositionHealthFactor, PositionHealthInput, PositionHealthScore } from './types';
-import { clampScore, daysBetween, factor, isDateOnOrBeforeExpiration, normalizePercent } from './factors';
+import { clampScore, daysBetween, factor, finitePercent, isDateOnOrBeforeExpiration, normalizePercent } from './factors';
 import { healthGrade, healthSummary, inferHealthStrategy } from './rules';
 
 export function calculatePositionHealthScore(position: PositionHealthInput, now: Date = new Date()): PositionHealthScore {
@@ -10,8 +10,8 @@ export function calculatePositionHealthScore(position: PositionHealthInput, now:
 
   const strategy = inferHealthStrategy(position);
   const dte = Number.isFinite(position.dte ?? NaN) ? Number(position.dte) : null;
-  const pnlPct = normalizePercent(position.pnlPct);
-  const buffer = normalizePercent(position.buffer);
+  const pnlPct = finitePercent(position.pnlPct);
+  const buffer = finitePercent(position.buffer);
   const ivr = normalizePercent(position.ivr);
   const iv = normalizePercent(position.iv);
   const hv30 = normalizePercent(position.hv30);
