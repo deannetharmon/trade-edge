@@ -192,3 +192,12 @@
 - Nothing is blocked: this reviews closed trades and never stops an order.
 - The 2× premium stop is a separate rule and is already in the rule checks.
 - **Alan:** use opening capital, not current. Quinn adds fixtures for 24.9%, 25.0% and 25.1% (exactly 25% is within the rule), and for an overridden trade.
+
+## Ian's mock review (2026-10-06): additions, Dean pre-approved ("unless Ian thinks it is missing something")
+
+1. **50% target card:** closed at the target vs closed early, with counts and dollars. Early closes report the average % of credit kept. The estimate of what reaching 50% would have added is hindsight on the same trades, assumes the same win rate, and is labeled as such.
+2. **Break-even win rate per strategy:** needed = avg loss ÷ (avg win + avg loss), shown next to the actual win rate (Alan: magnitudes, after fees).
+3. **Trend by month on every rule-break card:** count per month inside the period, so Dean sees whether a habit is fading.
+4. **Assigned CSPs:** information only. Acceptable under DECIDE-0001, never a breach.
+
+Mock updated (version 2, same link).
