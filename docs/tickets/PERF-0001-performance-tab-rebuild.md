@@ -1,6 +1,6 @@
 # PERF-0001 — Performance tab: one trade dataset, trader-relevant metrics
 
-**Status: IAN REVIEW DONE (2026-10-06); next Paul scope + Diane mock, then build.** Reported by Dean: the Performance tab does not match the Trade Log and is not useful.
+**Status (2026-10-06): step 1 (reconstruction fix) and step 2a (one metrics computation, incl. by ticker) BUILT; Diane mock https://claude.ai/artifact/JBFzCYwcF42Aj5TkeenUjs (Ian, Paul approved); next: Performance tab UI from the mock.** Reported by Dean: the Performance tab does not match the Trade Log and is not useful.
 
 ## Evidence (Dean's 2026-10-06 export + screenshots)
 
@@ -33,10 +33,14 @@
 ## Reconciliation with the full log (Dean's full-detail export, 67 rows, 2026-04-29 to 10-05)
 
 - The tab's numbers come from the log but mix two record sets: **Strategy report = 62 complete records (+$2,017)**; **Exit Analysis / Best-Worst / Hold Time = all 67 (+$2,363)**. The difference is the 5 INCOMPLETE records (+$346).
-- **The incomplete records' P/L is wrong:** partial closes are priced against the full position's credit. MU BPS 8/5 (1 of 5 closed) shows +$822 and is a "best trade"; SPY BPS 6/3 (1 of 10 closed) shows −$505. AMD BPS 5/29 is "INCOMPLETE" yet CLOSED 2/2; SLV BCS shows opened 1, closed 1, remaining 1.
+- **Correction (code review, 2026-10-06): the P/L of these records is right** — they were fully closed in several same-day transactions; the per-fill quantity math mislabelled them ("closed 1 of 5") and marked them INCOMPLETE. Fixed in step 1. Original note: MU BPS 8/5 (1 of 5 closed) shows +$822 and is a "best trade"; SPY BPS 6/3 (1 of 10 closed) shows −$505. AMD BPS 5/29 is "INCOMPLETE" yet CLOSED 2/2; SLV BCS shows opened 1, closed 1, remaining 1.
 - **ORCL BPS 5/28 has credit received −$83** (impossible for a credit spread; mis-signed or a roll leg).
 - Fees total $344 across 67 trades (included in P/L).
 
 **What the data says (Ian):** BPS 48 trades, −$1,038, 50% wins, avg win $178 vs avg loss $221 → negative expectancy. CSP 13 trades, +$2,912, 77% wins. **7 trades lost more than the credit (beyond the 2x stop): −$2,216** — without them the period is about +$4.2k. Realized by month: May +716, Jun −223, Jul −919, Aug +727, Sep +1,777, Oct −63. Several losses were 7-8 DTE SPX/SMH spreads, outside the 21-DTE methodology.
 
 **Build order:** (1) fix partial-close P/L (price the closed quantity only) and the negative-credit record; one dataset for log, export and tab; (2) Ian's metrics and rule-adherence panel; (3) Diane's layout.
+
+## Paul (scope, 2026-10-06)
+
+In: the mock's panels (results, rule check, by month, by strategy, by ticker with per-month cells and click-through to the Trade Log, how trades ended, needs review), one window selector shared with the Trade Log, the same 66-trade set everywhere. Out: Entry Context Outcomes (removed until it has data), the old Exit Analysis and Hold Time panels (replaced by rule check and how trades ended), AI Analysis unchanged.
