@@ -194,7 +194,7 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByRole('columnheader', { name: 'Dates' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Strike / BE' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Capital' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Entry Credit / Debit' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Entry $' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Close Value' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'P/L / Target' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Orders / Stop' })).toBeInTheDocument();

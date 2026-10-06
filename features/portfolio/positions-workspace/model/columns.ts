@@ -6,7 +6,7 @@ export const ANALYSIS_COLUMNS: ReadonlyArray<{ id: AnalysisColumnId; label: stri
   { id: 'underlying', label: 'Price Change', group: 'Position' },
   { id: 'strike', label: 'Strike / BE', group: 'Position' },
   { id: 'capital', label: 'Capital', group: 'Economics' },
-  { id: 'entry', label: 'Entry Credit / Debit', group: 'Economics' },
+  { id: 'entry', label: 'Entry $', group: 'Economics' },
   { id: 'value', label: 'Close Value', group: 'Economics' },
   { id: 'pnl', label: 'P/L / Target', group: 'Economics' },
   { id: 'evolution', label: 'Metric Movement', group: 'Movement' },

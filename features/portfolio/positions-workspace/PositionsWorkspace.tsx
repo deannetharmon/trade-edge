@@ -20,7 +20,7 @@ import { ANALYSIS_COLUMNS, columnsForView } from './model/columns';
 import { activeFilterCount, DEFAULT_FILTERS, matchesAnalysisFilters } from './model/filters';
 import { DEFAULT_PREFERENCES, loadPreferences, savePreferences } from './model/preferences';
 import { buildCapitalViewModel, buildMoneynessMovementViewModel, buildMoneynessViewModel, comparisonTone, SEMANTIC_TONE_CLASS, stopPresentation, stopPresentationForPosition, type SemanticTone } from './model/presentation';
-import { buildBreakevenViewModel } from './model/breakeven';
+import { buildBreakevenViewModel, priceBufferFor } from './model/breakeven';
 import type { AnalysisColumnId, AnalysisViewId, ExistingIncomeOpportunity, FinancialAggregate, PositionAnalysisFilters, PositionsWorkspaceModel, SymbolGroupViewModel } from './model/types';
 import { DebitStopObservation, StopEvidencePanel } from '@/components/portfolio-data/StopEvidencePanel';
 import { canonicalRecommendationToAction } from '@/lib/portfolio/canonicalRecommendationPresentation';
@@ -690,10 +690,9 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
   const valueSplit = buildValueSplit(p);
   const loneShort = intentFamilyFor(p) === 'SHORT_OPTION';
   const standaloneLeap = p.strategy === 'CALL' && p.legs.length === 1 && p.legs[0]?.direction === 'Long' && p.dte >= 365;
-  const priceBuffer = breakeven.values.length === 1 && p.stockPrice != null
-    ? p.stockPrice - breakeven.values[0]
-    : null;
-  const priceBufferPct = priceBuffer != null && p.stockPrice != null && p.stockPrice > 0 ? priceBuffer / p.stockPrice * 100 : null;
+  const buffer = priceBufferFor(breakeven, p.stockPrice);
+  const priceBuffer = buffer?.dollars ?? null;
+  const priceBufferPct = buffer?.pct ?? null;
   const entryTone = p.entryPriceEffect === 'Credit' ? 'positive' : p.entryPriceEffect === 'Debit' ? 'warning' : 'neutral';
   const firstPnl = first?.pnl;
   const cell: Record<AnalysisColumnId, ReactNode> = {

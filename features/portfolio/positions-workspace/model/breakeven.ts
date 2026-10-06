@@ -1,9 +1,24 @@
+// features/portfolio/positions-workspace/model/breakeven.ts
+
 import type { Position } from '@/lib/portfolio-data/types';
 import { computeIcBreakevens, computeSingleLegBreakeven } from '@/lib/portfolio/positionMetrics';
 
 export interface BreakevenViewModel {
   values: number[];
   unavailableReason: string | null;
+  /** Which way the stock may move before the position loses at expiration: UP-safe (short put, long call) or DOWN-safe (short call, long put). */
+  favorable?: 'UP' | 'DOWN' | null;
+}
+
+/**
+ * Price Buffer: how far the stock can move AGAINST the position before the at-expiration breakeven. Positive = cushion,
+ * negative = past breakeven. Direction-aware (Ian, 2026-10-06): a short call or long put loses as the stock RISES /
+ * stays high, so its buffer is breakeven minus stock, not stock minus breakeven. Single breakeven only.
+ */
+export function priceBufferFor(vm: BreakevenViewModel, stockPrice: number | null | undefined): { dollars: number; pct: number | null } | null {
+  if (vm.values.length !== 1 || !vm.favorable || stockPrice == null || !Number.isFinite(stockPrice)) return null;
+  const dollars = vm.favorable === 'UP' ? stockPrice - vm.values[0] : vm.values[0] - stockPrice;
+  return { dollars, pct: stockPrice > 0 ? (dollars / stockPrice) * 100 : null };
 }
 
 export function buildBreakevenViewModel(position: Position): BreakevenViewModel {
@@ -28,18 +43,23 @@ export function buildBreakevenViewModel(position: Position): BreakevenViewModel 
   }
   if (position.entryPriceEffect === 'Credit' && shortPut) {
     const value = computeSingleLegBreakeven(shortPut.strikePrice, creditPerShare, 'P');
-    return value == null ? { values: [], unavailableReason: 'Put breakeven is unavailable' } : { values: [value], unavailableReason: null };
+    return value == null ? { values: [], unavailableReason: 'Put breakeven is unavailable' } : { values: [value], unavailableReason: null, favorable: 'UP' };
   }
   if (position.entryPriceEffect === 'Credit' && shortCall) {
     const value = computeSingleLegBreakeven(shortCall.strikePrice, creditPerShare, 'C');
-    return value == null ? { values: [], unavailableReason: 'Call breakeven is unavailable' } : { values: [value], unavailableReason: null };
+    return value == null ? { values: [], unavailableReason: 'Call breakeven is unavailable' } : { values: [value], unavailableReason: null, favorable: 'DOWN' };
   }
   // A standalone long call's at-expiration breakeven is strike plus the
   // verified debit per share. This is distinct from current P/L and makes
   // the LEAPS call's Price Buffer intelligible in the table.
   const longCall = position.legs.find(leg => leg.direction === 'Long' && leg.optionType === 'C');
   if (position.entryPriceEffect === 'Debit' && position.legs.length === 1 && longCall) {
-    return { values: [longCall.strikePrice + creditPerShare], unavailableReason: null };
+    return { values: [longCall.strikePrice + creditPerShare], unavailableReason: null, favorable: 'UP' };
+  }
+  // A standalone long put's at-expiration breakeven is strike minus the verified debit per share.
+  const longPut = position.legs.find(leg => leg.direction === 'Long' && leg.optionType === 'P');
+  if (position.entryPriceEffect === 'Debit' && position.legs.length === 1 && longPut) {
+    return { values: [longPut.strikePrice - creditPerShare], unavailableReason: null, favorable: 'DOWN' };
   }
   return { values: [], unavailableReason: 'No canonical breakeven policy exists for this structure' };
 }
