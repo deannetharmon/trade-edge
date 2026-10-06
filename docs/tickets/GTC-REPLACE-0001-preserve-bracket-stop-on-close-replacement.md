@@ -97,3 +97,34 @@ Risk: order path. Full suite, `tsconfig.check.json`, one push, CI green and curr
 
 ## Open
 
+
+## Build sign-off (2026-10-06)
+
+- **Ian:** approved. The extra second of exposure is acceptable because restore is exact. Condition: if the live re-read (step 2) shows the stop already triggered, filled or cancelled, refuse and say so; never rebuild a stop that is no longer working.
+- **Quinn:** approved with the post-cancel dry-run sequence and the test list below.
+- **Paul:** scope unchanged (items 1-8 plus Quinn's additions); approved for build.
+
+## Dane: approved build instructions
+
+Order path: full suite, `tsconfig.check.json`, one push, merge after CI green and current-head Vercel Ready.
+
+1. **New `lib/portfolio/existingGtcReplacement.ts` logic** (next to `cancelExistingGtcForReplacement`), broker calls injected:
+   - `resolveReconstructablePairedLeg` moved out of `page.tsx`. `limitPrice` optional: required for `Stop Limit`, absent for `Stop`. Refuse with a named reason for: missing trigger, missing legs, multi-leg `Stop`, unknown order type.
+   - `buildExactOcoBody(closeLegs, limitPrice, closeTif, pairedLeg)`: the target is the trader's close (Day or GTC); the stop copies type, trigger, limit (Stop Limit only), TIF, legs and quantity from the paired leg; `Stop` has no `price` / `price-effect`.
+   - `buildExactStopBody(pairedLeg)` for restores.
+   - `replaceBracket(deps)`: (1) build + local safety gates; (2) re-read live orders, refuse if the stop differs from the evidence or is no longer working (Ian); (3) cancel; (4) broker dry-run the replacement; (5) rejected → restore the original bracket exactly (OCO of original target + exact stop) and report; accepted → submit; submit failure → same restore; restore failure → the existing UNPROTECTED message.
+   - Assert stop quantity = close quantity, else refuse before cancel.
+2. **Close dialog** (`page.tsx` ~3500): when the cancelled GTC was part of a bracket, call `replaceBracket`; persist the new stop identity with `postStopPolicies` (as Set/Edit Profit Target ~6926). A plain GTC with no stop keeps today's path and never gains a stop.
+3. **Set/Edit Profit Target** (`page.tsx` ~7100-7190): when replacing an existing bracket, use the same `replaceBracket` sequence; emergency restore uses `buildExactStopBody`, never `buildStopLimitBody`. New stops the trader creates there are unchanged (Stop Limit).
+4. **Messages** in the existing result row: name the reason (unsupported stop type, missing field, changed since load, stop no longer working, broker dry-run rejection with its text).
+5. **Batch:** each position runs its own sequence; one failure never stops or hides another's final state.
+6. **Tests** (`lib/portfolio/__tests__/existingGtcReplacement.test.ts` plus page-level where needed):
+   - paired leg: Stop resolves without limit; Stop Limit unchanged; missing trigger / legs, multi-leg Stop refuse;
+   - exact OCO: Stop has no `price`; Day and GTC targets;
+   - changed-since-load and stop-no-longer-working refuse before cancel;
+   - dry-run rejected after cancel → exact restore, no replacement submitted;
+   - submit failure → exact restore (both paths), stop type unchanged;
+   - restore failure → UNPROTECTED message;
+   - stop identity persisted after replacement;
+   - quantity assertion; batch where item 2 fails leaves items 1 and 3 in a stated final state.
+7. Sibling search before push: every `buildStopLimitBody` / `buildOcoBody` call site used for a *restore* or *replacement*.
