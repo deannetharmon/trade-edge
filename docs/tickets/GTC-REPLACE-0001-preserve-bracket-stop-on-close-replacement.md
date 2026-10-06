@@ -2,7 +2,7 @@
 
 ## Status
 
-**DRAFT 2026-10-05. Ian: approve with changes. Paul: approved scope as one ticket. Quinn: approve with changes (2026-10-06, below). Dean: approved 2026-10-06. Paul: Quinn's additions (exact-stop OCO builder, fail-closed in Set/Edit Profit Target, extraction to `lib/`) accepted into scope 2026-10-06. Ian: Quinn item 1 is his "rebuild exactly" rule; no new ruling needed.** Order path: full gates, full suite before push. Do not build before Quinn's review and Dean's approval. Build starts with the dry-run proof (step 1).
+**IMPLEMENTED 2026-10-06** (as built below). Drafted 2026-10-05. Ian: approve with changes. Paul: approved scope as one ticket. Quinn: approve with changes (2026-10-06, below). Dean: approved 2026-10-06. Paul: Quinn's additions (exact-stop OCO builder, fail-closed in Set/Edit Profit Target, extraction to `lib/`) accepted into scope 2026-10-06. Ian: Quinn item 1 is his "rebuild exactly" rule; no new ruling needed.** Order path: full gates, full suite before push. Do not build before Quinn's review and Dean's approval. Build starts with the dry-run proof (step 1).
 
 ## Problem
 
@@ -128,3 +128,14 @@ Order path: full suite, `tsconfig.check.json`, one push, merge after CI green an
    - stop identity persisted after replacement;
    - quantity assertion; batch where item 2 fails leaves items 1 and 3 in a stated final state.
 7. Sibling search before push: every `buildStopLimitBody` / `buildOcoBody` call site used for a *restore* or *replacement*.
+
+## As built (2026-10-06)
+
+- `lib/portfolio/existingGtcReplacement.ts`: `resolvePairedLeg` (moved from `page.tsx`; Stop without limit, Stop Limit with; named refusals; must belong to the bracket being replaced), `buildExactStopBody`, `buildExactOcoBody`, `stopCoverageRefusal`, `liveStopRefusal` (Ian: changed or no-longer-working stop refuses), `submitAfterBrokerDryRun`, `keptStopPolicy`. `ReconstructablePairedLeg.limitPrice` / `priceEffect` optional.
+- Close dialog: refusals (roll mode with a bracket, quantity, live re-read) run before cancel; a bracket replacement goes in as an exact OCO after a post-cancel broker dry run; the result row says "stop kept: <type> trigger $X"; the stop policy is re-pointed at the new ids; restore uses `buildExactOcoBody` (previously sent `price` on a stop-market and legs without `instrument-type`).
+- Set/Edit Profit Target: a replaced bracket is re-read live before cancel; the new OCO is broker dry-run before submit; a failed replacement restores the **original** bracket exactly (target + stop, type unchanged). With no resolvable original bracket the existing fallback (a stop at the trader's new trigger) is unchanged.
+- Safety gate: a stop-market (`Stop`) is a resting stop like `Stop Limit` (direction check, no drift block), so an exact restore is not blocked.
+- New refusal not in the original scope: a **roll** cannot replace a bracket (the roll close is an OTOCO trigger and cannot carry the stop); the trader is told to use Close Position or cancel the bracket in TastyTrade first. Nothing is cancelled.
+- Tests: `lib/portfolio/__tests__/gtcReplaceKeepsStop.test.ts` (24) and one gate test in `closeOrderSafety.test.ts`; existing `existingGtcReplacement.test.ts` (restore-failure warning) unchanged and passing. Full suite 478 files / 6,889 tests; `tsconfig.check.json` clean.
+- Not covered by a new test: page-level batch isolation (no close-dialog harness exists; each item still runs in its own try/catch, unchanged) and the UNPROTECTED message text in the Set/Edit Profit Target exact-restore branch.
+- Sibling search: every `buildStopLimitBody` / `buildOcoBody` / `'stop-trigger'` site. Remaining Stop Limit builders create **new** stops the trader chose (Add Stop, profit-protection fallback with no original bracket, standalone LEAPS stop, screener entry bracket); none rebuild an existing stop.

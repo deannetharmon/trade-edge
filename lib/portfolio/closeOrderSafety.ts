@@ -694,7 +694,8 @@ export function runLiveCloseOrderSafetyGate(input: LiveCloseOrderSafetyInput): S
   // buy-to-close target BELOW it, or it would fill the moment it is placed.
   // Cut Losses and Take Profit closes (Limit orders meant to fill now) are NOT
   // exempt: they keep the drift check.
-  const restingStop = input.pricingIntent === 'STOP_LOSS' && input.actualOrder.orderType === 'Stop Limit';
+  // GTC-REPLACE-0001: a stop-market ('Stop') restored exactly is a resting stop too.
+  const restingStop = input.pricingIntent === 'STOP_LOSS' && (input.actualOrder.orderType === 'Stop Limit' || input.actualOrder.orderType === 'Stop');
   const restingTarget = input.pricingIntent === 'PROFIT_TARGET'
     && input.actualOrder.orderType === 'Limit' && input.actualOrder.timeInForce === 'GTC';
   const isRestingOrder = restingStop || restingTarget;

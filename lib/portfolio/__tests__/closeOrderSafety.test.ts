@@ -537,6 +537,12 @@ describe('runLiveCloseOrderSafetyGate', () => {
       expect(result.issues.map(i => i.ruleId)).not.toContain('MATERIAL_PNL_DEVIATION');
       expect(result.ok).toBe(true);
     });
+    it('GTC-REPLACE-0001: a stop-market (Stop) far above the market is a resting stop too', () => {
+      const result = runLiveCloseOrderSafetyGate(resting('STOP_LOSS', 1.20, 'Stop'));
+      expect(result.issues.map(i => i.ruleId)).not.toContain('MATERIAL_PNL_DEVIATION');
+      expect(result.ok).toBe(true);
+      expect(runLiveCloseOrderSafetyGate(resting('STOP_LOSS', 0.60, 'Stop')).issues.map(i => i.ruleId)).toContain('RESTING_ORDER_WRONG_SIDE');
+    });
     it('a GTC limit profit target far below the market is allowed', () => {
       const result = runLiveCloseOrderSafetyGate(resting('PROFIT_TARGET', 0.30, 'Limit'));
       expect(result.issues.map(i => i.ruleId)).not.toContain('MATERIAL_PNL_DEVIATION');

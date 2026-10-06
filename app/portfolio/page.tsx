@@ -98,7 +98,7 @@ import {
 } from '@/lib/portfolio/profitProtectingStop';
 import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/stopPolicyStore';
 import { creditClosePnlDollars, protectiveStopOutcomeLabel, signedDollar } from '@/lib/portfolio/positionManagementPresentation';
-import { cancelExistingGtcForReplacement, criticalGtcRestorationWarning, restoreOriginalGtcIfNeeded, type ReconstructablePairedLeg } from '@/lib/portfolio/existingGtcReplacement';
+import { buildExactOcoBody, cancelExistingGtcForReplacement, criticalGtcRestorationWarning, liveStopRefusal, PAIRED_LEG_REFUSAL_PREFIX, keptStopPolicy, resolvePairedLeg, restoreOriginalGtcIfNeeded, stopCoverageRefusal, submitAfterBrokerDryRun, type ReconstructablePairedLeg } from '@/lib/portfolio/existingGtcReplacement';
 import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
 // PM-0001: pure entry-vs-now favorability judgment for Trade Evolution's
 // per-metric coloring -- see computeEntryChangeTone's doc comment.
@@ -1175,29 +1175,17 @@ async function cancelOrder(accountNumber: string, orderId: string, token: string
   return result;
 }
 
-// Resolves the paired leg of a position's complex/OCO GTC (almost always the
-// stop leg) from TradeEdge's own already-collected broker evidence
-// (stopAssessment.rawEvidence -- see stopLossPolicy.ts), so a complex order's
-// cancel-and-restore can rebuild the FULL bracket rather than being refused
-// outright. Returns null -- never a partial/guessed reconstruction -- unless
-// evidence is complete, the matched order is fully resolvable, and every
-// field needed to resubmit it is present. cancelExistingGtcForReplacement
-// treats null exactly like "can't reconstruct" and blocks the cancel.
-function resolveReconstructablePairedLeg(pos: Position): ReconstructablePairedLeg | null {
-  const assessment = pos.stopAssessment;
-  if (!assessment?.evidenceComplete || !assessment.matchedOrderId) return null;
-  const order = assessment.rawEvidence.orders.find(o => o.orderId === assessment.matchedOrderId);
-  if (!order) return null;
-  if (order.triggerPrice == null || order.limitPrice == null || !order.priceEffect) return null;
-  if (!order.legs.length) return null;
-  return {
-    orderType: order.orderType,
-    timeInForce: order.timeInForce,
-    triggerPrice: order.triggerPrice,
-    limitPrice: order.limitPrice,
-    priceEffect: order.priceEffect,
-    legs: order.legs.map(l => ({ symbol: l.symbol, action: l.action, quantity: l.quantity, ratio: l.ratio })),
-  };
+// GTC-REPLACE-0001: re-point the recorded stop policy at the kept stop's new
+// broker ids (non-blocking, like persistStopPolicy in the stop dialog).
+async function persistKeptStopIdentity(pos: Position, ids: { complexOrderId: string | null; stopOrderId: string | null }): Promise<void> {
+  const policy = keptStopPolicy(pos.stopLossPolicy, ids);
+  const shortLeg = pos.legs.find(l => l.direction === 'Short');
+  if (!policy || !shortLeg?.symbol) return;
+  try {
+    await postStopPolicies([{ positionKey: positionStopPolicyKey(pos.accountNumber, shortLeg.symbol), policy }]);
+  } catch (e) {
+    console.warn('Kept-stop policy persist failed (non-blocking):', e);
+  }
 }
 
 // TastyTrade supports a native dry-run: POST to the matching /dry-run endpoint.
@@ -3505,9 +3493,23 @@ function BatchConfirmModal({
 
           // AUTO CANCEL EXISTING GTC IF USER CONFIRMED
           if (!dryRun && item.pos.hasGtc && gtcConfirmed.has(item.pos.key)) {
+            // GTC-REPLACE-0001: a bracket's stop is kept exactly. Everything
+            // that can refuse runs here, BEFORE anything is cancelled.
+            const gtcComplexId = (item.pos as any).gtcComplexOrderId as string | undefined;
+            const pairedResolution = gtcComplexId ? resolvePairedLeg(item.pos.stopAssessment, gtcComplexId) : null;
+            const pairedLeg = pairedResolution?.ok ? pairedResolution.leg : null;
+            if (pairedLeg) {
+              if (item.action === 'CLOSE_ROLL' && rollMode[item.pos.key] === 'roll') {
+                throw new Error('A roll cannot keep the bracket\'s stop while the close waits to fill. Use Close Position, or cancel the bracket in TastyTrade first. No order was cancelled.');
+              }
+              const coverage = stopCoverageRefusal(pairedLeg, item.orderBody.legs);
+              if (coverage) throw new Error(coverage);
+              const live = await ttFetch(`/accounts/${item.pos.accountNumber}/complex-orders/${gtcComplexId}`, token)
+                .catch((readErr: any) => { throw new Error(`Could not re-read the bracket from TastyTrade (${readErr?.message ?? 'unknown error'}). No order was cancelled.`); });
+              const liveRefusal = liveStopRefusal(live?.data, pairedLeg);
+              if (liveRefusal) throw new Error(liveRefusal);
+            }
             try {
-              const gtcComplexId = (item.pos as any).gtcComplexOrderId as string | undefined;
-              const pairedLeg = gtcComplexId ? resolveReconstructablePairedLeg(item.pos) : null;
               const cancellation = await cancelExistingGtcForReplacement(
                 {
                   hasGtc: item.pos.hasGtc,
@@ -3516,6 +3518,7 @@ function BatchConfirmModal({
                   complexOrderId: gtcComplexId,
                   originalPrice: item.pos.gtcOrderPrice,
                   pairedLeg,
+                  pairedLegRefusal: pairedResolution && !pairedResolution.ok ? pairedResolution.reason : null,
                 },
                 async orderId => {
                   console.log(`CANCEL DEBUG: symbol=${item.pos.symbol} orderId=${orderId} complexId=${gtcComplexId}`);
@@ -3536,6 +3539,7 @@ function BatchConfirmModal({
               if (
                 cancelMessage.startsWith('Existing GTC order ID is unavailable.') ||
                 cancelMessage.startsWith('The existing close is part of a complex/OCO order') ||
+                cancelMessage.startsWith(PAIRED_LEG_REFUSAL_PREFIX) ||
                 cancelMessage.startsWith('The existing GTC price is unavailable')
               ) {
                 throw cancelErr;
@@ -3695,6 +3699,23 @@ function BatchConfirmModal({
                 // exact gate input), so the position can never end up
                 // half-rolled (closed but not re-opened).
                 return '';
+              }
+              if (cancelledPairedLeg) {
+                // GTC-REPLACE-0001: the close replaces a bracket, so it goes in
+                // as an OCO carrying the original stop exactly. TastyTrade
+                // cannot dry-run it while the original was working, so the
+                // dry run happens now; a rejection throws and the catch below
+                // restores the original bracket exactly.
+                const ocoBody = buildExactOcoBody(item.orderBody, cancelledPairedLeg);
+                return submitAfterBrokerDryRun(ocoBody, {
+                  dryRun: body => ttValidateOrder(`/accounts/${item.pos.accountNumber}/complex-orders`, token, body),
+                  submit: async body => {
+                    const res = await ttPostComplex(`/accounts/${item.pos.accountNumber}/complex-orders`, token, body);
+                    const ids = resolveOcoStopOrderId(res);
+                    await persistKeptStopIdentity(item.pos, ids);
+                    return `OCO #${ids.complexOrderId ?? 'submitted'} (stop kept: ${cancelledPairedLeg!.orderType} trigger $${cancelledPairedLeg!.triggerPrice.toFixed(2)})`;
+                  },
+                });
               }
               const res = await ttPost(`/accounts/${item.pos.accountNumber}/orders`, token, item.orderBody);
               return String(res?.data?.order?.id ?? res?.data?.id ?? 'submitted');
@@ -3931,26 +3952,7 @@ function BatchConfirmModal({
               // own broker evidence recorded the paired leg, mirroring the
               // OCO body shape used when this bracket is placed fresh (see
               // the Set/Edit Profit Target flow above).
-              const restoreOcoBody = {
-                type: 'OCO',
-                orders: [
-                  {
-                    'order-type': restoreBody['order-type'],
-                    'time-in-force': restoreBody['time-in-force'],
-                    price: restoreBody.price,
-                    'price-effect': restoreBody['price-effect'],
-                    legs: restoreBody.legs,
-                  },
-                  {
-                    'order-type': pairedLeg.orderType,
-                    'time-in-force': pairedLeg.timeInForce,
-                    'stop-trigger': pairedLeg.triggerPrice.toFixed(2),
-                    price: pairedLeg.limitPrice.toFixed(2),
-                    'price-effect': pairedLeg.priceEffect,
-                    legs: pairedLeg.legs,
-                  },
-                ],
-              };
+              const restoreOcoBody = buildExactOcoBody(restoreBody, pairedLeg);
               const restored = await submitCloseOrderIfSafe(
                 { identity: item.closeIdentity, structureAmbiguous: item.pos.structureAmbiguous, structureBlockMessage: item.pos.structureBlockMessage },
                 restoreGateInput,
@@ -7083,7 +7085,24 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
 
       if (kind === 'OCO_REPLACE' || kind === 'OCO_NEW') {
         let cancelSucceeded = false;
+        // GTC-REPLACE-0001: when the order being replaced is a bracket whose
+        // stop TradeEdge can rebuild exactly, remember it (after a live re-read)
+        // so a failed replacement restores the ORIGINAL bracket, stop type
+        // unchanged. Checked before anything is cancelled.
+        let originalPairedLeg: ReconstructablePairedLeg | null = null;
         if (kind === 'OCO_REPLACE') {
+        const replacedComplexId = (pos as any).gtcComplexOrderId as string | undefined;
+        if (replacedComplexId) {
+          const resolution = resolvePairedLeg(pos.stopAssessment, replacedComplexId);
+          if (resolution.ok) {
+            setPhase('Re-reading the existing bracket...');
+            const live = await ttFetch(`/accounts/${pos.accountNumber}/complex-orders/${replacedComplexId}`, token)
+              .catch((readErr: any) => { throw new Error(`Could not re-read the bracket from TastyTrade (${readErr?.message ?? 'unknown error'}). No order was cancelled.`); });
+            const liveRefusal = liveStopRefusal(live?.data, resolution.leg);
+            if (liveRefusal) throw new Error(liveRefusal);
+            originalPairedLeg = resolution.leg;
+          }
+        }
         setPhase('Cancelling existing GTC order...');
         console.log('CANCEL EXISTING GTC ORDER:', pos.gtcOrderId);
         // Cancel via complex order endpoint if this is part of an OCO
@@ -7118,8 +7137,13 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
         const ocoBody = buildOcoBody(legs, gtcLimit, stopTrigger);
 
         try {
+          // GTC-REPLACE-0001: broker dry-run first (it cannot run while the
+          // original was working); a rejection goes to the restore path below.
           const ocoSubmission = await submitCloseOrderIfSafe(stopStructureGuardInput, stopLiveGateInput, async () =>
-            ttPostComplex(`/accounts/${pos.accountNumber}/complex-orders`, token, ocoBody)
+            submitAfterBrokerDryRun(ocoBody, {
+              dryRun: body => ttValidateOrder(`/accounts/${pos.accountNumber}/complex-orders`, token, body),
+              submit: body => ttPostComplex(`/accounts/${pos.accountNumber}/complex-orders`, token, body),
+            })
           );
           if (!ocoSubmission.submitted) {
             // A gate block leaves the position exactly as unprotected as a
@@ -7160,6 +7184,43 @@ function SetStopLossButtonInner({ pos, th }: { pos: Position; th: typeof THEMES[
           // recovery by re-placing the original order before reporting anything.
           if (!cancelSucceeded) throw placeErr;
           setPhase('OCO placement failed — restoring original order...');
+          if (originalPairedLeg && pos.gtcOrderPrice != null && pos.gtcOrderPrice > 0) {
+            // GTC-REPLACE-0001: restore the ORIGINAL bracket exactly (its
+            // profit target and its stop, type unchanged), not a converted stop.
+            try {
+              const originalTarget = buildTargetLimitBody(legs, pos.gtcOrderPrice);
+              const restoreOcoBody = buildExactOcoBody(originalTarget, originalPairedLeg);
+              const originalTargetGate: LiveCloseOrderSafetyInput = {
+                ...targetLiveGateInput,
+                closePricePointsPerUnit: pos.gtcOrderPrice,
+                actualOrder: { ...targetLiveGateInput.actualOrder, limitPricePointsPerUnit: pos.gtcOrderPrice },
+                displayedExpectedPnlDollars: pos.identity
+                  ? (pos.identity.entryPricePointsPerUnit - pos.gtcOrderPrice) * pos.identity.quantity * 100
+                  : 0,
+              };
+              const restored = await submitCloseOrderIfSafe(stopStructureGuardInput, originalTargetGate, async () =>
+                ttPostComplex(`/accounts/${pos.accountNumber}/complex-orders`, token, restoreOcoBody)
+              );
+              if (!restored.submitted) throw new Error(`Blocked by safety gate: ${restored.reason}`);
+              const ids = resolveOcoStopOrderId(restored.result as any);
+              await persistKeptStopIdentity(pos, ids);
+              setResult('error');
+              setResultMsg(
+                `OCO placement failed (${placeErr.message ?? 'unknown error'}). ` +
+                `The original bracket was restored exactly: profit target $${pos.gtcOrderPrice.toFixed(2)} and ` +
+                `${originalPairedLeg.orderType} stop at trigger $${originalPairedLeg.triggerPrice.toFixed(2)} (ID #${ids.complexOrderId ?? 'submitted'}).`
+              );
+            } catch (restoreErr: any) {
+              setResult('error');
+              setResultMsg(
+                `⚠ UNPROTECTED POSITION — OCO placement failed (${placeErr.message ?? 'unknown error'}) ` +
+                `AND restoring the original bracket also failed (${restoreErr.message ?? 'unknown error'}). ` +
+                `The original GTC order was already cancelled. ${pos.symbol} currently has no GTC or stop order ` +
+                `protecting it. Place a new stop or GTC manually in TastyTrade right away.`
+              );
+            }
+            return;
+          }
           try {
             const restoreBody = buildStopLimitBody(legs, stopTrigger);
             const restoreSubmission = await submitCloseOrderIfSafe(stopStructureGuardInput, stopLiveGateInput, async () =>
