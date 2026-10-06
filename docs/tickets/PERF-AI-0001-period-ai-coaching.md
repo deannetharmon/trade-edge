@@ -1,6 +1,6 @@
 # PERF-AI-0001 — AI coaching for the selected Performance period
 
-**Status (2026-10-06): scope approved by Dean, team aligned, D-SIZE decided. Diane mock https://claude.ai/artifact/ESGGSkjVfFh5CtXenDKwUq awaiting Dean and Ian sign-off; then build S1–S3.** Requested by Dean: an AI analysis of the selected period that helps trading habits and strategy, and is precise and confident.
+**Status (2026-10-06): BUILT (S1–S3), see "As built". Mock https://claude.ai/artifact/ESGGSkjVfFh5CtXenDKwUq (approved by Dean, with Ian's additions).** Requested by Dean: an AI analysis of the selected period that helps trading habits and strategy, and is precise and confident.
 
 ## Current state (as built, verified in code)
 
@@ -201,3 +201,32 @@
 4. **Assigned CSPs:** information only. Acceptable under DECIDE-0001, never a breach.
 
 Mock updated (version 2, same link).
+
+## As built (2026-10-06)
+
+- **S1** `lib/tradeLog/coachingInput.ts`: the only AI input.
+  - Habits with tiers and by-month trend; what-ifs; 25% sizing with overrides; break-even win rate; trade lines capped at 400.
+  - `lib/tradeLog/coachingNumberCheck.ts`: checks every $ figure and trade count in the answer.
+- **Golden fixture:** Dean's 2026-10-06 log (`lib/tradeLog/__tests__/fixtures/`), cross-checked by an independent Python calculation:
+  - 66 trades, +$2,449.69;
+  - beyond the stop: 5 trades, −$1,637.19; excess $402;
+  - opened inside 21 DTE: 11 trades, −$614.54;
+  - credit-to-width: at or above 1/3, 9 trades, −$981.61; below, 43 trades, +$425.90;
+  - target 22, early 17, inside the stop 22.
+- **S2** `lib/tradeLog/coachingPrompt.ts`: system prompt with the precision rules and a JSON answer contract.
+  - The AI writes the words; the app supplies every number on the cards and each change's dollars.
+  - gpt-5.6-terra in JSON mode; the `/api/analyze` route passes `response_format` through.
+  - One automatic retry on unreadable JSON or unverified figures, then a visible banner. Follow-up chat answers are checked too.
+- **S3** `features/performance/CoachingPanel.tsx`:
+  - The panel opens above the tab, only on click.
+  - If the period changes, the old AI text is hidden until Dean runs it again.
+  - The 25% rule card, with Review and Mark deliberate (`localStorage` `hunter-perf-size-overrides`), is on the tab's rule check, with anchors for "See rule card".
+  - The old side-drawer AI and its prompt are deleted from `app/performance/page.tsx`.
+- **Deviations from the mock:**
+  1. **Open positions context section not built:** the Performance page does not load positions. It moves to PERF-AI-0002, which needs them anyway.
+  2. **Early-close what-if dollars dropped (Alan):** without the price path we cannot know those trades would have reached 50%. Counts and average % of credit kept remain.
+  3. **The number check is strong for dollars and weak for small counts:** 1–20 almost always appear somewhere in DATA.
+  4. **The Trade Log AI button is unchanged,** as scoped out.
+- **Tests:**
+  - coachingInput 15, coachingPrompt 4, CoachingPanel 4 (render, retry and banner, AI error, empty period);
+  - related suites green (206); `tsc` clean.

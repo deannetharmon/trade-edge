@@ -2,7 +2,7 @@
 'use client';
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -27,6 +27,8 @@ import type { CreditSpreadEntrySnapshot } from '@/lib/entry-context/types';
 import { buildStrategyPerformanceReport } from '@/lib/performance/strategyPerformance';
 import { buildStrategyBreakdown } from '@/lib/tradeLog/strategyBreakdown';
 import { buildPerformanceReport } from '@/lib/tradeLog/performanceMetrics';
+import { buildCoachingInput } from '@/lib/tradeLog/coachingInput';
+import { CoachingPanel } from '@/features/performance/CoachingPanel';
 import { extractMoneyMovements, periodAccountProfit, todayNewYork, type BalanceDayPoint, type MoneyMovement } from '@/lib/portfolio-data/balancePerformance';
 import { PerformanceReportView } from '@/features/performance/PerformanceReportView';
 
@@ -45,8 +47,8 @@ function presetDates(preset: PeriodPreset, today: string): { from: string; to: s
   return { from: back(12), to: today };
 }
 const LS_PERF_PERIOD = 'hunter-perf-period';
+const LS_PERF_SIZE_OVERRIDES = 'hunter-perf-size-overrides';
 
-interface ChatMessage { role: 'user' | 'assistant'; content: string; }
 
 // ── Widget config ─────────────────────────────────────────────────────────
 type WidgetId =
@@ -89,250 +91,6 @@ function getSavedWidgets(): WidgetConfig[] {
     const merged = [...parsed, ...DEFAULT_WIDGETS.filter(w => !savedIds.has(w.id))];
     return merged.sort((a, b) => a.order - b.order);
   } catch { return DEFAULT_WIDGETS; }
-}
-
-// ── AI ────────────────────────────────────────────────────────────────────
-const AI_SYSTEM_PROMPT = `You are a brutally honest options trading coach reviewing a trader's actual closed trade history. Your job is to find real patterns, call out mistakes without softening them, and give specific actionable advice.
-
-Do not hedge. Do not add disclaimers. If the data shows a clear problem, say so directly. If a pattern is costing money, name it explicitly. Be direct like a mentor who respects the trader enough to tell them the truth.
-
-Respond in clear conversational prose. No JSON. No markdown headers. Use short paragraphs. When you cite a stat, be specific with numbers.`;
-
-function buildPerformanceAnalysisPrompt(trades: ClosedTrade[], range: TimeRange): string {
-  const total = trades.length;
-  if (total === 0) return 'No closed trades found in this period.';
-  const wins    = trades.filter(t => t.outcome === 'WIN');
-  const losses  = trades.filter(t => t.outcome === 'LOSS');
-  const winRate = Math.round((wins.length / total) * 100);
-  const totalPnl = trades.reduce((s, t) => s + t.pnl, 0);
-  const avgWin  = wins.length   > 0 ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length : 0;
-  const avgLoss = losses.length > 0 ? losses.reduce((s, t) => s + t.pnl, 0) / losses.length : 0;
-  const avgHold = Math.round(trades.reduce((s, t) => s + t.holdDays, 0) / total);
-  const byStrategy = buildStrategyBreakdown(trades).map(r =>
-    `${r.strategy}: ${r.total} trades, ${Math.round(r.winRate * 100)}% win, $${r.pnl.toFixed(0)} total, avg ${r.avgPnlPct.toFixed(1)}%`);
-  const symMap: Record<string, { count: number; wins: number; pnl: number }> = {};
-  for (const t of trades) {
-    if (!symMap[t.symbol]) symMap[t.symbol] = { count: 0, wins: 0, pnl: 0 };
-    symMap[t.symbol].count++; if (t.outcome === 'WIN') symMap[t.symbol].wins++; symMap[t.symbol].pnl += t.pnl;
-  }
-  const bySymbol = Object.entries(symMap).sort((a, b) => b[1].pnl - a[1].pnl)
-    .map(([sym, v]) => `${sym}: ${v.count} trades, ${Math.round(v.wins/v.count*100)}% win, $${v.pnl.toFixed(0)}`);
-  const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const dowMap: Record<number, { count: number; wins: number; pnl: number }> = {};
-  for (const t of trades) {
-    if (t.openDow == null || t.openDow < 0) continue;
-    if (!dowMap[t.openDow]) dowMap[t.openDow] = { count: 0, wins: 0, pnl: 0 };
-    dowMap[t.openDow].count++; if (t.outcome === 'WIN') dowMap[t.openDow].wins++; dowMap[t.openDow].pnl += t.pnl;
-  }
-  const byDow = Object.entries(dowMap).sort((a, b) => Number(a[0]) - Number(b[0]))
-    .map(([d, v]) => `${DOW[Number(d)]}: ${v.count} trades, ${Math.round(v.wins/v.count*100)}% win, $${v.pnl.toFixed(0)}`);
-  const timeBuckets = [
-    { label: 'Open (9:30–10:30)', min: 570, max: 630 },
-    { label: 'Morning (10:30–12:00)', min: 630, max: 720 },
-    { label: 'Midday (12:00–14:00)', min: 720, max: 840 },
-    { label: 'Afternoon (14:00–15:00)', min: 840, max: 900 },
-    { label: 'Close (15:00–16:00)', min: 900, max: 960 },
-  ];
-  const byTime = timeBuckets.map(b => {
-    const g = trades.filter(t => {
-      if (!t.openTime) return false;
-      const [h, m] = t.openTime.split(':').map(Number); const mins = h * 60 + m;
-      return mins >= b.min && mins < b.max;
-    });
-    if (g.length === 0) return null;
-    const w = g.filter(t => t.outcome === 'WIN').length;
-    return `${b.label}: ${g.length} trades, ${Math.round(w/g.length*100)}% win, $${g.reduce((s,t) => s+t.pnl, 0).toFixed(0)}`;
-  }).filter(Boolean);
-  const sorted = [...trades].sort((a, b) => a.closeDate.localeCompare(b.closeDate));
-  let revengeTrades = 0;
-  for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i-1].outcome === 'LOSS' && sorted[i].outcome === 'LOSS') {
-      const days = Math.round((new Date(sorted[i].openDate).getTime() - new Date(sorted[i-1].closeDate).getTime()) / 86400000);
-      if (days <= 2) revengeTrades++;
-    }
-  }
-  return `Analyze this trader's performance data from the last ${range === '3m' ? '3 months' : range === '6m' ? '6 months' : '12 months'} and give brutally honest coaching feedback.
-
-OVERALL (${total} closed trades):
-Win rate: ${winRate}% | Total P&L: $${totalPnl.toFixed(0)} | Avg win: $${avgWin.toFixed(0)} | Avg loss: $${avgLoss.toFixed(0)} | Avg hold: ${avgHold} days
-
-BY STRATEGY:
-${byStrategy.join('\n')}
-
-BY SYMBOL (best to worst P&L):
-${bySymbol.join('\n')}
-
-ENTRY DAY OF WEEK:
-${byDow.length > 0 ? byDow.join('\n') : 'No day data available'}
-
-ENTRY TIME OF DAY:
-${byTime.length > 0 ? byTime.join('\n') : 'No time data available'}
-
-BEHAVIORAL FLAGS:
-Potential revenge trades: ${revengeTrades}
-
-EXIT TYPE BREAKDOWN:
-${(() => {
-  const exitLabels: Record<string, string> = {
-    TARGET_HIT:     'Target hit (50–75% profit — disciplined)',
-    SCRATCH_WIN:    'Partial profit (positive return below target)',
-    HELD_TO_EXPIRY: 'Held to expiry (win but gamma-risky)',
-    MANAGED_LOSS:   'Managed loss (cut at planned stop — good)',
-    TIME_STOP:      'Time stop (closed at ≤21 DTE)',
-    FAST_CUT:       'Fast cut (small loss, exit ≤2 days)',
-    MAX_LOSS:       'Max loss (>150% or >$400, or held too long)',
-  };
-  const types = ['TARGET_HIT','SCRATCH_WIN','HELD_TO_EXPIRY','MANAGED_LOSS','TIME_STOP','FAST_CUT','MAX_LOSS'];
-  return types.map(et => {
-    const g = trades.filter(t => t.exitType === et);
-    if (g.length === 0) return null;
-    const w = g.filter(t => t.outcome === 'WIN').length;
-    const pnl = g.reduce((s, t) => s + t.pnl, 0);
-    const avgH = Math.round(g.reduce((s, t) => s + t.holdDays, 0) / g.length);
-    return `${exitLabels[et]}: ${g.length} trades, ${Math.round(w/g.length*100)}% win, $${pnl.toFixed(0)} total, avg ${avgH}d hold`;
-  }).filter(Boolean).join('\n');
-})()}
-
-LOSS DETAIL (each losing trade with context):
-${trades.filter(t => t.outcome === 'LOSS').map(t =>
-  `${t.symbol} ${t.strategy}: held ${t.holdDays}d, ${t.dteAtClose}DTE remaining at close, loss ${t.pnlPct.toFixed(0)}% of credit [${t.exitType}]`
-).join('\n') || 'No losses in this period'}
-
-Lead with exit behavior — were fast cuts disciplined or panic? Which losses came from holding too long? Which were unavoidable? Then cover strategy patterns, entry timing, and finish with 3 concrete changes to make immediately. Be direct. Start with the most important finding.`;
-}
-
-// PERF-AI-0001 (Dean, 2026-10-06): gpt-5.6-terra. The route falls back to the configured model if it is unavailable;
-// the model that actually answered is shown in the panel header. Reasoning models count thinking in the token budget.
-const PERFORMANCE_AI_MODEL = 'gpt-5.6-terra';
-
-async function callAIWithHistory(messages: ChatMessage[], system: string): Promise<{ text: string; model: string | null }> {
-  const res = await fetch('/api/analyze', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: PERFORMANCE_AI_MODEL, max_tokens: 8000, system, messages }),
-  });
-  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error ?? `API error: ${res.status}`); }
-  const data = await res.json();
-  return { text: data?.content?.find((b: any) => b.type === 'text')?.text ?? '', model: typeof data?.model === 'string' ? data.model : null };
-}
-
-// ── AI Chat Panel ─────────────────────────────────────────────────────────
-function AIChatPanel({ trades, range, th, onClose }: {
-  trades: ClosedTrade[]; range: TimeRange; th: typeof THEMES[Theme]; onClose: () => void;
-}) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput]       = useState('');
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
-  const [initializing, setInitializing] = useState(true);
-  const [answeredBy, setAnsweredBy] = useState<string | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef  = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
-
-  useEffect(() => {
-    const runInitial = async () => {
-      setInitializing(true);
-      const prompt = buildPerformanceAnalysisPrompt(trades, range);
-      try {
-        const reply = await callAIWithHistory([{ role: 'user', content: prompt }], AI_SYSTEM_PROMPT);
-        setAnsweredBy(reply.model);
-        setMessages([{ role: 'assistant', content: reply.text }]);
-      } catch (e: any) { setError(e.message); }
-      finally { setInitializing(false); setTimeout(() => inputRef.current?.focus(), 100); }
-    };
-    runInitial();
-  }, []);
-
-  const send = async () => {
-    const text = input.trim(); if (!text || loading) return;
-    setInput(''); setError('');
-    const next: ChatMessage[] = [...messages, { role: 'user', content: text }];
-    setMessages(next); setLoading(true);
-    try {
-      const reply = await callAIWithHistory(next, AI_SYSTEM_PROMPT);
-      setAnsweredBy(reply.model);
-      setMessages(prev => [...prev, { role: 'assistant', content: reply.text }]);
-    } catch (e: any) { setError(e.message); }
-    finally { setLoading(false); setTimeout(() => inputRef.current?.focus(), 50); }
-  };
-
-  const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-  };
-
-  const suggestions = [
-    'Were my fast cuts the right call?',
-    'Which losses were avoidable?',
-    'Am I holding losers too long?',
-    'Which strategy should I drop?',
-    'What should I change immediately?',
-  ];
-
-  return (
-    <div className={`fixed top-0 right-0 h-full w-[480px] max-w-[95vw] ${th.sidebar} border-l ${th.border} flex flex-col z-50 shadow-2xl`}
-         style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
-      <div className={`flex items-center justify-between px-5 py-4 border-b ${th.border} shrink-0`}>
-        <div>
-          <p className={`text-sm font-bold ${th.text} tracking-wider`}>◈ AI COACHING</p>
-          <p className={`text-[10px] ${th.textFaint} mt-0.5`}>{trades.length} trades · {range === '3m' ? '3 months' : range === '6m' ? '6 months' : '12 months'}{answeredBy ? ` · model: ${answeredBy}` : ''}</p>
-        </div>
-        <button onClick={onClose} className={`${th.textFaint} hover:${th.text} text-xl leading-none`}>✕</button>
-      </div>
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-        {initializing && (
-          <div className="flex items-center gap-3 py-8 justify-center">
-            <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            <p className={`text-xs ${th.textFaint}`}>Analyzing your performance data...</p>
-          </div>
-        )}
-        {messages.map((m, i) => (
-          <div key={i} className={`flex gap-3 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            {m.role === 'assistant' && <span className="text-indigo-400 text-[11px] mt-1 shrink-0 font-bold">◈</span>}
-            <div className={`rounded-2xl px-4 py-3 text-[12px] leading-relaxed whitespace-pre-wrap max-w-[92%] ${
-              m.role === 'user' ? 'ac-bg-20 border ac-border/30 text-blue-100 ml-auto' : `${th.card} border ${th.border} ${th.textMuted}`
-            }`}>{m.content}</div>
-          </div>
-        ))}
-        {loading && (
-          <div className="flex gap-3 justify-start">
-            <span className="text-indigo-400 text-[11px] mt-1 shrink-0 font-bold">◈</span>
-            <div className={`${th.card} border ${th.border} rounded-2xl px-4 py-3`}>
-              <div className="flex gap-1 items-center h-4">
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-            </div>
-          </div>
-        )}
-        {error && <p className="text-[10px] text-red-400 px-1">{error} — <button onClick={send} className="underline">retry</button></p>}
-        <div ref={bottomRef} />
-      </div>
-      {messages.length === 1 && !initializing && (
-        <div className="px-5 pb-3 flex flex-wrap gap-1.5 shrink-0">
-          {suggestions.map((s, i) => (
-            <button key={i} onClick={() => { setInput(s); setTimeout(() => inputRef.current?.focus(), 50); }}
-              className={`text-[10px] px-2.5 py-1 rounded-full border ${th.border} ${th.textFaint} hover:border-indigo-500 hover:text-indigo-400 transition-colors`}>
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className={`px-5 py-4 border-t ${th.border} shrink-0`}>
-        <div className="flex items-end gap-2">
-          <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKey}
-            placeholder="Ask a follow-up question..." rows={2}
-            className={`flex-1 resize-none text-xs px-3 py-2.5 border ${th.inputBorder} ${th.input} ${th.text} rounded-xl focus:outline-none focus:border-indigo-500`} />
-          <button onClick={send} disabled={loading || !input.trim()}
-            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold tracking-wider transition-colors shrink-0">
-            Send
-          </button>
-        </div>
-        <p className={`text-[9px] ${th.textFaint} mt-1.5`}>Enter to send · Shift+Enter for new line</p>
-      </div>
-    </div>
-  );
 }
 
 // ── Formatting ────────────────────────────────────────────────────────────
@@ -1048,7 +806,21 @@ export default function PerformancePage() {
     const inPeriod = trades.filter(t => t.closeDate >= period.from && t.closeDate <= period.to).map(t => ({ ...t, excluded: excludedIds.has(t.id) }));
     return buildPerformanceReport(inPeriod);
   }, [trades, period.from, period.to]);
-  const accountProfit = balanceHistory == null ? null : periodAccountProfit(balanceHistory, movements, period.from, period.to);
+  const accountProfit = useMemo(() => (balanceHistory == null ? null : periodAccountProfit(balanceHistory, movements, period.from, period.to)), [balanceHistory, movements, period.from, period.to]);
+
+  // PERF-AI-0001: per-trade "deliberate" overrides of the 25%-of-net-liq rule (Dean); review only, never blocking.
+  const [sizeOverrides, setSizeOverrides] = useState<Set<string>>(new Set());
+  useEffect(() => { try { const raw = localStorage.getItem(LS_PERF_SIZE_OVERRIDES); if (raw) setSizeOverrides(new Set<string>(JSON.parse(raw))); } catch {} }, []);
+  const markDeliberate = (id: string) => setSizeOverrides(prev => {
+    const next = new Set(prev); next.add(id);
+    try { localStorage.setItem(LS_PERF_SIZE_OVERRIDES, JSON.stringify(Array.from(next))); } catch {}
+    return next;
+  });
+  const coachingInput = useMemo(() => buildCoachingInput({
+    report, from: period.from, to: period.to, label: `${period.from} to ${period.to}`,
+    accountProfit: accountProfit ?? { status: 'UNAVAILABLE', reason: 'Account balance history is still loading.' },
+    balanceHistory: balanceHistory ?? [], sizeOverrides,
+  }), [report, period.from, period.to, accountProfit, balanceHistory, sizeOverrides]);
 
   // Load widget config from localStorage on mount
   useEffect(() => { setWidgets(getSavedWidgets()); }, []);
@@ -1163,7 +935,7 @@ export default function PerformancePage() {
       </div>
 
       {/* Sticky controls bar */}
-      <div className={`${th.header} border-b ${th.border} px-6 py-3 sticky top-[57px] z-40 transition-all duration-300 ${showAI ? 'mr-[480px]' : ''}`}>
+      <div className={`${th.header} border-b ${th.border} px-6 py-3 sticky top-[57px] z-40 transition-all duration-300`}>
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-1 flex-wrap">
             {PERIOD_PRESETS.map(([p, label]) => (
@@ -1191,7 +963,7 @@ export default function PerformancePage() {
             {trades.length > 0 && (
               <button onClick={() => setShowAI(v => !v)}
                 className={`text-[10px] px-3 py-1.5 border rounded font-bold tracking-wider transition-colors ${showAI ? 'border-indigo-500 text-indigo-400 bg-indigo-500/10' : 'border-indigo-700 text-indigo-400 hover:border-indigo-500 hover:bg-indigo-500/10'}`}>
-                ◈ AI Analysis
+                ◈ AI Coaching
               </button>
             )}
 
@@ -1203,7 +975,7 @@ export default function PerformancePage() {
         </div>
       </div>{/* end sticky controls */}
 
-      <div className={`px-6 py-4 max-w-[1400px] mx-auto space-y-4 transition-all duration-300 ${showAI ? 'mr-[480px]' : ''}`}>
+      <div className={`px-6 py-4 max-w-[1400px] mx-auto space-y-4 transition-all duration-300`}>
 
         {/* Widget configurator panel */}
         {showConfig && (
@@ -1238,6 +1010,10 @@ export default function PerformancePage() {
           </div>
         )}
 
+        {showAI && !loading && !error && trades.length > 0 && (
+          <CoachingPanel th={th} input={coachingInput} onClose={() => setShowAI(false)} />
+        )}
+
         {!loading && !error && trades.length > 0 && (
           <PerformanceReportView
             th={th}
@@ -1245,6 +1021,8 @@ export default function PerformancePage() {
             accountProfit={accountProfit}
             periodLabel={`${period.from} to ${period.to}`}
             onOpenTicker={symbol => { try { localStorage.setItem('hunter-tl-f-symbol', symbol); } catch {} window.location.href = '/trade-log'; }}
+            positionSize={coachingInput.habits.positionSize}
+            onMarkDeliberate={markDeliberate}
           />
         )}
 
@@ -1257,9 +1035,6 @@ export default function PerformancePage() {
         )}
       </div>
 
-      {showAI && (
-        <AIChatPanel trades={report.included} range={range} th={th} onClose={() => setShowAI(false)} />
-      )}
     </div>
   );
 }

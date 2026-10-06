@@ -7,6 +7,7 @@
 
 import type { PerformanceReport, GroupStats, MethodExit } from '@/lib/tradeLog/performanceMetrics';
 import type { PeriodAccountProfit } from '@/lib/portfolio-data/balancePerformance';
+import type { CoachingInput } from '@/lib/tradeLog/coachingInput';
 
 const STRATEGY_LABEL: Record<string, string> = {
   CSP: 'Cash-secured puts', BPS: 'Bull put spreads', BCS: 'Bear call spreads', IC: 'Iron condors', SHORT_CALL: 'Short calls', SPREAD: 'Other spreads', OTHER: 'Other',
@@ -60,12 +61,15 @@ function StatRow({ name, s }: { name: string; s: GroupStats }) {
   );
 }
 
-export function PerformanceReportView({ th, report, accountProfit, periodLabel, onOpenTicker }: {
+export function PerformanceReportView({ th, report, accountProfit, periodLabel, onOpenTicker, positionSize, onMarkDeliberate }: {
   th: Theme;
   report: PerformanceReport;
   accountProfit: PeriodAccountProfit | null;
   periodLabel: string;
   onOpenTicker: (symbol: string) => void;
+  /** PERF-AI-0001: 25%-of-net-liq rule (Dean); review only, never blocking, override per trade. */
+  positionSize?: CoachingInput['habits']['positionSize'];
+  onMarkDeliberate?: (tradeId: string) => void;
 }) {
   const h = report.headline;
   const realized = h.pnl;
@@ -110,19 +114,39 @@ export function PerformanceReportView({ th, report, accountProfit, periodLabel, 
       <Panel th={th} title="Rule check" sub="Your rules: close at 50% of credit, stop at 2× credit, manage spreads at 21 DTE (CSPs and covered calls exempt).">
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
           {[
-            { t: 'Lost more than the 2× stop', n: `${r.beyondStop.trades} trades · ${money(r.beyondStop.pnl)}`, d: `${money(-r.beyondStop.excessLoss)} beyond where the stop would have closed${r.beyondStop.symbols.length ? ` · ${r.beyondStop.symbols.join(', ')}` : ''}`, alert: r.beyondStop.trades > 0, c: tone(r.beyondStop.pnl) },
-            { t: 'Losses inside the 2× stop', n: `${report.exits.STOPPED.trades} trades · ${money(report.exits.STOPPED.pnl)}`, d: `average loss ${money(h.avgLoss)} vs average win ${money(h.avgWin, false)}`, alert: report.exits.STOPPED.trades > 0, c: tone(report.exits.STOPPED.pnl) },
-            { t: 'Spreads opened inside 21 DTE', n: `${r.enteredInside21Dte.trades} trades · ${money(r.enteredInside21Dte.pnl)}`, d: 'entries the 21-DTE rule would not take', alert: r.enteredInside21Dte.trades > 0, c: tone(r.enteredInside21Dte.pnl) },
-            { t: 'Closed at the 50% target', n: `${r.targetHit} trades · ${money(report.exits.TARGET.pnl)}`, d: `${report.exits.EARLY_PROFIT.trades} more closed early (${money(report.exits.EARLY_PROFIT.pnl)})`, alert: false, c: tone(report.exits.TARGET.pnl) },
-            { t: 'Spreads below 1/3 credit-to-width', n: `${r.creditToWidth.below.trades} trades · ${money(r.creditToWidth.below.pnl)}`, d: `${r.creditToWidth.atOrAbove.trades} at or above 1/3: ${money(r.creditToWidth.atOrAbove.pnl)}`, alert: r.creditToWidth.below.trades > 0, c: tone(r.creditToWidth.below.pnl) },
-            { t: 'Spreads held past 21 DTE', n: `${r.spreadsHeldPast21Dte.trades} trades · ${money(r.spreadsHeldPast21Dte.pnl)}`, d: 'held into the management window', alert: false, c: tone(r.spreadsHeldPast21Dte.pnl) },
+            { id: 'rule-beyondStop', t: 'Lost more than the 2× stop', n: `${r.beyondStop.trades} trades · ${money(r.beyondStop.pnl)}`, d: `${money(-r.beyondStop.excessLoss)} beyond where the stop would have closed${r.beyondStop.symbols.length ? ` · ${r.beyondStop.symbols.join(', ')}` : ''}`, alert: r.beyondStop.trades > 0, c: tone(r.beyondStop.pnl) },
+            { id: 'rule-insideStop', t: 'Losses inside the 2× stop', n: `${report.exits.STOPPED.trades} trades · ${money(report.exits.STOPPED.pnl)}`, d: `average loss ${money(h.avgLoss)} vs average win ${money(h.avgWin, false)}`, alert: report.exits.STOPPED.trades > 0, c: tone(report.exits.STOPPED.pnl) },
+            { id: 'rule-openedInside21Dte', t: 'Spreads opened inside 21 DTE', n: `${r.enteredInside21Dte.trades} trades · ${money(r.enteredInside21Dte.pnl)}`, d: 'entries the 21-DTE rule would not take', alert: r.enteredInside21Dte.trades > 0, c: tone(r.enteredInside21Dte.pnl) },
+            { id: 'rule-target', t: 'Closed at the 50% target', n: `${r.targetHit} trades · ${money(report.exits.TARGET.pnl)}`, d: `${report.exits.EARLY_PROFIT.trades} more closed early (${money(report.exits.EARLY_PROFIT.pnl)})`, alert: false, c: tone(report.exits.TARGET.pnl) },
+            { id: 'rule-creditToWidth', t: 'Spreads below 1/3 credit-to-width', n: `${r.creditToWidth.below.trades} trades · ${money(r.creditToWidth.below.pnl)}`, d: `${r.creditToWidth.atOrAbove.trades} at or above 1/3: ${money(r.creditToWidth.atOrAbove.pnl)}`, alert: r.creditToWidth.below.trades > 0, c: tone(r.creditToWidth.below.pnl) },
+            { id: 'rule-spreadsHeldPast21Dte', t: 'Spreads held past 21 DTE', n: `${r.spreadsHeldPast21Dte.trades} trades · ${money(r.spreadsHeldPast21Dte.pnl)}`, d: 'held into the management window', alert: false, c: tone(r.spreadsHeldPast21Dte.pnl) },
           ].map((x) => (
-            <div key={x.t} className={`border rounded-lg p-3 ${x.alert ? 'border-amber-500/50' : th.border}`}>
+            <div key={x.t} id={x.id} className={`border rounded-lg p-3 scroll-mt-32 ${x.alert ? 'border-amber-500/50' : th.border}`}>
               <p className={`text-[11px] ${th.textMuted}`}>{x.t}</p>
               <p className={`text-base font-bold tabular-nums mt-1 ${x.c}`}>{x.n}</p>
               <p className={`text-[10px] ${th.textFaint} mt-1`}>{x.d}</p>
             </div>
           ))}
+          {positionSize && (
+            <div id="rule-positionSize" className={`border rounded-lg p-3 scroll-mt-32 ${positionSize.trades > 0 ? 'border-amber-500/50' : th.border}`}>
+              <p className={`text-[11px] ${th.textMuted}`}>Positions over {positionSize.limitPct}% of net liq</p>
+              <p className={`text-base font-bold tabular-nums mt-1 ${th.text}`}>{positionSize.trades} trade{positionSize.trades === 1 ? '' : 's'}{positionSize.oversize[0] ? ` · ${positionSize.oversize[0].symbol} ${positionSize.oversize[0].pct.toFixed(0)}%` : ''}</p>
+              <p className={`text-[10px] ${th.textFaint} mt-1`}>{positionSize.overridden} marked deliberate{positionSize.notChecked ? ` · ${positionSize.notChecked} not checked (no saved balance at open)` : ''}</p>
+              {positionSize.oversize.length > 0 && onMarkDeliberate && (
+                <details className="mt-2">
+                  <summary className={`text-[10px] cursor-pointer ${th.textMuted}`}>Review</summary>
+                  <ul className="mt-1 space-y-1">
+                    {positionSize.oversize.map((o) => (
+                      <li key={o.id} className={`flex items-center justify-between gap-2 text-[10px] ${th.textFaint}`}>
+                        <span className="tabular-nums">{o.symbol} · {o.pct.toFixed(1)}% · {money(o.capital, false)} of {money(o.netLiq, false)}</span>
+                        <button type="button" onClick={() => onMarkDeliberate(o.id)} className={`px-2 py-0.5 border ${th.border} rounded ${th.textMuted} hover:text-white`}>Mark deliberate</button>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
         </div>
       </Panel>
 

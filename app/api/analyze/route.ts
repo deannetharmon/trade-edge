@@ -78,7 +78,7 @@ function extractResponsesText(data: any): string {
     .join('');
 }
 
-async function callChatCompletions(apiKey: string, model: string, messages: any[], maxTokens: number) {
+async function callChatCompletions(apiKey: string, model: string, messages: any[], maxTokens: number, responseFormat?: unknown) {
   const res = await fetch(OPENAI_API, {
     method: 'POST',
     headers: {
@@ -90,6 +90,8 @@ async function callChatCompletions(apiKey: string, model: string, messages: any[
       // OpenAI's current parameter; gpt-5.x rejects max_tokens (a 400 that silently fell back to the old model).
       max_completion_tokens: maxTokens,
       messages,
+      // PERF-AI-0001: optional JSON mode ({ type: 'json_object' }) for structured answers.
+      ...(responseFormat ? { response_format: responseFormat } : {}),
     }),
   });
 
@@ -135,21 +137,22 @@ async function handleStandard(body: any, apiKey: string) {
   const model = selectedModel(body, 'analysis');
   const fallback = fallbackModel(body, 'analysis');
   const maxTokens = body.max_tokens ?? 1000;
+  const responseFormat = body.response_format?.type === 'json_object' ? { type: 'json_object' } : undefined;
 
   try {
-    let { res, data } = await callChatCompletions(apiKey, model, messages, maxTokens);
+    let { res, data } = await callChatCompletions(apiKey, model, messages, maxTokens, responseFormat);
 
     if (!res.ok) {
       const message = data?.error?.message ?? `OpenAI error ${res.status}`;
       if (shouldRetryWithFallback(res.status, message, model, fallback)) {
-        ({ res, data } = await callChatCompletions(apiKey, fallback, messages, maxTokens));
+        ({ res, data } = await callChatCompletions(apiKey, fallback, messages, maxTokens, responseFormat));
       }
     }
 
     if (!res.ok && fallback !== SAFE_FALLBACK_MODEL) {
       const message = data?.error?.message ?? `OpenAI error ${res.status}`;
       if (shouldRetryWithFallback(res.status, message, fallback, SAFE_FALLBACK_MODEL)) {
-        ({ res, data } = await callChatCompletions(apiKey, SAFE_FALLBACK_MODEL, messages, maxTokens));
+        ({ res, data } = await callChatCompletions(apiKey, SAFE_FALLBACK_MODEL, messages, maxTokens, responseFormat));
       }
     }
 
