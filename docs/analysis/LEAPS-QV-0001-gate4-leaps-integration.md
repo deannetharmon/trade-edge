@@ -1,6 +1,6 @@
 # LEAPS-QV-0001 Gate 4 — LEAPS Integration (specification and review package)
 
-**Status: SPECIFICATION ONLY — REVISION 2 IN REVIEW (review round 1 returned CHANGES REQUIRED at `6d7858c687470b7798f694771b64bb13720fcefb`; revision 1 at `1fd91b220afc7672ee8e6aea0c236dcdd18c5872` returned narrow corrections; revision 2 response in Section 17). Gate 4 IMPLEMENTATION IS BLOCKED.** Baseline: `d25631384611aeaa8ccfce86328ba746bca3bb7f` (Gate 2c CLOSED, Gate 3 CLOSED). No reviewer approval is recorded in this document; every threshold, weight and tie-break below is a **PROPOSAL** marked `[IAN]` where it needs Ian's ruling, `[QUINN]` for architecture/test questions, `[PAUL]` for scope, `[FRANK]` for authorization.
+**Status: SPECIFICATION ONLY — REVISION 4 (2026-10-06): provider audit PERFORMED (three real captures, findings in `docs/analysis/LEAPS-QV-0001-gate4a-provider-audit-findings.md`); Ian, Quinn and Paul rulings on the audit's open items recorded in Section 17, Revision 4. Gate 4 IMPLEMENTATION IS BLOCKED** until Paul authorizes it (Section 16, F1) and Ian rules on the new item I12. Earlier history: review round 1 returned CHANGES REQUIRED at `6d7858c687470b7798f694771b64bb13720fcefb`; revision 1 at `1fd91b220afc7672ee8e6aea0c236dcdd18c5872` returned narrow corrections; revisions 2-3 in Section 17. Baseline: `d25631384611aeaa8ccfce86328ba746bca3bb7f` (Gate 2c CLOSED, Gate 3 CLOSED). No reviewer approval is recorded in this document; every threshold, weight and tie-break below is a **PROPOSAL** marked `[IAN]` where it needs Ian's ruling, `[QUINN]` for architecture/test questions, `[PAUL]` for scope, `[FRANK]` for authorization.
 
 Gate 5 owns Bear/Base/Bull scenarios. This document contains no scenario engine, QV UI, persistence, sizing, execution, rolling or notification design (Section 15 lists the interfaces Gate 4 exposes so those gates can consume it without rework).
 
@@ -350,7 +350,23 @@ Score: cost 35×(1−13.793103/30)=18.908046; carry 15×(1−6.896552/20)=9.8275
 ## 11. Dependencies, data audit, limits
 
 ### 11.1 Provider data audit (Gate 4a — required before coding) `[QUINN]` `[IAN]`
-**Status: NOT PERFORMED.** (Capture tooling prepared and validated with synthetic data only: `scripts/leaps-provider-audit/leaps-provider-audit.js`, runbook `docs/analysis/LEAPS-QV-0001-gate4a-provider-audit-runbook.md`. Not provider evidence; the audit stays NOT PERFORMED until real captures are reviewed.) TastyTrade is reached browser-side with the user's own token; this session has no authorized read-only provider access and the sandbox cannot reach the provider, and credentials must never be committed. The audit therefore needs a person with authorized access (or a session linked to Dean's browser) to run a read-only capture, with responses sanitized (no tokens, headers, account numbers; only instrument and market-data fields) and committed as fixtures under `lib/discovery/leaps/__fixtures__/`.
+**Status: PERFORMED 2026-10-06** — weekend, regular-hours and after-hours captures of 8 underlyings, reviewed in `docs/analysis/LEAPS-QV-0001-gate4a-provider-audit-findings.md`. Outcome per item (the original checklist and blocking table below are kept for the record):
+
+| # | Outcome |
+|---|---|
+| 1 | Nested chain: one item per underlying, `root-symbol`, `option-chain-type`, `shares-per-contract`, `deliverables`, `tick-sizes`; expirations carry `expiration-type`, `settlement-type`. **Resolved** for standard roots; no adjusted root observed (handled by I8 ruling: refuse). |
+| 2 | Bulk instrument endpoint **403** (OAuth scope); single `/instruments/equity-options/{OCC}` lookups return `shares-per-contract`, `root-symbol`, `option-chain-type`. The nested chain's `deliverables` record is the deliverable evidence (I8). **Resolved.** |
+| 3a | `bid`, `ask`, `delta`, `open-interest` present on 100% of rows. **Resolved.** Numbers are strings except `open-interest`. |
+| 3b | `updated-at`: ISO 8601 UTC with milliseconds; live within seconds during the session. **Resolved.** |
+| 3c | **No delayed-feed flag exists.** The DELAYED mode cannot be proven and is removed (I6). |
+| 3d | `volatility` is a **fraction** (0.63 = 63%), verified against displayed IV. |
+| 3e | `theta`, `vega` 100%; `volume`, `last`, `open`, `prev-close` absent on contracts not traded that day. Non-blocking. |
+| 4 | Underlying `last`, `close` (+`close-price-type`), `updated-at`. **The underlying keeps updating after the close (extended/overnight) while options do not.** |
+| 5 | Option quotes freeze outside the session but are **re-stamped about 20:00 ET** (Fri 19:49-19:59, Mon 20:00). `close` appears on option rows only after a session. New item **I12**. |
+| 6 | Every 100-symbol chunk returned complete (0 missing, 0 duplicate) in all captures; failure paths remain synthetic-test only. |
+| 7 | Expirations in window: 2-6 (expiration cap of 6 never binds). In-window calls per underlying 122-1,564; calls below spot per expiration 11-183 (a 40-strike cap would bind on META, NFLX, SNDK). Caps revised (Q3). |
+
+(Capture tooling: `scripts/leaps-provider-audit/leaps-provider-audit.js`, runbook `docs/analysis/LEAPS-QV-0001-gate4a-provider-audit-runbook.md`. Raw captures are account-scoped and not committed; sanitized fixtures for `lib/discovery/leaps/__fixtures__/` are built from them in 4a.) TastyTrade is reached browser-side with the user's own token; this session has no authorized read-only provider access and the sandbox cannot reach the provider, and credentials must never be committed. The audit therefore needs a person with authorized access (or a session linked to Dean's browser) to run a read-only capture, with responses sanitized (no tokens, headers, account numbers; only instrument and market-data fields) and committed as fixtures under `lib/discovery/leaps/__fixtures__/`.
 
 **Specific missing evidence:**
 1. `/option-chains/{symbol}/nested`: which per-expiration / per-strike fields exist (`shares-per-contract`, root symbol, expiration type, settlement type) and their values for a standard and, if obtainable, an adjusted/non-standard contract.
@@ -430,14 +446,17 @@ One matrix replaces the earlier per-reviewer lists. Every value is **PROPOSED**;
 | I3 | Ian | Entry price | mid, with the ask-based breakeven as a sensitivity | ask, or mid only | Gate 2 and Find LEAPS convention; no price labelled executable | 4b |
 | I4 | Ian | Observable-only metrics | volume, debit, leverage, theta, vega, IV (no gate) | add a leverage gate | Leverage is not fixed by delta and extrinsic alone (8.4); avoid an untested investment constraint | 4b |
 | I5 | Ian | Ranking weights and form | cost 35, carry 15, breakeven 20, liquidity 30; quantized comparator | merge cost+breakeven (70 points follow extrinsic) or drop carry (maturity bias) | Overlap (8.2) and bias (8.3) are shown with matched examples; Ian decides whether acceptable | 4b |
-| I6 | Ian | Quote modes | DELAYED <= 30 min (open only); LAST_SESSION evidence window `W` = final 60 min | `W` = anywhere in session, or final 30 min | Weekend discovery must use close-adjacent evidence without rejecting normal after-hours data | 4b |
+| I6 | Ian | Quote modes | **RULED (rev 4):** LIVE during the session; outside it LAST_SESSION with `S` = the underlying's regular-session `close`, results labelled "closing values"; after-hours/overnight underlying prints never change a rating or ranking. DELAYED mode removed (audit 3c: no delayed flag exists). First 15 minutes after the open = settling (as Portfolio). `W` still final 60 min, subject to I12 | — | Audit 4-5: the underlying moves after the close while options are frozen | 4b |
 | I7 | Ian | Quote skew | 60 s | 30 s or 120 s | Option and underlying quotes must describe the same moment | 4b |
-| I8 | Ian + Quinn | Deliverable evidence rule | deliverable record if the provider has one; OCC-root equality plus shares-per-contract = 100 only if the audit finds no record | require a record always (else `DATA_UNAVAILABLE`) | Positive evidence for standard deliverable (4.4) | 4a, 4b (needs audit items 1-2) |
+| I8 | Ian + Quinn | Deliverable evidence rule | **RULED (rev 4):** the nested chain's `deliverables` record (100 shares of the underlying) plus `shares-per-contract` = 100 plus OCC root = underlying. Anything else (adjusted root, other deliverable) is **refused in v1**: `INELIGIBLE` with `CONTRACT_NON_STANDARD_DELIVERABLE` ("Adjusted contract: not evaluated"); no further capture needed | — | Never price an unverified deliverable | 4a, 4b |
 | I9 | Ian | Missing optional metrics | no effect on eligibility or score; flagged | score penalty | Avoids hidden imputation | 4b |
 | I10 | Ian | IV | observable-only; provider IV Rank informational; internal stays UNAVAILABLE | include provider IVR in score | No stored IV history; Gate 2b ruling | No |
 | Q1 | Quinn | Acquisition module | new additive `leapsQvChainClient` | extend `getPmccChain` | Existing function hides chunk failures and drops fields; changing it touches Find LEAPS | 4a |
 | Q2 | Quinn | Coverage model | COMPLETE/RESTRICTED/FAILED, precedence rules 1-6, D1-D16 (D13a/b), `unresolvedTotal` identities, `K >= S` provable exclusion | none proposed | Fixes status honesty under restriction and failure | 4b |
-| Q3 | Quinn | Caps | 6 expirations, N = 40, 240 symbols, 25 underlyings, concurrency 3, 20 s | larger caps after measured ladders | Acquisition cost control; every binding cap is reported | 4a (ratify after audit item 7) |
+| Q3 | Quinn | Caps | **RULED (rev 4):** 6 expirations (never bound in the audit); the per-expiration strike cap and 240-symbol cap are **replaced** by a per-underlying limit of **10 quote chunks (1,000 contracts)** inside the I11 band; an underlying over the limit is acquisition-INCOMPLETE (coverage `RESTRICTED`) and **not ranked** — never silently truncated. 25 underlyings, concurrency 3, 20 s unchanged; run request budget Q9 | — | Audit 7: META and SNDK ladders exceed 240 | 4a |
+| I11 | Ian + Alan | Strike band (replaces "no lower moneyness band" and the 0.80·S priority) | **PROPOSED (rev 4):** request calls with **40%-100% of spot** in the DTE window. Alan, on the regular-hours and weekend captures: 0.70-0.90 delta contracts lie at 44%-99% of spot (high-IV names lowest); 40-100% covers 100% of them (50-95% covered only 91%); largest underlying (SNDK) = 522 contracts, 6 chunks. Strikes below 40% are out of policy scope (`excludedOutOfPolicyBand`, counted, not a restriction); `K >= S` stays provably ineligible | 50-95% (Ian's first proposal; misses 9%) | Delta 0.70-0.90 is the LEAPS stock-replacement range | 4a, 4b |
+| I12 | Ian | After-hours option timestamps | **PROPOSED (rev 4, new from audit 5):** outside the session, an option quote stamped between the latest completed session's `[close - W, next open)` is LAST_SESSION evidence (the provider re-stamps frozen quotes about 20:00 ET); one stamped earlier than `close - W` stays STALE. Flag `CONTRACT_LAST_SESSION_QUOTE` as today | keep `[close - W, close]` (rejects every after-hours and weekend quote observed) | Without it LAST_SESSION can never pass on TastyTrade data | 4b |
+| Q9 | Quinn | Run request budget | **PROPOSED (rev 4):** 300 GET requests per run (per underlying: 1 underlying quote + 1 nested chain + up to 10 quote chunks); underlyings beyond the budget are `LEAPS_NOT_EVALUATED_RUN_CAP`, reported, never dropped silently | 150 (audit tool's cap; fits about 12 underlyings) | 25 underlyings × up to 12 requests | 4a |
 | Q4 | Quinn | Find LEAPS regression surface | production-path RTL harness; rendered rows, `persistLeapsSession` as fallback | persisted payload only | Real path, goldens pre-recorded in a separate commit | 4c |
 | Q5 | Quinn | Comparator | quantized integer keys + lexicographic chain ending in OCC symbol; fixture T | epsilon compare (rejected: not transitive) | Total order independent of input order | 4b |
 | Q6 | Quinn | Policy pinning and guards | fingerprint test; isolation and `noInvestmentLogic` guards extended | none | Prevents silent threshold drift | 4b |
@@ -451,7 +470,7 @@ One matrix replaces the earlier per-reviewer lists. Every value is **PROPOSED**;
 | P6 | Paul | Session-open helper on the Gate 2c calendar | small additive change in Gate 4 | duplicate calendar logic in `lib/discovery/leaps/` | One calendar source of truth | 4a, 4b |
 | F1 | Frank | Authorization | implementation stays BLOCKED until the rulings above that block a slice, Paul's scope and the provider audit evidence for that slice are recorded in the ledger | none | No approvals are recorded in this document | all |
 
-**Implementation readiness:** NOT READY. Blocking: Ian rulings I1-I9, Quinn rulings Q1-Q3 and Q8, Paul rulings P5-P6, and the provider evidence marked BLOCKS in 11.1 (access not available in this session). Closed and available: Gate 2 contract metrics, Gate 3 evaluation, Gate 2c data and calendar.
+**Implementation readiness (rev 4):** provider evidence is in (11.1 PERFORMED); I6, I8 and Q3 ruled. Still blocking: Ian I12 (and I11 confirmation with Alan's figures), Quinn Q9, the remaining PROPOSED rows above (I1-I5, I7, I9, Q1, Q2, Q4-Q8, P1-P2, P5-P6), and Paul's authorization (F1). Closed and available: Gate 2 contract metrics, Gate 3 evaluation, Gate 2c data and calendar.
 
 ## 17. Revision 1 — response to review round 1 (CHANGES REQUIRED at 6d7858c)
 | # | Review item | Response (where) |
@@ -484,3 +503,14 @@ Thresholds and weights remain PROPOSED; provider evidence remains outstanding (1
 | M1 | Decision matrix | One matrix of Ian, Quinn, Paul and Frank decisions with proposed choice, alternative, rationale and blocking status (Section 16) |
 | M2 | Provider-audit checklist | Retained; each missing item classified as blocking or not; access status and required access stated (11.1) |
 Thresholds, weights and quote windows remain PROPOSED; provider access is NOT AVAILABLE; no Ian, Quinn, Paul or Frank approval is recorded.
+
+### Revision 4 — provider audit performed; rulings on its open items (2026-10-06)
+| # | Item | Response (where) |
+|---|---|---|
+| A1 | Audit evidence | Three real captures reviewed; per-item outcomes in 11.1; findings doc `docs/analysis/LEAPS-QV-0001-gate4a-provider-audit-findings.md` |
+| A2 | Adjusted roots (Ian) | Refuse in v1; no extra capture (I8) |
+| A3 | After-hours spot (Ian) | Regular-session `close` as `S`, "closing values" label, after-hours prints never change rank (I6); DELAYED mode removed (no flag) |
+| A4 | Strike band (Ian, Alan) | 40%-100% of spot, measured against captured deltas (I11, PROPOSED) |
+| A5 | Request budget (Quinn) | 10 chunks per underlying, over-limit = incomplete and unranked (Q3); run budget 300 (Q9, PROPOSED) |
+| A6 | New finding | Option quotes re-stamped about 20:00 ET outside the session; LAST_SESSION window extended to the next open (I12, PROPOSED for Ian) |
+Thresholds, weights and quote windows not listed above remain PROPOSED; no Paul/Frank authorization is recorded.
