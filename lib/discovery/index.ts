@@ -17,3 +17,4 @@ export * from './candidate';
 export * from './observability';
 export * from './normalized';
 export * from './qv';
+export * from './leaps';

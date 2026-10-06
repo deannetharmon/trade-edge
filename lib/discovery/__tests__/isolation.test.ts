@@ -98,8 +98,10 @@ describe('discovery framework isolation', () => {
     // Gate 3 deviation (reported): lib/discovery/qv/ IS the versioned QV-v1.0 strategy layer and necessarily names RSI,
     // ROIC, percentile, ... It is the one place that may; qv/__tests__/policyCentralization.test.ts guards that thresholds
     // live only in qv/policy.ts.
+    // Gate 4 deviation (reported): lib/discovery/leaps/ is the versioned QV LEAPS layer and necessarily names option
+    // greeks (delta, theta, vega) as provider fields; its limits live only in leaps/acquisitionPolicy.ts (fingerprint-pinned).
     const offenders: string[] = [];
-    sourceFiles.filter((file) => file.indexOf(`${DISCOVERY}/normalized/`) !== 0 && file.indexOf(`${DISCOVERY}/qv/`) !== 0).forEach((file) => {
+    sourceFiles.filter((file) => file.indexOf(`${DISCOVERY}/normalized/`) !== 0 && file.indexOf(`${DISCOVERY}/qv/`) !== 0 && file.indexOf(`${DISCOVERY}/leaps/`) !== 0).forEach((file) => {
       readFileSync(file, 'utf8')
         .split('\n')
         .forEach((line, index) => {

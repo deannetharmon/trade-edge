@@ -518,3 +518,22 @@ Thresholds, weights and quote windows remain PROPOSED; provider access is NOT AV
 | A8 | Quinn sign-off | Q9 approved with conditions: retries counted, 429 one retry then not evaluated, 401 stops the run, four required tests |
 | A7 | Ian sign-off | I11 approved (40%-100% of spot, delta decides); I12 approved with conditions: review/ranking only, two-sided market required, live re-quote for any order |
 All decision rows ruled (A7-A10); Paul authorized Gate 4 (F1), scheduled after Portfolio queue items 3-4.
+
+## 18. Gate 4a — as built (2026-10-06)
+
+**Delivered**
+- `lib/discovery/leaps/acquisitionPolicy.ts`: `QV_LEAPS_ACQUISITION_V1` (DTE 365-900, 6 expirations by |DTE - 730|, strikes 40%-100% of spot, chunks of 100 up to 10 per underlying, run budget 300 GETs incl. retries, one 429 retry after 2 s, 25 underlyings, concurrency 3, 20 s per underlying); frozen, fingerprint-pinned.
+- `lib/discovery/normalized/exchangeCalendar.ts` (P6, additive): `sessionOpenEpochSeconds` (09:30 New York) and `marketSessionState` (REGULAR_HOURS / MARKET_CLOSED / null when the calendar cannot decide; early closes honoured).
+- `lib/discovery/leaps/acquisition.ts`: `acquireLeapsChain` (stages 1-5 of Section 10, `AcquisitionReport` per Section 2) and `acquireLeapsRun` (Q9 budget, 429/401 rules, run cap, concurrency, per-underlying timeout). Spot for selection (I6): live `last` during the session, regular-session `close` outside it. Raw quote rows and nested-chain instrument evidence (root, underlying, chain type, shares per contract, deliverables) are returned unjudged for the 4b evaluator.
+- Fixture `lib/discovery/leaps/__fixtures__/uber-regular-hours-2026-10-05.json`: sanitized slice of the regular-hours audit capture (instrument and market-data fields only).
+- Tests `lib/discovery/leaps/__tests__/acquisition.test.ts` (21): real-row acquisition, call accounting identity, I6 spot, no chain call without a spot, chain failure, deterministic selection under shuffled input, expiration cap with counted and unknown omissions, quote limit, failed chunk, non-standard root, duplicate rows, and Quinn's four Q9 tests (budget exhausted, 429 retry then give up, 401 mid-run, retries counted) plus run cap and timeout.
+
+**Deviations (for Quinn)**
+1. **Placement (Q1):** the acquisition logic lives in `lib/discovery/leaps/acquisition.ts` with an injected transport instead of `lib/scans/leapsQvChainClient.ts`. It performs no I/O and reads no clock, so the discovery isolation guard stays unexempted for imports; a `lib/scans` module could not import the discovery types without a new guard exemption. The browser binding (the app's TastyTrade proxy) is a few lines supplied by the 4c orchestrator's caller.
+2. **Report fields (rev 4 caps):** `omittedByStrikeCap` / `omittedBySymbolCap` are replaced by `omittedByQuoteLimit` and `quoteLimitExceeded`; added `excludedOutOfPolicyBand` (K < 0.40·S, not a restriction) and `excludedNonStandardRoot` (I8, explicitly non-standard chains, counted, not quoted); new restriction `STRIKES_UNAVAILABLE` when a selected expiration has no strike list (coverage cannot be complete).
+3. **Quote limit:** over 1,000 band candidates nothing is quoted (saves the budget); 4b must map `quoteLimitExceeded` to an unranked, incomplete result (never `NO_SUITABLE_CONTRACT` or `NO_ELIGIBLE_IN_SUBSET`).
+4. **Timeout:** a timed-out underlying is reported `LEAPS_CHAIN_PROVIDER_FAILURE:TIMEOUT`, but its in-flight requests are not cancelled (no abort signal through the injected transport) and still count against the run budget.
+5. **Guard:** the isolation test's vocabulary check exempts `lib/discovery/leaps/` (it names delta/theta/vega as provider fields), as it already does for `qv/` and `normalized/`.
+6. **Fixtures:** one real-row fixture (UBER, regular hours) in 4a; the after-hours and weekend fixtures arrive with the 4b quote-mode tests that need them.
+
+Find LEAPS files are untouched (Section 12 guard holds: nothing outside `lib/discovery` imports it).

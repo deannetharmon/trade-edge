@@ -145,6 +145,30 @@ export function sessionCloseEpochSeconds(day: number): number | null {
   return day * SECONDS_PER_DAY + minutes * 60 - newYorkUtcOffsetSeconds(day);
 }
 
+const REGULAR_OPEN_MINUTES = 9 * 60 + 30;
+
+/** LEAPS-QV-0001 Gate 4 (P6): open of the regular session on `day` (09:30 New York) as Unix seconds, or null when not a supported session day. */
+export function sessionOpenEpochSeconds(day: number): number | null {
+  if (isSessionDay(day) !== true) return null;
+  return day * SECONDS_PER_DAY + REGULAR_OPEN_MINUTES * 60 - newYorkUtcOffsetSeconds(day);
+}
+
+export type MarketSessionState = 'REGULAR_HOURS' | 'MARKET_CLOSED';
+
+/**
+ * Gate 4 (P6): REGULAR_HOURS when `now` is on a session day with open <= now < close (early closes honoured);
+ * MARKET_CLOSED otherwise (before the open, after the close, weekends, holidays). Null when the calendar cannot decide.
+ */
+export function marketSessionState(nowEpochSeconds: number): MarketSessionState | null {
+  if (!Number.isFinite(nowEpochSeconds)) return null;
+  const day = epochDay(nowEpochSeconds);
+  if (!calendarCovers(day)) return null;
+  const open = sessionOpenEpochSeconds(day);
+  const close = sessionCloseEpochSeconds(day);
+  if (open === null || close === null) return 'MARKET_CLOSED';
+  return nowEpochSeconds >= open && nowEpochSeconds < close ? 'REGULAR_HOURS' : 'MARKET_CLOSED';
+}
+
 /** The most recent session (epoch day) whose close is at or before `nowEpochSeconds`; null when it cannot be determined. */
 export function latestCompletedSession(nowEpochSeconds: number): number | null {
   if (!Number.isFinite(nowEpochSeconds)) return null;
