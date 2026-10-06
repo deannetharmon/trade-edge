@@ -320,7 +320,7 @@ Score (rev 4): time-value cost 70×(1−5/15)=46.666667; liquidity 30×(0.5×0.6
 mid 29.00; intrinsic 25; extrinsic 4.00 → **13.793103%**; spread 0.80/29 = **2.758621%**; dollar delta **8,400**; debit **$2,900**; leverage 0.84×100/29 = **2.896552**; breakeven 104.00, move **4.0%**; annualized 13.793103×365/730 = **6.896552%**.
 Score (rev 4): time-value cost 70×(1−4/15)=51.333333; liquidity 30×(0.5×0.724138+0.5×0.5)=18.362069 → **69.695402**. Ranks 1; A ranks 2. (Rev 3: 61.764368.)
 
-**B** — K 90, bid 17.00 / ask 18.00, Δ 0.68, OI 400, DTE 540: mid 17.50, intrinsic 10, extrinsic **42.857143%** > 20 → `CONTRACT_EXTRINSIC_ABOVE_MAX`; Δ 0.68 < 0.70 → `CONTRACT_DELTA_BELOW_MIN`. INELIGIBLE, two reasons, unranked (its would-be score 28.428571 is not computed).
+**B** — K 90, bid 17.00 / ask 18.00, Δ 0.68, OI 400, DTE 540: mid 17.50, intrinsic 10, extrinsic **42.857143%** > 20 → `CONTRACT_EXTRINSIC_ABOVE_MAX`; Δ 0.68 < 0.70 → `CONTRACT_DELTA_BELOW_MIN`. INELIGIBLE, two reasons, unranked (its would-be score, 53.428571 under rev 4 / 28.428571 under rev 3, is not computed).
 
 **C** — K 75, bid 29.00 / ask 29.50, Δ 0.85 (boundary, passes), OI 99, DTE 400: mid 29.25, extrinsic 14.529915%, spread 1.709402%; OI 99 < 100 → `CONTRACT_OI_BELOW_MIN`. INELIGIBLE (all other gates pass), would-be score 65.572564 (rev 4; rev 3: 52.843754) is not ranked.
 
@@ -537,3 +537,20 @@ All decision rows ruled (A7-A10); Paul authorized Gate 4 (F1), scheduled after P
 6. **Fixtures:** one real-row fixture (UBER, regular hours) in 4a; the after-hours and weekend fixtures arrive with the 4b quote-mode tests that need them.
 
 Find LEAPS files are untouched (Section 12 guard holds: nothing outside `lib/discovery` imports it).
+
+## 19. Alan — fixture re-verification under I5 (2026-10-06)
+
+Independent recomputation with exact rational arithmetic (Python `fractions`), not the spec's hand figures:
+
+| Contract | ext % of mid | spread % | breakeven move % | time-value (70) | liquidity (30) | score | spec |
+|---|---|---|---|---|---|---|---|
+| A | 20.000000 | 4.000000 | 5.000000 | 46.666667 | 21.000000 | **67.666667** | matches |
+| E | 13.793103 | 2.758621 | 4.000000 | 51.333333 | 18.362069 | **69.695402** | matches |
+| B (would-be) | 42.857143 | 5.714286 | 7.500000 | 35.000000 | 18.428571 | 53.428571 | **was stale (28.428571, rev 3)**; corrected in Section 9 |
+| C (would-be) | 14.529915 | 1.709402 | 4.250000 | 50.166667 | 15.405897 | 65.572564 | matches |
+
+Also confirmed: leverage A 3.2, E 2.896552; 8.4 leverage 3.40 vs 1.70; annualized extrinsic A 13.518519, E 6.896552 (observable only). Ranking E then A unchanged. Fixture T (8.1) is independent of the score formula and stays valid. Breakeven move = extrinsic / S holds for every candidate because acquisition only takes K < S.
+
+**Acceptance test 1 adjustment:** the 8.2 overlap and 8.3 maturity-bias matched examples test the superseded rev 3 components; they stay as documentation, not test fixtures. The 8.4 leverage example stays a fixture.
+
+**Open conflict for Ian (blocks 4b):** Section 7 sets the delta gate at **0.70-0.85** (reused from Find LEAPS `SERVER_LEAPS_POLICY`; fixture C passes at the 0.85 boundary, acceptance test 2 uses 0.85/0.8501), while the I11 ruling and Alan's strike-band study used **0.70-0.90** as the qualifying range. One value is needed. The 40%-100% strike band covers both.
