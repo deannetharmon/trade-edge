@@ -1,6 +1,6 @@
 # AI-POLICY-0001 — Deterministic-First AI Analysis (Epic)
 
-**Status:** Decisions accepted by Dean on 2026-09-19 except D3 and D6 (open) — see [Sign-offs](#sign-offs)
+**Status:** Decisions accepted by Dean on 2026-09-19 except D6 (open); D3 models decided 2026-10-06 — see [Sign-offs](#sign-offs)
 **Requirements source:** [AI-POLICY-0001 specification](../specifications/AI-POLICY-0001-Deterministic-First-AI-Analysis.md) (authoritative)
 **Architecture decision:** [ADR-0005 Trust classes for AI analysis inputs](../decisions/ADR-0005-ai-analysis-input-trust-classes.md)
 **Verified against:** `main` @ 02b8276c
@@ -58,7 +58,7 @@ Recommended defaults are what the phase tickets assume. Nothing here is decided 
 |---|---|---|---|---|
 | D1 | Snapshot trust model | ADR-0005: `server_verified` for deep routes, `client_attested` for scan summary/chat | Alan | Accepted 2026-09-19 |
 | D2 | Legacy AI routes and LEAPS-ADVISOR-0001B | Freeze `/api/advisor`, `/api/leaps-advisor` as-is (no new features). 0001B superseded by this epic. Migrate/retire `/api/analyze` etc. under a new ticket AI-POLICY-0002 after 0001D | Paul | Accepted 2026-09-19 |
-| D3 | Provider, models, governance | OpenAI only. Economy tier `gpt-4o-mini`; reasoning tier **named by Dean** (route unavailable until set). Dean verifies OpenAI org data controls (no-train, retention, region) and sets the attestation env vars; missing → fail closed | Dean | Open |
+| D3 | Provider, models, governance | **DECIDED by Dean 2026-10-06:** OpenAI only. Decision tier (analysis, chat that informs trades) `gpt-5.6-terra`; economy tier (summaries, fast text) `gpt-5.6-luna`; `gpt-4o-mini` retired. Rollout: Performance AI first (PERF-AI-0001, live), then app-wide via Vercel env vars `AI_ANALYSIS_MODEL`/`AI_CHAT_MODEL`=terra, `AI_SUMMARY_MODEL`/`AI_FAST_MODEL`=luna after a few days of good Performance answers; code defaults follow. Governance attestation (no-train, retention, region) still Dean's to verify. | Dean | Decided (models); attestation open |
 | D4 | Retention | Prompts/outputs/artifacts: 90 days (matches `LEAPS_ANALYSIS_TTL_SECONDS`). Audit record = hashes + metadata only (no prompt/output text), 548 days (matches `pmcc-review-snapshots`), access limited to the owning user's scope. Deletion request removes artifacts, keeps audit metadata | Alan, Dean | Accepted 2026-09-19 |
 | D5 | Kill switches | Env flags (default off) **plus** Redis override keys checked per request: `ai-policy:kill:global`, `ai-policy:kill:route:<route>`. Redis wins over env. No redeploy needed to stop | Alan | Accepted 2026-09-19 |
 | D6 | Budgets | Route hourly limits and per-user monthly / global daily USD budgets are env-configured; **any unset → route unavailable** (forces a conscious number). Suggested starting hourly limits: summary 20, chat 60, LEAPS deep 10, PMCC deep 10 | Paul | Open |
