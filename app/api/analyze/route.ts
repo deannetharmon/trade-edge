@@ -200,6 +200,8 @@ async function handleWithSearch(body: any, apiKey: string) {
         instructions: body.system ?? '',
         input,
         max_output_tokens: body.max_tokens ?? 1000,
+        // AI-POLICY D3 (Dean, 2026-10-06): the Responses API stores calls by default; keep trade data out of org logs.
+        store: false,
       }),
     });
 
