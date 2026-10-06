@@ -83,7 +83,7 @@
 | Q5 | Paul | Scope: should entry context (IVR, delta at entry, where captured) be in v1, or wait until coverage is better (1 of 67 trades today)? |
 | Q6 | Paul | Should analyses be saved per period so Dean can compare month over month? This would need Redis storage. |
 | Q7 | Quinn | When the dollar check fails: flag, or auto-regenerate once? |
-| Q8 | Dean | Model: keep `/api/analyze` (OpenAI GPT-4o), or switch to a stronger model for this feature? This affects cost. |
+| Q8 | Dean | DECIDED 2026-10-06: gpt-5.6-terra (step up to gpt-5.6-sol if answers are sloppy). Applied to the current Performance AI ahead of the rest of this ticket. |
 | Q9 | Diane | Should the panel open automatically, or only when Dean clicks? Should the answer render as sections or as chat prose? |
 
 ## Out of scope (proposed)

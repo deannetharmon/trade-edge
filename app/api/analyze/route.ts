@@ -87,7 +87,8 @@ async function callChatCompletions(apiKey: string, model: string, messages: any[
     },
     body: JSON.stringify({
       model,
-      max_tokens: maxTokens,
+      // OpenAI's current parameter; gpt-5.x rejects max_tokens (a 400 that silently fell back to the old model).
+      max_completion_tokens: maxTokens,
       messages,
     }),
   });

@@ -201,14 +201,18 @@ ${trades.filter(t => t.outcome === 'LOSS').map(t =>
 Lead with exit behavior — were fast cuts disciplined or panic? Which losses came from holding too long? Which were unavoidable? Then cover strategy patterns, entry timing, and finish with 3 concrete changes to make immediately. Be direct. Start with the most important finding.`;
 }
 
-async function callAIWithHistory(messages: ChatMessage[], system: string): Promise<string> {
+// PERF-AI-0001 (Dean, 2026-10-06): gpt-5.6-terra. The route falls back to the configured model if it is unavailable;
+// the model that actually answered is shown in the panel header. Reasoning models count thinking in the token budget.
+const PERFORMANCE_AI_MODEL = 'gpt-5.6-terra';
+
+async function callAIWithHistory(messages: ChatMessage[], system: string): Promise<{ text: string; model: string | null }> {
   const res = await fetch('/api/analyze', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1800, system, messages }),
+    body: JSON.stringify({ model: PERFORMANCE_AI_MODEL, max_tokens: 8000, system, messages }),
   });
   if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error ?? `API error: ${res.status}`); }
   const data = await res.json();
-  return data?.content?.find((b: any) => b.type === 'text')?.text ?? '';
+  return { text: data?.content?.find((b: any) => b.type === 'text')?.text ?? '', model: typeof data?.model === 'string' ? data.model : null };
 }
 
 // ── AI Chat Panel ─────────────────────────────────────────────────────────
@@ -220,6 +224,7 @@ function AIChatPanel({ trades, range, th, onClose }: {
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
   const [initializing, setInitializing] = useState(true);
+  const [answeredBy, setAnsweredBy] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLTextAreaElement>(null);
 
@@ -231,7 +236,8 @@ function AIChatPanel({ trades, range, th, onClose }: {
       const prompt = buildPerformanceAnalysisPrompt(trades, range);
       try {
         const reply = await callAIWithHistory([{ role: 'user', content: prompt }], AI_SYSTEM_PROMPT);
-        setMessages([{ role: 'assistant', content: reply }]);
+        setAnsweredBy(reply.model);
+        setMessages([{ role: 'assistant', content: reply.text }]);
       } catch (e: any) { setError(e.message); }
       finally { setInitializing(false); setTimeout(() => inputRef.current?.focus(), 100); }
     };
@@ -245,7 +251,8 @@ function AIChatPanel({ trades, range, th, onClose }: {
     setMessages(next); setLoading(true);
     try {
       const reply = await callAIWithHistory(next, AI_SYSTEM_PROMPT);
-      setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+      setAnsweredBy(reply.model);
+      setMessages(prev => [...prev, { role: 'assistant', content: reply.text }]);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); setTimeout(() => inputRef.current?.focus(), 50); }
   };
@@ -268,7 +275,7 @@ function AIChatPanel({ trades, range, th, onClose }: {
       <div className={`flex items-center justify-between px-5 py-4 border-b ${th.border} shrink-0`}>
         <div>
           <p className={`text-sm font-bold ${th.text} tracking-wider`}>◈ AI COACHING</p>
-          <p className={`text-[10px] ${th.textFaint} mt-0.5`}>{trades.length} trades · {range === '3m' ? '3 months' : range === '6m' ? '6 months' : '12 months'}</p>
+          <p className={`text-[10px] ${th.textFaint} mt-0.5`}>{trades.length} trades · {range === '3m' ? '3 months' : range === '6m' ? '6 months' : '12 months'}{answeredBy ? ` · model: ${answeredBy}` : ''}</p>
         </div>
         <button onClick={onClose} className={`${th.textFaint} hover:${th.text} text-xl leading-none`}>✕</button>
       </div>
