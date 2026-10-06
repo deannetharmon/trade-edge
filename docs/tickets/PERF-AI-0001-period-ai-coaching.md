@@ -1,6 +1,6 @@
 # PERF-AI-0001 — AI coaching for the selected Performance period
 
-**Status (2026-10-06): team review done (below); waiting on Dean: scope approval and the sizing question (D-SIZE). Then Diane mock, then build.** Requested by Dean: an AI analysis of the selected period that helps trading habits and strategy, and is precise and confident.
+**Status (2026-10-06): scope approved by Dean, team aligned, D-SIZE decided. Diane mock https://claude.ai/artifact/ESGGSkjVfFh5CtXenDKwUq awaiting Dean and Ian sign-off; then build S1–S3.** Requested by Dean: an AI analysis of the selected period that helps trading habits and strategy, and is precise and confident.
 
 ## Current state (as built, verified in code)
 
