@@ -178,12 +178,17 @@
 
   Built on the AI-POLICY-0001 grounded-chat work (0001B) rather than a second chat system.
 
-## D-SIZE decided (Dean, 2026-10-06)
+## D-SIZE decided (Dean, 2026-10-06; revised after Ian's concern)
 
-- **Rule: no single position may use more than 50% of net liq.**
+- **Rule: no single position over 25% of net liq. Dean can override per trade. Never blocking.**
   - Capital per position = capital at risk (spreads: max loss; CSP: strike × 100 × contracts).
   - Net liq = the stored balance close on or before the open date (`balance-history`).
   - Fail closed: no balance within 5 days → "size not checked" for that trade, never estimated.
+- **Override:** Dean marks an oversize trade as deliberate. It then counts as within the rule, and the coaching does not raise it again. Saved per trade, like the existing exclusion list. Diane designs the control.
+- **No flags all over the place (Dean):**
+  - The size check appears only in the Performance rule check and in the AI coaching: one rule card, plus a line in the coaching when an oversize trade was not overridden.
+  - Nothing is added to Portfolio, Screener or order screens, and no warnings elsewhere.
+  - No separate "largest position" line.
+- Nothing is blocked: this reviews closed trades and never stops an order.
 - The 2× premium stop is a separate rule and is already in the rule checks.
-- **Coaching:** a trade over 50% is a rule breach (a fact at any count). Size is also shown per trade as information.
-- **Alan:** use opening capital, not current. Quinn adds fixtures for 49.9%, 50.0% and 50.1%. At exactly 50% the trade is within the rule.
+- **Alan:** use opening capital, not current. Quinn adds fixtures for 24.9%, 25.0% and 25.1% (exactly 25% is within the rule), and for an overridden trade.
