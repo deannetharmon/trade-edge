@@ -51,7 +51,7 @@ The unprotected window between cancel and submit (about 1 s) cannot be removed: 
 
 ## Build order
 
-1. **Dry-run proof (Dane, with Dean).** On a single-leg short option: OCO of `Limit` (Buy to Close) + `Stop` (stop-market, Buy to Close), GTC/GTC and Day/GTC. Record accept/reject. If Day/GTC is rejected, the replacement goes in as GTC and the result row says so.
+1. **Dry-run proof (Dane, with Dean). DONE 2026-10-06 (above).** On a single-leg short option: OCO of `Limit` (Buy to Close) + `Stop` (stop-market, Buy to Close), GTC/GTC and Day/GTC. Record accept/reject. If Day/GTC is rejected, the replacement goes in as GTC and the result row says so.
 2. Quinn confirms whether the close dialog allows partial quantities (item 7).
 3. Build items 1-8, tests, full suite, `tsconfig.check.json`, one push, CI green and current-head Vercel preview Ready.
 
@@ -64,6 +64,22 @@ The unprotected window between cancel and submit (about 1 s) cannot be removed: 
 - Replacement failure after cancel restores the full bracket with the stop type unchanged (both close dialog and Set/Edit Profit Target).
 - New stop identity persisted after replacement.
 - Partial close and batch rules.
+
+## Step 1 result: dry-run proof (2026-10-06 06:45Z, Dean's account, `scripts/gtc-replace-dryrun/gtc-replace-dryrun.js`)
+
+| Case | Order | Result |
+|---|---|---|
+| A | MULL OCO: Limit GTC + Stop (stop-market) GTC | **Accepted** (HTTP 201) |
+| B | MULL OCO: Limit **Day** + Stop (stop-market) GTC | **Accepted** |
+| C | MULL OCO: Limit GTC + Stop Limit GTC (current builder) | Accepted |
+| D | TQQQ OCO while closing order #511546370 is working | **Rejected** 422 `cannot_close_against_more_than_existing_position`: "You already have a closing order ... which must be canceled before this order can be routed." |
+
+Only warning on A-C: `tif.next_valid_session` (run outside market hours).
+
+**Consequences (Quinn's item 3 fallback applies; both paths):**
+- Stop-market brackets are buildable exactly, as GTC/GTC and Day/GTC; no GTC substitution needed.
+- A broker dry-run of the replacement cannot run while the original order is working. Sequence for the close dialog **and** Set/Edit Profit Target: (1) build the exact replacement and pass local safety gates; (2) re-read live orders (item 4); (3) cancel; (4) broker dry-run the replacement; (5) on rejection, restore the original bracket exactly and report; otherwise submit. Steps 3-5 widen the unprotected window by one dry-run round trip; the restore path covers it.
+- Test added: dry-run rejected after cancel → exact restore, no replacement submitted.
 
 ## Quinn review (2026-10-06): approve with changes
 
