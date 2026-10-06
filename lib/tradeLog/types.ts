@@ -63,6 +63,8 @@ export interface ClosedTrade {
   closedQuantity: number;    // contracts this row accounts for closing
   remainingQuantity: number; // contracts still open after this row, if any
   sourceTransactionIds: string[];
+  /** PERF-0001: why a row is INCOMPLETE beyond leg disagreement (e.g. a credit spread whose net open value is a debit). */
+  anomaly?: string;
 }
 
 export interface CacheEntry {

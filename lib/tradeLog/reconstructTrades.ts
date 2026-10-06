@@ -79,7 +79,7 @@ export const LS_TL_12M = 'hunter-tradelog-12m';
 // tranches of the same spread get distinct ids -- see note in
 // buildClosedTradeId below). Stale caches from before this sprint must not
 // be read back as if they matched the new shape.
-export const CACHE_VERSION = 'v4';
+export const CACHE_VERSION = 'v5'; // PERF-0001: per-leg quantities, anomaly flag
 
 export const LS_KEY: Record<TimeRange, string> = {
   '1w': LS_TL_1W, '2w': LS_TL_2W, '1m': LS_TL_1M, '3m': LS_TL_3M, '6m': LS_TL_6M, '12m': LS_TL_12M,
@@ -428,12 +428,30 @@ function groupFillsIntoTrades(fills: Fill[]): ClosedTrade[] {
     // only as closed as its most-restrictive leg); MAX for remaining is
     // conservative in the other direction (if any leg still has contracts
     // open, the spread as a whole isn't fully closed).
-    const openedQuantity   = Math.min(...groupFills.map(f => f.openedQuantity));
-    const closedQuantity   = Math.min(...groupFills.map(f => f.qty));
-    const remainingQuantity = Math.max(...groupFills.map(f => f.remainingOnLotAfter));
+    // PERF-0001: quantities are summed PER LEG first. A leg closed in several transactions on the same day (e.g. 1 + 4
+    // contracts) produces several fills; the old per-fill MIN/MAX reported "closed 1 of 5, 4 remaining" and marked the
+    // fully closed spread INCOMPLETE although its P/L already covered all 5 contracts.
+    const legs: Record<string, Fill[]> = {};
+    for (const f of groupFills) (legs[`${legKey(f)}:${f.isShort ? 'S' : 'L'}`] ??= []).push(f);
+    const legTotals = Object.values(legs).map(legFills => {
+      const lots: Record<string, { opened: number; remaining: number }> = {};
+      for (const f of legFills) {
+        const lotId = f.sourceTransactionIds[0];
+        const lot = lots[lotId] ?? (lots[lotId] = { opened: f.openedQuantity, remaining: f.remainingOnLotAfter });
+        lot.remaining = Math.min(lot.remaining, f.remainingOnLotAfter);
+      }
+      return {
+        closed: legFills.reduce((n, f) => n + f.qty, 0),
+        opened: Object.values(lots).reduce((n, l) => n + l.opened, 0),
+        remaining: Object.values(lots).reduce((n, l) => n + l.remaining, 0),
+      };
+    });
+    const openedQuantity   = Math.min(...legTotals.map(l => l.opened));
+    const closedQuantity   = Math.min(...legTotals.map(l => l.closed));
+    const remainingQuantity = Math.max(...legTotals.map(l => l.remaining));
 
     const mechanisms = new Set(groupFills.map(f => f.closureMechanism));
-    const qtysAgree = groupFills.every(f => f.qty === groupFills[0].qty);
+    const qtysAgree = legTotals.every(l => l.closed === legTotals[0].closed);
     const isPartial = closedQuantity < openedQuantity || remainingQuantity > 0;
     let closureMechanism: ClosureMechanism = mechanisms.size === 1 ? Array.from(mechanisms)[0] : 'PARTIAL_CLOSE';
     if (closureMechanism === 'CLOSED' && isPartial) closureMechanism = 'PARTIAL_CLOSE';
@@ -444,7 +462,11 @@ function groupFillsIntoTrades(fills: Fill[]): ClosedTrade[] {
     // is null/fabricated -- every number here is computed from whatever
     // real data was available; this just tells a future consumer not to
     // treat it as a clean 1:1 reconstruction.
-    const reconstructionStatus: ReconstructionStatus = (qtysAgree && !anyMalformed) ? 'COMPLETE' : 'INCOMPLETE';
+    // PERF-0001: a credit spread whose net opening value is not a credit cannot be a clean reconstruction (legs from
+    // different spreads or a roll were grouped together); it is flagged, never shown as an ordinary trade.
+    const creditStructure = strategy === 'BPS' || strategy === 'BCS' || strategy === 'IC' || strategy === 'CSP' || strategy === 'SHORT_CALL';
+    const anomaly = creditStructure && creditReceived <= 0 ? 'CREDIT_STRUCTURE_OPENED_FOR_A_DEBIT' : undefined;
+    const reconstructionStatus: ReconstructionStatus = (qtysAgree && !anyMalformed && !anomaly) ? 'COMPLETE' : 'INCOMPLETE';
 
     trades.push({
       id: buildClosedTradeId(underlying, openDay, expiry, closeDate),
@@ -473,6 +495,7 @@ function groupFillsIntoTrades(fills: Fill[]): ClosedTrade[] {
       closedQuantity,
       remainingQuantity,
       sourceTransactionIds: Array.from(sourceIds),
+      ...(anomaly ? { anomaly } : {}),
     });
   }
 

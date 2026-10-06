@@ -194,3 +194,33 @@ describe('reconstructTrades: unmatched closures', () => {
     expect(unmatchedClosures[0].quantity).toBe(1);
   });
 });
+
+describe('PERF-0001: same-day split closes and anomalies', () => {
+  it('a spread closed in several same-day transactions (1 + 4) is one COMPLETE row: opened 5, closed 5, remaining 0', () => {
+    const transactions: RawTransaction[] = [
+      tx({ id: 'os', symbol: 'MU240216P00800000', 'underlying-symbol': 'MU', 'transaction-sub-type': 'Sell to Open', 'executed-at': '2024-01-05T15:00:00.000Z', quantity: '5', price: '5.00' }),
+      tx({ id: 'ol', symbol: 'MU240216P00790000', 'underlying-symbol': 'MU', 'transaction-sub-type': 'Buy to Open', 'executed-at': '2024-01-05T15:00:00.000Z', quantity: '5', price: '2.48' }),
+      tx({ id: 'cs1', symbol: 'MU240216P00800000', 'underlying-symbol': 'MU', 'transaction-sub-type': 'Buy to Close', 'executed-at': '2024-01-17T15:00:00.000Z', quantity: '1', price: '1.20' }),
+      tx({ id: 'cs2', symbol: 'MU240216P00800000', 'underlying-symbol': 'MU', 'transaction-sub-type': 'Buy to Close', 'executed-at': '2024-01-17T15:00:01.000Z', quantity: '4', price: '1.20' }),
+      tx({ id: 'cl1', symbol: 'MU240216P00790000', 'underlying-symbol': 'MU', 'transaction-sub-type': 'Sell to Close', 'executed-at': '2024-01-17T15:00:00.000Z', quantity: '1', price: '0.35' }),
+      tx({ id: 'cl2', symbol: 'MU240216P00790000', 'underlying-symbol': 'MU', 'transaction-sub-type': 'Sell to Close', 'executed-at': '2024-01-17T15:00:01.000Z', quantity: '4', price: '0.35' }),
+    ];
+    const { trades } = reconstructTrades(transactions);
+    expect(trades).toHaveLength(1);
+    expect(trades[0]).toMatchObject({ openedQuantity: 5, closedQuantity: 5, remainingQuantity: 0, closureMechanism: 'CLOSED', reconstructionStatus: 'COMPLETE' });
+    expect(trades[0].creditReceived).toBeCloseTo(1260, 5);
+    expect(trades[0].pnl).toBeCloseTo(1260 - 425, 5);
+  });
+
+  it('a credit spread whose net opening value is a debit is flagged INCOMPLETE with the anomaly named', () => {
+    const transactions: RawTransaction[] = [
+      tx({ id: 'os', symbol: 'ORCL240216P00190000', 'underlying-symbol': 'ORCL', 'transaction-sub-type': 'Sell to Open', 'executed-at': '2024-01-05T15:00:00.000Z', quantity: '1', price: '1.00' }),
+      tx({ id: 'ol', symbol: 'ORCL240216P00185000', 'underlying-symbol': 'ORCL', 'transaction-sub-type': 'Buy to Open', 'executed-at': '2024-01-05T15:00:00.000Z', quantity: '1', price: '1.83' }),
+      tx({ id: 'cs', symbol: 'ORCL240216P00190000', 'underlying-symbol': 'ORCL', 'transaction-sub-type': 'Buy to Close', 'executed-at': '2024-01-08T15:00:00.000Z', quantity: '1', price: '0.10' }),
+      tx({ id: 'cl', symbol: 'ORCL240216P00185000', 'underlying-symbol': 'ORCL', 'transaction-sub-type': 'Sell to Close', 'executed-at': '2024-01-08T15:00:00.000Z', quantity: '1', price: '0.09' }),
+    ];
+    const t = reconstructTrades(transactions).trades[0];
+    expect(t.creditReceived).toBeCloseTo(-83, 5);
+    expect(t).toMatchObject({ reconstructionStatus: 'INCOMPLETE', anomaly: 'CREDIT_STRUCTURE_OPENED_FOR_A_DEBIT' });
+  });
+});
