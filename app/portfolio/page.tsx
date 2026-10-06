@@ -98,7 +98,7 @@ import {
 } from '@/lib/portfolio/profitProtectingStop';
 import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/stopPolicyStore';
 import { creditClosePnlDollars, protectiveStopOutcomeLabel, signedDollar } from '@/lib/portfolio/positionManagementPresentation';
-import { buildExactOcoBody, cancelExistingGtcForReplacement, criticalGtcRestorationWarning, liveStopRefusal, PAIRED_LEG_REFUSAL_PREFIX, keptStopPolicy, resolvePairedLeg, restoreOriginalGtcIfNeeded, stopCoverageRefusal, submitAfterBrokerDryRun, type ReconstructablePairedLeg } from '@/lib/portfolio/existingGtcReplacement';
+import { bracketCloseTimeInForce, buildExactOcoBody, cancelExistingGtcForReplacement, DAY_PROMOTED_NOTE, criticalGtcRestorationWarning, liveStopRefusal, PAIRED_LEG_REFUSAL_PREFIX, keptStopPolicy, resolvePairedLeg, restoreOriginalGtcIfNeeded, stopCoverageRefusal, submitAfterBrokerDryRun, type ReconstructablePairedLeg } from '@/lib/portfolio/existingGtcReplacement';
 import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
 // PM-0001: pure entry-vs-now favorability judgment for Trade Evolution's
 // per-metric coloring -- see computeEntryChangeTone's doc comment.
@@ -3488,6 +3488,7 @@ function BatchConfirmModal({
         let cancelledExistingGtc = false;
         let replacementSubmitted = false;
         let cancelledPairedLeg: ReconstructablePairedLeg | null = null;
+        let dayPromotedToGtc = false;
         try {
           let orderId: string;
 
@@ -3529,6 +3530,14 @@ function BatchConfirmModal({
               );
               cancelledExistingGtc = cancellation.cancelled;
               cancelledPairedLeg = cancellation.pairedLeg;
+              if (cancelledPairedLeg) {
+                // Ian: a Day close must not take the bracket's GTC stop with it at the close.
+                const tif = bracketCloseTimeInForce(String(item.orderBody['time-in-force']));
+                if (tif.promotedFromDay) {
+                  item.orderBody = { ...item.orderBody, 'time-in-force': tif.timeInForce as 'GTC' };
+                  dayPromotedToGtc = true;
+                }
+              }
               await new Promise(r => setTimeout(r, 800));
             } catch (cancelErr: any) {
               console.error(`CANCEL FAILED: ${item.pos.symbol} orderId=${item.pos.gtcOrderId} error=`, cancelErr?.message);
@@ -3713,7 +3722,7 @@ function BatchConfirmModal({
                     const res = await ttPostComplex(`/accounts/${item.pos.accountNumber}/complex-orders`, token, body);
                     const ids = resolveOcoStopOrderId(res);
                     await persistKeptStopIdentity(item.pos, ids);
-                    return `OCO #${ids.complexOrderId ?? 'submitted'} (stop kept: ${cancelledPairedLeg!.orderType} trigger $${cancelledPairedLeg!.triggerPrice.toFixed(2)})`;
+                    return `OCO #${ids.complexOrderId ?? 'submitted'} (stop kept: ${cancelledPairedLeg!.orderType} trigger $${cancelledPairedLeg!.triggerPrice.toFixed(2)}${dayPromotedToGtc ? `; close ${DAY_PROMOTED_NOTE}` : ''})`;
                   },
                 });
               }

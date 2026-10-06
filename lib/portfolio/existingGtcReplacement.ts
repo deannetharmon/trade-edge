@@ -315,3 +315,17 @@ export function keptStopPolicy(
   if (!existing) return null;
   return { ...existing, brokerOrderId: ids.stopOrderId, complexOrderId: ids.complexOrderId };
 }
+
+/**
+ * Ian (2026-10-06): a Day close inside a replacement bracket may take the GTC
+ * stop with it when the Day leg expires unfilled (OCO), leaving the position
+ * unprotected overnight. Until that is proven safe, a close that replaces a
+ * bracket goes in as GTC and the trader is told.
+ */
+export function bracketCloseTimeInForce(requested: string): { timeInForce: string; promotedFromDay: boolean } {
+  return requested === 'Day'
+    ? { timeInForce: 'GTC', promotedFromDay: true }
+    : { timeInForce: requested, promotedFromDay: false };
+}
+
+export const DAY_PROMOTED_NOTE = 'sent as GTC so the stop stays working; cancel the close in TastyTrade if you do not want it resting';

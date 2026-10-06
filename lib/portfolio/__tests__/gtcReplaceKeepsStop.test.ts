@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { StopAssessment, StopLossPolicy, StopOrderEvidence } from '@/lib/portfolio/stopLossPolicy';
 import {
-  buildExactOcoBody, buildExactStopBody, cancelExistingGtcForReplacement, keptStopPolicy, liveStopRefusal,
+  bracketCloseTimeInForce, buildExactOcoBody, buildExactStopBody, cancelExistingGtcForReplacement, keptStopPolicy, liveStopRefusal,
   PAIRED_LEG_REFUSAL_PREFIX, resolvePairedLeg, restoreOriginalGtcIfNeeded, stopCoverageRefusal, submitAfterBrokerDryRun,
   type ReconstructablePairedLeg,
 } from '../existingGtcReplacement';
@@ -146,5 +146,15 @@ describe('GTC-REPLACE-0001: kept stop identity', () => {
     const policy = { triggerPrice: 3.5, brokerOrderId: 'S1', complexOrderId: '8688606' } as StopLossPolicy;
     expect(keptStopPolicy(policy, { complexOrderId: '9000', stopOrderId: 'S9' })).toMatchObject({ triggerPrice: 3.5, brokerOrderId: 'S9', complexOrderId: '9000' });
     expect(keptStopPolicy(null, { complexOrderId: '9000', stopOrderId: 'S9' })).toBeNull();
+  });
+});
+
+describe('GTC-REPLACE-0001: Day close inside a bracket (Ian)', () => {
+  it('a Day close replacing a bracket goes in as GTC, and the trader is told', () => {
+    expect(bracketCloseTimeInForce('Day')).toEqual({ timeInForce: 'GTC', promotedFromDay: true });
+    expect(bracketCloseTimeInForce('GTC')).toEqual({ timeInForce: 'GTC', promotedFromDay: false });
+    const oco = buildExactOcoBody(target(bracketCloseTimeInForce('Day').timeInForce), stopMarket);
+    expect(oco.orders[0]['time-in-force']).toBe('GTC');
+    expect(oco.orders[1]['time-in-force']).toBe('GTC');
   });
 });
