@@ -262,7 +262,7 @@ One frozen policy object. Where an existing TradeEdge LEAPS number exists it is 
 |---|---|---|---|
 | DTE minimum | 365 | LEAPS = more than one year; Find LEAPS server policy uses 180, modal defaults vary | `[IAN]` new; 180 would match Find LEAPS |
 | DTE maximum | 900 | caps theta/capital lock-up; Find LEAPS has no max by default | `[IAN]` new |
-| Delta | 0.70 – 0.85 | `SERVER_LEAPS_POLICY` (deltaMin .70, deltaMax .85) | reuse |
+| Delta | 0.70 – 0.85 | `SERVER_LEAPS_POLICY` (deltaMin .70, deltaMax .85) | **RULED (Ian, 2026-10-06)** |
 | Open interest | ≥ 100 | `SERVER_LEAPS_POLICY.oiMin` | reuse |
 | Spread % of mid | ≤ 10 | `SERVER_LEAPS_POLICY.spreadPctMax` | reuse |
 | Extrinsic % of mid | ≤ 20 | `SERVER_LEAPS_POLICY.extrinsicPctMax` (alternative 25) | reuse; `[IAN]` whether 20 is realistic for 2-year, 0.70-0.85 delta contracts |
@@ -553,4 +553,4 @@ Also confirmed: leverage A 3.2, E 2.896552; 8.4 leverage 3.40 vs 1.70; annualize
 
 **Acceptance test 1 adjustment:** the 8.2 overlap and 8.3 maturity-bias matched examples test the superseded rev 3 components; they stay as documentation, not test fixtures. The 8.4 leverage example stays a fixture.
 
-**Open conflict for Ian (blocks 4b):** Section 7 sets the delta gate at **0.70-0.85** (reused from Find LEAPS `SERVER_LEAPS_POLICY`; fixture C passes at the 0.85 boundary, acceptance test 2 uses 0.85/0.8501), while the I11 ruling and Alan's strike-band study used **0.70-0.90** as the qualifying range. One value is needed. The 40%-100% strike band covers both.
+**Conflict — RULED by Ian 2026-10-06: delta 0.70-0.85.** Reason: the I5 score ranks least time value first, and time value falls as strikes go deeper, so a 0.90 ceiling would push the top picks to the deepest, most capital-heavy contracts with the least leverage; 0.85 keeps the stock-replacement exposure without that drift and matches Find LEAPS. The I11 band study (0.70-0.90) is a superset, so 40%-100% of spot still covers every qualifying contract. Original note: Section 7 sets the delta gate at **0.70-0.85** (reused from Find LEAPS `SERVER_LEAPS_POLICY`; fixture C passes at the 0.85 boundary, acceptance test 2 uses 0.85/0.8501), while the I11 ruling and Alan's strike-band study used **0.70-0.90** as the qualifying range. One value is needed. The 40%-100% strike band covers both.
