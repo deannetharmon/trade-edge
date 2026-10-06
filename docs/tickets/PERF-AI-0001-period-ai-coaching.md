@@ -1,6 +1,6 @@
 # PERF-AI-0001 — AI coaching for the selected Performance period
 
-**Status (2026-10-06): DRAFT for team review. Not approved; do not build.** Requested by Dean: an AI analysis of the selected period that helps trading habits and strategy, and is precise and confident.
+**Status (2026-10-06): team review done (below); waiting on Dean: scope approval and the sizing question (D-SIZE). Then Diane mock, then build.** Requested by Dean: an AI analysis of the selected period that helps trading habits and strategy, and is precise and confident.
 
 ## Current state (as built, verified in code)
 
@@ -91,3 +91,71 @@
 - Trade recommendations for new positions.
 - Live open-position advice (the Portfolio tab owns it).
 - Changing any scoring or qualification logic.
+
+## Team review (2026-10-06)
+
+### Ian (trader): approve with changes
+- **Coach against Dean's own rules only (Q2).** General norms are not his methodology. Exception: position sizing has no written rule. It is raised as **D-SIZE** for Dean, not invented by the AI.
+- **Habits in v1 (Q1)**, limited to data the trade record actually holds:
+  1. the five rule checks;
+  2. **re-entry after a loss:** same ticker within 2 days of a losing close;
+  3. **loss concentration:** a ticker carrying ≥ 25% of the period's losses;
+  4. **day of week and time of entry:** only ever as an early signal, never a finding.
+- Out of v1:
+  - earnings exposure and rolls: not in the trade record;
+  - IVR and delta at entry: entry context covers 1 of 67 trades.
+- **The AI must report what the data says, even against a rule.** In Dean's log, the 9 spreads at or above 1/3 credit-to-width lost −$982, and the 43 below made +$426. That is 9 trades, so an early signal, not a reason to drop the rule. The coaching must say so plainly and suggest what to look at (were those near the money?). It must not recommend skipping below-1/3 trades, which would have cost $426.
+
+### Alan (quant): approve with changes
+- **Evidence tiers (Q3):**
+  - finding ≥ 10 trades, early signal 5–9, below 5 not reported as a pattern;
+  - a rule breach is a fact at any count;
+  - a **comparison** between two groups (strategy A vs B, at-or-above vs below 1/3) needs **both** groups ≥ 10 to be a finding;
+  - no confidence intervals in the text, since the tiers carry it.
+- **What-ifs (Q4)**, computed in code and shown with the arithmetic:
+  - **Beyond the 2× stop:** saved = Σ (actual loss before fees − credit). The 2× stop on price means the loss is capped at 1× credit. This is already `rules.beyondStop.excessLoss`. It assumes a fill at the stop: label it "at the stop price; slippage not modeled".
+  - **Skipped entries** (inside 21 DTE, re-entry after a loss): saved = −Σ P/L of those trades. It can be negative, meaning skipping would have cost money. Show it either way.
+  - **Credit-to-width:** report both groups' P/L; no single "saved" figure.
+- **Units:** dollars after fees, per position (all contracts). Credit-to-width = credit ÷ (width × 100 × contracts).
+- **Fail closed:** a what-if with any trade lacking strikes or credit is reported as "not computable: N trades missing data", never estimated.
+
+### Quinn (QA): approve with changes
+- **Number check (Q7):**
+  - Every $ amount and trade count in the answer must match a value in the input, allowing ±$1 rounding.
+  - The input supplies the differences and totals the AI may want, so it never adds or subtracts anything itself.
+  - On a mismatch: one automatic retry that lists the bad figures. If it still fails, show the answer with a visible "unverified figures: …" banner.
+- **Tests:**
+  - input builder and what-if calculator against a golden fixture of Dean's 67-trade log (expected −$982 / +$426, beyond-stop 5 trades);
+  - number checker: exact, rounding, invented figure, percent vs dollar;
+  - period label;
+  - the panel's empty-period and API-error states.
+- **Architecture:**
+  - builder, what-ifs, prompt text and checker live in `lib/` (`page.tsx` exports only);
+  - the old `buildPerformanceAnalysisPrompt` is deleted, not left beside the new one;
+  - one shared prompt version constant.
+- **Size:** at 12 months (~70–200 trades) the per-trade lines stay well under the model's input limit. Cap at 400 trades, with a visible note when capped.
+
+### Diane (UX): approve; mock next
+- **Opens on click (Q9)**, never automatically: each run costs money and takes time.
+- **The answer renders as sections, not chat prose:**
+  1. **Top tiles:** account profit, closed-trade profit, and the biggest leak in dollars.
+  2. **Habit cards:** one per habit, with dollars and a tier chip (Finding / Early signal).
+  3. **Three change cards:** each with dollars, a tier chip, and a "see rule card" link that scrolls to the matching card on the tab.
+  4. **Chat box** below for follow-ups.
+- **Header:** period dates, trade count, the model that answered, and a "generated at" time.
+- **Unverified figures:** an amber banner at the top of the answer, not hidden.
+
+### Paul (product): scope
+- **In:** R1–R6 with the changes above. The habit list is Ian's v1 list.
+- **Build order:**
+  1. S1, `lib/`: input builder, what-ifs, number checker, with tests.
+  2. S2: prompt and the gpt-5.6-terra call with the checker and retry.
+  3. S3: the panel per Diane's mock.
+- **Out, separate tickets:**
+  - saving analyses per period for month-over-month comparison (Q6, needs Redis);
+  - entry-context coaching (Q5) until coverage is meaningful;
+  - moving the Trade Log AI button onto the same builder;
+  - earnings and roll coaching.
+- **Dean decisions needed:**
+  - approve this scope;
+  - **D-SIZE:** do you have a max risk per trade (for example % of account)? If yes, the AI coaches against it; if not, sizing is reported as information only (capital at risk per trade vs account value), with no verdict.
