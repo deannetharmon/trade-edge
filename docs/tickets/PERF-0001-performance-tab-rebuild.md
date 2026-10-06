@@ -29,3 +29,14 @@
 - **Exit categories = the methodology:** Target (>= 50% of credit), Early profit (< 50%), Stopped at <= 2x credit, Beyond stop (> 2x credit) — the leak, 21-DTE managed, Expired, Assigned. Same names in the log and the tab.
 - **Returns:** spreads on max risk, CSP on collateral, long options on debit.
 - **Drop** Entry Context Outcomes until it has data; keep Hold Time only with the same dataset.
+
+## Reconciliation with the full log (Dean's full-detail export, 67 rows, 2026-04-29 to 10-05)
+
+- The tab's numbers come from the log but mix two record sets: **Strategy report = 62 complete records (+$2,017)**; **Exit Analysis / Best-Worst / Hold Time = all 67 (+$2,363)**. The difference is the 5 INCOMPLETE records (+$346).
+- **The incomplete records' P/L is wrong:** partial closes are priced against the full position's credit. MU BPS 8/5 (1 of 5 closed) shows +$822 and is a "best trade"; SPY BPS 6/3 (1 of 10 closed) shows −$505. AMD BPS 5/29 is "INCOMPLETE" yet CLOSED 2/2; SLV BCS shows opened 1, closed 1, remaining 1.
+- **ORCL BPS 5/28 has credit received −$83** (impossible for a credit spread; mis-signed or a roll leg).
+- Fees total $344 across 67 trades (included in P/L).
+
+**What the data says (Ian):** BPS 48 trades, −$1,038, 50% wins, avg win $178 vs avg loss $221 → negative expectancy. CSP 13 trades, +$2,912, 77% wins. **7 trades lost more than the credit (beyond the 2x stop): −$2,216** — without them the period is about +$4.2k. Realized by month: May +716, Jun −223, Jul −919, Aug +727, Sep +1,777, Oct −63. Several losses were 7-8 DTE SPX/SMH spreads, outside the 21-DTE methodology.
+
+**Build order:** (1) fix partial-close P/L (price the closed quantity only) and the negative-credit record; one dataset for log, export and tab; (2) Ian's metrics and rule-adherence panel; (3) Diane's layout.
