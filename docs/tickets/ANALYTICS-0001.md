@@ -19,7 +19,7 @@ Why v2: v1 of this ticket proposed a new calculation layer. A check of main (da6
 ## 2. Scope
 
 In scope, phase 1: new route `/analytics`, these panels only:
-1. Summary tiles: Realized, Open, Total, Capital deployed. Same numbers as Performance and Positions; same window selector as Performance, and the window is shown beside every number.
+1. Summary tiles: Realized, Open, Total, Capital deployed. Same numbers as Performance and Positions. The range control is the shared one used by Performance and the Trade Log: presets (1m to 12m) plus a custom from/to date. The range is shown beside every number.
 2. Monthly P&L, realized vs open: realized bars from the PERF-0001 report by month; open P&L shown as its own bar for the current month. A month is never presented as a mix of the two.
 3. Capital by strategy: the existing per-group capital from the portfolio summary, shown as shares of total. Groups with no capital say so.
 4. Concentration by economic underlying: share of capital per underlying, leveraged products tagged from the catalog, with the existing 25% limit marked and a 15% warning level.
@@ -43,6 +43,7 @@ Out of scope:
 - Win = pnl > 0. Win rate = wins / included trades (breakeven counts as not a win). Expectancy = net pnl / included trades. These are the existing definitions; no second win rate is introduced.
 - Realized P&L: by close date, after fees, window as selected. Open P&L: mark-to-market on the same basis the Positions page uses (mid), labelled with the basis.
 - Total = Realized + Open.
+- Date range (Dean, 2026-10-06): a preset or a custom from/to, inclusive, by close date. Realized panels (Realized tile, monthly realized, DTE at entry, monthly short-put P&L) follow the range. Open P&L, capital, concentration, position size and risk are as of now and are labelled so. Total P&L is shown only when the range ends today; otherwise the tile shows Realized only, because realized for a past range plus open now would mix two moments. Months cut by the range are marked partial. A start earlier than the Trade Log's fetched lookback is limited to it, with the limit stated; trades opened before the lookback stay unmatched, as today.
 - Position and group membership: the portfolio summary's groups, which partition the portfolio. This is the single count for Position size and Risk summary. (The 6-versus-10 mismatch seen in the mock came from the external mock, not the app.)
 - Capital: the portfolio summary's per-group capital (`buildCapitalViewModel` basis). One basis for Capital by strategy and concentration.
 - Position size % = position capital / account net liquidation value, because the rule set measures per-position size against the portfolio. Quinn confirms the field exists; if account value is unavailable the panel says "Unavailable" and does not silently fall back to deployed capital. Bands: 0-5, 5-10, 10+.
@@ -62,6 +63,7 @@ Out of scope:
 - No static leveraged list. Leverage tags come from `lib/instrument-metadata` and `leveragedPositionExposure`; an uncatalogued ticker is untagged, never guessed.
 - `app/analytics/page.tsx`: layout and calls only; no named exports beyond the allowed Next.js list. The route has no nav link until Dean confirms the numbers.
 - No new TastyTrade calls; browser-side acquisition stays as is.
+- `bookAnalytics.ts` takes `{ from, to }` dates; presets are just ranges. The custom from/to control is added to the shared selector by RANGE-0001 (separate small ticket; touches Performance and the Trade Log; Paul scopes). Until RANGE-0001 ships, the page offers the presets only.
 - Build order: A = `bookAnalytics.ts` + tests (green first), B = page.
 
 ## 6. Acceptance and tests
@@ -74,6 +76,7 @@ Out of scope:
 6. Position size band counts sum to the number of positions in the summary.
 7. DTE band trade counts sum to the included trades with a known entry DTE; the rest are counted as "unknown".
 8. A held leveraged product is tagged from the catalog; an uncatalogued ticker is not.
+9. The range filter is inclusive by close date; each preset equals its custom equivalent; Total shows only when the range ends today; partial months are marked.
 
 Golden fixture (Alan): a small hand-computed trade and position set. CI-0001 runs the suite on every push. Dean checks numbers on production behind the hidden route (Vercel Preview does not work for him).
 
