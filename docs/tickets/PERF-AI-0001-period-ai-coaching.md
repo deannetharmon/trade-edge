@@ -159,3 +159,21 @@
 - **Dean decisions needed:**
   - approve this scope;
   - **D-SIZE:** do you have a max risk per trade (for example % of account)? If yes, the AI coaches against it; if not, sizing is reported as information only (capital at risk per trade vs account value), with no verdict.
+
+## Dean's input (2026-10-06, after the review)
+
+- **Open positions are unsettled.** Period results stay realized-only; open positions are context, not results.
+- **Coaching must include open stock positions,** but only with enough market and company data to be intelligent. Dean: AI is too often "too deterministic" and gives bad position advice.
+- **Every recommendation must be discussable.** Dean can reply back and forth in the context of that specific position.
+
+**Paul's proposed split (pending Dean):**
+- **This ticket (v1):** coaching on closed trades and habits. Open positions are listed as context only, with no advice on them.
+- **New ticket PERF-AI-0002, position coaching:** per-position recommendations for open stock and option positions, with a follow-up chat per position. The AI gets:
+  - quote and trend;
+  - IV and IVR;
+  - earnings date;
+  - fundamentals (`lib/fundamentals`);
+  - recent news through the route's web-search path;
+  - the position's own entry, cost and history.
+
+  Built on the AI-POLICY-0001 grounded-chat work (0001B) rather than a second chat system.
