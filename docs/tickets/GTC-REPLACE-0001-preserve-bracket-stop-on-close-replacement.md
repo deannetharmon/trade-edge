@@ -31,7 +31,7 @@ Investigation found larger problems in the same path:
 - Rebuild exactly; never convert. Stop-market stays stop-market: same trigger, quantity, legs, time in force. Missing any field: refuse and name the field.
 - Single-leg only for stop-market. Multi-leg stop-market is not supported by TastyTrade; keep refusing (ES-0003 owns multi-leg stops).
 - A replacement must never silently leave the position without its stop.
-- Preserve the trader's own stop on Acquire/Wheel CSPs: never add or remove a stop in this ticket. (Confirm.)
+- Preserve the trader's own stop on Acquire/Wheel CSPs: never add or remove a stop in this ticket. **Confirmed 2026-10-06:** a bracket's stop is rebuilt exactly; a close replacing a plain GTC with no stop goes in without one; this ticket never adds a stop.
 
 **Paul (scope):**
 - In: items 1-7 below. Out: multi-leg stop-market; any change to how stop levels are chosen; UI redesign (copy in the existing result row only; no Diane mock).
@@ -81,5 +81,4 @@ Risk: order path. Full suite, `tsconfig.check.json`, one push, CI green and curr
 
 ## Open
 
-- Ian: confirm the Acquire/Wheel CSP rule above.
 - Dean: approve the ticket.
