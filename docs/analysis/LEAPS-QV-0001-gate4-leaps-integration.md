@@ -585,3 +585,7 @@ Also confirmed: leverage A 3.2, E 2.896552; 8.4 leverage 3.40 vs 1.70; annualize
 **Exit (P2):** a tested orchestrator with no production caller. Wiring it to a screen is Gate 6 (UI), which also needs the Gate 7 / `StrategyInput` assembler to produce real Gate 3 evaluations.
 
 **Deviation (for Quinn):** the golden harness pins the persisted LEAPS session payload (the Q4 fallback surface) rather than rendered row text; it captures every field the rows show (score, delta, OI, bid/ask, spread, extrinsic, IVR/IVx) at full precision.
+
+## 22. Quinn — review of the Gate 4 deviations (2026-10-06): ACCEPTED
+
+Sections 18 (4a, 6 items), 20 (4b, 6 items) and 21 (4c, 1 item) accepted as built: each keeps the spec's intent (no silent truncation, counted identities, fail-closed data, Find LEAPS untouched) and is covered by tests. Follow-ups carried, not blocking: cancel in-flight requests of a timed-out underlying (abort signal through the transport, 4a item 4); after-hours and weekend real-row fixtures when Gate 6 exercises LAST_SESSION on screen. **Gate 4 CLOSED.**

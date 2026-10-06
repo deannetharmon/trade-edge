@@ -1,3 +1,10 @@
+## RESUME HERE (2026-10-06, end of session)
+
+1. **ROIC data fix (LEAPS-QV):** Dean reruns `/api/qv-feasibility?symbols=UBER,NFLX,META,MRNA,SNDK` (now shows `blockingReasons`); fix the SEC concept mapping for `roic_v1_pct` (blocks UBER, META, NFLX) and NFLX P/E history / net debt-to-EBITDA. Then Diane mocks the Gate 6 screen.
+2. **Portfolio summary follow-ups:** reconcile 1D vs TastyTrade P/L Day (Dean screenshot in market hours); equity 1D; settings control for the 25% exposure limit.
+3. **GTC-REPLACE:** a Day close replacing a bracket is sent GTC until Dean sees a Day bracket expire with its stop intact.
+4. Dean has one more item to raise.
+
 # TradeEdge Roadmap (maintained by Paul — update after every major decision)
 
 Last updated: 2026-10-01 (LEV-0001 Gate 10 review)
