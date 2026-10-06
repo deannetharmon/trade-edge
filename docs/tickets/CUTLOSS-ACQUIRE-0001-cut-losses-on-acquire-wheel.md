@@ -2,7 +2,7 @@
 
 ## Status
 
-**APPROVED 2026-10-06** (Ian, Paul, Quinn). Not built. Display/availability of a manual button; no recommendation, scoring or order-body change. Targeted tests plus the full suite (shared action logic).
+**IMPLEMENTED 2026-10-06** (approved by Ian, Paul, Quinn, Dean). Display/availability of a manual button; no recommendation, scoring or order-body change. Targeted tests plus the full suite (shared action logic).
 
 ## Problem
 
@@ -30,3 +30,10 @@ In: the availability rule above at every place the action list is built. Out: re
    - Income CSP at a loss, Hold: Cut Losses present (unchanged).
    - Unset intent: unchanged.
    - Batch bar with a mixed selection: Cut Losses targets exclude the Acquire/Wheel Hold positions.
+
+## As built
+
+- `lib/portfolio/cutLossesAvailability.ts`: `assignmentIsThePlan` (intent `acquisition`/`wheel` and strategy key CSP or CC) and `cutLossesAvailable`; `isActionRelevant` (`app/portfolio/page.tsx`) calls it.
+- The Positions workspace's `getManagementActions` now passes the canonical action, like the card bar and the batch bar (Quinn item 1).
+- Tests: `lib/portfolio/__tests__/cutLossesAvailability.test.ts` (7; the Acquire/Wheel Hold cases fail on the old rule). Full suite 477 files; `tsconfig.check.json` clean.
+- Sibling check: no other component derives Cut Losses availability (grepped `features`, `components`); the card bar, batch bar and workspace all go through `isActionRelevant`.

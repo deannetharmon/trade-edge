@@ -134,6 +134,7 @@ import {
   type PmccShortLegPromptContext,
 } from '@/lib/portfolio/pmccStopGtcPrompt';
 import { canonicalRecommendationForCard, canonicalRecommendationToAction, projectCanonicalRecommendationForAi } from '@/lib/portfolio/canonicalRecommendationPresentation';
+import { cutLossesAvailable } from '@/lib/portfolio/cutLossesAvailability';
 // ES-0002: closes ES-0001 Closeout TD-1 -- `replacePendingOrder`'s
 // cancel/resubmit and its automatic restore-on-failure path now route
 // through this same discipline (deterministic plan, hard-blocking gate,
@@ -1717,8 +1718,9 @@ function isActionRelevant(pos: Position, action: ActionType, canonicalAction?: A
     //       preserved so the button stays available when TradeEdge
     //       recommends cutting losses even if pnl is null, zero, or
     //       temporarily positive.
-    const hasCurrentLoss = pos.pnl != null && pos.pnl < 0;
-    return entryComplete && (hasCurrentLoss || canonicalAction === 'CUT_LOSSES');
+    // CUTLOSS-ACQUIRE-0001: except on Acquire/Wheel short puts and covered
+    // calls, where only (b) applies (see cutLossesAvailability.ts).
+    return entryComplete && cutLossesAvailable(pos, canonicalAction);
   }
   if (action === 'PLACE_GTC') {
     return entryComplete && !pos.hasGtc;
@@ -11253,7 +11255,11 @@ export default function PortfolioPage() {
                 sellDeps={sellDeps}
                 th={th}
                 getManagementActions={position => (['TAKE_PROFIT', 'CUT_LOSSES', 'CLOSE_ROLL', 'PLACE_GTC'] as ActionType[])
-                  .filter(action => isActionRelevant(position, action))}
+                  .filter(action => isActionRelevant(
+                    position,
+                    action,
+                    position.recommendation ? canonicalRecommendationToAction(position.recommendation.kind) : null,
+                  ))}
                 onExecute={(position, action, initialRollMode) => openBatch([{ pos: position, action, initialRollMode }])}
                 onAnalyze={(position, traderNote) => analyzePosition(position, null, traderNote)}
                 renderAnalysisConversation={(position, analysis) => <PositionAnalysisConversation analysis={analysis as PositionAnalysis} pos={position} th={th} />}

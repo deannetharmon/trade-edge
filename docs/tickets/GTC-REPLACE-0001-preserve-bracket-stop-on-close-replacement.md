@@ -2,7 +2,7 @@
 
 ## Status
 
-**DRAFT 2026-10-05. Ian: approve with changes. Paul: approved scope as one ticket. Quinn: approve with changes (2026-10-06, below). Dean: approval pending.** Order path: full gates, full suite before push. Do not build before Quinn's review and Dean's approval. Build starts with the dry-run proof (step 1).
+**DRAFT 2026-10-05. Ian: approve with changes. Paul: approved scope as one ticket. Quinn: approve with changes (2026-10-06, below). Dean: approved 2026-10-06.** Order path: full gates, full suite before push. Do not build before Quinn's review and Dean's approval. Build starts with the dry-run proof (step 1).
 
 ## Problem
 
@@ -81,4 +81,3 @@ Risk: order path. Full suite, `tsconfig.check.json`, one push, CI green and curr
 
 ## Open
 
-- Dean: approve the ticket.
