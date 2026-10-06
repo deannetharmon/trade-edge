@@ -2,7 +2,7 @@
 
 ## Status
 
-**DRAFT 2026-10-05. Ian: approve with changes. Paul: approved scope as one ticket. Quinn: review pending. Dean: approval pending.** Order path: full gates, full suite before push. Do not build before Quinn's review and Dean's approval. Build starts with the dry-run proof (step 1).
+**DRAFT 2026-10-05. Ian: approve with changes. Paul: approved scope as one ticket. Quinn: approve with changes (2026-10-06, below). Dean: approval pending.** Order path: full gates, full suite before push. Do not build before Quinn's review and Dean's approval. Build starts with the dry-run proof (step 1).
 
 ## Problem
 
@@ -65,8 +65,21 @@ The unprotected window between cancel and submit (about 1 s) cannot be removed: 
 - New stop identity persisted after replacement.
 - Partial close and batch rules.
 
+## Quinn review (2026-10-06): approve with changes
+
+Checked against `app/portfolio/page.tsx` and `lib/portfolio/protectionOrders.ts` at `d2536ce`.
+
+1. **The OCO builder converts too.** `buildOcoBody` (`protectionOrders.ts` ~86) always builds the stop with `buildStopLimitBody`. Reusing it as scope item 2 says would turn a stop-market into a stop-limit on the *success* path, not just the restore. Add an exact-stop variant (`buildOcoBodyWithStop(legs, limit, pairedLeg)`) that copies type, trigger, limit (Stop Limit only), quantity, legs and TIF; the Set/Edit Profit Target path keeps its own behaviour when it creates a new stop.
+2. **The sibling does not fail closed either.** Set/Edit Profit Target cancels (~7104) before any broker dry-run. Item 3 applies to both paths, or the close dialog becomes safer than the sibling it reuses.
+3. **Dry-run with the bracket still working is unproven.** Dry-running a second Buy to Close OCO while the original is working may be rejected for exceeding the closeable quantity. Build-order step 1 must include that case. If TastyTrade rejects it, fall back to: local build + safety gates before cancel, broker dry-run right after cancel, restore on rejection. Record which one in the ticket.
+4. **App Dry Run mode cannot prove this flow.** The close dialog skips the whole cancel block and the fresh-price check when Dry Run is on (`!dryRun &&` ~3505, ~3547). Step 1 uses the broker `/dry-run` endpoint (`ttValidateOrder` ~1204) in live mode; the result row must say which checks ran.
+5. **Partial close: not reachable.** The close dialog always closes the full closeable quantity (`requestedQuantity` = `closeableQuantity`, ~3428). Item 7 reduces to an assertion (stop quantity = close quantity, else refuse) plus a test; build-order step 2 is answered.
+6. **Testability.** `resolveReconstructablePairedLeg` (~1185) and the cancel → place → restore sequence live in `page.tsx`. Move them to `lib/portfolio/existingGtcReplacement.ts` (next to `cancelExistingGtcForReplacement`) with injected broker calls, so every test below runs without the page.
+7. **Tests added:** the OCO builder preserves stop-market exactly (no `price` field); Set/Edit Profit Target refuses before cancel on dry-run rejection; restore after a failed replacement keeps the stop type in both paths; the stop-quantity assertion; a batch where item 2 fails leaves items 1 and 3 in a stated final state.
+
+Risk: order path. Full suite, `tsconfig.check.json`, one push, CI green and current-head Vercel Ready.
+
 ## Open
 
-- Quinn review.
 - Ian: confirm the Acquire/Wheel CSP rule above.
 - Dean: approve the ticket.
