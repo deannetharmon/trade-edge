@@ -51,14 +51,13 @@ So the profit target has no percentage anywhere, and the stop percentage can onl
 - Review order: "% of credit kept" box above `Limit $` for Place GTC and Take Profit on credit positions; `Limit $` rounds to tick on blur.
 - Sliders and typed percentages send tick-rounded prices; a "sent $3.80 · 29.6%" note appears when rounding changed the typed percentage.
 
-## Deviation from Ian's Acquire/Wheel ruling (for Ian to confirm)
+## Deviation from Ian's Acquire/Wheel ruling — CONFIRMED by Ian 2026-10-06
 
 The Add Stop dialog only opens from the **Add Stop / Review Stop** button, i.e. the trader explicitly asked for a stop. Starting the stop unchecked there would undo that click. Built instead: stop stays checked, with the line "Acquire (or Wheel): assignment is the plan, so a stop is optional." No dialog adds a stop to an Acquire/Wheel put on its own.
 
 ## Follow-ups
 
-- 24 more malformed `text-[9px}` / `text-[10px}` classes in the Review order dialog (`app/portfolio/page.tsx` ~4080-4470). Fixing them shrinks text Dean is used to (e.g. ORDERS / TOTAL DEBIT / EST. P&L), so it needs Diane first. Only the `Limit $` label was fixed here.
+- FIXED 2026-10-06 (Diane): the 24 malformed `text-[9px}` / `text-[10px}` classes in the Review order dialog. Labels take their intended 9/10px; risk and decision lines (live P/L, roll-check results, the 1/3 credit-rule line) set to `text-xs` so they do not shrink below label size.
 
 ## Open
 
-- Ian: confirm the Acquire/Wheel deviation above.

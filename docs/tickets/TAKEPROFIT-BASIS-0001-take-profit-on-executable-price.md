@@ -41,7 +41,7 @@ The 20% rule reads as "close now" although its purpose is "protect the profit wi
 - **No flip-flopping:** `lib/portfolio-data/recommendationHysteresis.ts`, applied in `attachSnapshotHistory`. A changed recommendation shows only when a second consecutive refresh confirms it, both directions; the pending one is kept on `Position.recommendationPending`.
 - Tests: `takeProfitBasis.test.ts` (5, Alan's golden fixtures), `recommendationHysteresis.test.ts` (8), `percentUnits.test.ts` (SET_PROFIT_TARGET and reason text), `recommendationScorecard.test.ts` (updated tie-break). Full suite 474 files / 6,832 tests; TypeScript check clean.
 
-## Deviations for Ian to confirm
+## Deviations — all four CONFIRMED by Ian 2026-10-06 (1: a nudge to place a target is safe without a close-now reading; 2: alerts appear at once, clear only on confirmation; 3 and 4 as written)
 
 1. **Close-now unknown:** the Set Profit Target nudge still shows when no close-now reading exists (it only suggests placing a target order, never closing). With a close-now reading it must be positive.
 2. **Urgent changes are not delayed:** a change TO cut losses, assignment risk, earnings risk or verify pricing shows at once. Leaving one still needs the second refresh, so one favourable tick cannot clear an alert.

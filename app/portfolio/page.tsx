@@ -4121,7 +4121,7 @@ function BatchConfirmModal({
                   </div>
                 ))}
               </div>
-              <p className={`text-[10px} ${th.textFaint} text-center`}>
+              <p className={`text-[10px] ${th.textFaint} text-center`}>
                 {dryRun ? 'Dry run complete' : 'Verify working orders in TastyTrade. Positions will refresh on close.'}
               </p>
             </div>
@@ -4234,12 +4234,12 @@ function BatchConfirmModal({
                           const effLimit = parseFloat(limitOverrides[item.pos.key] ?? item.limitPrice.toFixed(2)) || item.limitPrice;
                           const livePnl = parseFloat(expectedClosePnl(item.closeIdentity!, effLimit).toFixed(2));
                           return (
-                            <p className={`text-[10px} font-bold ${livePnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            <p className={`text-xs font-bold ${livePnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                               {livePnl >= 0 ? '+' : ''}${livePnl.toFixed(2)}
                             </p>
                           );
                         })()}
-                        <p className={`text-[10px} ${th.textFaint}`}>{item.orderBody['time-in-force']}</p>
+                        <p className={`text-[10px] ${th.textFaint}`}>{item.orderBody['time-in-force']}</p>
                       </div>
                     </div>
 
@@ -4316,7 +4316,7 @@ function BatchConfirmModal({
                     {item.action === 'CLOSE_ROLL' && !isExcluded && item.closeIdentity!.entryPriceEffect !== 'Debit' && (
                       <div className={`px-4 pb-3 border-t ${th.borderLight}`}>
                         <div className="flex items-center gap-2 pt-2 pb-2">
-                          <span className={`text-[9px} ${th.textFaint} uppercase`}>Action:</span>
+                          <span className={`text-[9px] ${th.textFaint} uppercase`}>Action:</span>
                           <button onClick={() => setRollMode((p: Record<string,string>) => ({...p, [item.pos.key]: 'close'}))} className={`text-[9px] px-2 py-0.5 rounded border font-bold ${(rollMode[item.pos.key] ?? 'close') === 'close' ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10' : th.border + ' ' + th.textFaint}`}>Close Only</button>
                           <button onClick={() => setRollMode((p: Record<string,string>) => ({...p, [item.pos.key]: 'roll'}))} className={`text-[9px] px-2 py-0.5 rounded border font-bold ${rollMode[item.pos.key] === 'roll' ? 'border-purple-500 text-purple-400 bg-purple-500/10' : th.border + ' ' + th.textFaint}`}>Close + Roll</button>
                           <span className={`text-[9px] ${th.textFaint}`}>{rollMode[item.pos.key] === 'roll' ? 'Closes and opens new spread.' : 'Closes position only.'}</span>
@@ -4369,32 +4369,32 @@ function BatchConfirmModal({
                                 </div>
                                 <div className="grid grid-cols-4 gap-2">
                                   <div>
-                                    <p className={`text-[9px} ${th.textFaint}`}>Credit (mid)</p>
-                                    <p className={`text-[10px} font-bold ${c.meetsMinCredit ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
+                                    <p className={`text-[9px] ${th.textFaint}`}>Credit (mid)</p>
+                                    <p className={`text-[10px] font-bold ${c.meetsMinCredit ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                                       ${c.creditMid.toFixed(2)}
                                     </p>
-                                    <p className={`text-[9px} ${th.textFaint}`}>{(c.creditRatio * 100).toFixed(0)}% of width</p>
+                                    <p className={`text-[9px] ${th.textFaint}`}>{(c.creditRatio * 100).toFixed(0)}% of width</p>
                                   </div>
                                   <div>
-                                    <p className={`text-[9px} ${th.textFaint}`}>Limit order</p>
-                                    <p className={`text-[10px} font-bold text-blue-400`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
+                                    <p className={`text-[9px] ${th.textFaint}`}>Limit order</p>
+                                    <p className={`text-[10px] font-bold text-blue-400`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                                       ${c.credit.toFixed(2)}
                                     </p>
-                                    <p className={`text-[9px} ${th.textFaint}`}>85% of mid</p>
+                                    <p className={`text-[9px] ${th.textFaint}`}>85% of mid</p>
                                   </div>
                                   <div>
-                                    <p className={`text-[9px} ${th.textFaint}`}>OI (short/long)</p>
-                                    <p className={`text-[10px} font-bold ${c.meetsOi ? 'text-emerald-400' : 'text-yellow-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
+                                    <p className={`text-[9px] ${th.textFaint}`}>OI (short/long)</p>
+                                    <p className={`text-[10px] font-bold ${c.meetsOi ? 'text-emerald-400' : 'text-yellow-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                                       {c.shortOi ?? '?'} / {c.longOi ?? '?'}
                                     </p>
-                                    <p className={`text-[9px} ${th.textFaint}`}>need ≥500</p>
+                                    <p className={`text-[9px] ${th.textFaint}`}>need ≥500</p>
                                   </div>
                                   <div>
-                                    <p className={`text-[9px} ${th.textFaint}`}>Bid-ask (sh/lg)</p>
-                                    <p className={`text-[10px} font-bold ${c.meetsBidAsk ? 'text-emerald-400' : 'text-yellow-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
+                                    <p className={`text-[9px] ${th.textFaint}`}>Bid-ask (sh/lg)</p>
+                                    <p className={`text-[10px] font-bold ${c.meetsBidAsk ? 'text-emerald-400' : 'text-yellow-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                                       ${c.shortBidAsk?.toFixed(2) ?? '?'} / ${c.longBidAsk?.toFixed(2) ?? '?'}
                                     </p>
-                                    <p className={`text-[9px} ${th.textFaint}`}>need ≤$0.10</p>
+                                    <p className={`text-[9px] ${th.textFaint}`}>need ≤$0.10</p>
                                   </div>
                                 </div>
                                 <div className={`pt-2 border-t ${th.borderLight}`}>
@@ -4414,10 +4414,10 @@ function BatchConfirmModal({
                                   <div className="space-y-1">
                                     {c.ruleViolations.map((v, i) => (
                                       <div key={i} className="flex items-start gap-1.5">
-                                        <span className={`text-[9px} shrink-0 mt-0.5 ${rollIsBlocking(c) ? 'text-red-400' : 'text-yellow-400'}`}>
+                                        <span className={`text-xs shrink-0 mt-0.5 ${rollIsBlocking(c) ? 'text-red-400' : 'text-yellow-400'}`}>
                                           {rollIsBlocking(c) ? '✕' : '⚠'}
                                         </span>
-                                        <p className={`text-[9px} leading-relaxed ${rollIsBlocking(c) ? 'text-red-300' : 'text-yellow-300'}`}>{v}</p>
+                                        <p className={`text-xs leading-relaxed ${rollIsBlocking(c) ? 'text-red-300' : 'text-yellow-300'}`}>{v}</p>
                                       </div>
                                     ))}
                                   </div>
@@ -4434,7 +4434,7 @@ function BatchConfirmModal({
                               { label: 'Credit ($)', key: 'credit', placeholder: '1.50' },
                             ].map(f => (
                               <div key={f.key}>
-                                <p className={`text-[9px} ${th.textFaint} mb-1`}>{f.label}</p>
+                                <p className={`text-[9px] ${th.textFaint} mb-1`}>{f.label}</p>
                                 <input
                                   value={ri?.[f.key as keyof typeof ri] ?? ''}
                                   onChange={e => setRollInputs(prev => ({ ...prev, [item.pos.key]: { ...prev[item.pos.key], [f.key]: e.target.value } }))}
@@ -4453,14 +4453,14 @@ function BatchConfirmModal({
                             const minCredit   = inputWidth / 3;
                             if (inputCredit > 0 && inputRatio < 1/3) {
                               return (
-                                <p className="text-[9px} text-red-400">
+                                <p className="text-xs text-red-400">
                                   ✕ Credit ${inputCredit.toFixed(2)} &lt; 1/3 of ${inputWidth} spread (${minCredit.toFixed(2)} min) — violates credit rule
                                 </p>
                               );
                             }
                             if (inputCredit > 0) {
                               return (
-                                <p className="text-[9px} text-emerald-400">
+                                <p className="text-xs text-emerald-400">
                                   ✓ Credit ratio {(inputRatio * 100).toFixed(0)}% of spread width — meets 1/3 rule
                                 </p>
                               );
@@ -4525,15 +4525,15 @@ function BatchConfirmModal({
               <div className={`flex items-center justify-between p-3 rounded-lg ${th.card}`}>
                 <div className="flex gap-6">
                   <div>
-                    <p className={`text-[9px} ${th.textFaint} uppercase tracking-widest`}>Orders</p>
+                    <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>Orders</p>
                     <p className={`text-sm font-bold ${th.text}`}>{activeItems.length}</p>
                   </div>
                   <div>
-                    <p className={`text-[9px} ${th.textFaint} uppercase tracking-widest`}>{totalCloseCashFlow >= 0 ? 'Total Credit' : 'Total Debit'}</p>
+                    <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>{totalCloseCashFlow >= 0 ? 'Total Credit' : 'Total Debit'}</p>
                     <p className="text-sm font-bold text-blue-400" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>${Math.abs(totalCloseCashFlow).toFixed(2)}</p>
                   </div>
                   <div>
-                    <p className={`text-[9px} ${th.textFaint} uppercase tracking-widest`}>Est. P&L</p>
+                    <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest`}>Est. P&L</p>
                     <p className={`text-sm font-bold ${totalEstPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
                       {totalEstPnl >= 0 ? '+' : ''}${totalEstPnl.toFixed(2)}
                     </p>
