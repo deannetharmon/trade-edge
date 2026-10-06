@@ -462,15 +462,15 @@ One matrix replaces the earlier per-reviewer lists. Every value is **PROPOSED**;
 | Q6 | Quinn | Policy pinning and guards | fingerprint test; isolation and `noInvestmentLogic` guards extended | none | Prevents silent threshold drift | 4b |
 | Q7 | Quinn | Future-timestamp tolerance | 5 s | 0 s or 30 s | Clock skew allowance without admitting future data | 4b |
 | Q8 | Quinn | Gate split | 4a audit+acquisition, 4b evaluator+ranking, 4c orchestration+equivalence | single gate | Each slice independently testable; one push per slice | Structure (before any 4x) |
-| P1 | Paul | SETUP underlyings in chain retrieval | included | ACTIONABLE only | SETUP is a qualifying state in Gate 3 | 4c |
-| P2 | Paul | No production `StrategyInput` assembler | tested orchestrator with no production caller is an acceptable Gate 4 exit | build assembler in Gate 4 | Assembler belongs to Gate 7 / separate ticket | 4c |
+| P1 | Paul | SETUP underlyings in chain retrieval | **RULED (Paul, rev 4):** included | ACTIONABLE only | SETUP is a qualifying state in Gate 3 | 4c |
+| P2 | Paul | No production `StrategyInput` assembler | **RULED (Paul, rev 4):** tested orchestrator with no production caller is an acceptable Gate 4 exit | build assembler in Gate 4 | Assembler belongs to Gate 7 / separate ticket | 4c |
 | P3 | Paul | Debit and capital | shown, no sizing | none | Sizing is a later gate | No |
 | P4 | Paul | Cross-underlying "best contract" | deferred to Gate 6 | include in Gate 4 | Underlying and contract rankings are separate | No |
-| P5 | Paul | Provider audit ownership | part of Gate 4 (as 4a) | separate Gate 2d data amendment | Audit gates the acquisition design | 4a |
-| P6 | Paul | Session-open helper on the Gate 2c calendar | small additive change in Gate 4 | duplicate calendar logic in `lib/discovery/leaps/` | One calendar source of truth | 4a, 4b |
+| P5 | Paul | Provider audit ownership | **RULED (Paul, rev 4):** part of Gate 4 (as 4a) | separate Gate 2d data amendment | Audit gates the acquisition design | 4a |
+| P6 | Paul | Session-open helper on the Gate 2c calendar | **RULED (Paul, rev 4):** small additive change in Gate 4 | duplicate calendar logic in `lib/discovery/leaps/` | One calendar source of truth | 4a, 4b |
 | F1 | Frank | Authorization | implementation stays BLOCKED until the rulings above that block a slice, Paul's scope and the provider audit evidence for that slice are recorded in the ledger | none | No approvals are recorded in this document | all |
 
-**Implementation readiness (rev 4):** provider evidence is in (11.1 PERFORMED); I6, I8 and Q3 ruled. I11, I12 (Ian) and Q9 (Quinn) ruled. Still blocking: the remaining PROPOSED rows above (I1-I5, I7, I9, Q1, Q2, Q4-Q8, P1-P2, P5-P6), and Paul's authorization (F1). Closed and available: Gate 2 contract metrics, Gate 3 evaluation, Gate 2c data and calendar.
+**Implementation readiness (rev 4):** provider evidence is in (11.1 PERFORMED); I6, I8 and Q3 ruled. I11, I12 (Ian), Q9 (Quinn), P1, P2, P5, P6 (Paul) ruled. Still blocking: Ian/Quinn rulings on I1-I5, I7, I9, Q1, Q2, Q4-Q8 (one ruling pass when Gate 4 is scheduled), then Paul's authorization (F1). **Paul (2026-10-06): not authorized yet; Gate 4 is queued behind the Portfolio queue in `docs/ROADMAP.md`.** Closed and available: Gate 2 contract metrics, Gate 3 evaluation, Gate 2c data and calendar.
 
 ## 17. Revision 1 — response to review round 1 (CHANGES REQUIRED at 6d7858c)
 | # | Review item | Response (where) |
@@ -513,6 +513,7 @@ Thresholds, weights and quote windows remain PROPOSED; provider access is NOT AV
 | A4 | Strike band (Ian, Alan) | 40%-100% of spot, measured against captured deltas (I11, PROPOSED) |
 | A5 | Request budget (Quinn) | 10 chunks per underlying, over-limit = incomplete and unranked (Q3); run budget 300 (Q9, PROPOSED) |
 | A6 | New finding | Option quotes re-stamped about 20:00 ET outside the session; LAST_SESSION window extended to the next open (I12) |
+| A9 | Paul | P1, P2, P5, P6 ruled as proposed; implementation not authorized until the Portfolio queue clears and the remaining rows are ruled |
 | A8 | Quinn sign-off | Q9 approved with conditions: retries counted, 429 one retry then not evaluated, 401 stops the run, four required tests |
 | A7 | Ian sign-off | I11 approved (40%-100% of spot, delta decides); I12 approved with conditions: review/ranking only, two-sided market required, live re-quote for any order |
 Thresholds, weights and quote windows not listed above remain PROPOSED; no Paul/Frank authorization is recorded.
