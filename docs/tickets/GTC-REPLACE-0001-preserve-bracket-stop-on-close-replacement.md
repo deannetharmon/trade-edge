@@ -2,7 +2,7 @@
 
 ## Status
 
-**DRAFT 2026-10-05. Ian: approve with changes. Paul: approved scope as one ticket. Quinn: approve with changes (2026-10-06, below). Dean: approved 2026-10-06.** Order path: full gates, full suite before push. Do not build before Quinn's review and Dean's approval. Build starts with the dry-run proof (step 1).
+**DRAFT 2026-10-05. Ian: approve with changes. Paul: approved scope as one ticket. Quinn: approve with changes (2026-10-06, below). Dean: approved 2026-10-06. Paul: Quinn's additions (exact-stop OCO builder, fail-closed in Set/Edit Profit Target, extraction to `lib/`) accepted into scope 2026-10-06. Ian: Quinn item 1 is his "rebuild exactly" rule; no new ruling needed.** Order path: full gates, full suite before push. Do not build before Quinn's review and Dean's approval. Build starts with the dry-run proof (step 1).
 
 ## Problem
 
