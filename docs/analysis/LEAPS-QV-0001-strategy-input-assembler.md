@@ -1,6 +1,6 @@
 # LEAPS-QV-0001 — Gate 3 input builder (StrategyInput assembler): data contract
 
-**Status: SPECIFICATION — Quinn, 2026-10-06.** Scope approved by Paul and Dean (2026-10-06): fetch fundamentals and price history per Opportunity Universe symbol, build the QV-v1.0 `StrategyInput`, run the strategy. **Out:** any Gate 3 rule change, any UI (that is the Gate 6 MVP). No investment logic is added here, so no Ian gate.
+**Status: IMPLEMENTED 2026-10-06 (as built, Section 9); feasibility run pending (Dean).** Specified by Quinn, 2026-10-06. Scope approved by Paul and Dean (2026-10-06): fetch fundamentals and price history per Opportunity Universe symbol, build the QV-v1.0 `StrategyInput`, run the strategy. **Out:** any Gate 3 rule change, any UI (that is the Gate 6 MVP). No investment logic is added here, so no Ian gate.
 
 ## 1. Why
 
@@ -64,3 +64,10 @@ This session cannot reach SEC or Yahoo (sandbox egress), so the first real run i
 ## 8. Build order
 
 One slice, one push: assembler + run + transport + tests 1-7, full suite, `tsconfig.check.json`; then Dean's feasibility run (Section 6); then the Gate 6 mock (Diane).
+
+## 9. As built (2026-10-06)
+
+- `lib/discovery/qv/assembleInput.ts` (`assembleQvStrategyInput`, `qvRequiredMetricIds`, `QV_NO_PROVIDER_METRIC_IDS`), `lib/discovery/qv/runUniverse.ts` (`runQvUniverse`), browser binding `lib/scans/qvUniverseTransport.ts`.
+- **Feasibility run (Section 6), changed from a console script to a signed-in URL:** `GET /api/qv-feasibility?symbols=UBER,NFLX` (handler `lib/fundamentals/qvFeasibility.ts`, max 25 symbols) runs the same loader, assembler and QV-v1.0 server-side and returns per symbol the state, blocking metric ids, source issues and reason codes. The TastyTrade earnings date is not fetched there (informational in QV-v1.0).
+- Tests: real loader -> JSON round trip -> assembly covers every QV id, with only the four no-provider ids unsourced; pinned evaluation (synthetic ACME: WATCH, technical state not established) as a snapshot; disjointness; named source failures -> INSUFFICIENT_DATA; timeout / network isolation; missing market-metrics item; contract error fails closed per symbol; determinism and order independence; one clock read; hand-off to `runQvLeaps` with zero chain calls for non-qualifying symbols; transport; Find LEAPS guard extended to the new transport.
+- Deviation: a source contract error (an id in two sources) fails closed for that symbol (all its data UNAVAILABLE, `ASSEMBLY_CONTRACT_ERROR`) rather than marking only the duplicated id INVALID.

@@ -95,5 +95,6 @@ describe('Section 12 one-way guard: Find LEAPS never imports Gate 4', () => {
     const src = readFileSync(join(ROOT, file), 'utf8');
     expect(src).not.toMatch(/lib\/discovery/);
     expect(src).not.toMatch(/leapsQvTransport/);
+    expect(src).not.toMatch(/qvUniverseTransport/);
   });
 });

@@ -11,3 +11,5 @@ export * from './fundamentals';
 export * from './technical';
 export * from './risk';
 export * from './strategy';
+export * from './assembleInput';
+export * from './runUniverse';
