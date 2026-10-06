@@ -177,3 +177,13 @@
   - the position's own entry, cost and history.
 
   Built on the AI-POLICY-0001 grounded-chat work (0001B) rather than a second chat system.
+
+## D-SIZE decided (Dean, 2026-10-06)
+
+- **Rule: no single position may use more than 50% of net liq.**
+  - Capital per position = capital at risk (spreads: max loss; CSP: strike × 100 × contracts).
+  - Net liq = the stored balance close on or before the open date (`balance-history`).
+  - Fail closed: no balance within 5 days → "size not checked" for that trade, never estimated.
+- The 2× premium stop is a separate rule and is already in the rule checks.
+- **Coaching:** a trade over 50% is a rule breach (a fact at any count). Size is also shown per trade as information.
+- **Alan:** use opening capital, not current. Quinn adds fixtures for 49.9%, 50.0% and 50.1%. At exactly 50% the trade is within the rule.
