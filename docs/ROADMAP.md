@@ -12,7 +12,7 @@ Last updated: 2026-10-01 (LEV-0001 Gate 10 review)
 5. **ORDER-PCT-INPUT-0001** — MERGED 2026-10-05; mock (https://claude.ai/artifact/Ln4e9PgkBBkNU19pnvdRD6). Percent and price boxes kept in sync for profit targets (% of credit kept) and stops (% of original credit). Diane, Ian (defaults), Quinn pending. Ticket: `docs/tickets/ORDER-PCT-INPUT-0001-percent-and-price-inputs.md`.
 6. **PORTFOLIO-SUMMARY-0001** — IMPLEMENTED 2026-10-05; mock (https://claude.ai/artifact/GaxxUqLfRSa4zABBsXGmvv). P/L summary tiles by position type on Positions and Position Analysis: P/L, capital and theta, 1D/1W change, needs-attention, cash to deploy (no margin), largest exposure (25% limit). Paul and Quinn pending. Ticket: `docs/tickets/PORTFOLIO-SUMMARY-0001-pl-summary-by-position-type.md`.
 
-**LEAPS-QV-0001 Gate 4a + 4b** — IMPLEMENTED 2026-10-06: acquisition (Section 18) and the pure evaluator and ranking (Section 20; Alan's fixtures Section 19; delta 0.70-0.85 ruled). Next: 4c orchestration (Gate 3 -> Gate 4 handoff, browser binding, Find LEAPS goldens).
+**LEAPS-QV-0001 Gate 4 (4a, 4b, 4c)** — IMPLEMENTED 2026-10-06: acquisition, evaluator and ranking, orchestration and browser binding, Find LEAPS goldens (spec Sections 18-21). No production caller yet (P2). Next LEAPS-QV gates: 5 (scenarios), 6 (UI, incl. the delta-range control), 7 (persistence / StrategyInput assembler).
 
 ## Current status — 2026-10-01 (LEV-0001 Gate 10 review)
 

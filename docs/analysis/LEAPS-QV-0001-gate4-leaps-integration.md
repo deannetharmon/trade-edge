@@ -573,3 +573,15 @@ Also confirmed: leverage A 3.2, E 2.896552; 8.4 leverage 3.40 vs 1.70; annualize
 4. **Timestamps:** only ISO-8601 strings are accepted (audit 3b); epoch numbers are `QUOTE_TIMESTAMP_UNPARSEABLE` rather than guessed.
 5. **DTE:** the gate uses the New York calendar date acquisition selected on, overriding the Gate 2 builder's UTC-date DTE, so selection and gating cannot disagree in the evening.
 6. **Section 12 Find LEAPS goldens:** not needed for 4b, which touches no Find LEAPS file; they belong to 4c, the first slice that adds a production caller.
+
+## 21. Gate 4c — as built (2026-10-06); Gate 4 complete
+
+**Delivered**
+- **Find LEAPS goldens first** (separate characterization commit `8065e97`, Section 12, Q4): `app/screener/__tests__/FindLeapsGolden.test.tsx` renders the real `ScreenerPage`, mocks only the TastyTrade proxy (answered from the sanitized UBER audit fixture) and the token, drives FIND LEAPS -> RUN LEAPS SCAN, and pins the persisted rows (24 UBER rows with the modal defaults 0.70-0.85 delta, 365-545 DTE) to `__goldens__/find-leaps-uber-2026-10-05.json`. Recording requires `RECORD_FIND_LEAPS_GOLDEN=1`; a Gate 4 change must never re-record it.
+- `lib/discovery/leaps/orchestrate.ts`: `runQvLeaps(pairs, deps)` -> `QvLeapsResult[]` (`{ underlying: StrategyEvaluation; leaps: LeapsEvaluation }`), plus run totals. Only SETUP / ACTIONABLE are acquired; every pair is evaluated; the Gate 3 evaluation is returned by reference, unchanged; `now()` is read before acquisition (selection) and after all I/O (evaluation, 4.1).
+- `lib/scans/leapsQvTransport.ts`: the browser binding (`leapsQvProxyGet` through the app's same-origin proxy, returning the provider status unchanged so the 401/429/budget rules apply; `LEAPS_QV_BROWSER_DEPS`). It imports nothing from `lib/discovery`, so the isolation guard needs no exemption.
+- Tests: `lib/discovery/leaps/__tests__/orchestrate.test.ts` (zero provider calls for non-qualifying and insufficient-data underlyings, pass-through by reference, clock read before/after I/O, failure isolation, and the Section 12 one-way guard over every Find LEAPS file), `lib/scans/__tests__/leapsQvTransport.test.ts`.
+
+**Exit (P2):** a tested orchestrator with no production caller. Wiring it to a screen is Gate 6 (UI), which also needs the Gate 7 / `StrategyInput` assembler to produce real Gate 3 evaluations.
+
+**Deviation (for Quinn):** the golden harness pins the persisted LEAPS session payload (the Q4 fallback surface) rather than rendered row text; it captures every field the rows show (score, delta, OI, bid/ask, spread, extrinsic, IVR/IVx) at full precision.
