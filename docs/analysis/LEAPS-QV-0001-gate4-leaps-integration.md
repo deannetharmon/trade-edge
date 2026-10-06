@@ -433,7 +433,7 @@ The Find LEAPS scan is implemented inline in `app/screener/page.tsx` (`runLeapsS
 No Bear/Base/Bull scenarios (Gate 5), no scenario engine, QV UI (Gate 6), snapshot persistence (Gate 7), sizing or allocation, order construction/execution, rolling, notifications, pre-expiration theoretical option pricing, historical IV storage, or any change to Gate 3 methodology.
 
 ## 15. Interfaces left for later gates (not built here)
-Gate 5 consumes `{ occSymbol, expiration, strike, debitPerContract (= mid × M), breakevenPrice, multiplier }` from a `ContractEvaluation`; the entry-price assumption (mid) is part of that contract so scenarios use the same debit. Gate 6 reads `QvLeapsResult` and reason codes. Gate 7 serialises `QvLeapsResult` with `policyVersion`.
+Gate 5 consumes `{ occSymbol, expiration, strike, debitPerContract (= mid × M), breakevenPrice, multiplier }` from a `ContractEvaluation`; the entry-price assumption (mid) is part of that contract so scenarios use the same debit. Gate 6 reads `QvLeapsResult` and reason codes. **Gate 6 requirement (Ian, Dean 2026-10-06):** each ranked row shows delta and capital required, and the LEAPS screen offers a delta-range control inside 0.70-0.85 (no target-delta score); the ranking's lean toward lower time value (deeper strikes) is the documented default. Gate 7 serialises `QvLeapsResult` with `policyVersion`.
 
 ## 16. Review package: consolidated decision matrix
 
@@ -554,3 +554,22 @@ Also confirmed: leverage A 3.2, E 2.896552; 8.4 leverage 3.40 vs 1.70; annualize
 **Acceptance test 1 adjustment:** the 8.2 overlap and 8.3 maturity-bias matched examples test the superseded rev 3 components; they stay as documentation, not test fixtures. The 8.4 leverage example stays a fixture.
 
 **Conflict — RULED by Ian 2026-10-06: delta 0.70-0.85.** Reason: the I5 score ranks least time value first, and time value falls as strikes go deeper, so a 0.90 ceiling would push the top picks to the deepest, most capital-heavy contracts with the least leverage; 0.85 keeps the stock-replacement exposure without that drift and matches Find LEAPS. The I11 band study (0.70-0.90) is a superset, so 40%-100% of spot still covers every qualifying contract. Original note: Section 7 sets the delta gate at **0.70-0.85** (reused from Find LEAPS `SERVER_LEAPS_POLICY`; fixture C passes at the 0.85 boundary, acceptance test 2 uses 0.85/0.8501), while the I11 ruling and Alan's strike-band study used **0.70-0.90** as the qualifying range. One value is needed. The 40%-100% strike band covers both.
+
+## 20. Gate 4b — as built (2026-10-06)
+
+**Delivered** (`lib/discovery/leaps/`)
+- `policy.ts`: `QV_LEAPS_POLICY_V1` (`QV-LEAPS-v1`): gates DTE 365-900, delta 0.70-0.85, OI >= 100, spread <= 10%, extrinsic <= 20%; quote rules LIVE 15 min / skew 60 s, LAST_SESSION from (latest close - 60 min), future tolerance 5 s; ranking time-value 70 (zero at 15% breakeven move) + liquidity 30; quanta 1e6 (rank) and 1e9 (gates); frozen, fingerprint-pinned, invariants tested.
+- `reasons.ts`: the 5.4 registry with fixed templates (observed value and limit from the same comparison).
+- `rank.ts`: I5 score and the 8.1 quantized lexicographic comparator.
+- `evaluate.ts`: `evaluateLeaps({ symbol, underlyingState, now, acquisition, policy })`. Per contract: duplicate -> quote row -> deliverable (I8) -> quote time and mode (I6, I12, two-sided closing quotes) -> Gate 2 metrics through `buildContractMetrics` -> gates -> score. Per underlying: Section 6 precedence rules 1-6 with the counted identities.
+- Tests `__tests__/evaluate.test.ts` (71): Section 9 fixtures to 6 decimals, every Section 3 metric for A and E, boundaries (DTE, delta, OI, spread, extrinsic, LIVE age, skew, future stamp), D1-D16 incl. D13a/b and reason codes, data failures, the 4.3 cases as ruled (no DELAYED), early close, Good Friday, I12 re-stamp, instrument metadata, fixture T over all permutations and every tie-break rung, no input mutation, IV observable only, and an end-to-end real-row run.
+
+**Real-row result (UBER, 2026-10-05 12:49 ET):** 59 contracts selected, 4 eligible, 55 ineligible, 0 unresolved, `COMPLETE_CHAIN`; rank 1 is the Dec 2027 45 call at delta 0.848 (score 60.94), which shows the documented lean toward deeper strikes.
+
+**Deviations (for Quinn)**
+1. **Input shape:** `LeapsEvaluationInput` takes the 4a `LeapsChainAcquisition` (spot, raw underlying, chain) instead of separate `underlying` and `chain` fields; `underlyingState` is a string so Gate 3 types are not imported here.
+2. **Quote modes:** `DELAYED` is removed (I6); `quoteMode` is `LIVE | LAST_SESSION`. LAST_SESSION skips the skew rule (S is the regular-session close, so both sides describe the close); the underlying stamp must fall in the same window.
+3. **New codes:** `CONTRACT_QUOTE_ROW_MISSING`, `CONTRACT_QUOTE_NOT_TWO_SIDED` (Ian I12 b), `LEAPS_NOT_EVALUATED_RUN_CAP`, `LEAPS_ACQUISITION_INCOMPLETE_QUOTE_LIMIT` (quote limit exceeded -> `DATA_UNAVAILABLE`, unranked), `LEAPS_GATE_FAILURE_COUNT` (dominant failing gates). `ContractEvaluation` gains `resolution` (the four disjoint classes) and `reasons`.
+4. **Timestamps:** only ISO-8601 strings are accepted (audit 3b); epoch numbers are `QUOTE_TIMESTAMP_UNPARSEABLE` rather than guessed.
+5. **DTE:** the gate uses the New York calendar date acquisition selected on, overriding the Gate 2 builder's UTC-date DTE, so selection and gating cannot disagree in the evening.
+6. **Section 12 Find LEAPS goldens:** not needed for 4b, which touches no Find LEAPS file; they belong to 4c, the first slice that adds a production caller.
