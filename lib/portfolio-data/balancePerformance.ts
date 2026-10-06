@@ -72,3 +72,29 @@ export function withLivePoint(history: readonly BalanceDayPoint[], todayNy: stri
 export function todayNewYork(nowMs: number): string {
   return newYorkDate(new Date(nowMs).toISOString()) as string;
 }
+
+export type PeriodAccountProfit =
+  | { status: 'OK'; startDate: string; endDate: string; startValue: number; endValue: number; netMoved: number; profit: number; returnPct: number | null }
+  | { status: 'UNAVAILABLE'; reason: string };
+
+function daysBetween(a: string, b: string): number {
+  return Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86400000);
+}
+
+/**
+ * PERF-0001 (Ian): account profit for [from, to] = value at the end - value at the start - money moved in between.
+ * Start = the last stored close before `from` (or the first on/after it), end = the last stored close on/before `to`,
+ * each within `toleranceDays`; the dates actually used are returned. Missing history is reported, never guessed.
+ */
+export function periodAccountProfit(history: readonly BalanceDayPoint[], movements: readonly MoneyMovement[], from: string, to: string, toleranceDays = 5): PeriodAccountProfit {
+  const days = history.filter((d) => d.netLiquidatingValue !== 0).slice().sort((a, b) => a.date.localeCompare(b.date));
+  const before = days.filter((d) => d.date < from).pop();
+  const onOrAfter = days.find((d) => d.date >= from && d.date <= to);
+  const start = before && daysBetween(before.date, from) <= toleranceDays ? before : onOrAfter && daysBetween(from, onOrAfter.date) <= toleranceDays ? onOrAfter : null;
+  const end = days.filter((d) => d.date <= to).pop();
+  if (!start) return { status: 'UNAVAILABLE', reason: `No saved account balance within ${toleranceDays} days of ${from}.` };
+  if (!end || daysBetween(end.date, to) > toleranceDays || end.date <= start.date) return { status: 'UNAVAILABLE', reason: `No saved account balance within ${toleranceDays} days of ${to}.` };
+  const netMoved = movements.filter((m) => m.date > start.date && m.date <= end.date).reduce((n, m) => n + m.amount, 0);
+  const profit = end.netLiquidatingValue - start.netLiquidatingValue - netMoved;
+  return { status: 'OK', startDate: start.date, endDate: end.date, startValue: start.netLiquidatingValue, endValue: end.netLiquidatingValue, netMoved, profit, returnPct: start.netLiquidatingValue > 0 ? (profit / start.netLiquidatingValue) * 100 : null };
+}

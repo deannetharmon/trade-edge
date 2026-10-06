@@ -2,7 +2,7 @@
 'use client';
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -26,6 +26,25 @@ import { buildEntryPerformanceRollup, type EntryPerformanceRollup } from '@/lib/
 import type { CreditSpreadEntrySnapshot } from '@/lib/entry-context/types';
 import { buildStrategyPerformanceReport } from '@/lib/performance/strategyPerformance';
 import { buildStrategyBreakdown } from '@/lib/tradeLog/strategyBreakdown';
+import { buildPerformanceReport } from '@/lib/tradeLog/performanceMetrics';
+import { extractMoneyMovements, periodAccountProfit, todayNewYork, type BalanceDayPoint, type MoneyMovement } from '@/lib/portfolio-data/balancePerformance';
+import { PerformanceReportView } from '@/features/performance/PerformanceReportView';
+
+// PERF-0001: one period selector for every panel. Trades are loaded once for 12 months and filtered by close date.
+type PeriodPreset = 'THIS_MONTH' | 'LAST_MONTH' | 'YTD' | '3M' | '6M' | '12M' | 'CUSTOM';
+const PERIOD_PRESETS: [PeriodPreset, string][] = [['THIS_MONTH', 'THIS MONTH'], ['LAST_MONTH', 'LAST MONTH'], ['YTD', 'YTD'], ['3M', '3 MO'], ['6M', '6 MO'], ['12M', '12 MO']];
+function presetDates(preset: PeriodPreset, today: string): { from: string; to: string } {
+  const [y, m] = today.split('-').map(Number);
+  const iso = (yy: number, mm: number, dd: number) => new Date(Date.UTC(yy, mm - 1, dd)).toISOString().slice(0, 10);
+  const back = (months: number) => { const d = new Date(`${today}T12:00:00Z`); d.setUTCMonth(d.getUTCMonth() - months); return d.toISOString().slice(0, 10); };
+  if (preset === 'THIS_MONTH') return { from: iso(y, m, 1), to: today };
+  if (preset === 'LAST_MONTH') return { from: iso(y, m - 1, 1), to: iso(y, m, 0) };
+  if (preset === 'YTD') return { from: iso(y, 1, 1), to: today };
+  if (preset === '3M') return { from: back(3), to: today };
+  if (preset === '6M') return { from: back(6), to: today };
+  return { from: back(12), to: today };
+}
+const LS_PERF_PERIOD = 'hunter-perf-period';
 
 interface ChatMessage { role: 'user' | 'assistant'; content: string; }
 
@@ -980,12 +999,49 @@ export default function PerformancePage() {
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
   const [status, setStatus]       = useState('');
-  const [range, setRange]         = useState<TimeRange>('3m');
+  const [range]                   = useState<TimeRange>('12m');
   const [cachedAt, setCachedAt]   = useState<number | null>(null);
   const [widgets, setWidgets]     = useState<WidgetConfig[]>(DEFAULT_WIDGETS);
   const [showConfig, setShowConfig] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const [entryPerformance, setEntryPerformance] = useState<EntryPerformanceRollup | null>(null);
+  void entryPerformance;
+  const today = todayNewYork(Date.now());
+  const [preset, setPreset] = useState<PeriodPreset>(() => { try { return (localStorage.getItem(LS_PERF_PERIOD) as PeriodPreset) || '12M'; } catch { return '12M'; } });
+  const [custom, setCustom] = useState<{ from: string; to: string }>(() => presetDates('3M', todayNewYork(Date.now())));
+  const period = preset === 'CUSTOM' ? custom : presetDates(preset, today);
+  const choosePreset = (p: PeriodPreset) => { setPreset(p); try { localStorage.setItem(LS_PERF_PERIOD, p); } catch {} };
+  const [balanceHistory, setBalanceHistory] = useState<BalanceDayPoint[] | null>(null);
+  const [movements, setMovements] = useState<MoneyMovement[]>([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/balance-history');
+        const data = res.ok ? await res.json() : null;
+        setBalanceHistory(Array.isArray(data?.history) ? data.history : []);
+      } catch { setBalanceHistory([]); }
+      try {
+        const token = await getAccessToken();
+        const accountId = await requireActiveBrokerAccount(token, ttFetch);
+        const start = new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10);
+        const all: Record<string, unknown>[] = [];
+        for (let page = 0; page < 8; page += 1) {
+          const tx = await ttFetch(`/accounts/${accountId}/transactions?start-date=${start}&type=Money%20Movement&per-page=250&page-offset=${page}`, token);
+          const items: Record<string, unknown>[] = tx?.data?.items ?? [];
+          all.push(...items);
+          if (items.length === 0 || page + 1 >= Number(tx?.pagination?.['total-pages'] ?? 1)) break;
+        }
+        setMovements(extractMoneyMovements(all));
+      } catch { setMovements([]); }
+    })();
+  }, []);
+  const report = useMemo(() => {
+    let excludedIds = new Set<string>();
+    try { const raw = localStorage.getItem('hunter-tradelog-excluded'); if (raw) excludedIds = new Set<string>(JSON.parse(raw)); } catch {}
+    const inPeriod = trades.filter(t => t.closeDate >= period.from && t.closeDate <= period.to).map(t => ({ ...t, excluded: excludedIds.has(t.id) }));
+    return buildPerformanceReport(inPeriod);
+  }, [trades, period.from, period.to]);
+  const accountProfit = balanceHistory == null ? null : periodAccountProfit(balanceHistory, movements, period.from, period.to);
 
   // Load widget config from localStorage on mount
   useEffect(() => { setWidgets(getSavedWidgets()); }, []);
@@ -1035,9 +1091,7 @@ export default function PerformancePage() {
     finally { setLoading(false); setStatus(''); }
   }, [loadEntryPerformance]);
 
-  useEffect(() => { loadTrades('3m'); }, [loadTrades]);
-
-  const handleRangeChange = (r: TimeRange) => { setRange(r); loadTrades(r); };
+  useEffect(() => { loadTrades('12m'); }, [loadTrades]);
 
   const enabledWidgets = widgets.filter(w => w.enabled).sort((a, b) => a.order - b.order);
   const disabledWidgets = widgets.filter(w => !w.enabled);
@@ -1104,19 +1158,24 @@ export default function PerformancePage() {
       {/* Sticky controls bar */}
       <div className={`${th.header} border-b ${th.border} px-6 py-3 sticky top-[57px] z-40 transition-all duration-300 ${showAI ? 'mr-[480px]' : ''}`}>
         <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-1">
-            {([['1w','1 WK'],['2w','2 WK'],['1m','1 MO'],['3m','3 MO'],['6m','6 MO'],['12m','12 MO']] as [TimeRange,string][]).map(([r,label]) => (
-              <button key={r} onClick={() => handleRangeChange(r)} disabled={loading}
+          <div className="flex items-center gap-1 flex-wrap">
+            {PERIOD_PRESETS.map(([p, label]) => (
+              <button key={p} onClick={() => choosePreset(p)} disabled={loading}
                 className={`text-[10px] px-2.5 py-1.5 border rounded font-bold tracking-wider transition-colors disabled:opacity-50 ${
-                  range === r ? 'ac-btn ac-bg-10' : `${th.border} ${th.textFaint} hover:ac-border-faint ac-hover-text`
+                  preset === p ? 'ac-btn ac-bg-10' : `${th.border} ${th.textFaint} hover:ac-border-faint ac-hover-text`
                 }`}>
                 {label}
               </button>
             ))}
-            {!loading && trades.length > 0 && (
+            <label htmlFor="perf-from" className={`ml-1 text-[10px] ${th.textFaint}`}>FROM</label>
+            <input id="perf-from" type="date" value={period.from} max={period.to} onChange={e => { setCustom({ from: e.target.value, to: period.to }); choosePreset('CUSTOM'); }}
+              className={`text-[10px] px-2 py-1 border rounded bg-transparent ${preset === 'CUSTOM' ? 'ac-btn' : `${th.border} ${th.textFaint}`}`} />
+            <label htmlFor="perf-to" className={`text-[10px] ${th.textFaint}`}>TO</label>
+            <input id="perf-to" type="date" value={period.to} min={period.from} max={today} onChange={e => { setCustom({ from: period.from, to: e.target.value }); choosePreset('CUSTOM'); }}
+              className={`text-[10px] px-2 py-1 border rounded bg-transparent ${preset === 'CUSTOM' ? 'ac-btn' : `${th.border} ${th.textFaint}`}`} />
+            {!loading && (
               <span className={`ml-2 text-[9px] ${th.textFaint}`}>
-                {({'1w':'last 7 days','2w':'last 14 days','1m':'last 30 days','3m':'last 3 months','6m':'last 6 months','12m':'last 12 months'} as Record<string,string>)[range]}
-                {' · '}{trades.length} trades
+                {report.included.length} closed trades{report.incomplete.length ? ` · ${report.incomplete.length} need review` : ''} · history loads 12 months
               </span>
             )}
           </div>
@@ -1128,10 +1187,7 @@ export default function PerformancePage() {
                 ◈ AI Analysis
               </button>
             )}
-            <button onClick={() => setShowConfig(v => !v)}
-              className={`text-[10px] px-3 py-1.5 border rounded tracking-wider transition-colors ${showConfig ? 'border-purple-500 text-purple-400 bg-purple-500/10' : `${th.border} ${th.textFaint} hover:border-purple-500 hover:text-purple-400`}`}>
-              ⊞ Configure
-            </button>
+
             <button onClick={() => loadTrades(range, true)} disabled={loading}
               className={`text-[10px] px-3 py-1.5 border ${th.border} rounded ${th.textMuted} ac-hover-border ac-hover-text transition-colors disabled:opacity-50 tracking-wider`}>
               {loading ? '↺ Loading...' : '↺ Refresh'}
@@ -1175,39 +1231,14 @@ export default function PerformancePage() {
           </div>
         )}
 
-        {entryPerformance && (
-          <div className={`${th.card} border ${th.border} rounded-xl p-4`}>
-            <p className="text-[10px] font-bold tracking-widest text-cyan-300 mb-2">ENTRY CONTEXT OUTCOMES</p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-              <div><p className={th.textFaint}>Eligible snapshots</p><p className={th.text}>{entryPerformance.eligibleTrades}</p></div>
-              <div><p className={th.textFaint}>Missing / incomplete</p><p className={th.text}>{entryPerformance.missingSnapshotTrades} / {entryPerformance.incompleteReconstructionTrades}</p></div>
-              <div><p className={th.textFaint}>Snapshot P/L</p><p className={entryPerformance.realizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>${entryPerformance.realizedPnl.toFixed(0)}</p></div>
-              <div><p className={th.textFaint}>Win rate</p><p className={th.text}>{entryPerformance.winRate == null ? 'Insufficient data' : `${(entryPerformance.winRate * 100).toFixed(0)}%`}</p></div>
-            </div>
-            <p className={`text-[9px] ${th.textFaint} mt-3`}>Window: {range}. Descriptive only. Inside expected move: {entryPerformance.insideExpectedMove.count} trades · ${entryPerformance.insideExpectedMove.realizedPnl.toFixed(0)} realized P/L. Outside expected move: {entryPerformance.outsideExpectedMove.count} trades · ${entryPerformance.outsideExpectedMove.realizedPnl.toFixed(0)} realized P/L. Missing or incomplete evidence is excluded.</p>
-          </div>
-        )}
-
-        {!loading && !error && <StrategyPerformanceReport trades={trades} th={th} range={range} />}
-
-        {/* Widgets */}
-        {!loading && trades.length > 0 && (
-          <div className="space-y-4">
-            {enabledWidgets.map((w, i) => (
-              <Widget
-                key={w.id}
-                config={w}
-                trades={trades}
-                range={range}
-                th={th}
-                onToggle={() => toggleWidget(w.id)}
-                onMoveUp={() => moveWidget(w.id, 'up')}
-                onMoveDown={() => moveWidget(w.id, 'down')}
-                isFirst={i === 0}
-                isLast={i === enabledWidgets.length - 1}
-              />
-            ))}
-          </div>
+        {!loading && !error && trades.length > 0 && (
+          <PerformanceReportView
+            th={th}
+            report={report}
+            accountProfit={accountProfit}
+            periodLabel={`${period.from} to ${period.to}`}
+            onOpenTicker={symbol => { try { localStorage.setItem('hunter-tl-f-symbol', symbol); } catch {} window.location.href = '/trade-log'; }}
+          />
         )}
 
         {!loading && !error && trades.length === 0 && (
@@ -1220,7 +1251,7 @@ export default function PerformancePage() {
       </div>
 
       {showAI && (
-        <AIChatPanel trades={trades} range={range} th={th} onClose={() => setShowAI(false)} />
+        <AIChatPanel trades={report.included} range={range} th={th} onClose={() => setShowAI(false)} />
       )}
     </div>
   );

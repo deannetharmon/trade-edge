@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ClosedTrade } from '../types';
-import { buildPerformanceReport, capitalAtRisk, methodExit } from '../performanceMetrics';
+import { buildPerformanceReport, capitalAtRisk, creditToWidth, methodExit } from '../performanceMetrics';
 
 let n = 0;
 const t = (o: Partial<ClosedTrade>): ClosedTrade => ({
@@ -33,6 +33,18 @@ describe('PERF-0001 performance metrics', () => {
     expect(methodExit(t({ creditReceived: 200, pnl: -201, fees: 0 }))).toBe('BEYOND_STOP');
     expect(methodExit(t({ closureMechanism: 'EXPIRED' }))).toBe('EXPIRED');
     expect(methodExit(t({ closureMechanism: 'ASSIGNED', strategy: 'CSP' }))).toBe('ASSIGNED');
+  });
+
+  it('credit-to-width: spreads split at 1/3; CSP not counted', () => {
+    expect(creditToWidth(t({ strikes: '450P/445P', creditReceived: 200, closedQuantity: 1 }))).toBeCloseTo(0.4);
+    expect(creditToWidth(t({ strategy: 'CSP', strikes: '135P' }))).toBeNull();
+    const rep = buildPerformanceReport([
+      t({ strikes: '450P/445P', creditReceived: 200, pnl: -300 }),
+      t({ strikes: '450P/445P', creditReceived: 100, pnl: 50 }),
+      t({ strategy: 'CSP', strikes: '135P', pnl: 400 }),
+    ]);
+    expect(rep.rules.creditToWidth.atOrAbove).toEqual({ trades: 1, pnl: -300 });
+    expect(rep.rules.creditToWidth.below).toEqual({ trades: 1, pnl: 50 });
   });
 
   it('capital at risk: spread max loss, CSP collateral, short call unbounded', () => {

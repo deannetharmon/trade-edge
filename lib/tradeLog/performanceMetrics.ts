@@ -42,6 +42,8 @@ export interface PerformanceReport {
     beyondStop: { trades: number; pnl: number; excessLoss: number; symbols: string[] };
     enteredInside21Dte: { trades: number; pnl: number };
     spreadsHeldPast21Dte: { trades: number; pnl: number };
+    /** Ian: spread credit as a share of width; >= 1/3 is the entry standard. Spreads with parseable strikes only. */
+    creditToWidth: { atOrAbove: { trades: number; pnl: number }; below: { trades: number; pnl: number } };
   };
 }
 
@@ -62,6 +64,16 @@ export function capitalAtRisk(t: ClosedTrade): number | null {
     return risk > 0 ? risk : null;
   }
   return null;
+}
+
+/** Credit / (width x 100 x qty) for spreads; null for non-spreads or unparsed strikes. */
+export function creditToWidth(t: ClosedTrade): number | null {
+  if (SPREADS.indexOf(t.strategy) < 0) return null;
+  const strikes = (t.strikes.match(/\d+(?:\.\d+)?/g) ?? []).map(Number);
+  if (strikes.length < 2) return null;
+  let width = Math.abs(strikes[0] - strikes[1]);
+  if (t.strategy === 'IC' && strikes.length >= 4) width = Math.max(width, Math.abs(strikes[2] - strikes[3]));
+  return width > 0 ? t.creditReceived / (width * 100 * units(t)) : null;
 }
 
 export function methodExit(t: ClosedTrade): MethodExit {
@@ -152,6 +164,9 @@ export function buildPerformanceReport(all: readonly ClosedTrade[]): Performance
   const inside21 = included.filter(t => isSpread(t) && t.dteAtEntry < 21);
   const heldPast21 = included.filter(t => isSpread(t) && t.dteAtEntry >= 21 && t.dteAtClose < 21);
 
+  const ratioed = included.map(t => ({ t, ratio: creditToWidth(t) })).filter(x => x.ratio != null);
+  const tally = (xs: { t: ClosedTrade }[]) => ({ trades: xs.length, pnl: xs.reduce((n, x) => n + x.t.pnl, 0) });
+
   const head = groupStats(included);
   return {
     included,
@@ -173,6 +188,7 @@ export function buildPerformanceReport(all: readonly ClosedTrade[]): Performance
       },
       enteredInside21Dte: { trades: inside21.length, pnl: inside21.reduce((n, t) => n + t.pnl, 0) },
       spreadsHeldPast21Dte: { trades: heldPast21.length, pnl: heldPast21.reduce((n, t) => n + t.pnl, 0) },
+      creditToWidth: { atOrAbove: tally(ratioed.filter(x => (x.ratio as number) >= 1 / 3)), below: tally(ratioed.filter(x => (x.ratio as number) < 1 / 3)) },
     },
   };
 }

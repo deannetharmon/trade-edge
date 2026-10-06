@@ -42,3 +42,21 @@ describe('BALANCE-CHART-0001', () => {
     expect(todayNewYork(Date.parse('2026-10-06T00:30:00Z'))).toBe('2026-10-05');
   });
 });
+
+import { periodAccountProfit } from '../balancePerformance';
+
+describe('PERF-0001 period account profit', () => {
+  const history = [
+    { date: '2026-09-25', netLiquidatingValue: 50000 },
+    { date: '2026-09-30', netLiquidatingValue: 45400 },
+    { date: '2026-10-05', netLiquidatingValue: 45900 },
+  ];
+  const withdrawal = [{ date: '2026-09-29', amount: -5000, label: '−$5,000 withdrawal' }];
+  it('profit = end - start - money moved; uses the last close before the start date', () => {
+    expect(periodAccountProfit(history, withdrawal, '2026-09-28', '2026-10-05')).toMatchObject({ status: 'OK', startDate: '2026-09-25', endDate: '2026-10-05', netMoved: -5000, profit: 900 });
+  });
+  it('no balance near the start or end: unavailable, with the reason', () => {
+    expect(periodAccountProfit(history, withdrawal, '2026-08-01', '2026-10-05').status).toBe('UNAVAILABLE');
+    expect(periodAccountProfit(history, withdrawal, '2026-09-28', '2026-12-31')).toMatchObject({ status: 'UNAVAILABLE', reason: expect.stringContaining('2026-12-31') });
+  });
+});
