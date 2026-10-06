@@ -86,5 +86,8 @@ describe('feasibility route handler', () => {
     expect(rows[0]).toMatchObject({ symbol: 'ACME', state: 'WATCH' });
     expect(rows[1].symbol).toBe('ZZZZ');
     expect(rows[1].sourceIssues.join(' ')).toMatch(/SEC_NOT_COVERED|FUNDAMENTALS_HTTP/);
+    const r1 = rows[1] as unknown as { state: string; blockingReasons: Record<string, string> };
+    if (rows[1].sourceIssues.indexOf('SEC_NOT_COVERED') >= 0) expect(r1.state).toBe('NOT_APPLICABLE_NO_COMPANY_FILINGS');
+    Object.values(r1.blockingReasons).forEach((reason) => expect(reason).toMatch(/^(UNAVAILABLE|INVALID|STALE)/));
   });
 });

@@ -16,6 +16,8 @@ export interface QvFeasibilityRow {
   symbol: string;
   state: string;
   blockingMetricIds: string[];
+  /** Why each blocking metric is not usable: the loader's own validity and reason (e.g. CONCEPT_NOT_FOUND). */
+  blockingReasons: Record<string, string>;
   sourceIssues: string[];
   reasonCodes: string[];
 }
@@ -42,10 +44,19 @@ export async function handleQvFeasibility(symbolsParam: string | null, deps: Han
 
   const rows = run.entries.map((e) => {
     const outcome = e.evaluation.outcome;
+    const blocking = outcome.kind === 'INSUFFICIENT_DATA' ? [...outcome.missingMetricIds] : [];
+    const blockingReasons: Record<string, string> = {};
+    blocking.forEach((id) => {
+      const m = e.input.metrics[id] as { validity?: string; reason?: string; ageMs?: number } | undefined;
+      blockingReasons[id] = m ? `${m.validity}${m.reason ? `: ${m.reason}` : ''}${m.ageMs != null ? ` (age ${Math.round(m.ageMs / 86400000)} d)` : ''}` : 'NOT_IN_INPUT';
+    });
+    // QV-v1.0 screens operating companies; a fund with no SEC company filings is out of scope, not "insufficient".
+    const notApplicable = e.sourceIssues.indexOf('SEC_NOT_COVERED') >= 0;
     return {
       symbol: e.symbol,
-      state: outcome.kind === 'CLASSIFIED' ? outcome.state : 'INSUFFICIENT_DATA',
-      blockingMetricIds: outcome.kind === 'INSUFFICIENT_DATA' ? [...outcome.missingMetricIds] : [],
+      state: notApplicable ? 'NOT_APPLICABLE_NO_COMPANY_FILINGS' : outcome.kind === 'CLASSIFIED' ? outcome.state : 'INSUFFICIENT_DATA',
+      blockingMetricIds: blocking,
+      blockingReasons,
       sourceIssues: e.sourceIssues.filter((x) => x !== 'MARKET_METRICS_NOT_FETCHED_IN_FEASIBILITY_RUN'),
       reasonCodes: e.evaluation.reasonCodes.map((r) => String((r as { code?: string }).code ?? r)),
     };
