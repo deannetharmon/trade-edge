@@ -23,7 +23,7 @@ In scope, phase 1: new route `/analytics`, these panels only:
 2. Monthly P&L, realized vs open: realized bars from the PERF-0001 report by month; open P&L shown as its own bar for the current month. A month is never presented as a mix of the two.
 3. Capital by strategy: the existing per-group capital from the portfolio summary, shown as shares of total. Groups with no capital say so.
 4. Concentration by economic underlying: share of capital per underlying, leveraged products tagged from the catalog, with the existing 25% limit marked and a 15% warning level.
-5. Position size distribution: positions per size band (share of total capital).
+5. Position size distribution: positions per size band (share of account value), against the Prosper rule set's max 5-10% of portfolio per position.
 6. Risk summary: needs-attention count (existing flag), expiring within 7 days, and a concentration alert row. No Low/Medium/High position tiers: no such tier exists in the app, so none is invented.
 7. DTE at entry: closed trades by entry-DTE band against the 30-45 target window.
 8. Monthly CSP P&L: the same PERF-0001 byMonth data filtered to CSP.
@@ -44,16 +44,17 @@ Out of scope:
 - Realized P&L: by close date, after fees, window as selected. Open P&L: mark-to-market on the same basis the Positions page uses (mid), labelled with the basis.
 - Total = Realized + Open.
 - Position and group membership: the portfolio summary's groups, which partition the portfolio. This is the single count for Position size and Risk summary. (The 6-versus-10 mismatch seen in the mock came from the external mock, not the app.)
-- Capital: the portfolio summary's per-group capital (`buildCapitalViewModel` basis). One basis for Capital by strategy, concentration and position size.
-- Position size % = position capital / total capital. Bands: 0-3, 3-7, 7-15, 15-20, 20+.
+- Capital: the portfolio summary's per-group capital (`buildCapitalViewModel` basis). One basis for Capital by strategy and concentration.
+- Position size % = position capital / account net liquidation value, because the rule set measures per-position size against the portfolio. Quinn confirms the field exists; if account value is unavailable the panel says "Unavailable" and does not silently fall back to deployed capital. Bands: 0-5, 5-10, 10+.
 - DTE band by `ClosedTrade.dteAtEntry`: 0-14, 15-29, 30-45, 46+. Win rate and average P&L per band with the existing group stats.
 
 ## 4. Rules (Ian; Paul co-signs). Labels and alerts only; nothing here changes scanning or qualification.
 
 - Concentration: alert at the existing 25% limit (Dean, 2026-10-05). New warning level at 15%, proposed.
-- Position size labels: 7-15% "Optimal", 15-20% "Caution", 20%+ "Risk", below 7% "Small".
+- Position size (Prosper rule set: max 5-10% of portfolio per position): up to 5% "Within rule", 5-10% "Upper range", above 10% "Over max". The earlier 7-15% "Optimal" bands came from the external mock and contradicted the rule set; they are removed.
 - DTE labels: "In target" for 30-45, "Outside target" otherwise. The label states the trader's rule, not a performance result. Samples are small; the page shows the trade count.
 - Win rate and P&L show no good/bad color when a group has fewer than 3 trades.
+- Color follows the Positions page convention (PORTFOLIO-SUMMARY-0001): red and green only on P&L numbers; amber for over-limit, over-max and needs-attention. Limits and bands never use red.
 
 ## 5. Architecture (Quinn)
 
@@ -86,7 +87,7 @@ Golden fixture (Alan): a small hand-computed trade and position set. CI-0001 run
 | Role | Verdict | Condition |
 |---|---|---|
 | Paul | Approved | Scope as section 2; Performance tab and Positions page untouched |
-| Ian | Approved | 15% warning level is new; everything else reuses decided rules |
+| Ian | Approved after correction | Position-size bands follow the rule set (5-10% max); 15% warning level is new; colors follow the Positions page; everything else reuses decided rules |
 | Alan | Approved | Existing definitions adopted; return on secured cash deferred; golden fixture required |
 | Quinn | Approved | Compose, do not reimplement; catalog-only leverage tags; hidden route first |
 | Diane | Mock v3 needed | Remove the panels listed under "Out of scope", keep section 2's nine |
