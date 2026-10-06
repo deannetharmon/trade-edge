@@ -5,6 +5,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { getAccessToken } from '@/lib/auth/tastytradeToken';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
+import { closedDaysOnly, extractMoneyMovements, performanceSeries, todayNewYork, withLivePoint, type BalanceDayPoint, type MoneyMovement } from '@/lib/portfolio-data/balancePerformance';
 
 const BASE = 'https://api.tastytrade.com';
 const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
@@ -58,7 +59,7 @@ function fmtSignedMoney(value: number | null | undefined): string {
   return `${sign}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; accountNumber: string }> {
+async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; accountNumber: string; movements: MoneyMovement[] }> {
   const token = await getAccessToken();
   const accountNumber = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
 
@@ -81,19 +82,38 @@ async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; 
         netOptionsValue: parseFloat(item['long-derivative-value'] ?? '0') - parseFloat(item['short-derivative-value'] ?? '0'),
       }))
       .filter((d: BalanceDay) => d.date && d.netLiquidatingValue !== 0);
+    // BALANCE-CHART-0001: only completed days are stored; today's figure keeps changing and is drawn live instead.
+    const closed = closedDaysOnly(days, todayNewYork(Date.now()));
 
-    if (days.length > 0) {
+    if (closed.length > 0) {
       await fetch('/api/balance-history', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ days }),
+        body: JSON.stringify({ days: closed }),
       });
     }
   } catch {
     // History sync is best-effort -- current balances above already loaded fine.
   }
 
-  return { current, accountNumber };
+  // BALANCE-CHART-0001: deposits / withdrawals, so the performance line does not treat them as gains or losses.
+  let movements: MoneyMovement[] = [];
+  try {
+    const start = new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10);
+    const all: Record<string, unknown>[] = [];
+    for (let page = 0; page < 8; page += 1) {
+      const tx = await ttFetch(`/accounts/${accountNumber}/transactions?start-date=${start}&type=Money%20Movement&per-page=250&page-offset=${page}`, token);
+      const items: Record<string, unknown>[] = tx?.data?.items ?? [];
+      all.push(...items);
+      const totalPages = Number(tx?.pagination?.['total-pages'] ?? 1);
+      if (items.length === 0 || page + 1 >= totalPages) break;
+    }
+    movements = extractMoneyMovements(all);
+  } catch {
+    movements = [];
+  }
+
+  return { current, accountNumber, movements };
 }
 
 async function fetchHistory(): Promise<BalanceDay[]> {
@@ -107,8 +127,11 @@ async function fetchHistory(): Promise<BalanceDay[]> {
   }
 }
 
-function BalanceChart({ history, range }: { history: BalanceDay[]; range: RangeKey }) {
+type ChartMode = 'PERFORMANCE' | 'NET_LIQ';
+
+function BalanceChart({ history, movements, range, mode }: { history: BalanceDayPoint[]; movements: MoneyMovement[]; range: RangeKey; mode: ChartMode }) {
   const rangeConfig = RANGES.find(r => r.key === range)!;
+  const [hover, setHover] = useState<number | null>(null);
   const filtered = useMemo(() => {
     if (rangeConfig.days == null) return history;
     const cutoff = new Date();
@@ -116,8 +139,9 @@ function BalanceChart({ history, range }: { history: BalanceDay[]; range: RangeK
     const cutoffStr = cutoff.toISOString().slice(0, 10);
     return history.filter(d => d.date >= cutoffStr);
   }, [history, rangeConfig]);
+  const series = useMemo(() => (mode === 'PERFORMANCE' ? performanceSeries(filtered, movements) : filtered), [filtered, movements, mode]);
 
-  if (filtered.length < 2) {
+  if (series.length < 2) {
     return (
       <div className="flex items-center justify-center h-64 text-white/40 text-xs">
         Not enough history yet for this range — check back after a few more days of tracked balances.
@@ -127,44 +151,75 @@ function BalanceChart({ history, range }: { history: BalanceDay[]; range: RangeK
 
   const width = 900;
   const height = 260;
-  const padding = 40;
-  const values = filtered.map(d => d.netLiquidatingValue);
+  const padLeft = 70;
+  const pad = 24;
+  const values = series.map(d => d.netLiquidatingValue);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min || 1;
-
-  const points = filtered.map((d, i) => {
-    const x = padding + (i / (filtered.length - 1)) * (width - padding * 2);
-    const y = height - padding - ((d.netLiquidatingValue - min) / span) * (height - padding * 2);
-    return { x, y, d };
-  });
-
+  const xOf = (i: number) => padLeft + (i / (series.length - 1)) * (width - padLeft - pad);
+  const yOf = (v: number) => height - pad - ((v - min) / span) * (height - pad * 2);
+  const points = series.map((d, i) => ({ x: xOf(i), y: yOf(d.netLiquidatingValue), d }));
   const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
-  const areaD = `${pathD} L ${points[points.length - 1].x.toFixed(1)} ${height - padding} L ${points[0].x.toFixed(1)} ${height - padding} Z`;
-
-  const first = filtered[0].netLiquidatingValue;
-  const last = filtered[filtered.length - 1].netLiquidatingValue;
+  const areaD = `${pathD} L ${points[points.length - 1].x.toFixed(1)} ${height - pad} L ${points[0].x.toFixed(1)} ${height - pad} Z`;
+  const first = series[0].netLiquidatingValue;
+  const last = series[series.length - 1].netLiquidatingValue;
   const isUp = last >= first;
   const lineColor = isUp ? '#00d4aa' : '#f87171';
+  // Money movements are marked on the first plotted day on or after their date.
+  const marks = movements
+    .filter(m => m.date > series[0].date && m.date <= series[series.length - 1].date)
+    .map(m => ({ m, index: series.findIndex(d => d.date >= m.date) }))
+    .filter(x => x.index >= 0);
+  const ticks = [max, (max + min) / 2, min];
+  const hovered = hover != null ? series[hover] : null;
+  const hoveredRaw = hover != null ? filtered[hover] : null;
+  const hoveredMarks = hovered ? marks.filter(x => x.index === hover).map(x => x.m.label) : [];
 
   return (
-    <div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-64">
+    <div className="relative">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="w-full h-64"
+        onMouseLeave={() => setHover(null)}
+        onMouseMove={e => {
+          const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
+          const x = ((e.clientX - rect.left) / rect.width) * width;
+          const i = Math.round(((x - padLeft) / (width - padLeft - pad)) * (series.length - 1));
+          setHover(Math.max(0, Math.min(series.length - 1, i)));
+        }}
+      >
         <defs>
           <linearGradient id="balanceFill" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={lineColor} stopOpacity="0.25" />
             <stop offset="100%" stopColor={lineColor} stopOpacity="0" />
           </linearGradient>
         </defs>
+        {ticks.map((t, i) => (
+          <g key={i}>
+            <line x1={padLeft} x2={width - pad} y1={yOf(t)} y2={yOf(t)} stroke="rgba(255,255,255,0.06)" />
+            <text x={padLeft - 8} y={yOf(t) + 4} textAnchor="end" fontSize="11" fill="rgba(255,255,255,0.45)">{fmtMoney(t).replace(/\.\d\d$/, '')}</text>
+          </g>
+        ))}
         <path d={areaD} fill="url(#balanceFill)" />
         <path d={pathD} fill="none" stroke={lineColor} strokeWidth="2" />
-        {points.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r={i === points.length - 1 ? 3 : 0} fill={lineColor} />
+        {marks.map((x, i) => (
+          <circle key={`m${i}`} cx={points[x.index].x} cy={points[x.index].y} r={4} fill="#fbbf24" data-testid="money-movement-marker"><title>{x.m.label} ({x.m.date})</title></circle>
         ))}
+        <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r={3} fill={lineColor} />
+        {hover != null && <line x1={points[hover].x} x2={points[hover].x} y1={pad} y2={height - pad} stroke="rgba(255,255,255,0.25)" />}
       </svg>
-      <div className="flex justify-between text-[10px] text-white/40 mt-1">
-        <span>{filtered[0].date}</span>
-        <span>{filtered[filtered.length - 1].date}</span>
+      {hovered && (
+        <div className="pointer-events-none absolute top-0 right-0 rounded-md border border-white/10 bg-black/80 px-3 py-2 text-[11px]" data-testid="balance-hover">
+          <p className="text-white/50">{hovered.date}{hover === series.length - 1 ? ' (live)' : ''}</p>
+          <p className="font-bold">{mode === 'PERFORMANCE' ? 'Performance ' : 'Net liq '}{fmtMoney(hovered.netLiquidatingValue)}</p>
+          {mode === 'PERFORMANCE' && hoveredRaw && <p className="text-white/50">Net liq {fmtMoney(hoveredRaw.netLiquidatingValue)}</p>}
+          {hoveredMarks.map(l => <p key={l} className="text-amber-300">{l}</p>)}
+        </div>
+      )}
+      <div className="flex justify-between text-[10px] text-white/40 mt-1 pl-[8%]">
+        <span>{series[0].date}</span>
+        <span>{series[series.length - 1].date} (live)</span>
       </div>
     </div>
   );
@@ -173,6 +228,8 @@ function BalanceChart({ history, range }: { history: BalanceDay[]; range: RangeK
 export default function BalancesTab() {
   const [current, setCurrent] = useState<CurrentBalances | null>(null);
   const [history, setHistory] = useState<BalanceDay[]>([]);
+  const [movements, setMovements] = useState<MoneyMovement[]>([]);
+  const [mode, setMode] = useState<ChartMode>('PERFORMANCE');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<RangeKey>('3M');
@@ -180,8 +237,9 @@ export default function BalancesTab() {
   useEffect(() => {
     (async () => {
       try {
-        const { current: cur } = await loadCurrentAndSyncHistory();
+        const { current: cur, movements: moves } = await loadCurrentAndSyncHistory();
         setCurrent(cur);
+        setMovements(moves);
         const hist = await fetchHistory();
         setHistory(hist);
       } catch (e: any) {
@@ -218,7 +276,14 @@ export default function BalancesTab() {
 
           <div className="border border-white/10 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
-              <p className="text-[10px] text-white/40 uppercase tracking-widest">Net Liq Over Time</p>
+              <div>
+                <div className="flex gap-1">
+                  {([['PERFORMANCE', 'Performance'], ['NET_LIQ', 'Net liq']] as [ChartMode, string][]).map(([key, label]) => (
+                    <button key={key} onClick={() => setMode(key)} className={`text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded transition-colors ${mode === key ? 'bg-white/15 text-white' : 'text-white/40 hover:text-white/70'}`}>{label}</button>
+                  ))}
+                </div>
+                <p className="mt-1 text-[10px] text-white/40">{mode === 'PERFORMANCE' ? 'Excludes deposits and withdrawals (marked in amber)' : 'Account value, including deposits and withdrawals'}</p>
+              </div>
               <div className="flex gap-1">
                 {RANGES.map(r => (
                   <button
@@ -233,7 +298,7 @@ export default function BalancesTab() {
                 ))}
               </div>
             </div>
-            <BalanceChart history={history} range={range} />
+            <BalanceChart history={withLivePoint(history, todayNewYork(Date.now()), current.netLiquidatingValue)} movements={movements} range={range} mode={mode} />
           </div>
         </>
       )}

@@ -62,9 +62,18 @@ export async function POST(req: NextRequest) {
     let added = 0;
     let skipped = 0;
 
+    // BALANCE-CHART-0001: clients now send completed days only. A day stored earlier from a still-open session (the old
+    // client stored today's partial figure, first-write-wins) is corrected once: the most recent 5 stored days may be
+    // replaced by a different non-zero completed snapshot.
+    const storedDates = existing.map(d => d.date).sort();
+    const replaceFrom = storedDates.length ? storedDates[Math.max(0, storedDates.length - 5)] : '';
     for (const day of days) {
       if (!day?.date) { skipped++; continue; }
-      if (byDate.has(day.date)) { skipped++; continue; }
+      const prior = byDate.get(day.date);
+      if (prior) {
+        const correctable = day.date >= replaceFrom && day.netLiquidatingValue !== 0 && day.netLiquidatingValue !== prior.netLiquidatingValue;
+        if (!correctable) { skipped++; continue; }
+      }
       byDate.set(day.date, day);
       added++;
     }
