@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { PendingOrder, Position, PositionLeg } from '@/lib/portfolio-data/types';
 import type { EquityHolding } from '@/lib/portfolio-snapshot/types';
 import {
-  buildPortfolioSummary, openingOrderCash, positionDayChange, positionDayChangeDetail, positionInSummaryGroup, positionWeekChange, summaryGroupForPosition,
+  buildPortfolioSummary, exposureTier, openingOrderCash, positionDayChange, positionDayChangeDetail, positionInSummaryGroup, positionWeekChange, summaryGroupForPosition,
 } from '../model/portfolioSummary';
 
 const NOW = Date.parse('2026-10-05T17:00:00Z'); // Monday 13:00 New York
@@ -175,8 +175,26 @@ describe('largest exposure', () => {
   it('largest single-underlying share of capital, amber only above the limit', () => {
     const rows = [row(csp('SOXL', { maxRisk: 16721 })), row(csp('TQQQ', { maxRisk: 5719 })), row(csp('AVL', { maxRisk: 3500 }))];
     const s = buildPortfolioSummary({ rows, equities: [], pendingOrders: [], cashBalance: 1, nowMs: NOW });
-    expect(s.largest).toMatchObject({ symbol: 'SOXL', capital: 16721, sharePct: 64, overLimit: true, limitPct: 25 });
+    expect(s.largest).toMatchObject({ symbol: 'SOXL', capital: 16721, sharePct: 64, overLimit: true, limitPct: 25, tier: 'red' });
     const relaxed = buildPortfolioSummary({ rows, equities: [], pendingOrders: [], cashBalance: 1, nowMs: NOW, exposureLimitPct: 70 });
     expect(relaxed.largest?.overLimit).toBe(false);
+  });
+});
+
+describe('CONCENTRATION-TIERS-0001', () => {
+  it('tiers: muted under 15, amber 15-24, red from 25', () => {
+    expect(exposureTier(14)).toBe('normal');
+    expect(exposureTier(15)).toBe('amber');
+    expect(exposureTier(24)).toBe('amber');
+    expect(exposureTier(25)).toBe('red');
+  });
+  it('leveraged-ETF cluster totals every leveraged underlying (MULL included) and ignores plain stocks', () => {
+    const rows = [row(csp('GGLL', { maxRisk: 5000 })), row(csp('MULL', { maxRisk: 3000 })), row(csp('METU', { maxRisk: 2000 })), row(csp('AVL', { maxRisk: 10000 }))];
+    const s = buildPortfolioSummary({ rows, equities: [], pendingOrders: [], cashBalance: 1, nowMs: NOW });
+    expect(s.leveragedCluster).toMatchObject({ symbols: ['GGLL', 'METU', 'MULL'], capital: 10000, sharePct: 50, tier: 'red' });
+  });
+  it('no cluster when none is held', () => {
+    const s = buildPortfolioSummary({ rows: [row(csp('AVL'))], equities: [], pendingOrders: [], cashBalance: 1, nowMs: NOW });
+    expect(s.leveragedCluster).toBeNull();
   });
 });

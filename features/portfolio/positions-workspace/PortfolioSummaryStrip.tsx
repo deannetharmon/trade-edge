@@ -54,15 +54,17 @@ function TileBody({ tile, weekSince }: { tile: SummaryTile; weekSince: string | 
   );
 }
 
-export function PortfolioSummaryStrip({ summary, selected, onSelect, onSelectSymbol }: {
+export function PortfolioSummaryStrip({ summary, selected, onSelect, onSelectSymbol, onSelectSymbols }: {
   summary: PortfolioSummary;
   selected: SummaryGroupKey | null;
   onSelect: (group: SummaryGroupKey | null) => void;
   onSelectSymbol?: (symbol: string) => void;
+  onSelectSymbols?: (symbols: string[]) => void;
 }) {
   const tileClass = (on: boolean) =>
     `min-h-11 rounded-lg border bg-slate-950 p-3 text-left focus:outline-none focus:ring-2 focus:ring-teal-400 ${on ? 'border-teal-400' : 'border-white/15 hover:border-white/30'}`;
-  const { cashToDeploy, largest } = summary;
+  const { cashToDeploy, largest, leveragedCluster } = summary;
+  const tierClass = (tier: 'normal' | 'amber' | 'red') => tier === 'red' ? 'font-semibold text-red-400' : tier === 'amber' ? 'font-semibold text-amber-400' : 'text-white/50';
   return (
     <section aria-label="P/L by position type" className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">
       <div className={tileClass(selected == null)}>
@@ -77,9 +79,15 @@ export function PortfolioSummaryStrip({ summary, selected, onSelect, onSelectSym
           {cashToDeploy.excluded > 0 && <span className="text-white/50">{` · ${cashToDeploy.excluded} not cash-securable, excluded`}</span>}
         </span>
         {largest && (
-          <button type="button" onClick={() => onSelectSymbol?.(largest.symbol)} title={`Largest single-underlying share of capital. Amber above ${largest.limitPct}%.`}
-            className={`mt-1 block text-left text-[11px] focus:outline-none focus:ring-2 focus:ring-teal-400 ${largest.overLimit ? 'font-semibold text-amber-400' : 'text-white/50'}`}>
+          <button type="button" onClick={() => onSelectSymbol?.(largest.symbol)} title={`Largest single-underlying share of capital. Amber from 15%, red from ${largest.limitPct}%.`}
+            className={`mt-1 block text-left text-[11px] focus:outline-none focus:ring-2 focus:ring-teal-400 ${tierClass(largest.tier)}`}>
             Largest: {largest.symbol} · {money(largest.capital)} · {largest.sharePct}% of capital
+          </button>
+        )}
+        {leveragedCluster && (
+          <button type="button" onClick={() => onSelectSymbols?.(leveragedCluster.symbols)} title={`Leveraged and inverse ETFs together: ${leveragedCluster.symbols.join(', ')}. Share of capital; amber from 15%, red from ${leveragedCluster.limitPct}%.`}
+            className={`mt-1 block text-left text-[11px] focus:outline-none focus:ring-2 focus:ring-teal-400 ${tierClass(leveragedCluster.tier)}`} data-testid="leveraged-cluster">
+            Leveraged ETFs: {leveragedCluster.symbols.length} {leveragedCluster.symbols.length === 1 ? 'underlying' : 'underlyings'} · {money(leveragedCluster.capital)} · {leveragedCluster.sharePct}% of capital
           </button>
         )}
       </div>

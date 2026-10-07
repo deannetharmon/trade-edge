@@ -813,7 +813,7 @@ export function PositionsWorkspace({ model: fullModel, th, getManagementActions,
   // PORTFOLIO-SUMMARY-0001: one strip above both tabs; always the whole portfolio. A tile (or the largest-exposure line)
   // narrows both lists below; the strip's own numbers never change with the filter.
   const [summaryGroup, setSummaryGroup] = useState<SummaryGroupKey | null>(null);
-  const [summarySymbol, setSummarySymbol] = useState<string | null>(null);
+  const [summarySymbols, setSummarySymbols] = useState<string[] | null>(null);
   const summary = useMemo(() => buildPortfolioSummary({
     rows: fullModel.analysisRows.map(row => ({ position: row.position, needsAttention: row.needsAttention })),
     equities: fullModel.symbolGroups.flatMap(group => group.equities),
@@ -822,18 +822,18 @@ export function PositionsWorkspace({ model: fullModel, th, getManagementActions,
     nowMs: Date.now(),
   }), [fullModel, pendingOrders, cashBalance]);
   const model = useMemo<PositionsWorkspaceModel>(() => {
-    if (summaryGroup == null && summarySymbol == null) return fullModel;
-    const keep = (position: Position) => (summarySymbol == null || position.symbol === summarySymbol) && positionInSummaryGroup(position, summaryGroup);
+    if (summaryGroup == null && summarySymbols == null) return fullModel;
+    const keep = (position: Position) => (summarySymbols == null || summarySymbols.includes(position.symbol)) && positionInSummaryGroup(position, summaryGroup);
     return {
       ...fullModel,
       symbolGroups: fullModel.symbolGroups.filter(group =>
-        (summarySymbol == null || group.symbol === summarySymbol) &&
+        (summarySymbols == null || summarySymbols.includes(group.symbol)) &&
         (summaryGroup == null || group.options.some(keep) || (summaryGroup === 'EQUITY' && group.equities.length > 0))),
       analysisRows: fullModel.analysisRows.filter(row => keep(row.position)),
     };
-  }, [fullModel, summaryGroup, summarySymbol]);
+  }, [fullModel, summaryGroup, summarySymbols]);
   const [view, setView] = useState<'portfolio' | 'analysis'>('portfolio');
   useEffect(() => { const loaded = loadPreferences(); setView(loaded.workspaceView); }, []);
   const switchView = (next: 'portfolio' | 'analysis') => { setView(next); const loaded = loadPreferences(); savePreferences({ ...loaded, workspaceView: next }); };
-  return <section className="p-4 sm:p-6" aria-label="Positions workspace"><PortfolioSummaryStrip summary={summary} selected={summaryGroup} onSelect={group => { setSummarySymbol(null); setSummaryGroup(group); }} onSelectSymbol={symbol => { setSummaryGroup(null); setSummarySymbol(current => current === symbol ? null : symbol); }} />{summarySymbol && <p className={`mb-2 text-xs ${th.textFaint}`}>Showing {summarySymbol} only · <button type="button" onClick={() => setSummarySymbol(null)} className="min-h-11 underline">Show all</button></p>}<div role="tablist" aria-label="Positions workspace views" className={`mb-4 flex gap-1 border-b ${th.border}`}>{(['portfolio', 'analysis'] as const).map(item => <button key={item} role="tab" aria-selected={view === item} onClick={() => switchView(item)} className={`min-h-11 border-b-2 px-4 text-xs font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-teal-400 ${view === item ? 'border-teal-400 text-white' : `border-transparent ${th.textFaint}`}`}>{item === 'portfolio' ? 'Portfolio' : 'Position Analysis'}</button>)}</div>{view === 'portfolio' ? <PortfolioView groups={model.symbolGroups} th={th} renderStopControl={renderStopControl} onIntentChange={onIntentChange} /> : <AnalysisView model={model} th={th} getManagementActions={getManagementActions} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} renderAnalysisConversation={renderAnalysisConversation} onFindPmccShortCall={onFindPmccShortCall} onIntentChange={onIntentChange} onRefresh={onRefresh} sellDeps={sellDeps} />}</section>;
+  return <section className="p-4 sm:p-6" aria-label="Positions workspace"><PortfolioSummaryStrip summary={summary} selected={summaryGroup} onSelect={group => { setSummarySymbols(null); setSummaryGroup(group); }} onSelectSymbol={symbol => { setSummaryGroup(null); setSummarySymbols(current => current?.length === 1 && current[0] === symbol ? null : [symbol]); }} onSelectSymbols={symbols => { setSummaryGroup(null); setSummarySymbols(current => current != null && current.length === symbols.length && symbols.every(sym => current.includes(sym)) ? null : symbols); }} />{summarySymbols && <p className={`mb-2 text-xs ${th.textFaint}`}>Showing {summarySymbols.join(', ')} only · <button type="button" onClick={() => setSummarySymbols(null)} className="min-h-11 underline">Show all</button></p>}<div role="tablist" aria-label="Positions workspace views" className={`mb-4 flex gap-1 border-b ${th.border}`}>{(['portfolio', 'analysis'] as const).map(item => <button key={item} role="tab" aria-selected={view === item} onClick={() => switchView(item)} className={`min-h-11 border-b-2 px-4 text-xs font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-teal-400 ${view === item ? 'border-teal-400 text-white' : `border-transparent ${th.textFaint}`}`}>{item === 'portfolio' ? 'Portfolio' : 'Position Analysis'}</button>)}</div>{view === 'portfolio' ? <PortfolioView groups={model.symbolGroups} th={th} renderStopControl={renderStopControl} onIntentChange={onIntentChange} /> : <AnalysisView model={model} th={th} getManagementActions={getManagementActions} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} renderAnalysisConversation={renderAnalysisConversation} onFindPmccShortCall={onFindPmccShortCall} onIntentChange={onIntentChange} onRefresh={onRefresh} sellDeps={sellDeps} />}</section>;
 }

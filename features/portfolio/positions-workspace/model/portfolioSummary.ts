@@ -17,8 +17,14 @@ import { resolvePositionStrategyFilterKey } from '@/lib/portfolio/positionStrate
 import { splitOptionLegs } from '@/lib/portfolio/positionLifecycle';
 import { toWholePositionThetaDollars } from '@/lib/portfolio/positionMetrics';
 import { buildCapitalViewModel } from './presentation';
+import { isLeveragedEtf } from '@/lib/leveragedEtfs';
 
 export const DEFAULT_EXPOSURE_LIMIT_PCT = 25;
+/** CONCENTRATION-TIERS-0001: muted below this, amber from here, red from the exposure limit. */
+export const EXPOSURE_AMBER_PCT = 15;
+export type ExposureTier = 'normal' | 'amber' | 'red';
+export const exposureTier = (sharePct: number, redPct: number = DEFAULT_EXPOSURE_LIMIT_PCT): ExposureTier =>
+  sharePct >= redPct ? 'red' : sharePct >= Math.min(EXPOSURE_AMBER_PCT, redPct) ? 'amber' : 'normal';
 const WEEK_DAYS = 7;
 const DAY_MS = 86400 * 1000;
 
@@ -122,7 +128,10 @@ export interface CashToDeploy {
   reason: string | null;
 }
 
-export interface LargestExposure { symbol: string; capital: number; sharePct: number; overLimit: boolean; limitPct: number }
+export interface LargestExposure { symbol: string; capital: number; sharePct: number; overLimit: boolean; limitPct: number; tier: ExposureTier }
+
+/** Leveraged and inverse ETF positions taken together (one macro bet across several tickers). */
+export interface LeveragedCluster { symbols: string[]; capital: number; sharePct: number; tier: ExposureTier; limitPct: number }
 
 export interface PortfolioSummary {
   total: SummaryTile;
@@ -130,6 +139,7 @@ export interface PortfolioSummary {
   weekSince: string | null;
   cashToDeploy: CashToDeploy;
   largest: LargestExposure | null;
+  leveragedCluster: LeveragedCluster | null;
 }
 
 interface Member {
@@ -292,12 +302,22 @@ export function buildPortfolioSummary(input: PortfolioSummaryInput): PortfolioSu
     for (const [symbol, capital] of Array.from(bySymbol.entries())) {
       if (!largest || capital > largest.capital) {
         const sharePct = Math.round((capital / totalCapital) * 100);
-        largest = { symbol, capital, sharePct, overLimit: sharePct > limitPct, limitPct };
+        largest = { symbol, capital, sharePct, overLimit: sharePct >= limitPct, limitPct, tier: exposureTier(sharePct, limitPct) };
       }
     }
   }
 
-  return { total, groups, weekSince: weekSinceDates[0] ?? null, cashToDeploy, largest };
+  let leveragedCluster: LeveragedCluster | null = null;
+  if (totalCapital != null && totalCapital > 0) {
+    const clusterSymbols = Array.from(bySymbol.keys()).filter(isLeveragedEtf).sort();
+    if (clusterSymbols.length > 0) {
+      const capital = clusterSymbols.reduce((sum, sym) => sum + (bySymbol.get(sym) ?? 0), 0);
+      const sharePct = Math.round((capital / totalCapital) * 100);
+      leveragedCluster = { symbols: clusterSymbols, capital, sharePct, tier: exposureTier(sharePct, limitPct), limitPct };
+    }
+  }
+
+  return { total, groups, weekSince: weekSinceDates[0] ?? null, cashToDeploy, largest, leveragedCluster };
 }
 
 /** Rows and symbol groups narrowed to one summary group (the tile filter). */
