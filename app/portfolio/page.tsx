@@ -16,7 +16,7 @@ import {
 } from '@/lib/portfolio/positionLifecycle';
 import { evaluatePmccLifecycle } from '@/lib/scans/pmccLifecycle';
 import { formatStrategyMix } from '@/lib/portfolioReview/strategyMix';
-import { earningsOnOrBeforeExpiration } from '@/lib/scans/earningsPrecheck';
+import { daysUntilNy, earningsOnOrBeforeExpiration } from '@/lib/scans/earningsPrecheck';
 import {
   resolvePositionStrategyFilterKey,
   POSITION_STRATEGY_FILTER_KEYS,
@@ -598,13 +598,12 @@ async function findRollCandidates(pos: Position, token: string): Promise<RollCan
 
     const chainData = await ttFetch(`/option-chains/${encodeURIComponent(pos.symbol)}/expirations`, token);
     const expirations: any[] = chainData?.data?.items ?? [];
-    const today = new Date();
     console.log(`ROLL_SEARCH_DEBUG ${pos.symbol}: raw expirations count=`, expirations.length);
     console.log(`ROLL_SEARCH_DEBUG ${pos.symbol}: raw expirations`, expirations.map((e: any) => e['expiration-date']));
     const validExpiries = expirations
       .map((e: any) => ({
         expiry: e['expiration-date'],
-        dte: Math.round((new Date(e['expiration-date']).getTime() - today.getTime()) / 86400000),
+        dte: daysUntilNy(e['expiration-date']) ?? Number.NaN, // DTE-CALENDAR-0001
       }))
       .filter(e => e.dte >= 28 && e.dte <= 50);
 
@@ -1355,12 +1354,11 @@ async function fetchRollSuggestion(pos: Position, token: string): Promise<RollSu
     const chainData = await ttFetch(`/option-chains/${encodeURIComponent(pos.symbol)}/expirations`, token);
     const expirations: any[] = chainData?.data?.items ?? [];
 
-    const today = new Date();
     // Sort by DTE ascending, find first in 30-45 window (prefer closest to 38 DTE)
     const candidates = expirations
       .map((e: any) => ({
         expiry: e['expiration-date'],
-        dte: Math.round((new Date(e['expiration-date']).getTime() - today.getTime()) / 86400000),
+        dte: daysUntilNy(e['expiration-date']) ?? Number.NaN, // DTE-CALENDAR-0001
       }))
       .filter(e => e.dte >= 28 && e.dte <= 50)
       .sort((a, b) => Math.abs(a.dte - 38) - Math.abs(b.dte - 38)); // prefer 38 DTE
@@ -4479,7 +4477,7 @@ function BatchConfirmModal({
                             if (!Number.isFinite(newShortStrike) || !Number.isFinite(newLongStrike) || !Number.isFinite(newCreditPerShare)) return null;
                             const r = explainRoll({ position: item.pos, newShortStrike, newLongStrike, newCreditPerShare });
                             if (!r || r.lossAtCloseTotal <= 0) return null;
-                            const newDte = ri.expiry ? Math.round((new Date(ri.expiry).getTime() - Date.now()) / 86400000) : null;
+                            const newDte = ri.expiry ? daysUntilNy(ri.expiry) : null; // DTE-CALENDAR-0001
                             const nextCheck = new Date(Date.now() + 21 * 86400000).toISOString().slice(0, 10);
                             const minCreditRule = 0.10;
                             return (
