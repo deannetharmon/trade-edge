@@ -20,6 +20,7 @@
 // of this module and were not touched -- they remain entirely in
 // app/portfolio/page.tsx.
 
+import { readMetricIvPercent } from './metricIv';
 import { confirmRecommendationChange } from './recommendationHysteresis';
 import type {
   ActionType, PositionIntent, StopStatus, StopLossInfo, Recommendation,
@@ -1441,9 +1442,8 @@ export async function loadPositions(
       const parsedIvr = rawIvr != null ? parseFloat(String(rawIvr)) : NaN;
       if (!isNaN(parsedIvr)) ivrMap[sym] = parsedIvr < 1 ? Math.round(parsedIvr * 100) : Math.round(parsedIvr);
       // IV (current implied volatility as %)
-      const rawIv = item['implied-volatility'] ?? item['iv'] ?? item['implied-volatility-30-day'] ?? item['iv-30-day'] ?? null;
-      const parsedIv = rawIv != null ? parseFloat(String(rawIv)) : NaN;
-      if (!isNaN(parsedIv)) ivMap[sym] = parsedIv < 1 ? Math.round(parsedIv * 100) : Math.round(parsedIv);
+      const readIv = readMetricIvPercent(item); // IV-FIELD-0001
+      if (readIv != null) ivMap[sym] = readIv;
       // HV30
       const rawHv = item['hv-30'] ?? item['historical-volatility-30'] ?? item['hv30'] ?? item['historical-volatility'] ?? null;
       const parsedHv = rawHv != null ? parseFloat(String(rawHv)) : NaN;
@@ -1765,9 +1765,7 @@ export async function loadPositions(
           const rawIvr = metric?.['implied-volatility-index-rank'] ?? metric?.['iv-rank'];
           const parsedIvr = Number(rawIvr);
           order.currentIvr = Number.isFinite(parsedIvr) ? (parsedIvr < 1 ? Math.round(parsedIvr * 100) : Math.round(parsedIvr)) : null;
-          const rawIv = metric?.['implied-volatility'] ?? metric?.['iv'] ?? metric?.['implied-volatility-30-day'] ?? metric?.['iv-30-day'];
-          const parsedIv = Number(rawIv);
-          order.currentIv = Number.isFinite(parsedIv) ? (parsedIv < 1 ? Math.round(parsedIv * 100) : Math.round(parsedIv)) : null;
+          order.currentIv = readMetricIvPercent(metric); // IV-FIELD-0001
           order.dte = order.expDate ? daysUntilNy(order.expDate) : null; // DTE-CALENDAR-0001
           const underlying = underlyingBySymbol.get(order.symbol);
           const bid = Number(underlying?.bid), ask = Number(underlying?.ask), mark = Number(underlying?.mark ?? underlying?.['mark-price']);
