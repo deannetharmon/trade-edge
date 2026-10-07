@@ -5031,7 +5031,7 @@ function PortfolioGreeksDashboard({ positions, th }: { positions: Position[]; th
   const cards = [
     {
       greek: 'Δ',
-      label: 'Direction',
+      label: 'Direction (raw)',
       value: fmtSignedWhole(totals.deltaShares, ' shares'),
       status: portfolioDeltaLabel(totals.deltaShares),
       drivers: deltaDrivers,
@@ -5084,7 +5084,7 @@ function PortfolioGreeksDashboard({ positions, th }: { positions: Position[]; th
         <p className={`text-[10px] ${th.textFaint}`}>status line shows healthy zone</p>
       </div>
 
-      <div className="grid grid-cols-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4">
         {cards.map((card, i) => (
           <div
             key={card.label}
@@ -11316,6 +11316,10 @@ export default function PortfolioPage() {
                   />
                 </div>
               )}
+              {/* GREEKS-V2-0001: portfolio-wide Greeks (always unfiltered) were legacy-view only. */}
+              <div className="px-4 pt-4 sm:px-6 sm:pt-6">
+                <PortfolioGreeksDashboard positions={positions} th={th} />
+              </div>
               <PositionsWorkspace
                 model={positionsWorkspaceModel}
                 pendingOrders={pendingOrders}
