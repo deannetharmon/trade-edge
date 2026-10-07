@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { PendingOrder, Position, PositionLeg } from '@/lib/portfolio-data/types';
 import type { EquityHolding } from '@/lib/portfolio-snapshot/types';
 import {
-  buildPortfolioSummary, openingOrderCash, positionDayChange, positionInSummaryGroup, positionWeekChange, summaryGroupForPosition,
+  buildPortfolioSummary, openingOrderCash, positionDayChange, positionDayChangeDetail, positionInSummaryGroup, positionWeekChange, summaryGroupForPosition,
 } from '../model/portfolioSummary';
 
 const NOW = Date.parse('2026-10-05T17:00:00Z'); // Monday 13:00 New York
@@ -99,6 +99,28 @@ describe('1D change (previous close)', () => {
     expect(positionDayChange(missing, NOW)).toBeNull();
     const s = buildPortfolioSummary({ rows: [row(csp('A')), row(missing)], equities: [], pendingOrders: [], cashBalance: 1, nowMs: NOW });
     expect(s.total.dayChange).toEqual({ value: 49, included: 1, of: 2 });
+  });
+});
+
+describe('PL-DAY-ROW-0001: per-row 1D with a reason', () => {
+  it('value, no reason, not since-open for a leg held overnight', () => {
+    expect(positionDayChangeDetail(csp('SOXL'), NOW)).toEqual({ value: 49, reason: null, sinceOpen: false });
+  });
+  it('legs opened today are flagged since open', () => {
+    const d = positionDayChangeDetail(csp('MULL', { legs: [leg({ openedAt: '2026-10-05T14:00:00Z', avgOpenPrice: 0.5, currentPrice: 0.42, closePrice: 0 })] }), NOW);
+    expect(d).toEqual({ value: 8, reason: null, sinceOpen: true });
+  });
+  it('missing data gives a reason, never zero', () => {
+    expect(positionDayChangeDetail(csp('A', { legs: [leg({ closePrice: undefined })] }), NOW)).toMatchObject({ value: null, reason: 'previous close unavailable' });
+    expect(positionDayChangeDetail(csp('B', { legs: [leg({ currentPrice: undefined })] }), NOW)).toMatchObject({ value: null, reason: 'current option price unavailable' });
+    expect(positionDayChangeDetail(csp('C', { legs: [] }), NOW)).toMatchObject({ value: null, reason: 'no option legs' });
+  });
+  it('Total tile names positions lacking 1D, with reasons (stock holdings included)', () => {
+    const s = buildPortfolioSummary({ rows: [row(csp('SOXL')), row(csp('A', { legs: [leg({ closePrice: undefined })] }))], equities: [equity({ symbol: 'SNDK' })], pendingOrders: [], cashBalance: 1000, nowMs: NOW });
+    expect(s.total.dayMissing).toEqual([
+      { symbol: 'A', reason: 'previous close unavailable' },
+      { symbol: 'SNDK', reason: 'no previous-close data for stock holdings yet' },
+    ]);
   });
 });
 

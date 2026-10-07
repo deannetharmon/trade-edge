@@ -60,19 +60,30 @@ const sumOf = (values: Array<number | null | undefined>): SummedFigure => {
 
 const nyDate = (ms: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
 
-/** 1-day change for an option position from each leg's previous close; null when any leg lacks the data. */
-export function positionDayChange(position: Pick<Position, 'legs'>, nowMs: number): number | null {
-  if (!position.legs.length) return null;
+/** PL-DAY-ROW-0001: 1-day change plus, when unavailable, the reason (never a silent zero). */
+export interface DayChangeDetail { value: number | null; reason: string | null; sinceOpen: boolean }
+
+export const EQUITY_DAY_UNAVAILABLE_REASON = 'no previous-close data for stock holdings yet';
+
+export function positionDayChangeDetail(position: Pick<Position, 'legs'>, nowMs: number): DayChangeDetail {
+  if (!position.legs.length) return { value: null, reason: 'no option legs', sinceOpen: false };
   const today = nyDate(nowMs);
-  let total = 0;
+  let total = 0, allToday = true;
   for (const leg of position.legs) {
     const openedToday = leg.openedAt != null && Number.isFinite(Date.parse(leg.openedAt)) && nyDate(Date.parse(leg.openedAt)) === today;
+    if (!openedToday) allToday = false;
     const ref = openedToday ? leg.avgOpenPrice : leg.closePrice;
-    if (ref == null || !Number.isFinite(ref) || (!openedToday && ref <= 0) || leg.currentPrice == null || !Number.isFinite(leg.currentPrice)) return null;
+    if (leg.currentPrice == null || !Number.isFinite(leg.currentPrice)) return { value: null, reason: 'current option price unavailable', sinceOpen: false };
+    if (ref == null || !Number.isFinite(ref) || (!openedToday && ref <= 0)) return { value: null, reason: openedToday ? 'open price unavailable' : 'previous close unavailable', sinceOpen: false };
     const qty = Math.abs(leg.quantity) * 100;
     total += (leg.direction === 'Short' ? ref - leg.currentPrice : leg.currentPrice - ref) * qty;
   }
-  return Math.round(total * 100) / 100;
+  return { value: Math.round(total * 100) / 100, reason: null, sinceOpen: allToday };
+}
+
+/** 1-day change for an option position from each leg's previous close; null when any leg lacks the data. */
+export function positionDayChange(position: Pick<Position, 'legs'>, nowMs: number): number | null {
+  return positionDayChangeDetail(position, nowMs).value;
 }
 
 /** 1-week change from the daily snapshot at least 7 days old; from entry when opened since; null when history is missing. */
@@ -97,6 +108,8 @@ export interface SummaryTile {
   capitalSharePct: number | null;
   thetaPerDay: SummedFigure;
   dayChange: SummedFigure;
+  /** Positions with no 1D value and why; named in the 1D tooltip. */
+  dayMissing: Array<{ symbol: string; reason: string }>;
   weekChange: SummedFigure;
   needsAttention: number;
 }
@@ -131,6 +144,7 @@ interface Member {
   capital: number | null;
   theta: number | null;
   day: number | null;
+  dayReason: string | null;
   week: number | null;
   weekSince: string | null;
   attention: boolean;
@@ -148,6 +162,7 @@ export interface PortfolioSummaryInput {
 function optionMember(position: Position, attention: boolean, nowMs: number): Member {
   const capital = buildCapitalViewModel(position);
   const week = positionWeekChange(position, nowMs);
+  const day = positionDayChangeDetail(position, nowMs);
   const basisAmount = position.entryEconomicsComplete === true && position.entryCredit != null && Number.isFinite(position.entryCredit) ? Math.abs(position.entryCredit) : null;
   return {
     key: position.key,
@@ -161,7 +176,8 @@ function optionMember(position: Position, attention: boolean, nowMs: number): Me
     // CC capital is shares, not dollars (`suffix`); it is collateral already counted as equity cost.
     capital: capital.suffix ? null : capital.value,
     theta: position.theta != null ? toWholePositionThetaDollars(position.theta) : null,
-    day: positionDayChange(position, nowMs),
+    day: day.value,
+    dayReason: day.reason,
     week: week.value,
     weekSince: week.since,
     attention,
@@ -173,7 +189,7 @@ function equityMember(holding: EquityHolding): Member {
   return {
     key: `EQUITY:${holding.symbol}`, kind: 'equity', strategy: 'EQUITY', dte: null,
     group: 'EQUITY', symbol: holding.symbol, pnl: holding.unrealizedPnl, basisAmount: cost, capital: cost,
-    theta: null, day: null, week: null, weekSince: null, attention: false,
+    theta: null, day: null, dayReason: EQUITY_DAY_UNAVAILABLE_REASON, week: null, weekSince: null, attention: false,
   };
 }
 
@@ -189,6 +205,7 @@ function tile(key: SummaryTile['key'], label: string, basis: SummaryTile['basis'
     capitalSharePct: capital.value != null && totalCapital != null && totalCapital > 0 ? Math.round((capital.value / totalCapital) * 100) : null,
     thetaPerDay: sumOf(members.filter(m => m.group !== 'EQUITY').map(m => m.theta)),
     dayChange: sumOf(members.map(m => m.day)),
+    dayMissing: members.filter(m => m.day == null).map(m => ({ symbol: m.symbol, reason: m.dayReason ?? 'unavailable' })),
     weekChange: sumOf(members.map(m => m.week)),
     needsAttention: members.filter(m => m.attention).length,
   };

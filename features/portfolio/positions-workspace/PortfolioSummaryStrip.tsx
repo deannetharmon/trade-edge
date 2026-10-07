@@ -44,7 +44,7 @@ function TileBody({ tile, weekSince }: { tile: SummaryTile; weekSince: string | 
         {tile.capital.value != null ? `Capital ${money(tile.capital.value)}${tile.key !== 'TOTAL' && tile.capitalSharePct != null ? ` · ${tile.capitalSharePct}%` : ''}${partial(tile.capital)}` : 'Capital unavailable'}
         {tile.thetaPerDay.value != null && ` · θ ${signedMoney(tile.thetaPerDay.value)}/day`}
       </span>
-      <span className="mt-0.5 block text-[11px]" title={`1D: change since the previous close (legs opened today: since their open). 1W: change since the snapshot of ${weekSince ?? 'a week ago'}, same positions only; a position opened since counts from entry; closed positions are in the Trade Log.`}>
+      <span className="mt-0.5 block text-[11px]" title={`1D: change since the previous close (legs opened today: since their open).${tile.dayMissing.length ? ` Not included: ${tile.dayMissing.map(d => `${d.symbol} (${d.reason})`).join('; ')}.` : ''} 1W: change since the snapshot of ${weekSince ?? 'a week ago'}, same positions only; a position opened since counts from entry; closed positions are in the Trade Log.`}>
         <Figure figure={tile.dayChange} prefix="1D" />
         <span className="text-white/50"> · </span>
         <Figure figure={tile.weekChange} prefix="1W" />
