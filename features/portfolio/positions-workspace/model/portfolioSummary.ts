@@ -120,6 +120,10 @@ export interface PortfolioSummary {
 }
 
 interface Member {
+  key: string;
+  kind: 'option' | 'equity';
+  strategy: string;
+  dte: number | null;
   group: SummaryGroupKey;
   symbol: string;
   pnl: number | null;
@@ -146,6 +150,10 @@ function optionMember(position: Position, attention: boolean, nowMs: number): Me
   const week = positionWeekChange(position, nowMs);
   const basisAmount = position.entryEconomicsComplete === true && position.entryCredit != null && Number.isFinite(position.entryCredit) ? Math.abs(position.entryCredit) : null;
   return {
+    key: position.key,
+    kind: 'option',
+    strategy: position.strategy,
+    dte: Number.isFinite(position.dte) ? position.dte : null,
     group: summaryGroupForPosition(position),
     symbol: position.symbol,
     pnl: position.pnl != null && Number.isFinite(position.pnl) ? position.pnl : null,
@@ -163,6 +171,7 @@ function optionMember(position: Position, attention: boolean, nowMs: number): Me
 function equityMember(holding: EquityHolding): Member {
   const cost = holding.basisComplete && holding.basis != null && Number.isFinite(holding.basis) ? Math.abs(holding.basis * holding.quantity) : null;
   return {
+    key: `EQUITY:${holding.symbol}`, kind: 'equity', strategy: 'EQUITY', dte: null,
     group: 'EQUITY', symbol: holding.symbol, pnl: holding.unrealizedPnl, basisAmount: cost, capital: cost,
     theta: null, day: null, week: null, weekSince: null, attention: false,
   };
@@ -202,11 +211,32 @@ export function openingOrderCash(order: PendingOrder): number | null {
   return null;
 }
 
-export function buildPortfolioSummary(input: PortfolioSummaryInput): PortfolioSummary {
-  const members: Member[] = [
+function buildMembers(input: Pick<PortfolioSummaryInput, 'rows' | 'equities' | 'nowMs'>): Member[] {
+  return [
     ...input.rows.map(r => optionMember(r.position, r.needsAttention, input.nowMs)),
     ...input.equities.map(equityMember),
   ];
+}
+
+/** ANALYTICS-0001: one line per held position, on the same members and the same capital basis the summary tiles are built from. */
+export interface SummaryMemberLine {
+  key: string;
+  symbol: string;
+  kind: 'option' | 'equity';
+  group: SummaryGroupKey;
+  strategy: string;
+  pnl: number | null;
+  capital: number | null;
+  dte: number | null;
+  attention: boolean;
+}
+
+export function summaryMemberLines(input: Pick<PortfolioSummaryInput, 'rows' | 'equities' | 'nowMs'>): SummaryMemberLine[] {
+  return buildMembers(input).map(m => ({ key: m.key, symbol: m.symbol, kind: m.kind, group: m.group, strategy: m.strategy, pnl: m.pnl, capital: m.capital, dte: m.dte, attention: m.attention }));
+}
+
+export function buildPortfolioSummary(input: PortfolioSummaryInput): PortfolioSummary {
+  const members = buildMembers(input);
   const totalCapital = sumOf(members.map(m => m.capital)).value;
   const groups = SUMMARY_GROUPS
     .map(g => ({ g, ms: members.filter(m => m.group === g.key) }))
