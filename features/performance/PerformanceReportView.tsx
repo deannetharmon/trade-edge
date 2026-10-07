@@ -75,7 +75,8 @@ export function PerformanceReportView({ th, report, accountProfit, periodLabel, 
   const r = report.rules;
 
   // By-month chart, one scale for bars and the running-total line.
-  const W = 760, H = 240, padL = 64, padR = 16, padT = 20, padB = 32;
+  // padB reserves a band below the plot for the value label under the deepest negative bar, so it can never touch the month labels on the x-axis.
+  const W = 760, H = 264, padL = 64, padR = 16, padT = 20, padB = 58;
   const vals = report.byMonth.flatMap((m) => [m.stats.pnl, m.cumulativePnl, 0]);
   const vmax = Math.max(...vals, 1), vmin = Math.min(...vals, -1);
   const y = (v: number) => padT + ((vmax - v) / (vmax - vmin)) * (H - padT - padB);
@@ -142,7 +143,7 @@ export function PerformanceReportView({ th, report, accountProfit, periodLabel, 
                 return (
                   <g key={m.month}>
                     <rect x={xc(i) - slot * 0.28} y={top} width={slot * 0.56} height={height} fill={m.stats.pnl >= 0 ? '#34d399' : '#f87171'} fillOpacity="0.85" />
-                    <text x={xc(i)} y={H - 10} textAnchor="middle" fontSize="11" fill="currentColor" fillOpacity="0.55">{m.month}</text>
+                    <text x={xc(i)} y={H - 8} textAnchor="middle" fontSize="11" fill="currentColor" fillOpacity="0.55">{m.month}</text>
                     <text x={xc(i)} y={m.stats.pnl >= 0 ? top - 6 : top + height + 14} textAnchor="middle" fontSize="11" fill="currentColor" fillOpacity="0.8">{money(m.stats.pnl)}</text>
                   </g>
                 );
