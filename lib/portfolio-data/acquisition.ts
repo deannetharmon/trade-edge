@@ -20,6 +20,7 @@
 // of this module and were not touched -- they remain entirely in
 // app/portfolio/page.tsx.
 
+import { readMetricIvPercent } from './metricIv';
 import { confirmRecommendationChange } from './recommendationHysteresis';
 import type {
   ActionType, PositionIntent, StopStatus, StopLossInfo, Recommendation,
@@ -68,7 +69,7 @@ import {
 } from '@/lib/portfolio/stopLossPolicy';
 import { DEBIT_STOP_OBSERVE_ENABLED, evaluateDebitStop, type StopAcquisitionCompleteness } from '@/lib/portfolio/debitStopEvaluation';
 import { fetchStopPolicies, positionStopPolicyKey } from './stopPolicyStore';
-import { earningsOnOrBeforeExpiration } from '@/lib/scans/earningsPrecheck';
+import { daysUntilNy, earningsOnOrBeforeExpiration } from '@/lib/scans/earningsPrecheck';
 import {
   CONTRACT_MULTIPLIER,
   computeCreditPerContract,
@@ -1441,9 +1442,8 @@ export async function loadPositions(
       const parsedIvr = rawIvr != null ? parseFloat(String(rawIvr)) : NaN;
       if (!isNaN(parsedIvr)) ivrMap[sym] = parsedIvr < 1 ? Math.round(parsedIvr * 100) : Math.round(parsedIvr);
       // IV (current implied volatility as %)
-      const rawIv = item['implied-volatility'] ?? item['iv'] ?? item['implied-volatility-30-day'] ?? item['iv-30-day'] ?? null;
-      const parsedIv = rawIv != null ? parseFloat(String(rawIv)) : NaN;
-      if (!isNaN(parsedIv)) ivMap[sym] = parsedIv < 1 ? Math.round(parsedIv * 100) : Math.round(parsedIv);
+      const readIv = readMetricIvPercent(item); // IV-FIELD-0001
+      if (readIv != null) ivMap[sym] = readIv;
       // HV30
       const rawHv = item['hv-30'] ?? item['historical-volatility-30'] ?? item['hv30'] ?? item['historical-volatility'] ?? null;
       const parsedHv = rawHv != null ? parseFloat(String(rawHv)) : NaN;
@@ -1765,10 +1765,8 @@ export async function loadPositions(
           const rawIvr = metric?.['implied-volatility-index-rank'] ?? metric?.['iv-rank'];
           const parsedIvr = Number(rawIvr);
           order.currentIvr = Number.isFinite(parsedIvr) ? (parsedIvr < 1 ? Math.round(parsedIvr * 100) : Math.round(parsedIvr)) : null;
-          const rawIv = metric?.['implied-volatility'] ?? metric?.['iv'] ?? metric?.['implied-volatility-30-day'] ?? metric?.['iv-30-day'];
-          const parsedIv = Number(rawIv);
-          order.currentIv = Number.isFinite(parsedIv) ? (parsedIv < 1 ? Math.round(parsedIv * 100) : Math.round(parsedIv)) : null;
-          order.dte = order.expDate ? Math.round((new Date(order.expDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)) : null;
+          order.currentIv = readMetricIvPercent(metric); // IV-FIELD-0001
+          order.dte = order.expDate ? daysUntilNy(order.expDate) : null; // DTE-CALENDAR-0001
           const underlying = underlyingBySymbol.get(order.symbol);
           const bid = Number(underlying?.bid), ask = Number(underlying?.ask), mark = Number(underlying?.mark ?? underlying?.['mark-price']);
           const spot = resolveUnderlyingPrice(bid, ask, mark);
@@ -1819,12 +1817,13 @@ export async function loadPositions(
     if (intentRes.ok) intentOverrides = (await intentRes.json())?.intents ?? {};
   } catch {}
 
-  const today = new Date();
   if (process.env.ZZDEBUG) console.log('ZZGROUPS', Object.keys(groups));
   let positions: Position[] = Object.entries(groups).map(([key, group]) => {
     const { rawLegs: legs, ambiguous, blockMessage, structure } = group;
     const [symbol, expDate] = key.split('::');
-    const dte = Math.round((new Date(expDate).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    // DTE-CALENDAR-0001: whole New York calendar days (matches the broker). The old
+    // UTC-midnight-minus-now rounding read one day low during US market hours.
+    const dte = daysUntilNy(expDate) ?? Number.NaN;
     const openedAt = legs[0]?.['created-at']?.slice(0, 10) ?? null;
     const entryDte = openedAt ? Math.round((new Date(expDate).getTime() - new Date(openedAt).getTime()) / (1000 * 60 * 60 * 24)) : dte;
 

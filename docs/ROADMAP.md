@@ -7,7 +7,7 @@
 
 # TradeEdge Roadmap (maintained by Paul — update after every major decision)
 
-Last updated: 2026-10-01 (LEV-0001 Gate 10 review)
+Last updated: 2026-10-06 (ANALYTICS-0001 go)
 
 ## Portfolio queue — 2026-10-05 (Dean, after the GGLL and SOXL reviews)
 
@@ -18,6 +18,7 @@ Last updated: 2026-10-01 (LEV-0001 Gate 10 review)
 4. **GTC-REPLACE-0001** — IMPLEMENTED 2026-10-06 (dry-run proof done with Dean); starts with a dry-run proof. A close that replaces a bracket must keep its stop; stop-market brackets are rebuilt exactly. Ticket: `docs/tickets/GTC-REPLACE-0001-preserve-bracket-stop-on-close-replacement.md`.
 5. **ORDER-PCT-INPUT-0001** — MERGED 2026-10-05; mock (https://claude.ai/artifact/Ln4e9PgkBBkNU19pnvdRD6). Percent and price boxes kept in sync for profit targets (% of credit kept) and stops (% of original credit). Diane, Ian (defaults), Quinn pending. Ticket: `docs/tickets/ORDER-PCT-INPUT-0001-percent-and-price-inputs.md`.
 6. **PORTFOLIO-SUMMARY-0001** — IMPLEMENTED 2026-10-05; mock (https://claude.ai/artifact/GaxxUqLfRSa4zABBsXGmvv). P/L summary tiles by position type on Positions and Position Analysis: P/L, capital and theta, 1D/1W change, needs-attention, cash to deploy (no margin), largest exposure (25% limit). Paul and Quinn pending. Ticket: `docs/tickets/PORTFOLIO-SUMMARY-0001-pl-summary-by-position-type.md`.
+7. **ANALYTICS-0001** — GO 2026-10-06 (Paul; Ian, Alan, Quinn approved; Dean approved Diane's v3 mock). New hidden `/analytics` page (no nav link) for the book view: reuses PERF-0001, PORTFOLIO-SUMMARY-0001 and the LEV-0001 catalog; changes no scoring, qualification, recommendation, order path or existing page behavior. Slices: **A0** share the Performance period logic (`lib/performance/period.ts`) — DONE; **A1** `lib/analytics/bookAnalytics.ts` + golden-fixture tests — IMPLEMENTED 2026-10-06 (Ian and Quinn review pending); **A2** the page. Deferred: ANALYTICS-0002 (return on secured cash). Tickets: `docs/tickets/ANALYTICS-0001.md`, `docs/tickets/ANALYTICS-0001-DANE-ORDER.md`.
 
 **LEAPS-QV-0001 Gate 4 (4a, 4b, 4c)** — IMPLEMENTED 2026-10-06: acquisition, evaluator and ranking, orchestration and browser binding, Find LEAPS goldens (spec Sections 18-21). No production caller yet (P2). **Next (Paul, approved by Dean 2026-10-06):** 1) Gate 3 input builder — IMPLEMENTED 2026-10-06 (`docs/analysis/LEAPS-QV-0001-strategy-input-assembler.md`); next: Dean's feasibility run at `/api/qv-feasibility?symbols=...`; 2) Gate 6 MVP screen (Diane mock first); 3) Gate 5 scenarios (Ian assumptions, Alan formulas); 4) Gate 7 persistence; 5) Gate 8 release.
 

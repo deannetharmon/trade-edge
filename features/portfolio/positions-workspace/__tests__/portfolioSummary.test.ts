@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { PendingOrder, Position, PositionLeg } from '@/lib/portfolio-data/types';
 import type { EquityHolding } from '@/lib/portfolio-snapshot/types';
 import {
-  buildPortfolioSummary, openingOrderCash, positionDayChange, positionInSummaryGroup, positionWeekChange, summaryGroupForPosition,
+  buildPortfolioSummary, exposureTier, openingOrderCash, positionDayChange, positionDayChangeDetail, positionInSummaryGroup, positionWeekChange, summaryGroupForPosition,
 } from '../model/portfolioSummary';
 
 const NOW = Date.parse('2026-10-05T17:00:00Z'); // Monday 13:00 New York
@@ -102,6 +102,28 @@ describe('1D change (previous close)', () => {
   });
 });
 
+describe('PL-DAY-ROW-0001: per-row 1D with a reason', () => {
+  it('value, no reason, not since-open for a leg held overnight', () => {
+    expect(positionDayChangeDetail(csp('SOXL'), NOW)).toEqual({ value: 49, reason: null, sinceOpen: false });
+  });
+  it('legs opened today are flagged since open', () => {
+    const d = positionDayChangeDetail(csp('MULL', { legs: [leg({ openedAt: '2026-10-05T14:00:00Z', avgOpenPrice: 0.5, currentPrice: 0.42, closePrice: 0 })] }), NOW);
+    expect(d).toEqual({ value: 8, reason: null, sinceOpen: true });
+  });
+  it('missing data gives a reason, never zero', () => {
+    expect(positionDayChangeDetail(csp('A', { legs: [leg({ closePrice: undefined })] }), NOW)).toMatchObject({ value: null, reason: 'previous close unavailable' });
+    expect(positionDayChangeDetail(csp('B', { legs: [leg({ currentPrice: undefined })] }), NOW)).toMatchObject({ value: null, reason: 'current option price unavailable' });
+    expect(positionDayChangeDetail(csp('C', { legs: [] }), NOW)).toMatchObject({ value: null, reason: 'no option legs' });
+  });
+  it('Total tile names positions lacking 1D, with reasons (stock holdings included)', () => {
+    const s = buildPortfolioSummary({ rows: [row(csp('SOXL')), row(csp('A', { legs: [leg({ closePrice: undefined })] }))], equities: [equity({ symbol: 'SNDK' })], pendingOrders: [], cashBalance: 1000, nowMs: NOW });
+    expect(s.total.dayMissing).toEqual([
+      { symbol: 'A', reason: 'previous close unavailable' },
+      { symbol: 'SNDK', reason: 'no previous-close data for stock holdings yet' },
+    ]);
+  });
+});
+
 describe('1W change (daily snapshots)', () => {
   it('against the latest snapshot at least 7 days old', () => {
     const p = csp('A', { pnl: 100, entryDate: '2026-09-01', snapshotHistory: [{ date: '2026-09-27', pnl: 20 }, { date: '2026-09-28', pnl: 30 }, { date: '2026-10-01', pnl: 90 }] as Position['snapshotHistory'] });
@@ -153,8 +175,26 @@ describe('largest exposure', () => {
   it('largest single-underlying share of capital, amber only above the limit', () => {
     const rows = [row(csp('SOXL', { maxRisk: 16721 })), row(csp('TQQQ', { maxRisk: 5719 })), row(csp('AVL', { maxRisk: 3500 }))];
     const s = buildPortfolioSummary({ rows, equities: [], pendingOrders: [], cashBalance: 1, nowMs: NOW });
-    expect(s.largest).toMatchObject({ symbol: 'SOXL', capital: 16721, sharePct: 64, overLimit: true, limitPct: 25 });
+    expect(s.largest).toMatchObject({ symbol: 'SOXL', capital: 16721, sharePct: 64, overLimit: true, limitPct: 25, tier: 'red' });
     const relaxed = buildPortfolioSummary({ rows, equities: [], pendingOrders: [], cashBalance: 1, nowMs: NOW, exposureLimitPct: 70 });
     expect(relaxed.largest?.overLimit).toBe(false);
+  });
+});
+
+describe('CONCENTRATION-TIERS-0001', () => {
+  it('tiers: muted under 15, amber 15-24, red from 25', () => {
+    expect(exposureTier(14)).toBe('normal');
+    expect(exposureTier(15)).toBe('amber');
+    expect(exposureTier(24)).toBe('amber');
+    expect(exposureTier(25)).toBe('red');
+  });
+  it('leveraged-ETF cluster totals every leveraged underlying (MULL included) and ignores plain stocks', () => {
+    const rows = [row(csp('GGLL', { maxRisk: 5000 })), row(csp('MULL', { maxRisk: 3000 })), row(csp('METU', { maxRisk: 2000 })), row(csp('AVL', { maxRisk: 10000 }))];
+    const s = buildPortfolioSummary({ rows, equities: [], pendingOrders: [], cashBalance: 1, nowMs: NOW });
+    expect(s.leveragedCluster).toMatchObject({ symbols: ['GGLL', 'METU', 'MULL'], capital: 10000, sharePct: 50, tier: 'red' });
+  });
+  it('no cluster when none is held', () => {
+    const s = buildPortfolioSummary({ rows: [row(csp('AVL'))], equities: [], pendingOrders: [], cashBalance: 1, nowMs: NOW });
+    expect(s.leveragedCluster).toBeNull();
   });
 });
