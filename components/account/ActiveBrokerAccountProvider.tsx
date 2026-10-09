@@ -1,6 +1,9 @@
+// components/account/ActiveBrokerAccountProvider.tsx
+
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ACTIVE_BROKER_ACCOUNT_CHANGED_EVENT,
   applyBrokerAccountSwitch,
@@ -52,11 +55,41 @@ export function useActiveBrokerAccount(): ActiveBrokerAccountContextValue {
 export function ActiveBrokerAccountIndicator() {
   const { status, accountId, accounts, refresh, selectAccount } = useActiveBrokerAccount();
   const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  // The indicator is portaled into each page's header, and some headers (for
+  // example Portfolio) wrap their controls in a horizontally scrolling box.
+  // An absolutely positioned menu inside that box is clipped, so the menu is
+  // rendered into document.body with fixed positioning anchored to the button.
+  const placeMenu = useCallback(() => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMenuPos({ top: rect.bottom + 8, right: Math.max(8, window.innerWidth - rect.right) });
+  }, []);
+
+  const toggle = useCallback(() => {
+    setOpen(value => {
+      if (!value) placeMenu();
+      return !value;
+    });
+  }, [placeMenu]);
+
   useEffect(() => {
     const close = () => setOpen(false);
     window.addEventListener(ACTIVE_BROKER_ACCOUNT_CHANGED_EVENT, close);
     return () => window.removeEventListener(ACTIVE_BROKER_ACCOUNT_CHANGED_EVENT, close);
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    window.addEventListener('resize', placeMenu);
+    window.addEventListener('scroll', placeMenu, true);
+    return () => {
+      window.removeEventListener('resize', placeMenu);
+      window.removeEventListener('scroll', placeMenu, true);
+    };
+  }, [open, placeMenu]);
 
   if (status === 'authorization_required' || status === 'no_accounts' || status === 'account_fetch_failed') return null;
   const selected = accounts.find(account => account.id === accountId);
@@ -69,8 +102,9 @@ export function ActiveBrokerAccountIndicator() {
   return (
     <div className="relative shrink-0 text-[11px]" data-testid="active-broker-account">
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setOpen(value => !value)}
+        onClick={toggle}
         className={`flex max-w-56 items-center gap-1.5 rounded-full border px-2.5 py-1.5 font-semibold shadow-sm backdrop-blur ${needsChoice ? 'border-amber-400 bg-amber-950/95 text-amber-200' : 'border-neutral-700 bg-neutral-950/90 text-neutral-300'}`}
         aria-expanded={open}
         aria-label={status === 'loading' ? 'Loading active broker account' : needsChoice ? 'Choose active broker account' : `Active broker account ${selected?.label ?? 'Account'}, ending ${accountId?.slice(-4) ?? ''}`}
@@ -84,8 +118,13 @@ export function ActiveBrokerAccountIndicator() {
           </>
         )}
       </button>
-      {open && (
-        <div className="absolute right-0 top-full z-[70] mt-2 w-64 rounded-xl border border-neutral-700 bg-neutral-950 p-2 text-neutral-200 shadow-2xl" role="dialog" aria-label="Active broker account">
+      {open && menuPos && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed z-[9999] w-64 rounded-xl border border-neutral-700 bg-neutral-950 p-2 text-[11px] text-neutral-200 shadow-2xl"
+          style={{ top: menuPos.top, right: menuPos.right }}
+          role="dialog"
+          aria-label="Active broker account"
+        >
           <div className="px-2 py-1 text-[10px] text-neutral-400">Active broker account</div>
           {choiceMessage && <p className="px-2 pb-2 text-[10px] text-amber-300">{choiceMessage}</p>}
           {accounts.map(account => (
@@ -94,7 +133,8 @@ export function ActiveBrokerAccountIndicator() {
             </button>
           ))}
           <button type="button" onClick={() => void refresh()} className="mt-1 w-full rounded-lg border border-neutral-800 px-2 py-1.5 text-neutral-400 hover:text-white">Refresh accounts</button>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

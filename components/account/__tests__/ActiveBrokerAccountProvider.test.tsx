@@ -1,3 +1,5 @@
+// components/account/__tests__/ActiveBrokerAccountProvider.test.tsx
+
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -31,8 +33,9 @@ describe('ActiveBrokerAccountProvider and indicator', () => {
     account.resolve.mockResolvedValue({ status: 'selection_required', accountId: null, accounts: [{ id: 'ACCT-A', label: 'IRA' }, { id: 'ACCT-B', label: 'Individual' }] });
     renderAccountControl();
     await userEvent.click(await screen.findByRole('button', { name: /choose active broker account/i }));
-    expect(screen.getByRole('dialog', { name: /active broker account/i }).className).toMatch(/\babsolute\b/);
-    expect(screen.getByRole('dialog', { name: /active broker account/i }).className).toMatch(/\btop-full\b/);
+    // Menu is portaled to <body> with fixed positioning so scrolling header rows cannot clip it.
+    expect(screen.getByRole('dialog', { name: /active broker account/i }).className).toMatch(/\bfixed\b/);
+    expect(screen.getByRole('dialog', { name: /active broker account/i }).parentElement).toBe(document.body);
     await userEvent.click(screen.getByRole('button', { name: /IRA/i }));
     expect(account.switchAccount).toHaveBeenCalledWith('ACCT-A');
   });
