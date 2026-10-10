@@ -1,7 +1,7 @@
 // path: app/screener/page.tsx
 
 'use client';
-import { AppNav } from '@/components/nav/AppNav';
+import { AppHeader } from '@/components/nav/AppHeader';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
@@ -11284,38 +11284,13 @@ export default function Home() {
       <CcCapacityShadowSnapshotBridge onPortfolioData={captureCcCapacityShadowSnapshot} />
       <span role="status" aria-live="polite" className="sr-only">{scanLiveMessage}</span>
       {/* Header */}
-      <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-3 flex items-center justify-between sticky top-0 z-50 flex-col gap-0`}>
-        <div className="flex items-center justify-between w-full pb-2">
-          <div className="flex items-center gap-3">
-            <svg width="46" height="46" viewBox="-26 -26 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle r="18" stroke="#00d4aa" strokeWidth="0.8" opacity="0.3"/>
-              <circle r="12" stroke="#00d4aa" strokeWidth="0.8" opacity="0.6"/>
-              <line x1="-23" y1="0" x2="-23" y2="0" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="-23" y1="0" x2="-14" y2="0" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="14" y1="0" x2="23" y2="0" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="0" y1="-23" x2="0" y2="-14" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="0" y1="14" x2="0" y2="23" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="-6" y1="5" x2="-6" y2="-6" stroke="#ff5566" strokeWidth="1.8" strokeLinecap="round" opacity="0.85"/>
-              <line x1="-1" y1="3" x2="-1" y2="-9" stroke="#00d4aa" strokeWidth="1.8" strokeLinecap="round"/>
-              <line x1="4" y1="1" x2="4" y2="-12" stroke="#00d4aa" strokeWidth="1.8" strokeLinecap="round"/>
-              <circle r="2" fill="#00d4aa"/>
-            </svg>
-            <div>
-              <h1 className="text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>TRADE<span style={{ color: '#00d4aa' }}>EDGE</span></h1>
-              <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
+      <AppHeader active="screener" theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent}
+        actions={<>
             <a href="/help" target="_blank" className="text-white/50 hover:text-white/90 text-xs font-medium tracking-wider transition-colors" title="Help">?</a>
-            <div data-global-header-context className="shrink-0" />
-            <ThemeToggle theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
-          </div>
-        </div>
-        <AppNav active="screener" />
-        
-        </div>
+        </>}
+      />
 
-      <div className="flex h-[calc(100vh-57px)]">
+      <div className="flex h-[calc(100vh-var(--app-header-h,57px))]">
         {/* Sidebar */}
         <div className={`w-80 border-r ${th.border} ${th.sidebar} p-4 overflow-auto flex flex-col gap-3 shrink-0`}>
           {/* TE-0007: Opportunity Universe — the ONE canonical ticker list.

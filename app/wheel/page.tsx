@@ -2,7 +2,7 @@
 
 'use client';
 
-import { AppNav } from '@/components/nav/AppNav';
+import { AppHeader } from '@/components/nav/AppHeader';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import {
@@ -383,13 +383,7 @@ export default function WheelPage() {
 
   return (
     <div className="min-h-screen bg-black text-white" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
-      <div className="border-b border-white/10">
-        <div className="flex items-center justify-between px-6 py-3">
-          <span className="text-sm font-bold tracking-widest">TRADEEDGE</span>
-          <div data-global-header-context className="shrink-0" />
-        </div>
-        <AppNav active="wheel" />
-      </div>
+      <AppHeader active="wheel" />
 
       {/* Wheel sub-tab bar */}
       <div className="border-b border-white/10 px-6">

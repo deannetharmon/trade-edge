@@ -1,7 +1,7 @@
 // path: app/page.tsx
 
 'use client';
-import { AppNav } from '@/components/nav/AppNav';
+import { AppHeader } from '@/components/nav/AppHeader';
 import { useNavConfig } from '@/components/nav/NavConfigProvider';
 import type { TabId } from '@/lib/nav/tabs';
 import { useState, useEffect } from 'react';
@@ -390,48 +390,11 @@ export default function HomePage() {
 
   return (
     <div className={`home-dashboard min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
-      <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-4 flex flex-col sticky top-0 z-50`}>
-        <div className="flex items-center justify-between w-full pb-3">
-          <div className="flex items-center gap-3">
-            <svg width="36" height="36" viewBox="-26 -26 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle r="18" stroke="#00d4aa" strokeWidth="0.8" opacity="0.3"/>
-              <circle r="12" stroke="#00d4aa" strokeWidth="0.8" opacity="0.6"/>
-              <line x1="-23" y1="0" x2="-14" y2="0" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="14" y1="0" x2="23" y2="0" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="0" y1="-23" x2="0" y2="-14" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="0" y1="14" x2="0" y2="23" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="-6" y1="5" x2="-6" y2="-6" stroke="#ff5566" strokeWidth="1.8" strokeLinecap="round" opacity="0.85"/>
-              <line x1="-1" y1="3" x2="-1" y2="-9" stroke="#00d4aa" strokeWidth="1.8" strokeLinecap="round"/>
-              <line x1="4" y1="1" x2="4" y2="-12" stroke="#00d4aa" strokeWidth="1.8" strokeLinecap="round"/>
-              <circle r="2" fill="#00d4aa"/>
-            </svg>
-            <div>
-              <h1 className="text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>TRADE<span style={{ color: '#00d4aa' }}>EDGE</span></h1>
-              <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
+      <AppHeader active="home" theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent}
+        actions={<>
             {lastUpdated && <span className={`text-[9px] ${th.textFaint}`}>Updated {lastUpdated}</span>}
-            <div data-global-header-context className="shrink-0" />
-            <div className="flex items-center gap-1 mr-1">
-              {(Object.entries(ACCENTS) as [Accent, typeof ACCENTS[Accent]][]).map(([key, val]) => (
-                <button key={key} onClick={() => { setAccent(key); applyAccent(key); try { localStorage.setItem(LS_ACCENT, key); } catch {} }}
-                  title={val.label}
-                  className={`w-3.5 h-3.5 rounded-full transition-all ${accent === key ? 'ring-2 ring-white/60 ring-offset-1 ring-offset-black scale-125' : 'opacity-60 hover:opacity-100'}`}
-                  style={{ backgroundColor: val.hex }} />
-              ))}
-            </div>
-            <div className="w-px h-4 bg-white/20" />
-            {(['dark','medium','light'] as Theme[]).map(t => (
-              <button key={t} onClick={() => { setTheme(t); try { localStorage.setItem(LS_THEME, t); } catch {} }}
-                className={`text-[9px] px-2 py-1 border rounded transition-colors ${theme === t ? 'border-[var(--accent)] text-[var(--accent)] bg-[rgba(var(--accent-r),var(--accent-g),var(--accent-b),0.1)]' : `${th.border} ${th.textFaint}`}`}>
-                {t}
-              </button>
-            ))}
-          </div>
-        </div>
-        <AppNav active="home" />
-      </div>
+        </>}
+      />
 
       <main className="px-6 py-6 max-w-5xl mx-auto space-y-6">
         <MarketConditionsPanel mc={mc} th={th} loading={mcLoading} />

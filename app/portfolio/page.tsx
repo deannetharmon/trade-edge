@@ -1,7 +1,7 @@
 // app/portfolio/page.tsx
 
 'use client';
-import { AppNav } from '@/components/nav/AppNav';
+import { AppHeader } from '@/components/nav/AppHeader';
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
 import { RsiStrip } from '@/components/RsiStrip';
 import { validateChatImageSelection } from '@/lib/ai/chatAttachments';
@@ -11039,27 +11039,8 @@ export default function PortfolioPage() {
     <div className={`min-h-screen max-w-full overflow-x-clip ${th.bg} pb-24 transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
 
       {/* Header */}
-      <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-3 sticky top-0 z-50 flex flex-col`}>
-        <div className="flex items-center justify-between w-full pb-2 gap-3">
-          <div className="flex items-center gap-3">
-            <svg width="46" height="46" viewBox="-26 -26 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle r="18" stroke="#00d4aa" strokeWidth="0.8" opacity="0.3"/>
-              <circle r="12" stroke="#00d4aa" strokeWidth="0.8" opacity="0.6"/>
-              <line x1="-23" y1="0" x2="-14" y2="0" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="14" y1="0" x2="23" y2="0" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="0" y1="-23" x2="0" y2="-14" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="0" y1="14" x2="0" y2="23" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="-6" y1="5" x2="-6" y2="-6" stroke="#ff5566" strokeWidth="1.8" strokeLinecap="round" opacity="0.85"/>
-              <line x1="-1" y1="3" x2="-1" y2="-9" stroke="#00d4aa" strokeWidth="1.8" strokeLinecap="round"/>
-              <line x1="4" y1="1" x2="4" y2="-12" stroke="#00d4aa" strokeWidth="1.8" strokeLinecap="round"/>
-              <circle r="2" fill="#00d4aa"/>
-            </svg>
-            <div>
-              <h1 className="text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>TRADE<span style={{ color: '#00d4aa' }}>EDGE</span></h1>
-              <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
-            </div>
-          </div>
-        <div className="flex items-center gap-3 min-w-0 overflow-x-auto whitespace-nowrap [&>*]:shrink-0">
+      <AppHeader active="portfolio" theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent}
+        actions={<>
           <span className={`text-[10px] font-bold ${marketStatus.open ? 'text-emerald-400' : 'text-yellow-400'}`}>{marketStatus.label}</span>
           {freshness && <span className={`text-[10px] ${freshness.tone === 'stale' ? 'text-amber-400 font-bold' : 'text-white/30'}`} title={lastRefresh ? `Last refresh ${lastRefresh.toLocaleTimeString()}` : undefined}>{freshness.text}</span>}
           {freshness?.settlingNote && <span className="text-[10px] text-white/50">{freshness.settlingNote}</span>}
@@ -11112,15 +11093,11 @@ export default function PortfolioPage() {
             className="text-[10px] px-3 py-1.5 border border-white/10 text-white/30 rounded hover:border-red-700 hover:text-red-400 transition-colors tracking-wider">
             RECONNECT TASTYTRADE
           </button>
-          <div data-global-header-context className="shrink-0" />
-          <ThemeToggle theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
-          </div>
-        </div>
-        <AppNav active="portfolio" />
-      </div>
+        </>}
+      />
 
       {/* Sub-tab bar */}
-      <div className={`${th.sidebar} border-b ${th.border} px-6 sticky top-[85px] z-40`}>
+      <div className={`${th.sidebar} border-b ${th.border} px-6 sticky top-[var(--app-header-h,85px)] z-40`}>
         <div className="flex gap-0 overflow-x-auto whitespace-nowrap">
           {([
             { key: 'todays-priorities', label: "Today's Priorities", icon: '✦' },

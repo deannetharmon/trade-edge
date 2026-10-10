@@ -7,7 +7,7 @@
 
 import { useState } from 'react';
 import { useSession, signOut } from 'next-auth/react';
-import { AppNav } from '@/components/nav/AppNav';
+import { AppHeader } from '@/components/nav/AppHeader';
 import { useNavConfig } from '@/components/nav/NavConfigProvider';
 import { TABS, TabId } from '@/lib/nav/tabs';
 
@@ -33,13 +33,7 @@ export default function ProfilePage() {
 
   return (
     <div className="min-h-screen bg-black text-white" style={{ fontFamily: 'var(--font-inter), system-ui, sans-serif' }}>
-      <div className="border-b border-white/10">
-        <div className="flex items-center justify-between px-6 py-3">
-          <span className="text-sm font-bold tracking-widest">TRADEEDGE</span>
-          <div data-global-header-context className="shrink-0" />
-        </div>
-        <AppNav />
-      </div>
+      <AppHeader />
 
       <div className="max-w-2xl mx-auto px-6 py-8 space-y-6">
         <div>
