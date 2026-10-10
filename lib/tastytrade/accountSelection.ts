@@ -24,6 +24,40 @@ export interface BrokerAccountResolution {
 
 let validatedAccountId: string | null = null;
 
+// ACCOUNT-STICKY-0001: the chosen account is also saved on the server under the
+// signed-in user, so it survives the browser clearing localStorage (iPad Safari
+// storage purges, Safari tab vs home-screen app, a new device). The server copy
+// is only a hint: it is always validated against the live broker account list.
+export const ACTIVE_BROKER_ACCOUNT_SERVER_ENDPOINT = '/api/active-account';
+
+async function fetchServerPreferredAccountId(): Promise<string | null> {
+  if (typeof window === 'undefined' || typeof fetch === 'undefined') return null;
+  try {
+    const res = await fetch(ACTIVE_BROKER_ACCOUNT_SERVER_ENDPOINT, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const value = typeof data?.accountId === 'string' ? data.accountId.trim() : '';
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+function saveServerPreferredAccountId(accountId: string): void {
+  if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
+  try {
+    // keepalive lets the request finish even when the page reloads right after a switch.
+    void fetch(ACTIVE_BROKER_ACCOUNT_SERVER_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountId }),
+      keepalive: true,
+    }).catch(() => undefined);
+  } catch {
+    /* best effort: the local copy still applies */
+  }
+}
+
 function storage(): Storage | null {
   try { return typeof window === 'undefined' ? null : window.localStorage; } catch { return null; }
 }
@@ -37,6 +71,7 @@ export function persistBrokerAccountId(accountId: string): void {
   const value = accountId.trim();
   if (!value) return;
   storage()?.setItem(ACTIVE_BROKER_ACCOUNT_STORAGE_KEY, value);
+  saveServerPreferredAccountId(value);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(ACTIVE_BROKER_ACCOUNT_CHANGED_EVENT, { detail: { accountId: value } }));
   }
@@ -103,11 +138,22 @@ export async function resolveActiveBrokerAccount(
       return { status: 'account_fetch_failed', accountId: null, accounts: [] };
     }
     const accounts = extractBrokerAccounts(payload);
-    const preferred = readPersistedBrokerAccountId();
+    const localPreferred = readPersistedBrokerAccountId();
+    const serverPreferred = await fetchServerPreferredAccountId();
+    const preferred = localPreferred ?? serverPreferred;
     const resolution = resolveBrokerAccounts(accounts, preferred);
     if (resolution.status === 'ready' && resolution.accountId) {
       validatedAccountId = resolution.accountId;
-      if (!preferred) persistBrokerAccountId(resolution.accountId);
+      if (!preferred) {
+        // Sole account: select it (also saved on the server).
+        persistBrokerAccountId(resolution.accountId);
+      } else {
+        // Local copy lost but the server remembered it: restore quietly (no
+        // account-changed event, nothing has switched).
+        if (!localPreferred) storage()?.setItem(ACTIVE_BROKER_ACCOUNT_STORAGE_KEY, resolution.accountId);
+        // Server has nothing yet (existing users): backfill from the local choice.
+        if (!serverPreferred) saveServerPreferredAccountId(resolution.accountId);
+      }
     } else if (resolution.status === 'selected_account_missing') {
       clearPersistedBrokerAccountId();
     }
