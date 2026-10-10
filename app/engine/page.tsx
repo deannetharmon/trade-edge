@@ -1,6 +1,7 @@
 // app/engine/page.tsx
 
 'use client';
+import { AppNav } from '@/components/nav/AppNav';
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
 import { RsiStrip } from '@/components/RsiStrip';
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -2902,16 +2903,7 @@ export default function EnginePage() {
           </div>
           </div>
         </div>
-        <div className="flex items-center gap-0 w-full border-t border-white/10">
-          <a href="/"            className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HOME</a>
-          <a href="/portfolio"   className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PORTFOLIO</a>
-          <a href="/screener"    className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">SCREENER</a>
-          <span                  className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>INCOME ENGINE</span>
-          <a href="/rinse-repeat" className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">REPEAT STRATEGIES</a>
-          <a href="/trade-log"   className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">TRADE LOG</a>
-          <a href="/performance" className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PERFORMANCE</a>
-          <a href="/help"        className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HELP</a>
-        </div>
+        <AppNav active="engine" />
       </div>
 
       {/* ── Settings Panel ── */}

@@ -1,6 +1,9 @@
 // path: app/page.tsx
 
 'use client';
+import { AppNav } from '@/components/nav/AppNav';
+import { useNavConfig } from '@/components/nav/NavConfigProvider';
+import type { TabId } from '@/lib/nav/tabs';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { injectAccentStyle } from '@/lib/theme';
@@ -352,6 +355,9 @@ function NavCard({ href, label, icon, desc, th }: { href: string; label: string;
 }
 
 export default function HomePage() {
+  // NAV-HIDE-0001: cards follow the user's hidden-tab list.
+  const { hiddenTabs } = useNavConfig();
+  const showTab = (id: TabId) => hiddenTabs.indexOf(id) === -1;
   const [theme, setTheme] = useState<Theme>('dark');
   const [accent, setAccent] = useState<Accent>('electric');
   const [mc, setMc] = useState<MarketConditions | null>(null);
@@ -424,18 +430,7 @@ export default function HomePage() {
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-0 w-full border-t border-white/10">
-          <span className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>HOME</span>
-          <Link href="/portfolio"    className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>PORTFOLIO</Link>
-          <Link href="/screener"     className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>SCREENER</Link>
-          <Link href="/engine"       className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>INCOME ENGINE</Link>
-          <Link href="/rinse-repeat" className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>REPEAT STRATEGIES</Link>
-          <Link href="/trade-log"    className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>TRADE LOG</Link>
-          <Link href="/performance"  className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>PERFORMANCE</Link>
-          <Link href="/paper-trading" className={`text-[10px] font-bold px-3 py-2 text-amber-400/80 hover:text-amber-300 transition-colors tracking-wider`}>PAPER TRADING</Link>
-          <Link href="/wheel-simulator" className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>WHEEL SIMULATOR</Link>
-          <Link href="/help"         className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>HELP</Link>
-        </div>
+        <AppNav active="home" />
       </div>
 
       <main className="px-6 py-6 max-w-5xl mx-auto space-y-6">
@@ -445,12 +440,12 @@ export default function HomePage() {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <NavCard href="/portfolio"    label="PORTFOLIO"         icon="📊" desc="Live positions, Greeks, action buttons"          th={th} />
             <NavCard href="/screener"     label="SCREENER"          icon="🔍" desc="Scan tickers for BPS, BCS, IC setups"            th={th} />
-            <NavCard href="/engine"       label="INCOME ENGINE"     icon="⚡" desc="SPX spread suggestions and capital allocation"   th={th} />
-            <NavCard href="/rinse-repeat" label="REPEAT STRATEGIES" icon="🔄" desc="Re-screen past winners and track cycles"         th={th} />
+            {showTab('engine') && <NavCard href="/engine"       label="INCOME ENGINE"     icon="⚡" desc="SPX spread suggestions and capital allocation"   th={th} /> }
+            {showTab('rinse-repeat') && <NavCard href="/rinse-repeat" label="REPEAT STRATEGIES" icon="🔄" desc="Re-screen past winners and track cycles"         th={th} /> }
             <NavCard href="/trade-log"    label="TRADE LOG"         icon="📋" desc="Closed trade history and P&L analysis"           th={th} />
             <NavCard href="/performance"  label="PERFORMANCE"       icon="📈" desc="Monthly P&L charts and win rate stats"           th={th} />
-            <NavCard href="/paper-trading" label="PAPER TRADING"    icon="🧪" desc="Simulated sandbox -- manual paper positions only" th={th} />
-            <NavCard href="/wheel-simulator" label="WHEEL SIMULATOR" icon="🎯" desc="Project capital growth for the wheel strategy"    th={th} />
+            {showTab('paper-trading') && <NavCard href="/paper-trading" label="PAPER TRADING"    icon="🧪" desc="Simulated sandbox -- manual paper positions only" th={th} /> }
+            {showTab('wheel-simulator') && <NavCard href="/wheel-simulator" label="WHEEL SIMULATOR" icon="🎯" desc="Project capital growth for the wheel strategy"    th={th} /> }
           </div>
         </div>
       </main>
