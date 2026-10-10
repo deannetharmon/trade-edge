@@ -12,7 +12,7 @@ import { TabId, visibleTabs } from '@/lib/nav/tabs';
 const ACTIVE_STYLE = { color: '#00d4aa', borderBottom: '2px solid #00d4aa' } as const;
 const BASE = 'text-[10px] font-bold px-3 py-2 tracking-wider';
 
-export function AppNav({ active }: { active?: TabId | 'profile' }) {
+export function AppNav({ active }: { active?: TabId }) {
   const { hiddenTabs } = useNavConfig();
   const tabs = visibleTabs(hiddenTabs);
 
@@ -34,16 +34,6 @@ export function AppNav({ active }: { active?: TabId | 'profile' }) {
             {t.label}
           </Link>
         ),
-      )}
-      <span className="flex-1" />
-      {active === 'profile' ? (
-        <span className={BASE} style={ACTIVE_STYLE}>
-          PROFILE
-        </span>
-      ) : (
-        <Link href="/profile" className={`${BASE} transition-colors text-white/55 hover:text-white/80`}>
-          PROFILE
-        </Link>
       )}
     </div>
   );
