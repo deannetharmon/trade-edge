@@ -21,6 +21,7 @@ import { activeFilterCount, DEFAULT_FILTERS, matchesAnalysisFilters } from './mo
 import { DEFAULT_PREFERENCES, loadPreferences, savePreferences } from './model/preferences';
 import { buildCapitalViewModel, buildMoneynessMovementViewModel, buildMoneynessViewModel, comparisonTone, SEMANTIC_TONE_CLASS, stopPresentation, stopPresentationForPosition, type SemanticTone } from './model/presentation';
 import { buildBreakevenViewModel, priceBufferFor } from './model/breakeven';
+import { buildLongOptionRecovery } from './model/longOptionRecovery';
 import type { AnalysisColumnId, AnalysisViewId, ExistingIncomeOpportunity, FinancialAggregate, PositionAnalysisFilters, PositionsWorkspaceModel, SymbolGroupViewModel } from './model/types';
 import { DebitStopObservation, StopEvidencePanel } from '@/components/portfolio-data/StopEvidencePanel';
 import { canonicalRecommendationToAction } from '@/lib/portfolio/canonicalRecommendationPresentation';
@@ -677,6 +678,7 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
   const moneyness = buildMoneynessViewModel(p.stockPrice, p.legs);
   const moneynessMovement = buildMoneynessMovementViewModel(p.stockPriceAtEntry ?? null, p.stockPrice, p.legs);
   const capital = buildCapitalViewModel(p);
+  const recovery = buildLongOptionRecovery(p);
   const pnl = p.closeNowPnl ?? p.pnl;
   const pctOfTarget = profitTargetPct(p, pnl);
   // PNL-BASIS-0001: say which basis the P/L above is on, and show the other one (display only; the rules' own inputs are unchanged).
@@ -703,7 +705,11 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
     strike: <><span className="block">{p.legs.map(leg => `${leg.direction === 'Short' ? 'Short ' : 'Long '}${leg.strikePrice}${leg.optionType}`).join(' · ') || '—'}</span><span className={`mt-1 block ${breakeven.values.length ? 'text-white' : th.textFaint}`} title={breakeven.unavailableReason ?? undefined}>{breakeven.values.length ? `AT-EXP B/E ${breakeven.values.map(value => moneyExact(value)).join(' / ')}` : 'AT-EXP B/E —'}</span>{priceBuffer != null && <span className={`block ${SEMANTIC_TONE_CLASS[priceBuffer >= 0 ? 'positive' : 'negative']}`}>Price Buffer {priceBuffer >= 0 ? '' : '−'}{money(Math.abs(priceBuffer))}{priceBufferPct != null ? ` (${priceBufferPct.toFixed(1)}%)` : ''}</span>}{valueSplit && <><span className={`mt-1 block ${th.textMuted}`} data-testid="extrinsic-now" title={valueSplit.side === 'short' ? 'Extrinsic value still in the price you would pay to close: what is left to earn as time passes' : 'Time and volatility value in the option price: the option price minus how far it is in the money'}>{valueSplit.side === 'short' ? 'Extrinsic left' : 'Extrinsic'} {moneyExact(valueSplit.extrinsic.now)}{valueSplit.extrinsicPctOfValue != null ? ` (${valueSplit.extrinsicPctOfValue.toFixed(0)}%)` : ''}</span>{valueSplit.extrinsic.atEntry != null && valueSplit.extrinsic.change != null && <span className={`block ${th.textFaint}`} data-testid="extrinsic-was">was {moneyExact(valueSplit.extrinsic.atEntry)} at entry ({valueSplit.extrinsic.change >= 0 ? '+' : '−'}{moneyExact(Math.abs(valueSplit.extrinsic.change))})</span>}</>}</>,
     capital: <><b className="text-white">{capital.label}</b>{capital.value == null ? <span className={`block max-w-40 ${th.textFaint}`} title={capital.reason}>{capital.reason}</span> : <span className="block">{capital.suffix ? `${capital.value}${capital.suffix}` : money(capital.value)}</span>}</>,
     entry: <><b className={SEMANTIC_TONE_CLASS[entryTone]}>{p.entryPriceEffect}</b><span className={`block ${SEMANTIC_TONE_CLASS[entryTone]}`}>{p.entryEconomicsComplete === false ? 'Unavailable' : money(p.entryCredit ?? p.creditReceived)}</span></>,
-    value: <><span>{p.entryPriceEffect === 'Debit' ? 'Liquidation' : 'Buyback'} {money(p.closeValue)}</span><span className="block">Mid {money(p.currentValue)}</span></>,
+    // LONG-OPTION-RECOVERY-0001: bought options lead with what closing returns and how much of the debit that is.
+    // Any position the model returns null for (credit, mixed legs, unverified debit) keeps the original two lines.
+    value: recovery
+      ? <><b className="block text-white" data-testid="recovery-close-now" title="Most you can still lose on this position">Close now {money(recovery.closeNow)}</b><span className="block text-[10px] text-white/70" data-testid="recovery-of-paid">of {money(recovery.paid)} paid · <span className={SEMANTIC_TONE_CLASS[recovery.pctTone]}>{recovery.remainingPct.toFixed(0)}% {recovery.atOrAbovePaid ? 'of paid' : 'left'}</span></span><span className="mt-1 block h-1.5 w-24 overflow-hidden rounded bg-white/10" aria-hidden="true"><span className={`block h-full ${recovery.barTone === 'positive' ? 'bg-emerald-400' : 'bg-amber-300'}`} style={{ width: `${Math.max(2, Math.min(100, recovery.remainingPct))}%` }} /></span><span className="block text-[10px] text-white/55">Mid {money(p.currentValue)}</span></>
+      : <><span>{p.entryPriceEffect === 'Debit' ? 'Liquidation' : 'Buyback'} {money(p.closeValue)}</span><span className="block">Mid {money(p.currentValue)}</span></>,
     // PLTARGET-0001: signed % of target next to the dollar figure. >=100%
     // (target reached/exceeded) gets bold + SEMANTIC_TONE_CLASS.positive --
     // the literal moment the take-profit rule says exit -- otherwise follows
