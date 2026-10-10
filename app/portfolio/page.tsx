@@ -1,6 +1,7 @@
 // app/portfolio/page.tsx
 
 'use client';
+import { AppNav } from '@/components/nav/AppNav';
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
 import { RsiStrip } from '@/components/RsiStrip';
 import { validateChatImageSelection } from '@/lib/ai/chatAttachments';
@@ -11115,18 +11116,7 @@ export default function PortfolioPage() {
           <ThemeToggle theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
           </div>
         </div>
-        <div className="flex items-center gap-0 w-full border-t border-white/10 overflow-x-auto whitespace-nowrap">
-          <Link href="/"              className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HOME</Link>
-          <span                       className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>PORTFOLIO</span>
-          <Link href="/screener"      className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">SCREENER</Link>
-          <Link href="/engine"        className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">INCOME ENGINE</Link>
-          <Link href="/wheel"         className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">WHEEL</Link>
-          <Link href="/rinse-repeat"  className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">REPEAT STRATEGIES</Link>
-          <Link href="/trade-log"     className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">TRADE LOG</Link>
-          <Link href="/pmcc-history"  className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PMCC HISTORY</Link>
-          <Link href="/performance"   className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PERFORMANCE</Link>
-          <Link href="/help"          className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HELP</Link>
-        </div>
+        <AppNav active="portfolio" />
       </div>
 
       {/* Sub-tab bar */}

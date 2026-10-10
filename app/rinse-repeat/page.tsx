@@ -1,6 +1,7 @@
 // path: app/rinse-repeat/page.tsx
 
 'use client';
+import { AppNav } from '@/components/nav/AppNav';
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
 import { RsiStrip } from '@/components/RsiStrip';
 
@@ -1437,16 +1438,7 @@ export default function RinseRepeatPage() {
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-0 w-full border-t border-white/10">
-          <Link href="/"             className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HOME</Link>
-          <Link href="/portfolio"    className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PORTFOLIO</Link>
-          <Link href="/screener"     className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">SCREENER</Link>
-          <Link href="/engine"       className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">INCOME ENGINE</Link>
-          <span                      className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>REPEAT STRATEGIES</span>
-          <Link href="/trade-log"    className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">TRADE LOG</Link>
-          <Link href="/performance"  className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PERFORMANCE</Link>
-          <Link href="/help"         className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HELP</Link>
-        </div>
+        <AppNav active="rinse-repeat" />
       </div>
 
       {/* Sticky controls */}
