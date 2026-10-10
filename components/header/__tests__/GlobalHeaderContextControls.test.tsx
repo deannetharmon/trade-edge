@@ -14,6 +14,8 @@ describe('global header context slots', () => {
       'app/rinse-repeat/page.tsx',
       'app/trade-log/page.tsx',
       'app/performance/page.tsx',
+      'app/wheel/page.tsx',
+      'app/profile/page.tsx',
     ];
 
     for (const route of routes) {
