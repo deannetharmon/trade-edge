@@ -7,6 +7,11 @@
 //   Row 2  page actions   (optional, wraps -- never scrolls sideways)
 //   Row 3  tab bar        (wraps, Profile pinned right)
 //
+// MOBILE-LAYOUT-0001: below the md breakpoint the header is one compact bar
+// (logo, LIVE/account chips, MENU button showing the current tab). Theme,
+// page actions and the tab bar open as a dropdown panel over the page, so a
+// phone (portrait or landscape) keeps its screen for content.
+//
 // The mode and account chips portal into the slot in row 1 (their one render
 // site stays components/header/GlobalHeaderContextControls.tsx). The slot sits
 // in the fixed top row, so a page's own buttons can never push the chips
@@ -14,10 +19,11 @@
 // sticky bars under it (trade log, performance, ...) stay flush at any width.
 
 import Link from 'next/link';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
 import { AppNav } from '@/components/nav/AppNav';
 import { ACCENTS, THEMES, LS_ACCENT, LS_THEME, applyAccent, type Accent, type Theme } from '@/lib/theme';
-import type { TabId } from '@/lib/nav/tabs';
+import { TABS, type TabId } from '@/lib/nav/tabs';
 
 interface AppHeaderProps {
   active?: TabId;
@@ -30,9 +36,9 @@ interface AppHeaderProps {
   setAccent?: (a: Accent) => void;
 }
 
-function Logo() {
+function Logo({ size = 40 }: { size?: number }) {
   return (
-    <svg width="40" height="40" viewBox="-26 -26 52 52" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <svg width={size} height={size} viewBox="-26 -26 52 52" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <circle r="18" stroke="#00d4aa" strokeWidth="0.8" opacity="0.3" />
       <circle r="12" stroke="#00d4aa" strokeWidth="0.8" opacity="0.6" />
       <line x1="-23" y1="0" x2="-14" y2="0" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round" />
@@ -82,6 +88,11 @@ function ThemeControls({ theme, setTheme, accent, setAccent }: { theme: Theme; s
 export function AppHeader({ active, actions, theme, setTheme, accent, setAccent }: AppHeaderProps) {
   const rootRef = useRef<HTMLElement>(null);
   const th = THEMES[theme ?? 'dark'];
+  const pathname = usePathname();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const activeLabel = TABS.find(t => t.id === active)?.label ?? (pathname === '/profile' ? 'PROFILE' : 'MENU');
+
+  useEffect(() => { setMenuOpen(false); }, [pathname]);
 
   useEffect(() => {
     const el = rootRef.current;
@@ -95,29 +106,51 @@ export function AppHeader({ active, actions, theme, setTheme, accent, setAccent 
   }, []);
 
   return (
-    <header ref={rootRef} className={`${th.header} border-b ${th.border} px-6 pt-3 sticky top-0 z-50`}>
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-2">
+    <header ref={rootRef} className={`${th.header} border-b ${th.border} px-4 md:px-6 pt-2 md:pt-3 sticky top-0 z-50`}>
+      <div className="flex items-center justify-between gap-x-3 gap-y-2 pb-2 md:flex-wrap md:gap-x-4">
         <Link href="/" className="flex items-center gap-3 shrink-0" aria-label="TradeEdge home">
-          <Logo />
-          <span>
+          <span className="md:hidden"><Logo size={28} /></span>
+          <span className="hidden md:block"><Logo size={40} /></span>
+          <span className="hidden sm:block">
             <span className="block text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: 'var(--font-inter), system-ui, sans-serif' }}>
               TRADE<span style={{ color: '#00d4aa' }}>EDGE</span>
             </span>
-            <span className="block text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: 'var(--font-inter), system-ui, sans-serif', color: '#00d4aa', opacity: 0.75 }}>
+            <span className="hidden md:block text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: 'var(--font-inter), system-ui, sans-serif', color: '#00d4aa', opacity: 0.75 }}>
               OPTIONS TRADING PLATFORM
             </span>
           </span>
         </Link>
-        <div className="flex flex-wrap items-center justify-end gap-3 min-w-0">
+        <div className="flex items-center justify-end gap-2 md:gap-3 min-w-0 md:flex-wrap">
           {/* The mode + account chips mount here (single render site: GlobalHeaderContextControls). */}
           <div data-global-header-context className="shrink-0" />
           {theme && setTheme && accent && setAccent && (
-            <ThemeControls theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
+            <div className="hidden md:block">
+              <ThemeControls theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
+            </div>
           )}
+          <button
+            type="button"
+            onClick={() => setMenuOpen(v => !v)}
+            aria-expanded={menuOpen}
+            aria-controls="app-header-panel"
+            className="md:hidden shrink-0 min-h-11 px-3 text-[10px] font-bold tracking-wider text-white/80 border border-white/20 rounded-lg"
+          >
+            {menuOpen ? '✕ CLOSE' : `☰ ${activeLabel}`}
+          </button>
         </div>
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2 pb-2">{actions}</div>}
-      <AppNav active={active} />
+      <div
+        id="app-header-panel"
+        className={`${menuOpen ? 'block' : 'hidden'} md:block max-md:absolute max-md:inset-x-0 max-md:top-full max-md:z-50 max-md:max-h-[75vh] max-md:overflow-y-auto max-md:px-4 max-md:pb-3 max-md:shadow-2xl max-md:border-b ${th.header} ${th.border}`}
+      >
+        {theme && setTheme && accent && setAccent && (
+          <div className="md:hidden py-2">
+            <ThemeControls theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
+          </div>
+        )}
+        {actions && <div className="flex flex-wrap items-center gap-2 pb-2">{actions}</div>}
+        <AppNav active={active} />
+      </div>
     </header>
   );
 }
