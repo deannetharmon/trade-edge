@@ -610,4 +610,22 @@ describe('P/L summary strip', () => {
     expect(screen.getByText('1 of 1 option positions')).toBeInTheDocument();
     expect(within(strip).getByRole('button', { name: /Total/ })).toHaveTextContent('+$65');
   });
+
+  it('VALUE-SIGNED-0001: signs the Value cell and shows the net options value footer', async () => {
+    const user = userEvent.setup();
+    const credit = { ...position, equityEffectMid: -910, equityEffectClose: -900 } as Position;
+    const debit = { ...position, key: 'MSFT-1', symbol: 'MSFT', entryPriceEffect: 'Debit', currentValue: 500, closeValue: 480, equityEffectMid: 500, equityEffectClose: 480 } as unknown as Position;
+    const noQuote = { ...position, key: 'TSLA-1', symbol: 'TSLA', currentValue: 300, closeValue: null, equityEffectMid: -300, equityEffectClose: null } as unknown as Position;
+    const rows = [credit, debit, noQuote].map(item => ({ id: item.key, position: item, symbol: item.symbol, strategy: item.strategy, needsAttention: false }));
+    render(<PositionsWorkspace model={{ ...model, analysisRows: rows } as PositionsWorkspaceModel} th={THEMES.dark} />);
+    expect(screen.getByTestId('net-options-mid')).toHaveTextContent('\u2212$710');
+    expect(screen.getByTestId('net-options-close')).toHaveTextContent('\u2212$420');
+    expect(screen.getByTestId('net-options-value')).toHaveTextContent('1 position excluded');
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    const closes = screen.getAllByTestId('value-close').map(node => node.textContent);
+    expect(closes).toContain('Buyback \u2212$900');
+    expect(closes).toContain('Liquidation +$480');
+    expect(closes).toContain('Buyback Unavailable');
+    expect(screen.getAllByTestId('value-mid').map(node => node.textContent)).toContain('Mid \u2212$910');
+  });
 });
