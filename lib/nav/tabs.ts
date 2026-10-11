@@ -37,7 +37,7 @@ export const TABS: TabDef[] = [
   { id: 'screener',        label: 'SCREENER',          href: '/screener',        desc: 'Scan tickers for BPS, BCS, IC setups',             hideable: false },
   { id: 'engine',          label: 'INCOME ENGINE',     href: '/engine',          desc: 'SPX spread suggestions and capital allocation',    hideable: true  },
   { id: 'wheel',           label: 'WHEEL',             href: '/wheel',           desc: 'Wheel candidates and defaults',                    hideable: true  },
-  { id: 'rinse-repeat',    label: 'REPEAT STRATEGIES', href: '/rinse-repeat',    desc: 'Re-screen past winners and track cycles',          hideable: true  },
+  { id: 'rinse-repeat',    label: 'REPEAT', href: '/rinse-repeat',    desc: 'Re-screen past winners and track cycles',          hideable: true  },
   { id: 'trade-log',       label: 'TRADE LOG',         href: '/trade-log',       desc: 'Closed trade history and P&L analysis',            hideable: false },
   { id: 'pmcc-history',    label: 'PMCC HISTORY',      href: '/pmcc-history',    desc: 'Read-only PMCC audit history',                     hideable: true  },
   { id: 'performance',     label: 'PERFORMANCE',       href: '/performance',     desc: 'Monthly P&L charts and win rate stats',            hideable: false },
