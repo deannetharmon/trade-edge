@@ -6,6 +6,14 @@
   box-sizing: border-box;
 }
 
+/* MOBILE-LAYOUT-0001: never let one wide child make the whole page wider than
+   the phone (iOS Safari then zooms the page out). Wide tables scroll inside
+   their own containers. */
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 /* The home dashboard was authored with 8–10px labels. Raise only that
    page's minimum UI scale instead of changing every screen globally. */
 .home-dashboard .text-\[8px\] {

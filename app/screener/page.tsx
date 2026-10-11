@@ -11290,9 +11290,9 @@ export default function Home() {
         </>}
       />
 
-      <div className="flex h-[calc(100vh-var(--app-header-h,57px))]">
+      <div className="flex flex-col md:flex-row md:h-[calc(100vh-var(--app-header-h,57px))]">
         {/* Sidebar */}
-        <div className={`w-80 border-r ${th.border} ${th.sidebar} p-4 overflow-auto flex flex-col gap-3 shrink-0`}>
+        <div className={`w-full md:w-80 border-b md:border-b-0 md:border-r ${th.border} ${th.sidebar} p-4 md:overflow-auto flex flex-col gap-3 shrink-0`}>
           {/* TE-0007: Opportunity Universe — the ONE canonical ticker list.
               Replaces the previously-separate general/PMCC/CSP ticker
               cards. Answers "which companies am I willing to evaluate";
@@ -11599,7 +11599,7 @@ export default function Home() {
         </div>
 
         {/* Main content */}
-        <div className="flex-1 overflow-auto p-5">
+        <div className="flex-1 min-w-0 md:overflow-auto p-4 md:p-5">
 
           {pmccRestoreNotice && (
             <div role="status" className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-600/60 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">

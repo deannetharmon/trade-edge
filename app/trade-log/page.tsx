@@ -808,7 +808,7 @@ export default function TradeLogPage() {
               placeholder="Filter symbol..."
               className={`text-[10px] px-2 py-1.5 border ${th.inputBorder} ${th.input} ${th.text} rounded w-28`} />
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             {cachedAt && <span className={`text-[9px] ${th.textFaint}`}>Synced {fmtAge(Date.now() - cachedAt)}</span>}
             {excluded > 0 && (
               <button onClick={() => setShowExcluded(v => !v)}
