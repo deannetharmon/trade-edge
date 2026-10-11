@@ -404,7 +404,7 @@ export default function HomePage() {
             <NavCard href="/portfolio"    label="PORTFOLIO"         icon="📊" desc="Live positions, Greeks, action buttons"          th={th} />
             <NavCard href="/screener"     label="SCREENER"          icon="🔍" desc="Scan tickers for BPS, BCS, IC setups"            th={th} />
             {showTab('engine') && <NavCard href="/engine"       label="INCOME ENGINE"     icon="⚡" desc="SPX spread suggestions and capital allocation"   th={th} /> }
-            {showTab('rinse-repeat') && <NavCard href="/rinse-repeat" label="REPEAT STRATEGIES" icon="🔄" desc="Re-screen past winners and track cycles"         th={th} /> }
+            {showTab('rinse-repeat') && <NavCard href="/rinse-repeat" label="REPEAT" icon="🔄" desc="Re-screen past winners and track cycles"         th={th} /> }
             <NavCard href="/trade-log"    label="TRADE LOG"         icon="📋" desc="Closed trade history and P&L analysis"           th={th} />
             <NavCard href="/performance"  label="PERFORMANCE"       icon="📈" desc="Monthly P&L charts and win rate stats"           th={th} />
             {showTab('paper-trading') && <NavCard href="/paper-trading" label="PAPER TRADING"    icon="🧪" desc="Simulated sandbox -- manual paper positions only" th={th} /> }
