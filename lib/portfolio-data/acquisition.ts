@@ -2092,6 +2092,8 @@ export async function loadPositions(
       creditReceived: Math.abs(creditReceived),
       currentValue: hasCurrentPrices ? Math.abs(currentValue) : null,
       closeValue: hasCloseValue ? Math.abs(closeValue) : null,
+      equityEffectMid: hasCurrentPrices ? -currentValue : null,
+      equityEffectClose: hasCloseValue ? -closeValue : null,
       closeNowPnl: supportedCreditEntry && entryEconomicsComplete && resolvedEntryCredit != null && hasCloseValue
         ? (isNetDebit ? Math.abs(closeValue) - resolvedEntryCredit : resolvedEntryCredit - Math.abs(closeValue))
         : null,
