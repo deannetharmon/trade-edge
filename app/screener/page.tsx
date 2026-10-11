@@ -9102,6 +9102,8 @@ export default function Home() {
   // REPLACES (never merges into) the previous one, a CSP scan's results can
   // no longer end up displayed alongside a prior BPS/BCS/IC scan's results.
   const [activeSession, setActiveSession] = useState<ScreenerScanSession | null>(null);
+  // MOBILE-LAYOUT-0001: phones show Setup or Results, one at a time (side by side from md up).
+  const [mobilePane, setMobilePane] = useState<'setup' | 'results'>('setup');
   const activeSessionIdRef = useRef<string | null>(null);
 
   // Starts a new session, immediately superseding whatever session was
@@ -9133,6 +9135,7 @@ export default function Home() {
     const session = createScanSession(args);
     activeSessionIdRef.current = session.sessionId;
     setActiveSession(session);
+    setMobilePane('results');
     return session;
   };
 
@@ -11290,9 +11293,17 @@ export default function Home() {
         </>}
       />
 
+      <div role="tablist" aria-label="Screener view" className={`md:hidden sticky top-[var(--app-header-h,57px)] z-30 flex border-b ${th.border} ${th.sidebar}`}>
+        {(['setup', 'results'] as const).map(pane => (
+          <button key={pane} role="tab" aria-selected={mobilePane === pane} onClick={() => setMobilePane(pane)}
+            className={`flex-1 min-h-11 text-xs font-bold tracking-wider border-b-2 ${mobilePane === pane ? 'border-teal-400 text-white' : `border-transparent ${th.textFaint}`}`}>
+            {pane === 'setup' ? 'SETUP' : 'RESULTS'}
+          </button>
+        ))}
+      </div>
       <div className="flex flex-col md:flex-row md:h-[calc(100vh-var(--app-header-h,57px))]">
         {/* Sidebar */}
-        <div className={`w-full md:w-80 border-b md:border-b-0 md:border-r ${th.border} ${th.sidebar} p-4 md:overflow-auto flex flex-col gap-3 shrink-0`}>
+        <div className={`w-full md:w-80 border-b md:border-b-0 md:border-r ${th.border} ${th.sidebar} p-4 md:overflow-auto ${mobilePane === 'results' ? 'hidden md:flex' : 'flex'} flex-col gap-3 shrink-0`}>
           {/* TE-0007: Opportunity Universe — the ONE canonical ticker list.
               Replaces the previously-separate general/PMCC/CSP ticker
               cards. Answers "which companies am I willing to evaluate";
@@ -11599,7 +11610,7 @@ export default function Home() {
         </div>
 
         {/* Main content */}
-        <div className="flex-1 min-w-0 md:overflow-auto p-4 md:p-5">
+        <div className={`flex-1 min-w-0 md:overflow-auto p-4 md:p-5 ${mobilePane === 'setup' ? 'hidden md:block' : ''}`}>
 
           {pmccRestoreNotice && (
             <div role="status" className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-600/60 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
