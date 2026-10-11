@@ -22,6 +22,7 @@ import { DEFAULT_PREFERENCES, loadPreferences, savePreferences } from './model/p
 import { buildCapitalViewModel, buildMoneynessMovementViewModel, buildMoneynessViewModel, comparisonTone, SEMANTIC_TONE_CLASS, stopPresentation, stopPresentationForPosition, type SemanticTone } from './model/presentation';
 import { buildBreakevenViewModel, priceBufferFor } from './model/breakeven';
 import { buildLongOptionRecovery } from './model/longOptionRecovery';
+import { equityEffectSortValue, signedMoney, sumEquityEffect } from './model/equityEffect';
 import type { AnalysisColumnId, AnalysisViewId, ExistingIncomeOpportunity, FinancialAggregate, PositionAnalysisFilters, PositionsWorkspaceModel, SymbolGroupViewModel } from './model/types';
 import { DebitStopObservation, StopEvidencePanel } from '@/components/portfolio-data/StopEvidencePanel';
 import { canonicalRecommendationToAction } from '@/lib/portfolio/canonicalRecommendationPresentation';
@@ -453,7 +454,7 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
       case 'underlying': return position.buffer;
       case 'capital': return buildCapitalViewModel(position).value;
       case 'entry': return position.entryCredit ?? position.creditReceived ?? null;
-      case 'value': return position.closeValue ?? position.currentValue ?? null;
+      case 'value': return equityEffectSortValue(position);
       case 'pnl': return position.closeNowPnl ?? position.pnl ?? null;
       case 'netEdge': return netEdgeLive(position);
       case 'pop': return position.pop;
@@ -709,7 +710,7 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
     // Any position the model returns null for (credit, mixed legs, unverified debit) keeps the original two lines.
     value: recovery
       ? <><b className="block text-white" data-testid="recovery-close-now" title="Most you can still lose on this position">Close now {money(recovery.closeNow)}</b><span className="block text-[10px] text-white/70" data-testid="recovery-of-paid">of {money(recovery.paid)} paid · <span className={SEMANTIC_TONE_CLASS[recovery.pctTone]}>{recovery.remainingPct.toFixed(0)}% {recovery.atOrAbovePaid ? 'of paid' : 'left'}</span></span><span className="mt-1 block h-1.5 w-24 overflow-hidden rounded bg-white/10" aria-hidden="true"><span className={`block h-full ${recovery.barTone === 'positive' ? 'bg-emerald-400' : 'bg-amber-300'}`} style={{ width: `${Math.max(2, Math.min(100, recovery.remainingPct))}%` }} /></span><span className="block text-[10px] text-white/55">Mid {money(p.currentValue)}</span></>
-      : <><span>{p.entryPriceEffect === 'Debit' ? 'Liquidation' : 'Buyback'} {money(p.closeValue)}</span><span className="block">Mid {money(p.currentValue)}</span></>,
+      : <><span data-testid="value-close">{p.entryPriceEffect === 'Debit' ? 'Liquidation' : 'Buyback'} {p.closeValue == null ? money(null) : signedMoney(p.equityEffectClose)}</span><span className="block" data-testid="value-mid">Mid {p.currentValue == null ? money(null) : signedMoney(p.equityEffectMid)}</span></>,
     // PLTARGET-0001: signed % of target next to the dollar figure. >=100%
     // (target reached/exceeded) gets bold + SEMANTIC_TONE_CLASS.positive --
     // the literal moment the take-profit rule says exit -- otherwise follows
@@ -815,6 +816,19 @@ function ColumnsDialog({ selected, setSelected, preset, onClose, onApply }: { se
   return <DialogShell title="Customize columns" onClose={onClose}><div className="grid gap-2 sm:grid-cols-2">{ANALYSIS_COLUMNS.map(column => <label key={column.id} className="flex min-h-11 items-center gap-2 rounded border border-white/10 px-3 text-xs"><input type="checkbox" checked={selected.includes(column.id)} disabled={column.id === 'identity'} onChange={() => toggle(column.id)} /><span><b className="block">{column.label}</b><span className="text-white/50">{column.group}</span></span></label>)}</div><div className="mt-5 flex justify-between"><button onClick={() => setSelected(columnsForView(preset === 'custom' ? 'management' : preset))} className="min-h-11 px-3 text-xs">Reset to preset</button><div className="flex gap-2"><button onClick={onClose} className="min-h-11 rounded border border-white/20 px-4 text-xs">Cancel</button><button disabled={selected.length < 2} onClick={onApply} className="min-h-11 rounded bg-teal-500 px-4 text-xs font-bold text-slate-950 disabled:opacity-40">Apply</button></div></div></DialogShell>;
 }
 
+// VALUE-SIGNED-0001: net effect of all shown option positions on net equity.
+// Mid reconciles to Tastytrade net liq; Close is the decision figure. Neutral colour on purpose.
+function NetOptionsValueFooter({ positions, th }: { positions: Position[]; th: typeof THEMES[Theme] }) {
+  const mid = sumEquityEffect(positions, 'mid');
+  const close = sumEquityEffect(positions, 'close');
+  if (positions.length === 0) return null;
+  const missing = Math.max(mid.excluded, close.excluded);
+  return <p className={`mt-4 border-t pt-3 text-xs ${th.border} ${th.textFaint}`} data-testid="net-options-value">
+    <b>Net options value</b> · Mid <span data-testid="net-options-mid">{signedMoney(mid.total)}</span> · Close <span data-testid="net-options-close">{signedMoney(close.total)}</span>
+    {missing > 0 && <span> · {missing} position{missing === 1 ? '' : 's'} excluded (price unavailable)</span>}
+  </p>;
+}
+
 export function PositionsWorkspace({ model: fullModel, th, getManagementActions, onExecute, renderStopControl, onAnalyze, renderAnalysisConversation, onFindPmccShortCall, onIntentChange, onRefresh, sellDeps, pendingOrders = [], cashBalance = null }: { model: PositionsWorkspaceModel; th: typeof THEMES[Theme]; sellDeps?: SellStockDialogDeps; pendingOrders?: PendingOrder[]; cashBalance?: number | null } & ManagementActionProps) {
   // PORTFOLIO-SUMMARY-0001: one strip above both tabs; always the whole portfolio. A tile (or the largest-exposure line)
   // narrows both lists below; the strip's own numbers never change with the filter.
@@ -841,5 +855,5 @@ export function PositionsWorkspace({ model: fullModel, th, getManagementActions,
   const [view, setView] = useState<'portfolio' | 'analysis'>('portfolio');
   useEffect(() => { const loaded = loadPreferences(); setView(loaded.workspaceView); }, []);
   const switchView = (next: 'portfolio' | 'analysis') => { setView(next); const loaded = loadPreferences(); savePreferences({ ...loaded, workspaceView: next }); };
-  return <section className="p-4 sm:p-6" aria-label="Positions workspace"><PortfolioSummaryStrip summary={summary} selected={summaryGroup} onSelect={group => { setSummarySymbols(null); setSummaryGroup(group); }} onSelectSymbol={symbol => { setSummaryGroup(null); setSummarySymbols(current => current?.length === 1 && current[0] === symbol ? null : [symbol]); }} onSelectSymbols={symbols => { setSummaryGroup(null); setSummarySymbols(current => current != null && current.length === symbols.length && symbols.every(sym => current.includes(sym)) ? null : symbols); }} />{summarySymbols && <p className={`mb-2 text-xs ${th.textFaint}`}>Showing {summarySymbols.join(', ')} only · <button type="button" onClick={() => setSummarySymbols(null)} className="min-h-11 underline">Show all</button></p>}<div role="tablist" aria-label="Positions workspace views" className={`mb-4 flex gap-1 border-b ${th.border}`}>{(['portfolio', 'analysis'] as const).map(item => <button key={item} role="tab" aria-selected={view === item} onClick={() => switchView(item)} className={`min-h-11 border-b-2 px-4 text-xs font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-teal-400 ${view === item ? 'border-teal-400 text-white' : `border-transparent ${th.textFaint}`}`}>{item === 'portfolio' ? 'Portfolio' : 'Position Analysis'}</button>)}</div>{view === 'portfolio' ? <PortfolioView groups={model.symbolGroups} th={th} renderStopControl={renderStopControl} onIntentChange={onIntentChange} /> : <AnalysisView model={model} th={th} getManagementActions={getManagementActions} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} renderAnalysisConversation={renderAnalysisConversation} onFindPmccShortCall={onFindPmccShortCall} onIntentChange={onIntentChange} onRefresh={onRefresh} sellDeps={sellDeps} />}</section>;
+  return <section className="p-4 sm:p-6" aria-label="Positions workspace"><PortfolioSummaryStrip summary={summary} selected={summaryGroup} onSelect={group => { setSummarySymbols(null); setSummaryGroup(group); }} onSelectSymbol={symbol => { setSummaryGroup(null); setSummarySymbols(current => current?.length === 1 && current[0] === symbol ? null : [symbol]); }} onSelectSymbols={symbols => { setSummaryGroup(null); setSummarySymbols(current => current != null && current.length === symbols.length && symbols.every(sym => current.includes(sym)) ? null : symbols); }} />{summarySymbols && <p className={`mb-2 text-xs ${th.textFaint}`}>Showing {summarySymbols.join(', ')} only · <button type="button" onClick={() => setSummarySymbols(null)} className="min-h-11 underline">Show all</button></p>}<div role="tablist" aria-label="Positions workspace views" className={`mb-4 flex gap-1 border-b ${th.border}`}>{(['portfolio', 'analysis'] as const).map(item => <button key={item} role="tab" aria-selected={view === item} onClick={() => switchView(item)} className={`min-h-11 border-b-2 px-4 text-xs font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-teal-400 ${view === item ? 'border-teal-400 text-white' : `border-transparent ${th.textFaint}`}`}>{item === 'portfolio' ? 'Portfolio' : 'Position Analysis'}</button>)}</div>{view === 'portfolio' ? <PortfolioView groups={model.symbolGroups} th={th} renderStopControl={renderStopControl} onIntentChange={onIntentChange} /> : <AnalysisView model={model} th={th} getManagementActions={getManagementActions} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} renderAnalysisConversation={renderAnalysisConversation} onFindPmccShortCall={onFindPmccShortCall} onIntentChange={onIntentChange} onRefresh={onRefresh} sellDeps={sellDeps} />}<NetOptionsValueFooter positions={model.analysisRows.map(row => row.position)} th={th} /></section>;
 }
