@@ -4,10 +4,12 @@
 
 export type AiProfile = 'analysis' | 'chat' | 'summary' | 'fast' | 'search';
 
-const DEFAULT_ANALYSIS_MODEL = 'gpt-4o-mini';
-const DEFAULT_CHAT_MODEL = 'gpt-4o-mini';
-const DEFAULT_SUMMARY_MODEL = 'gpt-4o-mini';
-const DEFAULT_FAST_MODEL = 'gpt-4o-mini';
+// AI-POLICY-0001 D3 (Dean, 2026-10-06): decision tier gpt-5.6-terra, economy tier gpt-5.6-luna; gpt-4o-mini retired.
+// Search stays on gpt-4o until web search is verified on the 5.6 models.
+const DEFAULT_ANALYSIS_MODEL = 'gpt-5.6-terra';
+const DEFAULT_CHAT_MODEL = 'gpt-5.6-terra';
+const DEFAULT_SUMMARY_MODEL = 'gpt-5.6-luna';
+const DEFAULT_FAST_MODEL = 'gpt-5.6-luna';
 const DEFAULT_SEARCH_MODEL = 'gpt-4o';
 
 export const AI_MODEL_BY_PROFILE: Record<AiProfile, string> = {

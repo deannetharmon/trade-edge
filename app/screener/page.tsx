@@ -4997,7 +4997,7 @@ Be direct. Reference the specific strikes and strategy. No disclaimers.`;
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'gpt-4o',
+      profile: 'analysis', // AI-POLICY D3: model chosen by profile (gpt-5.6-terra)
       max_tokens: 500,
       system: 'You are a concise, direct options trading analyst. Reference specific trade details. No hedging. No disclaimers.',
       messages: [{ role: 'user', content: prompt }],
@@ -5013,7 +5013,7 @@ async function sendChatMessage(messages: ChatMessage[], symbol: string, tradeCon
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'gpt-4o',
+      profile: 'analysis', // AI-POLICY D3: model chosen by profile (gpt-5.6-terra)
       max_tokens: 500,
       system: `You are a professional options trading analyst. The trader is analyzing ${symbol}. Trade context: ${tradeContext}. Be direct, specific, and reference the actual trade setup in your answers.`,
       messages: messages.map(m => ({ role: m.role, content: m.content })),

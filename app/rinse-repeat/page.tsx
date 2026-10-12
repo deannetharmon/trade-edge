@@ -582,7 +582,7 @@ Be direct and specific. No disclaimers. If the news is thin, say so.`;
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'gpt-4o',
+      profile: 'analysis', // AI-POLICY D3: model chosen by profile (gpt-5.6-terra)
       max_tokens: 400,
       system: 'You are a concise, direct options trading analyst. No hedging. No disclaimers. Plain prose only.',
       messages: [{ role: 'user', content: prompt }],

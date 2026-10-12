@@ -989,7 +989,7 @@ Be specific, direct, no disclaimers.`;
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'gpt-4o',
+      profile: 'analysis', // AI-POLICY D3: model chosen by profile (gpt-5.6-terra)
       max_tokens: 400,
       system: 'You are a concise options portfolio manager. Be direct, specific, no hedging.',
       messages: [{ role: 'user', content: prompt }],

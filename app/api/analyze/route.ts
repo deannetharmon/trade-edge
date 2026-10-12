@@ -9,7 +9,7 @@ import { requireSessionUserId } from '@/lib/ai/requireSession';
 
 const OPENAI_API = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_RESPONSES_API = 'https://api.openai.com/v1/responses';
-const SAFE_FALLBACK_MODEL = process.env.AI_FAST_MODEL ?? process.env.AI_DEFAULT_MODEL ?? 'gpt-4o-mini';
+const SAFE_FALLBACK_MODEL = process.env.AI_FAST_MODEL ?? process.env.AI_DEFAULT_MODEL ?? 'gpt-5.6-luna';
 
 function requestedProfile(body: any, fallback: AiProfile): AiProfile {
   return isAiProfile(body?.profile) ? body.profile : fallback;
@@ -88,7 +88,9 @@ async function callChatCompletions(apiKey: string, model: string, messages: any[
     body: JSON.stringify({
       model,
       // OpenAI's current parameter; gpt-5.x rejects max_tokens (a 400 that silently fell back to the old model).
-      max_completion_tokens: maxTokens,
+      // Reasoning models spend part of the budget thinking; a small caller budget (400-500) can return an empty answer.
+      // Billing is for tokens used, so a floor costs nothing extra when the answer is short.
+      max_completion_tokens: /^(gpt-5|o\d)/.test(model) ? Math.max(maxTokens, 4000) : maxTokens,
       messages,
       // PERF-AI-0001: optional JSON mode ({ type: 'json_object' }) for structured answers.
       ...(responseFormat ? { response_format: responseFormat } : {}),

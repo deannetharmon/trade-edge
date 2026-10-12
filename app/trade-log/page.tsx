@@ -183,7 +183,7 @@ async function callAIWithHistory(messages: ChatMessage[], system: string): Promi
   const res = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1800, system, messages }),
+    body: JSON.stringify({ profile: 'chat', max_tokens: 1800, system, messages }), // AI-POLICY D3: gpt-5.6-terra via profile
   });
   if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error ?? `API error: ${res.status}`); }
   const data = await res.json();
