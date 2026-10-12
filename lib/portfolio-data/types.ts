@@ -116,6 +116,11 @@ export interface Position {
   creditReceived: number;
   currentValue: number | null;
   closeValue: number | null;    // marketable "if I closed now" buyback (ask for short leg, bid for long leg)
+  // VALUE-SIGNED-0001: signed effect on net equity. Credit/short structures are
+  // negative (cost to close), debit/long structures positive (proceeds). Derived
+  // from the actual legs, not the Credit/Debit label. Null when not computable.
+  equityEffectMid?: number | null;
+  equityEffectClose?: number | null;
   closeNowPnl: number | null;   // credit - close cost, or liquidation proceeds - entry debit
   pnl: number | null;
   pnlPct: number | null;

@@ -71,11 +71,11 @@ export function PortfolioSummaryStrip({ summary, selected, onSelect, onSelectSym
         <button type="button" aria-pressed={selected == null} onClick={() => onSelect(null)} className="block w-full text-left focus:outline-none">
           <TileBody tile={summary.total} weekSince={summary.weekSince} />
         </button>
-        <span className="mt-2 block border-t border-white/10 pt-2 text-[11px]" title="Cash balance minus full short-put collateral, spread max loss and cash held by working opening orders. Margin buying power is not counted.">
+        <span className="mt-2 block border-t border-white/10 pt-2 text-[11px]" title="Cash balance minus full short-put collateral, spread max loss and cash held by working opening orders. Margin buying power is not counted. A negative figure is an estimate that your cash-secured collateral exceeds cash, not a margin loan reported by the broker.">
           <span className="text-white/50">Cash to deploy (no margin) </span>
           {cashToDeploy.value == null
             ? <span className="text-white/50">Unavailable</span>
-            : <span className={`font-bold ${cashToDeploy.usingMargin ? 'text-amber-400' : 'text-white'}`}>{cashToDeploy.usingMargin ? `-${money(cashToDeploy.value)} · using margin` : money(cashToDeploy.value)}</span>}
+            : <span className={`font-bold ${cashToDeploy.usingMargin ? 'text-amber-400' : 'text-white'}`}>{cashToDeploy.usingMargin ? `-${money(cashToDeploy.value)} · short-put collateral exceeds cash` : money(cashToDeploy.value)}</span>}
           {cashToDeploy.excluded > 0 && <span className="text-white/50">{` · ${cashToDeploy.excluded} not cash-securable, excluded`}</span>}
         </span>
         {largest && (

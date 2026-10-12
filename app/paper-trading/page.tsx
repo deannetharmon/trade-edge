@@ -8,6 +8,7 @@
 'use client';
 
 import Link from 'next/link';
+import { AppHeader } from '@/components/nav/AppHeader';
 import { useCallback, useEffect, useState } from 'react';
 import PaperAccountSummary from '@/components/paper-trading/PaperAccountSummary';
 import PaperTicketForm from '@/components/paper-trading/PaperTicketForm';
@@ -45,6 +46,8 @@ export default function PaperTradingPage() {
   }, [refresh]);
 
   return (
+    <>
+    <AppHeader active="paper-trading" />
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-6xl px-6 py-8">
         {/* Header-placement corrective pass: below the md breakpoint this
@@ -91,5 +94,6 @@ export default function PaperTradingPage() {
         )}
       </div>
     </main>
+    </>
   );
 }

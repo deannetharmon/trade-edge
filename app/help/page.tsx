@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { AppHeader } from '@/components/nav/AppHeader';
 
 type Theme = 'dark' | 'medium' | 'light';
 const LS_THEME = 'hunter-theme';
@@ -69,14 +70,7 @@ export default function HelpPage() {
 
   return (
     <div className={`min-h-screen ${th.bg} font-sans transition-colors duration-200`}>
-      {/* Header */}
-      <div className={`${th.header} border-b ${th.border} px-6 py-4 flex items-center justify-between`}>
-        <div>
-          <a href="/" className={`text-[10px] ${th.textFaint} hover:text-blue-400 transition-colors tracking-wider`}>← Back to TRADEEDGE</a>
-          <h1 className="text-base font-bold tracking-widest text-white mt-1">TRADEEDGE</h1>
-          <p className="text-[10px] text-white/50 tracking-wider">Help & Reference Guide</p>
-        </div>
-      </div>
+      <AppHeader active="help" />
 
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
 

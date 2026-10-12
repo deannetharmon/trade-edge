@@ -1,6 +1,7 @@
 // app/wheel-simulator/page.tsx
 "use client";
 import { useState, useEffect } from "react";
+import { AppHeader } from '@/components/nav/AppHeader';
 import { getAccessToken, getQuote, getChain } from "@/lib/scans/tastytrade-client";
 import { daysUntil } from "@/lib/scans/scan-utils";
 
@@ -645,6 +646,8 @@ export default function WheelSimulator() {
   const totalWeeklyRealistic = tickers.filter((t) => t.included).reduce((sum, t) => sum + weeklyIncomeRealistic(t), 0);
 
   return (
+    <>
+    <AppHeader active="wheel-simulator" />
     <div style={{ fontFamily: "var(--font-inter), system-ui, sans-serif", padding: "20px 20px 90px 20px", background: "#0f1115", color: "#e6e8eb", minHeight: "100vh" }}>
       <h2 style={{ marginBottom: 4 }}>Wheel capital growth simulator</h2>
       <p style={{ color: "#9aa0a6", marginTop: 0, fontSize: 13 }}>
@@ -963,6 +966,7 @@ export default function WheelSimulator() {
 
       {chatOpen && <AiAssistantPanel getContext={buildAiContext} onClose={() => setChatOpen(false)} />}
     </div>
+    </>
   );
 }
 

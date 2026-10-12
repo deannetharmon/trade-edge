@@ -1,6 +1,9 @@
 // path: app/page.tsx
 
 'use client';
+import { AppHeader } from '@/components/nav/AppHeader';
+import { useNavConfig } from '@/components/nav/NavConfigProvider';
+import type { TabId } from '@/lib/nav/tabs';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { injectAccentStyle } from '@/lib/theme';
@@ -352,6 +355,9 @@ function NavCard({ href, label, icon, desc, th }: { href: string; label: string;
 }
 
 export default function HomePage() {
+  // NAV-HIDE-0001: cards follow the user's hidden-tab list.
+  const { hiddenTabs } = useNavConfig();
+  const showTab = (id: TabId) => hiddenTabs.indexOf(id) === -1;
   const [theme, setTheme] = useState<Theme>('dark');
   const [accent, setAccent] = useState<Accent>('electric');
   const [mc, setMc] = useState<MarketConditions | null>(null);
@@ -384,59 +390,11 @@ export default function HomePage() {
 
   return (
     <div className={`home-dashboard min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
-      <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-4 flex flex-col sticky top-0 z-50`}>
-        <div className="flex items-center justify-between w-full pb-3">
-          <div className="flex items-center gap-3">
-            <svg width="36" height="36" viewBox="-26 -26 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle r="18" stroke="#00d4aa" strokeWidth="0.8" opacity="0.3"/>
-              <circle r="12" stroke="#00d4aa" strokeWidth="0.8" opacity="0.6"/>
-              <line x1="-23" y1="0" x2="-14" y2="0" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="14" y1="0" x2="23" y2="0" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="0" y1="-23" x2="0" y2="-14" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="0" y1="14" x2="0" y2="23" stroke="#00d4aa" strokeWidth="1.1" strokeLinecap="round"/>
-              <line x1="-6" y1="5" x2="-6" y2="-6" stroke="#ff5566" strokeWidth="1.8" strokeLinecap="round" opacity="0.85"/>
-              <line x1="-1" y1="3" x2="-1" y2="-9" stroke="#00d4aa" strokeWidth="1.8" strokeLinecap="round"/>
-              <line x1="4" y1="1" x2="4" y2="-12" stroke="#00d4aa" strokeWidth="1.8" strokeLinecap="round"/>
-              <circle r="2" fill="#00d4aa"/>
-            </svg>
-            <div>
-              <h1 className="text-lg font-bold tracking-widest text-white leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>TRADE<span style={{ color: '#00d4aa' }}>EDGE</span></h1>
-              <p className="text-[9px] font-bold tracking-widest leading-tight" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif", color: '#00d4aa', opacity: 0.75 }}>OPTIONS TRADING PLATFORM</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
+      <AppHeader active="home" theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent}
+        actions={<>
             {lastUpdated && <span className={`text-[9px] ${th.textFaint}`}>Updated {lastUpdated}</span>}
-            <div data-global-header-context className="shrink-0" />
-            <div className="flex items-center gap-1 mr-1">
-              {(Object.entries(ACCENTS) as [Accent, typeof ACCENTS[Accent]][]).map(([key, val]) => (
-                <button key={key} onClick={() => { setAccent(key); applyAccent(key); try { localStorage.setItem(LS_ACCENT, key); } catch {} }}
-                  title={val.label}
-                  className={`w-3.5 h-3.5 rounded-full transition-all ${accent === key ? 'ring-2 ring-white/60 ring-offset-1 ring-offset-black scale-125' : 'opacity-60 hover:opacity-100'}`}
-                  style={{ backgroundColor: val.hex }} />
-              ))}
-            </div>
-            <div className="w-px h-4 bg-white/20" />
-            {(['dark','medium','light'] as Theme[]).map(t => (
-              <button key={t} onClick={() => { setTheme(t); try { localStorage.setItem(LS_THEME, t); } catch {} }}
-                className={`text-[9px] px-2 py-1 border rounded transition-colors ${theme === t ? 'border-[var(--accent)] text-[var(--accent)] bg-[rgba(var(--accent-r),var(--accent-g),var(--accent-b),0.1)]' : `${th.border} ${th.textFaint}`}`}>
-                {t}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-0 w-full border-t border-white/10">
-          <span className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>HOME</span>
-          <Link href="/portfolio"    className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>PORTFOLIO</Link>
-          <Link href="/screener"     className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>SCREENER</Link>
-          <Link href="/engine"       className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>INCOME ENGINE</Link>
-          <Link href="/rinse-repeat" className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>REPEAT STRATEGIES</Link>
-          <Link href="/trade-log"    className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>TRADE LOG</Link>
-          <Link href="/performance"  className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>PERFORMANCE</Link>
-          <Link href="/paper-trading" className={`text-[10px] font-bold px-3 py-2 text-amber-400/80 hover:text-amber-300 transition-colors tracking-wider`}>PAPER TRADING</Link>
-          <Link href="/wheel-simulator" className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>WHEEL SIMULATOR</Link>
-          <Link href="/help"         className={`text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider`}>HELP</Link>
-        </div>
-      </div>
+        </>}
+      />
 
       <main className="px-6 py-6 max-w-5xl mx-auto space-y-6">
         <MarketConditionsPanel mc={mc} th={th} loading={mcLoading} />
@@ -445,12 +403,12 @@ export default function HomePage() {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <NavCard href="/portfolio"    label="PORTFOLIO"         icon="📊" desc="Live positions, Greeks, action buttons"          th={th} />
             <NavCard href="/screener"     label="SCREENER"          icon="🔍" desc="Scan tickers for BPS, BCS, IC setups"            th={th} />
-            <NavCard href="/engine"       label="INCOME ENGINE"     icon="⚡" desc="SPX spread suggestions and capital allocation"   th={th} />
-            <NavCard href="/rinse-repeat" label="REPEAT STRATEGIES" icon="🔄" desc="Re-screen past winners and track cycles"         th={th} />
+            {showTab('engine') && <NavCard href="/engine"       label="INCOME ENGINE"     icon="⚡" desc="SPX spread suggestions and capital allocation"   th={th} /> }
+            {showTab('rinse-repeat') && <NavCard href="/rinse-repeat" label="REPEAT" icon="🔄" desc="Re-screen past winners and track cycles"         th={th} /> }
             <NavCard href="/trade-log"    label="TRADE LOG"         icon="📋" desc="Closed trade history and P&L analysis"           th={th} />
             <NavCard href="/performance"  label="PERFORMANCE"       icon="📈" desc="Monthly P&L charts and win rate stats"           th={th} />
-            <NavCard href="/paper-trading" label="PAPER TRADING"    icon="🧪" desc="Simulated sandbox -- manual paper positions only" th={th} />
-            <NavCard href="/wheel-simulator" label="WHEEL SIMULATOR" icon="🎯" desc="Project capital growth for the wheel strategy"    th={th} />
+            {showTab('paper-trading') && <NavCard href="/paper-trading" label="PAPER TRADING"    icon="🧪" desc="Simulated sandbox -- manual paper positions only" th={th} /> }
+            {showTab('wheel-simulator') && <NavCard href="/wheel-simulator" label="WHEEL SIMULATOR" icon="🎯" desc="Project capital growth for the wheel strategy"    th={th} /> }
           </div>
         </div>
       </main>

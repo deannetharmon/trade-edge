@@ -24,10 +24,15 @@ import { PortfolioDataProvider } from '@/components/portfolio-data/PortfolioData
 import { PortfolioModeProvider } from '@/components/portfolio-mode/PortfolioModeProvider';
 import { ActiveBrokerAccountProvider } from '@/components/account/ActiveBrokerAccountProvider';
 import { GlobalHeaderContextControls } from '@/components/header/GlobalHeaderContextControls';
+// NAV-HIDE-0001: per-user hidden-tab list + redirect for hidden routes.
+import { NavConfigProvider } from '@/components/nav/NavConfigProvider';
+import { NavRouteGuard } from '@/components/nav/NavRouteGuard';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider>
+      <NavConfigProvider>
+      <NavRouteGuard />
       <TaskProvider>
         <CommandProvider>
           <ActiveBrokerAccountProvider>
@@ -43,6 +48,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           </ActiveBrokerAccountProvider>
         </CommandProvider>
       </TaskProvider>
+      </NavConfigProvider>
     </SessionProvider>
   );
 }

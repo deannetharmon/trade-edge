@@ -1,6 +1,7 @@
 // path: app/rinse-repeat/page.tsx
 
 'use client';
+import { AppHeader } from '@/components/nav/AppHeader';
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
 import { RsiStrip } from '@/components/RsiStrip';
 
@@ -1408,49 +1409,10 @@ export default function RinseRepeatPage() {
     <div className={`min-h-screen ${th.bg} transition-colors duration-200`} style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
 
       {/* Header */}
-      <div className={`${th.header} border-b ${th.border} px-6 pb-0 pt-4 flex flex-col sticky top-0 z-50`}>
-        <div className="flex items-center justify-between w-full pb-2">
-          <div className="flex items-center gap-3">
-            <div>
-              <h1 className="text-base font-bold tracking-widest text-white" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>OPTIONS HUNTER</h1>
-              <p className="text-[10px] text-white/50 mt-0.5 tracking-wider" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>REPEAT STRATEGIES</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div data-global-header-context className="shrink-0" />
-            {/* Accent swatches */}
-            <div className="flex items-center gap-1 mr-1">
-              {(Object.entries(ACCENTS) as [Accent, typeof ACCENTS[Accent]][]).map(([key, val]) => (
-                <button key={key} onClick={() => { setAccent(key); applyAccent(key); try { localStorage.setItem(LS_ACCENT, key); } catch {} }}
-                  title={val.label}
-                  className={`w-3.5 h-3.5 rounded-full transition-all ${accent === key ? 'ring-2 ring-white/60 ring-offset-1 ring-offset-black scale-125' : 'opacity-60 hover:opacity-100'}`}
-                  style={{ backgroundColor: val.hex }}
-                />
-              ))}
-            </div>
-            <div className="w-px h-4 bg-white/20 mr-1" />
-            {(['dark','medium','light'] as Theme[]).map(t => (
-              <button key={t} onClick={() => { setTheme(t); try { localStorage.setItem(LS_THEME, t); } catch {} }}
-                className={`text-[9px] px-2 py-1 border rounded transition-colors ${theme === t ? 'ac-btn' : `${th.border} ${th.textFaint}`}`}>
-                {t}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-0 w-full border-t border-white/10">
-          <Link href="/"             className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HOME</Link>
-          <Link href="/portfolio"    className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PORTFOLIO</Link>
-          <Link href="/screener"     className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">SCREENER</Link>
-          <Link href="/engine"       className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">INCOME ENGINE</Link>
-          <span                      className="text-[10px] font-bold px-3 py-2 tracking-wider" style={{ color: '#00d4aa', borderBottom: '2px solid #00d4aa' }}>REPEAT STRATEGIES</span>
-          <Link href="/trade-log"    className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">TRADE LOG</Link>
-          <Link href="/performance"  className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">PERFORMANCE</Link>
-          <Link href="/help"         className="text-[10px] font-bold px-3 py-2 text-white/55 hover:text-white/80 transition-colors tracking-wider">HELP</Link>
-        </div>
-      </div>
+      <AppHeader active="rinse-repeat" theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
 
       {/* Sticky controls */}
-      <div className={`${th.header} border-b ${th.border} px-6 py-3 sticky top-[85px] z-40`}>
+      <div className={`${th.header} border-b ${th.border} px-6 py-3 sticky top-[var(--app-header-h,85px)] z-40`}>
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3 flex-wrap">
             {/* Range */}
