@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { completionParams, DEFAULT_LEAPS_ALLOWED_MODELS, DEFAULT_LEAPS_MODEL } from '@/lib/ai/models';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { ANALYSIS_OUTPUT_SCHEMA, buildSnapshot, isAnalysisEligible, snapshotCriteria, claimAnalysis, enforceFactsLimit, deleteAnalysisRecord, getAnalysisRecord, listAnalysisRecords, markCurrent, redisForAnalysis, requestFingerprint, saveAnalysisRecord, validateAnalysisOutput, type AnalysisRecord, type LeapsIntent } from '@/lib/leaps-analysis/analysisService';
@@ -12,8 +13,8 @@ const system = `Analyze only the immutable LEAPS snapshot supplied by the server
 async function user() { const session = await getServerSession(authOptions); return (session?.user as { id?: string } | undefined)?.id ?? null; }
 function enabled() { return isLeapsAnalysisEnabled(); }
 function allowedModel() {
-  const model = process.env.LEAPS_ANALYSIS_MODEL?.trim();
-  const allowlist = (process.env.LEAPS_ANALYSIS_ALLOWED_MODELS ?? 'gpt-4o-mini,gpt-4o,gpt-5-mini,gpt-5').split(',').map(x => x.trim()).filter(Boolean);
+  const model = process.env.LEAPS_ANALYSIS_MODEL?.trim() || DEFAULT_LEAPS_MODEL;
+  const allowlist = (process.env.LEAPS_ANALYSIS_ALLOWED_MODELS ?? DEFAULT_LEAPS_ALLOWED_MODELS).split(',').map(x => x.trim()).filter(Boolean);
   return model && allowlist.includes(model) ? model : null;
 }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'Unable to analyze LEAPS contract'; }
@@ -21,7 +22,7 @@ function errorMessage(error: unknown) { return error instanceof Error ? error.me
 async function callModel(key: string, model: string, snapshot: unknown, repair: boolean) {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, cache: 'no-store',
-    body: JSON.stringify({ model, max_tokens: 900, temperature: 0, response_format: { type: 'json_schema', json_schema: { name: 'leaps_mechanics_review', strict: true, schema: ANALYSIS_OUTPUT_SCHEMA } }, messages: [{ role: 'system', content: repair ? `${system}\nThe prior response failed validation. Return a corrected schema-compliant response only.` : system }, { role: 'user', content: JSON.stringify(snapshot) }] }),
+    body: JSON.stringify({ model, ...completionParams(model, 900, 0), response_format: { type: 'json_schema', json_schema: { name: 'leaps_mechanics_review', strict: true, schema: ANALYSIS_OUTPUT_SCHEMA } }, messages: [{ role: 'system', content: repair ? `${system}\nThe prior response failed validation. Return a corrected schema-compliant response only.` : system }, { role: 'user', content: JSON.stringify(snapshot) }] }),
   });
   const data = await response.json().catch(() => ({})); let parsed: unknown;
   try { parsed = JSON.parse(data?.choices?.[0]?.message?.content ?? ''); } catch { parsed = null; }

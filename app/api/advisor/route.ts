@@ -8,6 +8,7 @@
 // (app/api/leaps-advisor/route.ts), built first, not migrated here.
 
 import { NextRequest, NextResponse } from 'next/server';
+import { completionParams, DEFAULT_LEAPS_ALLOWED_MODELS, DEFAULT_LEAPS_MODEL } from '@/lib/ai/models';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 
@@ -60,8 +61,8 @@ function enabled(strategy: AdvisorStrategy) {
 }
 
 function allowedModel() {
-  const model = process.env.LEAPS_ANALYSIS_MODEL?.trim();
-  const allowlist = (process.env.LEAPS_ANALYSIS_ALLOWED_MODELS ?? 'gpt-4o-mini,gpt-4o,gpt-5-mini,gpt-5').split(',').map(x => x.trim()).filter(Boolean);
+  const model = process.env.LEAPS_ANALYSIS_MODEL?.trim() || DEFAULT_LEAPS_MODEL;
+  const allowlist = (process.env.LEAPS_ANALYSIS_ALLOWED_MODELS ?? DEFAULT_LEAPS_ALLOWED_MODELS).split(',').map(x => x.trim()).filter(Boolean);
   return model && allowlist.includes(model) ? model : null;
 }
 
@@ -99,7 +100,7 @@ async function callModel(key: string, model: string, systemPrompt: string, paylo
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     cache: 'no-store',
-    body: JSON.stringify({ model, max_tokens: 1200, temperature: 0.2, response_format: { type: 'json_object' }, messages }),
+    body: JSON.stringify({ model, ...completionParams(model, 1200, 0.2), response_format: { type: 'json_object' }, messages }),
   });
   const data = await response.json().catch(() => ({}));
   let parsed: unknown;

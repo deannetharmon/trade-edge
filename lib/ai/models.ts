@@ -54,3 +54,17 @@ export function isAiProfile(value: unknown): value is AiProfile {
 export function getAiModel(profile: AiProfile = 'analysis'): string {
   return AI_MODEL_BY_PROFILE[profile];
 }
+
+// AI-POLICY-0001 D3: LEAPS routes default to the decision tier; the old models stay allowed for rollback via env.
+export const DEFAULT_LEAPS_MODEL = 'gpt-5.6-terra';
+export const DEFAULT_LEAPS_ALLOWED_MODELS = 'gpt-5.6-terra,gpt-5.6-luna,gpt-4o-mini,gpt-4o,gpt-5-mini,gpt-5';
+
+/**
+ * Chat Completions token and temperature parameters per model family. Reasoning models (gpt-5.x, o-series) reject
+ * max_tokens and any temperature other than the default, and spend part of the budget thinking, so they get
+ * max_completion_tokens with a 4,000 floor (billing is for tokens used) and no temperature.
+ */
+export function completionParams(model: string, maxTokens: number, temperature?: number): Record<string, number> {
+  if (/^(?:gpt-[5-9]|o\d)/.test(model)) return { max_completion_tokens: Math.max(maxTokens, 4000) };
+  return temperature == null ? { max_tokens: maxTokens } : { max_tokens: maxTokens, temperature };
+}
