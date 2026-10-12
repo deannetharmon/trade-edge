@@ -5,6 +5,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { getAccessToken } from '@/lib/auth/tastytradeToken';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
+import BuyingPowerPanel from '@/components/BuyingPowerPanel';
+import { buildBpModel, type BpModel } from '@/lib/portfolio-data/buyingPower';
 import { closedDaysOnly, extractMoneyMovements, performanceSeries, todayNewYork, withLivePoint, type BalanceDayPoint, type MoneyMovement } from '@/lib/portfolio-data/balancePerformance';
 
 const BASE = 'https://api.tastytrade.com';
@@ -59,7 +61,7 @@ function fmtSignedMoney(value: number | null | undefined): string {
   return `${sign}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; accountNumber: string; movements: MoneyMovement[] }> {
+async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; accountNumber: string; movements: MoneyMovement[]; bp: BpModel | null }> {
   const token = await getAccessToken();
   const accountNumber = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
 
@@ -70,6 +72,15 @@ async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; 
     cashBalance: parseFloat(b['cash-balance'] ?? '0'),
     netOptionsValue: parseFloat(b['long-derivative-value'] ?? '0') - parseFloat(b['short-derivative-value'] ?? '0'),
   };
+
+  // BAL-0001/0002: buying power by ticker. Best-effort: the rest of the tab still works if the requirements call fails.
+  let bp: BpModel | null = null;
+  try {
+    const req = await ttFetch(`/margin/accounts/${accountNumber}/requirements`, token);
+    bp = buildBpModel(b, req?.data ?? {});
+  } catch {
+    bp = null;
+  }
 
   try {
     const snapData = await ttFetch(`/accounts/${accountNumber}/balance-snapshots`, token);
@@ -113,7 +124,7 @@ async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; 
     movements = [];
   }
 
-  return { current, accountNumber, movements };
+  return { current, accountNumber, movements, bp };
 }
 
 async function fetchHistory(): Promise<BalanceDay[]> {
@@ -229,6 +240,7 @@ export default function BalancesTab() {
   const [current, setCurrent] = useState<CurrentBalances | null>(null);
   const [history, setHistory] = useState<BalanceDay[]>([]);
   const [movements, setMovements] = useState<MoneyMovement[]>([]);
+  const [bp, setBp] = useState<BpModel | null>(null);
   const [mode, setMode] = useState<ChartMode>('PERFORMANCE');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -237,8 +249,9 @@ export default function BalancesTab() {
   useEffect(() => {
     (async () => {
       try {
-        const { current: cur, movements: moves } = await loadCurrentAndSyncHistory();
+        const { current: cur, movements: moves, bp: bpModel } = await loadCurrentAndSyncHistory();
         setCurrent(cur);
+        setBp(bpModel);
         setMovements(moves);
         const hist = await fetchHistory();
         setHistory(hist);
@@ -273,6 +286,8 @@ export default function BalancesTab() {
               </p>
             </div>
           </div>
+
+          {bp && <BuyingPowerPanel model={bp} />}
 
           <div className="border border-white/10 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
