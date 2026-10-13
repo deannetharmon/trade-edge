@@ -132,6 +132,12 @@ import {
 import { createReadRateLimiter, withRetry } from '@/lib/screener/rateLimitedFetch';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import { buildCreditEntryOtoco } from '@/lib/screener/entryBracket';
+import { WalkCheckbox, WalkProgress, useEntryWalk } from '@/components/EntryWalk';
+import { buildWalkLadder } from '@/lib/entry-walk/ladder';
+import { bracketForPrice } from '@/lib/entry-walk/bracket';
+import { netQuoteFromLegs } from '@/lib/entry-walk/broker';
+import { buildFillRecord, recordWalkFill } from '@/lib/entry-walk/fillLog';
+import { tickTableFromNestedChain } from '@/lib/portfolio/tickSize';
 import { buildCspOrderLeg, computeCspMaxLoss } from '@/lib/scans/cspOrderMath';
 import { guardCspOrder } from '@/lib/scans/cspOrderSubmission';
 import type {
@@ -2761,6 +2767,9 @@ function CspTradeModal({ result, th, onClose, qualification }: {
   const [quoteValidation, setQuoteValidation] = useState<{ at: number; executableCredit: number } | null>(null);
   const [validationNow, setValidationNow] = useState(Date.now());
   const [freshCapital, setFreshCapital] = useState<{ label: string; ok: boolean } | null>(null);
+  // ENTRY-WALK-0001: opt-in per order, off by default.
+  const [walkOn, setWalkOn] = useState(false);
+  const walk = useEntryWalk();
 
   const [entryLimit, setEntryLimit] = useState(parseFloat((c.credit ?? 0).toFixed(2)));
   const [gtcPct, setGtcPct] = useState(50); // Ian, 2026-09-22: same defaults as spreads -- no CSP-specific default needed.
@@ -2809,10 +2818,10 @@ function CspTradeModal({ result, th, onClose, qualification }: {
   // Diane's mock: a freshly re-fetched collateral figure shown right before
   // Place, distinct from -- and never trusted from -- whatever the screen
   // showed when this modal opened.
-  const refreshCapital = async (): Promise<boolean> => {
+  const refreshCapital = async (creditPerContract: number = entryLimit): Promise<boolean> => {
     const token = await getAccessToken();
     const capital = await getCspCapitalContext(token);
-    const guard = guardCspOrder(capital, { strike: c.shortStrike, creditPerContract: entryLimit, quantity });
+    const guard = guardCspOrder(capital, { strike: c.shortStrike, creditPerContract, quantity });
     setFreshCapital({ label: guard.allowed ? `$${guard.requiredCash.toLocaleString()} available and reserved` : guard.reason, ok: guard.allowed });
     return guard.allowed;
   };
@@ -2836,7 +2845,91 @@ function CspTradeModal({ result, th, onClose, qualification }: {
     }
   };
 
+  // ENTRY-WALK-0001: first order near the ask, then steps toward the mid (see lib/entry-walk). With "Walk the price" off
+  // nothing here runs. The bid-equality "market moved" check does not apply to a walk (it sits above the bid on purpose);
+  // each step re-checks a fresh quote against the walk's own floor, and a quote older than 15 seconds still stops it.
+  const placeWalkedOrder = async () => {
+    setPhase('placing'); setError('');
+    try {
+      if (qualGateBlocking) throw new Error('Acknowledge the scan warnings before placing this order.');
+      if (!quoteValidation || Date.now() - quoteValidation.at > 15_000) throw new Error('Validation has expired. Refresh and validate the current market before placing this order.');
+      if (derivePmccMarketSession(new Date()) !== 'open') throw new Error('Market is closed. Live executable quotes cannot be validated. Refresh during regular market hours before placing this order.');
+      if (!legBuild.ok) throw new Error(legBuild.reason);
+      const walkLegs = [{ symbol: String(legBuild.leg.symbol), action: String(legBuild.leg.action) }];
+      const token = await getAccessToken();
+      const quote = netQuoteFromLegs(walkLegs, await getExecutableOptionQuotes([walkLegs[0].symbol], token));
+      if (!quote || quote.ageSeconds == null || quote.ageSeconds > 15) throw new Error('Live quote is unavailable, crossed, or older than 15 seconds. This order cannot be placed from stale scan data.');
+      let tickTable = null;
+      try { tickTable = tickTableFromNestedChain(await ttFetch(`/option-chains/${encodeURIComponent(result.symbol)}/nested`, token), walkLegs[0].symbol); } catch { tickTable = null; }
+      const ladder = buildWalkLadder({ side: 'credit', netBid: quote.netBid, netAsk: quote.netAsk, legSpreads: quote.legSpreads, minCredit: null, tickTable });
+      if (!ladder.ok) throw new Error(`Price walking is off for this order. ${ladder.message} Untick "Walk the price" to place it normally.`);
+      const firstPrice = ladder.prices[0];
+      const capitalOk = await refreshCapital(firstPrice);
+      if (!capitalOk) throw new Error('Collateral is no longer sufficient for this order. Refresh and try a smaller quantity.');
+      const accountNumber = await getAccountNumber();
+      const walkLeg = legBuild.leg;
+      const buildPayload = (price: number) => buildCreditEntryOtoco({ ...bracketForPrice(price, gtcPct, stopMultiple), quantity, legs: [walkLeg] });
+      // Same Trade Log note as the normal path, re-saved for each new order id so the live order always has its verdict.
+      const saveNote = async (response: any) => {
+        const id = String(response?.data?.['complex-order']?.id ?? response?.data?.order?.id ?? 'submitted');
+        setOrderId(id);
+        if (!qualification) return;
+        try {
+          const triggerOrderId = response?.data?.['complex-order']?.['trigger-order']?.id;
+          const openingOrderIds = triggerOrderId == null ? [] : [String(triggerOrderId)];
+          if (openingOrderIds.length === 0) throw new Error('no opening order id');
+          const noteResponse = await fetch('/api/entry-context/notes', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              accountId: accountNumber, brokerOrderId: id, openingOrderIds, submittedAt: new Date().toISOString(),
+              strategy: 'CSP', symbol: result.symbol, expiration: c.expiration, strike: c.shortStrike, quantity,
+              entryQualification: buildEntryQualification({
+                state: qualification.derivation.state,
+                failing: qualification.derivation.failing,
+                warning: qualification.derivation.warning,
+                reasonFor: key => reasonText(key, qualification.checks),
+                acknowledged: qualAcknowledged,
+                at: new Date().toISOString(),
+                scanMode: null,
+              }),
+            }),
+          });
+          if (!noteResponse.ok) throw new Error(`entry note save failed (${noteResponse.status})`);
+        } catch (noteError) {
+          console.warn(noteError);
+          setEntryNoteWarning('Order submitted, but the scan verdict could not be saved for the Trade Log.');
+        }
+      };
+      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(buildPayload(firstPrice)),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
+      const firstOrderId = data?.data?.['complex-order']?.id;
+      if (firstOrderId == null) throw new Error('The broker did not return an order id. Check Pending orders before trying again.');
+      await saveNote(data);
+      setPhase('done');
+      const outcome = await walk.start({
+        ladder: ladder.prices,
+        firstOrderId: String(firstOrderId),
+        config: {
+          accountNumber, legs: walkLegs, tickTable, getToken: getAccessToken, fetchQuotes: getExecutableOptionQuotes,
+          buildPayload, onSubmitted: saveNote,
+        },
+      });
+      if (outcome.kind === 'filled') {
+        recordWalkFill(buildFillRecord({
+          symbol: result.symbol, strategy: 'CSP', quantity, fillPrice: outcome.price,
+          bid: quote.netBid, mid: (quote.netBid + quote.netAsk) / 2, firstPrice,
+        }));
+      }
+    } catch (e: any) {
+      setError(e.message); setPhase('error');
+    }
+  };
+
   const placeOrder = async () => {
+    if (walkOn) { await placeWalkedOrder(); return; }
     setPhase('placing'); setError('');
     try {
       if (qualGateBlocking) throw new Error('Acknowledge the scan warnings before placing this order.');
@@ -2899,7 +2992,7 @@ function CspTradeModal({ result, th, onClose, qualification }: {
       <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-xl max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h2 className={`text-sm font-bold ${th.text} tracking-widest`}>PLACE CSP ORDER — {result.symbol}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
+          <button onClick={onClose} disabled={walk.running} className="text-slate-400 hover:text-white text-xl disabled:opacity-30">✕</button>
         </div>
 
         {!legBuild.ok && (
@@ -2957,6 +3050,8 @@ function CspTradeModal({ result, th, onClose, qualification }: {
           Cash-secured — assignment would mean buying 100 shares/contract at ${c.shortStrike}. Only enter if owning the stock at this price is acceptable.
         </p>
 
+        {phase !== 'done' && <WalkCheckbox checked={walkOn} onChange={setWalkOn} disabled={phase === 'placing'} />}
+
         <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4 space-y-2`}>
           <p className={`text-[10px] font-bold ${th.textMuted} uppercase tracking-wider`}>GTC Profit Target</p>
           <input type="range" min={10} max={90} step={5} value={gtcPct} onChange={e => setGtcPct(Number(e.target.value))} className="w-full" />
@@ -2984,9 +3079,10 @@ function CspTradeModal({ result, th, onClose, qualification }: {
           <p className="text-xs text-emerald-400 mb-3" role="status">Order submitted. Broker order id: {orderId}</p>
         )}
         {phase === 'done' && entryNoteWarning && <p className="text-[10px] text-amber-300 mb-3">{entryNoteWarning}</p>}
+        <WalkProgress log={walk.log} running={walk.running} outcome={walk.outcome} onCancel={walk.cancel} />
 
         <div className="flex gap-2">
-          <button onClick={onClose} className="flex-1 py-2.5 border border-slate-700 rounded-xl text-xs font-bold tracking-widest">
+          <button onClick={onClose} disabled={walk.running} className="flex-1 py-2.5 border border-slate-700 rounded-xl text-xs font-bold tracking-widest disabled:opacity-40">
             {phase === 'done' ? 'CLOSE' : 'CANCEL'}
           </button>
           {phase !== 'done' && (
@@ -3953,6 +4049,9 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
   const [error, setError] = useState('');
   const [orderId, setOrderId] = useState<string>('');
   const [entryContextWarning, setEntryContextWarning] = useState('');
+  // ENTRY-WALK-0001: opt-in per order, off by default; credit spreads only (PMCC is a debit and is not walked in v1).
+  const [walkOn, setWalkOn] = useState(false);
+  const walk = useEntryWalk();
   const [quoteValidation, setQuoteValidation] = useState<{ at: number; executableCredit: number; maxAgeSeconds: number } | null>(null);
   const [validationNow, setValidationNow] = useState(Date.now());
   const isPMCC = c.strategy === 'PMCC';
@@ -4066,7 +4165,7 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
   // call-side-specific evidence fields are honestly marked unavailable
   // rather than guessed. Capturing real call-side quote/delta/IV data
   // would need its own separate scan-pipeline enhancement.
-  const persistPendingIronCondorEntry = async (accountId: string, brokerOrderId: string, openingOrderIds: string[]) => {
+  const persistPendingIronCondorEntry = async (accountId: string, brokerOrderId: string, openingOrderIds: string[], plan?: { gtcBuyback: number; stopTrigger: number }) => {
     if (c.strategy !== 'IC') return;
     const at = new Date().toISOString();
     const quoteAt = entryEvidenceAsOf(c.quoteFetchedAt, scanCompletedAt);
@@ -4096,8 +4195,8 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
         scoreTechnical: scoreEvidence(scored?.dims.technical), scoreLiquidity: scoreEvidence(scored?.dims.liquidity),
         scoreBuffer: scoreEvidence(scored?.dims.buffer), scoreStrategyAlignment: scoreEvidence(scored?.dims.strategyAlignment),
         scoreDeltaQuality: scoreEvidence(scored?.dims.deltaQuality), scoreComposite: scoreEvidence(scored?.score),
-        profitTarget: availableEvidence(gtcBuyback, 'order plan at entry', at),
-        stopLoss: availableEvidence(stopTrigger, 'order plan at entry', at),
+        profitTarget: availableEvidence(plan?.gtcBuyback ?? gtcBuyback, 'order plan at entry', at),
+        stopLoss: availableEvidence(plan?.stopTrigger ?? stopTrigger, 'order plan at entry', at),
         stopLossPct: availableEvidence(stopPnlPct, 'order plan at entry', at),
         entryQualification: entryQualificationRecord(),
       }),
@@ -4105,7 +4204,7 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
     if (!response.ok) throw new Error('Order was accepted, but entry context could not be saved.');
   };
 
-  const persistPendingEntry = async (accountId: string, brokerOrderId: string, openingOrderIds: string[]) => {
+  const persistPendingEntry = async (accountId: string, brokerOrderId: string, openingOrderIds: string[], plan?: { gtcBuyback: number; stopTrigger: number }) => {
     if (c.strategy !== 'BPS' && c.strategy !== 'BCS') return;
     const at = new Date().toISOString();
     const quoteAt = entryEvidenceAsOf(c.quoteFetchedAt, scanCompletedAt);
@@ -4139,8 +4238,8 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
         scoreTechnical: scoreEvidence(scored?.dims.technical), scoreLiquidity: scoreEvidence(scored?.dims.liquidity),
         scoreBuffer: scoreEvidence(scored?.dims.buffer), scoreStrategyAlignment: scoreEvidence(scored?.dims.strategyAlignment),
         scoreDeltaQuality: scoreEvidence(scored?.dims.deltaQuality), scoreComposite: scoreEvidence(scored?.score),
-        profitTarget: availableEvidence(gtcBuyback, 'order plan at entry', at),
-        stopLoss: availableEvidence(stopTrigger, 'order plan at entry', at),
+        profitTarget: availableEvidence(plan?.gtcBuyback ?? gtcBuyback, 'order plan at entry', at),
+        stopLoss: availableEvidence(plan?.stopTrigger ?? stopTrigger, 'order plan at entry', at),
         stopLossPct: availableEvidence(stopPnlPct, 'order plan at entry', at),
         entryQualification: entryQualificationRecord(),
       }),
@@ -4169,7 +4268,74 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
     }
   };
 
+  // ENTRY-WALK-0001: places the first order near the ask, then steps toward the mid (see lib/entry-walk). The normal
+  // placeOrder below is untouched; with "Walk the price" off nothing here runs. The "market moved" equality check against
+  // the bid does not apply to a walk (it sits above the bid on purpose): each step instead re-checks a fresh quote against
+  // the walk's own floor, and a quote older than 15 seconds still stops it.
+  const placeWalkedOrder = async () => {
+    setPhase('placing'); setError('');
+    try {
+      if (qualGateBlocking) throw new Error('Acknowledge the scan warnings before placing this order.');
+      if (!quoteValidation || Date.now() - quoteValidation.at > 15_000) throw new Error('Validation has expired. Refresh and validate the current market before placing this order.');
+      if (derivePmccMarketSession(new Date()) !== 'open') throw new Error('Market is closed. Live executable quotes cannot be validated. Refresh during regular market hours before placing this order.');
+      const legs = buildOrderLegs(result, c);
+      const walkLegs = legs.map(leg => ({ symbol: String(leg.symbol), action: String(leg.action) }));
+      if (walkLegs.some(leg => !leg.symbol)) throw new Error('Exact option symbols are required to refresh this order. Rescan the candidate.');
+      const token = await getAccessToken();
+      const quote = netQuoteFromLegs(walkLegs, await getExecutableOptionQuotes(walkLegs.map(leg => leg.symbol), token));
+      if (!quote || quote.ageSeconds == null || quote.ageSeconds > 15) throw new Error('Live quotes are unavailable, crossed, or older than 15 seconds. This order cannot be placed from stale scan data.');
+      let tickTable = null;
+      try { tickTable = tickTableFromNestedChain(await ttFetch(`/option-chains/${encodeURIComponent(result.symbol)}/nested`, token), walkLegs[0].symbol); } catch { tickTable = null; }
+      const ladder = buildWalkLadder({ side: 'credit', netBid: quote.netBid, netAsk: quote.netAsk, legSpreads: quote.legSpreads, minCredit: null, tickTable });
+      if (!ladder.ok) throw new Error(`Price walking is off for this order. ${ladder.message} Untick "Walk the price" to place it normally.`);
+      const accountNumber = await getAccountNumber();
+      const buildPayload = (price: number) => buildCreditEntryOtoco({ ...bracketForPrice(price, gtcPct, stopMultiple), quantity, legs });
+      const persist = async (response: any, price: number) => {
+        const id = String(response?.data?.['complex-order']?.id ?? response?.data?.order?.id ?? 'submitted');
+        const triggerId = response?.data?.['complex-order']?.['trigger-order']?.id;
+        const openingOrderIds = triggerId == null ? [] : [String(triggerId)];
+        const bracket = bracketForPrice(price, gtcPct, stopMultiple);
+        const plan = { gtcBuyback: bracket.profitBuyback, stopTrigger: bracket.stopTrigger };
+        setOrderId(id);
+        try { await persistPendingEntry(accountNumber, id, openingOrderIds, plan); await persistPendingIronCondorEntry(accountNumber, id, openingOrderIds, plan); }
+        catch (entryContextError) {
+          console.warn(entryContextError);
+          setEntryContextWarning('Order submitted, but entry context could not be saved. No snapshot will be claimed unless broker evidence is later captured.');
+        }
+      };
+      const firstPrice = ladder.prices[0];
+      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildPayload(firstPrice)),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
+      const firstOrderId = data?.data?.['complex-order']?.id;
+      if (firstOrderId == null) throw new Error('The broker did not return an order id. Check Pending orders before trying again.');
+      await persist(data, firstPrice);
+      setPhase('done');
+      const outcome = await walk.start({
+        ladder: ladder.prices,
+        firstOrderId: String(firstOrderId),
+        config: {
+          accountNumber, legs: walkLegs, tickTable, getToken: getAccessToken, fetchQuotes: getExecutableOptionQuotes,
+          buildPayload, onSubmitted: persist,
+        },
+      });
+      if (outcome.kind === 'filled') {
+        recordWalkFill(buildFillRecord({
+          symbol: result.symbol, strategy: c.strategy, quantity, fillPrice: outcome.price,
+          bid: quote.netBid, mid: (quote.netBid + quote.netAsk) / 2, firstPrice,
+        }));
+      }
+    } catch (e: any) {
+      setError(e.message); setPhase('error');
+    }
+  };
+
   const placeOrder = async () => {
+    if (walkOn && !isPMCC) { await placeWalkedOrder(); return; }
     setPhase('placing'); setError('');
     try {
       if (qualGateBlocking) throw new Error('Acknowledge the scan warnings before placing this order.');
@@ -4216,7 +4382,7 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
       <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-xl max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h2 className={`text-sm font-bold ${th.text} tracking-widest`}>PLACE ORDER — {result.symbol}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
+          <button onClick={onClose} disabled={walk.running} className="text-slate-400 hover:text-white text-xl disabled:opacity-30">✕</button>
         </div>
 
         {!hasOccSymbols && (
@@ -4259,6 +4425,10 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
             </span>
           </div>
         </div>
+
+        {!isPMCC && phase !== 'done' && (
+          <WalkCheckbox checked={walkOn} onChange={setWalkOn} disabled={phase === 'placing'} />
+        )}
 
         {!isPMCC && (c.strategy === 'BPS' || c.strategy === 'BCS') && (
           <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-4 space-y-2`}>
@@ -4346,6 +4516,8 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
           </div>
         )}
 
+        <WalkProgress log={walk.log} running={walk.running} outcome={walk.outcome} onCancel={walk.cancel} />
+
         {phase === 'error' && error && (
           <div className="p-3 bg-red-500/10 border border-red-600 rounded-lg mb-4">
             <p className="text-xs text-red-400">{error}</p>
@@ -4375,7 +4547,7 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
         )}
 
         {phase === 'done' && (
-          <button onClick={onClose} className={`w-full py-2.5 border ${th.border} ${th.textMuted} rounded-xl text-xs font-bold tracking-widest`}>
+          <button onClick={onClose} disabled={walk.running} className={`w-full py-2.5 border ${th.border} ${th.textMuted} rounded-xl text-xs font-bold tracking-widest disabled:opacity-40`}>
             CLOSE
           </button>
         )}
