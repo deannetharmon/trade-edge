@@ -6,6 +6,8 @@ import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, get
 import { RsiStrip } from '@/components/RsiStrip';
 import { validateChatImageSelection } from '@/lib/ai/chatAttachments';
 import { buildTrustedChatSystemPrompt } from '@/lib/ai/trustedChatContext';
+import { buildPortfolioAiSnapshotFromPage } from '@/lib/portfolio-ai/fromPositions';
+import { redactUnsupportedFigures, PORTFOLIO_AI_STALE_MS, type PortfolioAiSnapshot, type PortfolioAiTone } from '@/lib/portfolio-ai/snapshot';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
@@ -5140,11 +5142,17 @@ const REC_COLOR: Record<string, string> = {
 // Reusable multi-turn chat component. The application snapshot is added to
 // trusted system context on every request and is never treated as user text.
 
-function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
+function ChatThread({ initialContext, systemPrompt, placeholder, th, suggestionChips, allowedFigures, seed, scrollClassName }: {
   initialContext: string;   // trusted application snapshot sent with every request
   systemPrompt?: string;    // optional override — defaults to TRADING_SYSTEM_PROMPT
   placeholder?: string;
   th: typeof THEMES[Theme];
+  // PORTFOLIO-AI-0001: optional. suggestionChips replaces the default chips; allowedFigures turns on
+  // figure hiding + "AI NOTE:" labelling; seed ({ id, text }) sends one message when its id changes.
+  suggestionChips?: string[];
+  allowedFigures?: number[];
+  seed?: { id: number; text: string } | null;
+  scrollClassName?: string;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -5156,6 +5164,8 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [hiddenFigureCounts, setHiddenFigureCounts] = useState<Record<number, number>>({});
+  const lastSeedIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     // Scroll within the chat container only — never move the page
@@ -5191,10 +5201,10 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
     if (images.length > 0) setPendingImages(current => [...current, ...images]);
   };
 
-  const send = async () => {
-    const text = input.trim();
+  const send = async (textOverride?: string) => {
+    const text = (textOverride ?? input).trim();
     if (!text && pendingImages.length === 0 || loading) return;
-    setInput('');
+    if (textOverride === undefined) setInput('');
     setError(null);
     const parts: ChatContentPart[] = [];
     pendingImages.forEach(image => parts.push({ type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.base64 } }));
@@ -5206,7 +5216,16 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
     setMessages(next);
     setLoading(true);
     try {
-      const reply = await callAIWithHistory(next, systemPrompt, initialContext);
+      const rawReply = await callAIWithHistory(next, systemPrompt, initialContext);
+      let reply = rawReply;
+      let hidden = 0;
+      if (allowedFigures) {
+        const userTexts = next.filter(m => m.role === 'user').map(m => typeof m.content === 'string' ? m.content : m.content.filter((p): p is ChatMessagePart => p.type === 'text').map(p => p.text).join(' '));
+        const redacted = redactUnsupportedFigures(rawReply, allowedFigures, userTexts);
+        reply = redacted.text;
+        hidden = redacted.removedCount;
+      }
+      if (hidden > 0) setHiddenFigureCounts(counts => ({ ...counts, [next.length]: hidden }));
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch (e: any) {
       setError(e.message ?? 'Failed');
@@ -5220,6 +5239,13 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
+  useEffect(() => {
+    if (!seed || lastSeedIdRef.current === seed.id) return;
+    lastSeedIdRef.current = seed.id;
+    void send(seed.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed]);
+
   const getMessageText = (content: ChatMessage['content']): string => {
     if (typeof content === 'string') return content;
     return content.filter((p): p is ChatMessagePart => p.type === 'text').map(p => p.text).join(' ');
@@ -5231,7 +5257,7 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
   };
 
   // Suggested follow-up prompts shown below the initial analysis
-  const suggestions = [
+  const suggestions = suggestionChips ?? [
     'What would make this go wrong fast?',
     'If I roll, what strikes should I target?',
     'Should I close early given current conditions?',
@@ -5241,7 +5267,7 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
   return (
     <div className={`border-t ${th.border} flex flex-col`} style={{ background: 'rgba(99,102,241,0.03)' }}>
       {messages.length > 0 && (
-        <div ref={scrollContainerRef} className="px-4 py-3 space-y-3 max-h-80 overflow-y-auto">
+        <div ref={scrollContainerRef} className={`px-4 py-3 space-y-3 ${scrollClassName ?? 'max-h-80'} overflow-y-auto`}>
           {messages.map((m, i) => (
             <div key={i} className={`flex gap-3 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               {m.role === 'assistant' && (
@@ -5257,7 +5283,14 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
                   const txt = getMessageText(m.content);
                   return (<>
                     {imageSources.length > 0 && <div className="mb-1.5 grid grid-cols-2 gap-1.5">{imageSources.map((src, imageIndex) => <img key={imageIndex} src={src} alt={`Attachment ${imageIndex + 1}`} className="rounded-lg max-w-full" style={{ maxHeight: '180px', objectFit: 'contain' }} />)}</div>}
-                    {txt && <span>{txt}</span>}
+                    {txt && (allowedFigures && m.role === 'assistant'
+                      ? <div className="space-y-1.5">
+                          {txt.split('\n').filter(line => line.trim()).map((line, lineIndex) => /^\s*AI NOTE:/i.test(line)
+                            ? <div key={lineIndex} className="rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2 py-1.5"><span className="text-[9px] font-bold tracking-widest text-indigo-300 mr-1.5">AI NOTE</span>{line.replace(/^\s*AI NOTE:\s*/i, '')}</div>
+                            : <p key={lineIndex}>{line}</p>)}
+                          {hiddenFigureCounts[i] > 0 && <p role="note" className="text-[10px] text-red-300 border border-red-500/40 rounded-lg px-2 py-1">FIGURE HIDDEN — {hiddenFigureCounts[i]} number{hiddenFigureCounts[i] === 1 ? '' : 's'} in this answer did not match your snapshot and {hiddenFigureCounts[i] === 1 ? 'was' : 'were'} removed.</p>}
+                        </div>
+                      : <span>{txt}</span>)}
                   </>);
                 })()}
               </div>
@@ -5328,7 +5361,7 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th }: {
               el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
             }}
           />
-          <button onClick={send} disabled={loading || (!input.trim() && pendingImages.length === 0)}
+          <button onClick={() => void send()} disabled={loading || (!input.trim() && pendingImages.length === 0)}
             className="shrink-0 w-8 h-8 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 text-white flex items-center justify-center transition-colors text-sm">
             ↑
           </button>
@@ -5424,135 +5457,114 @@ function PositionAnalysisConversation({ analysis, pos, th }: { analysis: Positio
   />;
 }
 
-function PortfolioAnalysisPanel({ analysis, positions, onClose, th }: {
-  analysis: PortfolioAnalysis; positions: Position[]; onClose: () => void; th: typeof THEMES[Theme];
+// PORTFOLIO-AI-0001: docked, read-only "Ask AI" panel. Grounded in a deterministic snapshot built
+// from this page's own numbers; the AI cannot change or contradict the app's suggested actions.
+const PORTFOLIO_AI_TONE_CLASS: Record<PortfolioAiTone, string> = {
+  neutral: 'text-slate-200', info: 'text-indigo-300', good: 'text-emerald-400', warn: 'text-yellow-400', bad: 'text-red-400',
+};
+
+function PortfolioAiPanel({ snapshot, onRefresh, onClose, th }: {
+  snapshot: PortfolioAiSnapshot; onRefresh: () => void; onClose: () => void; th: typeof THEMES[Theme];
 }) {
-  // Build rich initial context for portfolio chat
-  const chatContext = [
-    `I've analyzed your portfolio of ${positions.length} open positions.`,
-    ``,
-    analysis.summary,
-    analysis.marketContext ? `\n**Market context:** ${analysis.marketContext}` : '',
-    analysis.dominantRisk ? `\n**Dominant risk:** ${analysis.dominantRisk}` : '',
-    analysis.priorityActions.length > 0 ? `\n**Priority actions:** ${analysis.priorityActions.map((a, i) => `${i+1}. ${a}`).join(' ')}` : '',
-    analysis.topRisks.length > 0 ? `\n**Portfolio risks:** ${analysis.topRisks.join(' · ')}` : '',
-    analysis.thetaYield ? `\n**Theta yield:** ${analysis.thetaYield}` : '',
-    ``,
-    `Positions: ${positions.map(p => {
-      const pct = entryPnlPct(p);
-      return `${p.symbol} ${p.strategy} (${p.dte}d, ${pct != null ? `${pct.toFixed(0)}% P&L` : 'entry-relative P&L unavailable'})`;
-    }).join(', ')}`,
-  ].filter(Boolean).join('\n');
+  const [seed, setSeed] = useState<{ id: number; text: string } | null>(null);
+  const [started, setStarted] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const stale = now - new Date(snapshot.generatedAt).getTime() > PORTFOLIO_AI_STALE_MS;
+
+  const analyze = () => {
+    setStarted(true);
+    setSeed({ id: Date.now(), text: 'Analyze my portfolio. Lead with the biggest risk, then what needs attention first, then one strategy question worth discussing. Use only the figures in the snapshot.' });
+  };
+
+  const chips = [
+    'What needs attention first?',
+    'Am I too concentrated?',
+    'Free up $ of cash — which positions are the cleanest to close?',
+    'What would hurt most in a sharp selloff?',
+  ];
 
   return (
-    <div className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-4" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
-      <div className={`${th.sidebar} border ${th.border} rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col`}>
-        <div className={`flex items-center justify-between px-6 py-4 border-b ${th.border} shrink-0`}>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-indigo-400 text-sm">◈</span>
-              <h2 className={`text-sm font-bold ${th.text} tracking-wider`}>PORTFOLIO ANALYSIS</h2>
-            </div>
-            <p className={`text-[10px] ${th.textFaint} mt-0.5`}>Generated {new Date(analysis.generatedAt).toLocaleTimeString()}</p>
+    <aside
+      aria-label="Portfolio AI"
+      className={`fixed top-0 right-0 bottom-0 z-40 w-full sm:w-[420px] ${th.sidebar} border-l ${th.border} flex flex-col shadow-2xl`}
+      style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}
+    >
+      <div className={`flex items-center justify-between px-4 py-3 border-b ${th.border} shrink-0`}>
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-indigo-400 text-sm">◈</span>
+            <h2 className={`text-xs font-bold ${th.text} tracking-wider`}>ASK AI · PORTFOLIO</h2>
+            <span className="text-[9px] px-1.5 py-0.5 rounded border border-slate-600 text-slate-400 font-bold tracking-widest">READ-ONLY</span>
           </div>
-          <button onClick={onClose} className={`text-xl ${th.textFaint} hover:${th.text}`}>✕</button>
+          <p className={`text-[10px] ${th.textFaint} mt-0.5`}>Snapshot {new Date(snapshot.generatedAt).toLocaleTimeString()} · {snapshot.positionCount} position{snapshot.positionCount === 1 ? '' : 's'}</p>
         </div>
-
-        <div className="flex-1 overflow-y-auto">
-          <div className="p-6 space-y-5">
-            {/* Summary */}
-            <div className={`p-4 rounded-xl border ${th.border}`} style={{ background: 'rgba(99,102,241,0.05)' }}>
-              <p className={`text-xs ${th.textMuted} leading-relaxed`}>{analysis.summary}</p>
-            </div>
-
-            {/* Market context */}
-            {analysis.marketContext && (
-              <div>
-                <p className="text-[9px] text-indigo-400 uppercase tracking-widest mb-2 font-bold">Market Context</p>
-                <p className={`text-[11px] ${th.textFaint} leading-relaxed`}>{analysis.marketContext}</p>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-5">
-              {analysis.priorityActions.length > 0 && (
-                <div>
-                  <p className="text-[9px] text-blue-400 uppercase tracking-widest mb-2 font-bold">Priority Actions</p>
-                  <div className="space-y-2">
-                    {analysis.priorityActions.map((a, i) => (
-                      <div key={i} className="flex items-start gap-2">
-                        <span className="text-blue-400 text-[10px] font-bold shrink-0 mt-0.5">{i + 1}.</span>
-                        <p className={`text-[10px] ${th.textMuted} leading-snug`}>{a}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {analysis.topRisks.length > 0 && (
-                <div>
-                  <p className="text-[9px] text-red-400 uppercase tracking-widest mb-2 font-bold">Portfolio Risks</p>
-                  <div className="space-y-2">
-                    {analysis.topRisks.map((r, i) => (
-                      <div key={i} className="flex items-start gap-2">
-                        <span className="text-red-400 text-[9px] shrink-0 mt-0.5">▸</span>
-                        <p className="text-[10px] text-red-300 leading-snug">{r}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {analysis.dominantRisk && (
-              <div className="flex items-start gap-2 p-3 rounded-lg border border-red-500/20 bg-red-500/5">
-                <span className="text-red-400 shrink-0 text-[10px] mt-0.5 font-bold">!</span>
-                <div>
-                  <p className="text-[9px] text-red-400 uppercase tracking-widest mb-1 font-bold">Dominant Risk</p>
-                  <p className="text-[10px] text-red-300">{analysis.dominantRisk}</p>
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-5">
-              {analysis.sectorConcentration.length > 0 && (
-                <div>
-                  <p className="text-[9px] text-yellow-400 uppercase tracking-widest mb-2 font-bold">Concentration Risk</p>
-                  <div className="space-y-1">
-                    {analysis.sectorConcentration.map((s, i) => (
-                      <p key={i} className="text-[10px] text-yellow-300">▸ {s}</p>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {analysis.thetaYield && (
-                <div>
-                  <p className="text-[9px] text-emerald-400 uppercase tracking-widest mb-2 font-bold">Theta Yield</p>
-                  <p className={`text-[10px] ${th.textMuted}`}>{analysis.thetaYield}</p>
-                </div>
-              )}
-            </div>
-
-            {/* Divider before chat */}
-            <div className={`flex items-center gap-2 pt-1`}>
-              <span className="text-[9px] text-indigo-400 font-bold tracking-widest uppercase">◈ Ask about your portfolio</span>
-              <div className={`flex-1 h-px ${th.borderLight} border-t`} />
-            </div>
-          </div>
-
-          <ChatThread
-            initialContext={chatContext}
-            systemPrompt={TRADING_CHAT_PROMPT}
-            placeholder='Ask anything — e.g. "Which position should I close first if I need cash?" or "Am I too long tech?"'
-            th={th}
-          />
-        </div>
-
-        <div className={`px-6 py-4 border-t ${th.border} shrink-0`}>
-          <button onClick={onClose} className={`w-full py-3 border ${th.border} ${th.textFaint} rounded-xl text-xs font-medium hover:border-white/30 transition-colors`}>
-            Close
-          </button>
-        </div>
+        <button onClick={onClose} aria-label="Close Ask AI" className={`min-w-[44px] min-h-[44px] text-lg ${th.textFaint} hover:${th.text}`}>✕</button>
       </div>
-    </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {stale && (
+          <div role="status" className={`mx-4 mt-3 rounded-lg border ${th.border} px-3 py-2 text-[11px] ${th.textMuted}`}>
+            Snapshot is 20+ minutes old. Refresh before relying on these numbers.{' '}
+            <button onClick={onRefresh} className="text-indigo-300 underline">↻ Refresh</button>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-2 p-4">
+          {snapshot.tiles.map(tile => (
+            <div key={tile.id} className={`rounded-lg border ${th.border} px-3 py-2`}>
+              <p className={`text-[9px] tracking-widest font-bold ${th.textFaint}`}>{tile.label}</p>
+              <p className={`text-sm font-bold ${PORTFOLIO_AI_TONE_CLASS[tile.tone]}`}>{tile.value}</p>
+              {tile.detail && <p className={`text-[10px] ${th.textFaint} leading-snug`}>{tile.detail}</p>}
+            </div>
+          ))}
+        </div>
+
+        {snapshot.watch.length > 0 && (
+          <div className="px-4 pb-3">
+            <p className="text-[9px] text-yellow-400 uppercase tracking-widest mb-1.5 font-bold">Watch</p>
+            <div className="space-y-1">
+              {snapshot.watch.map((line, i) => <p key={i} className={`text-[11px] ${th.textMuted} leading-snug`}>▸ {line}</p>)}
+            </div>
+          </div>
+        )}
+
+        {snapshot.notAvailable.length > 0 && (
+          <div className="mx-4 mb-3 rounded-lg border border-dashed border-yellow-700/50 bg-yellow-500/5 px-3 py-2">
+            <p className="text-[9px] text-yellow-400 uppercase tracking-widest font-bold">Not available</p>
+            {snapshot.notAvailable.map((item, i) => <p key={i} className={`text-[10px] ${th.textMuted} leading-snug mt-0.5`}>{item}</p>)}
+            <p className={`text-[10px] ${th.textFaint} mt-1`}>The AI will not estimate these.</p>
+          </div>
+        )}
+
+        {!started && (
+          <div className="px-4 pb-4 text-center space-y-2">
+            <p className={`text-xs font-semibold ${th.text}`}>Analyze {snapshot.positionCount} position{snapshot.positionCount === 1 ? '' : 's'} in the selected account?</p>
+            <p className={`text-[11px] ${th.textFaint}`}>Uses the numbers already on this page. Nothing is sent until you click.</p>
+            <button onClick={analyze} className="min-h-[44px] px-5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors">Analyze portfolio</button>
+            <p className={`text-[10px] ${th.textFaint}`}>Or just ask a question below.</p>
+          </div>
+        )}
+
+        <ChatThread
+          initialContext={snapshot.contextText}
+          systemPrompt={TRADING_CHAT_PROMPT}
+          placeholder='Ask anything — e.g. "Am I too long tech?" or "Free up $2,000 of cash"'
+          th={th}
+          suggestionChips={chips}
+          allowedFigures={snapshot.allowedFigures}
+          seed={seed}
+          scrollClassName="max-h-[45vh]"
+        />
+      </div>
+
+      <p className={`px-4 py-2 border-t ${th.border} text-[10px] ${th.textFaint} shrink-0`}>
+        Not financial advice. Read-only: this panel cannot place, change or cancel orders.
+      </p>
+    </aside>
   );
 }
 
@@ -10626,8 +10638,8 @@ export default function PortfolioPage() {
     if (typeof window === 'undefined') return null;
     return new URLSearchParams(window.location.search).get('reviewId');
   });
-  const [portfolioAnalysis, setPortfolioAnalysis] = useState<PortfolioAnalysis | null>(null);
-  const [portfolioAnalysisLoading, setPortfolioAnalysisLoading] = useState(false);
+  const [portfolioAiOpen, setPortfolioAiOpen] = useState(false);
+  const [portfolioAiSnapshot, setPortfolioAiSnapshot] = useState<PortfolioAiSnapshot | null>(null);
   // PI-0014C: page-owned so the outcome survives removal of a resolved
   // Verify Pricing button/card/objective after refreshed data is published.
   const [pricingRefreshOutcome, setPricingRefreshOutcome] = useState<PricingRefreshOutcome | null>(null);
@@ -10635,17 +10647,19 @@ export default function PortfolioPage() {
   // Trigger weekly behavior summarization silently on load
   useEffect(() => { summarizeBehaviorProfile().catch(() => {}); }, []);
 
-  const handleAnalyzePortfolio = async () => {
+  // PORTFOLIO-AI-0001: the snapshot is frozen when the panel opens (or on Refresh) so the numbers
+  // the AI saw stay identical to what the trader sees in the panel.
+  const refreshPortfolioAiSnapshot = () => {
+    setPortfolioAiSnapshot(buildPortfolioAiSnapshotFromPage({
+      positions,
+      thetaPerDay: calculatePortfolioGreeks(positions).thetaPerDay,
+      leverageGroups: leveragedPositionExposureGroups,
+    }));
+  };
+  const handleOpenPortfolioAi = () => {
     if (positions.length === 0) return;
-    setPortfolioAnalysisLoading(true);
-    try {
-      const result = await analyzePortfolio(positions);
-      setPortfolioAnalysis(result);
-    } catch (e: any) {
-      setPortfolioAnalysis({ loading: false, error: e.message, netDelta: null, dominantRisk: '', sectorConcentration: [], thetaYield: '', topRisks: [], priorityActions: [], marketContext: '', summary: '', generatedAt: new Date().toISOString() });
-    } finally {
-      setPortfolioAnalysisLoading(false);
-    }
+    refreshPortfolioAiSnapshot();
+    setPortfolioAiOpen(true);
   };
 
   const marketStatus = getMarketStatus();
@@ -11063,9 +11077,9 @@ export default function PortfolioPage() {
             ◆ Memory
           </button>
           {positions.length > 0 && (
-            <button onClick={handleAnalyzePortfolio} disabled={portfolioAnalysisLoading}
-              className="text-[10px] px-3 py-1.5 border border-indigo-700 text-indigo-400 rounded hover:border-indigo-500 hover:text-indigo-300 transition-colors tracking-wider disabled:opacity-50 font-bold">
-              {portfolioAnalysisLoading ? '◈ Analyzing...' : '◈ Analyze Portfolio'}
+            <button onClick={handleOpenPortfolioAi} aria-pressed={portfolioAiOpen}
+              className="text-[10px] px-3 py-1.5 border border-indigo-700 text-indigo-400 rounded hover:border-indigo-500 hover:text-indigo-300 transition-colors tracking-wider font-bold">
+              ◈ Ask AI
             </button>
           )}
           <a href="https://my.tastytrade.com" target="_blank" rel="noopener noreferrer"
@@ -11410,15 +11424,8 @@ export default function PortfolioPage() {
       {showPerformance && <PerformancePanel onClose={() => setShowPerformance(false)} th={th} />}
       {showMemory && <MemoryPanel onClose={() => setShowMemory(false)} th={th} />}
 
-      {portfolioAnalysis && !portfolioAnalysis.error && (
-        <PortfolioAnalysisPanel analysis={portfolioAnalysis} positions={positions} onClose={() => setPortfolioAnalysis(null)} th={th} />
-      )}      
-      
-      {portfolioAnalysis?.error && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-red-900/80 border border-red-500 rounded-lg px-4 py-3 text-xs text-red-300 flex items-center gap-3">
-          Portfolio analysis failed: {portfolioAnalysis.error}
-          <button onClick={() => setPortfolioAnalysis(null)} className="text-red-400 hover:text-red-200">✕</button>
-        </div>
+      {portfolioAiOpen && portfolioAiSnapshot && (
+        <PortfolioAiPanel snapshot={portfolioAiSnapshot} onRefresh={refreshPortfolioAiSnapshot} onClose={() => setPortfolioAiOpen(false)} th={th} />
       )}
 
       </>)}
