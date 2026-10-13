@@ -20,13 +20,38 @@ The trader gets a better entry price without watching the order: it starts near 
    - Five steps, one every 3.5 seconds (about 15-20 seconds in total).
    - Floor = the higher of the mid and the scan's minimum credit rule (1/3 of width for spreads). If the minimum credit is above the mid, the walk does not start.
    - Lands on the mid and leaves the order working as a normal pending order (managed from the existing pending-order surfaces).
-   - A bid-ask wider than the scan's own limit ($0.10 under the course rules) does not start the walk.
+   - If any leg's bid-ask is wider than the scan's own limit (`BID_ASK_MAX`, $0.10 per leg under the course rules; evaluated per leg, as the scan does), the walk does not start.
 4. **Each step:** re-fetch the quote, recompute the mid, round to the tick (`lib/portfolio/tickSize.ts`), then replace the order. The step is skipped (walk stops) if the quote is stale, crossed, or the market moved enough that the floor is no longer valid.
 5. **Progress strip** after submit: current price, floor, step n/5, Cancel (always visible, works at any step). Wording and layout per Diane's mock.
 
 ## Key technical finding (Dane)
 
 The Screener entry is an **OTOCO** (entry plus profit-target and stop, `/complex-orders`), not a simple limit order. A complex order's price cannot be edited in place, so each step is **cancel then resubmit the whole OTOCO** at the new price. The existing pending-order replacement workflow (`lib/portfolio/pendingOrderReplacementSubmission.ts`) and the order-lifecycle log are the reuse points. This makes the race window the main risk (below).
+
+## Bracket and safety conditions (Ian, 2026-10-13)
+
+1. **The profit target and stop follow each step's price.** The Screener sets `exitCredit = entryLimit`, `gtcBuyback = round(credit x (1 - gtcPct/100), 2)`, `stopTrigger = round(credit x stopMultiple, 2)`, `stopLimit = round(stopTrigger x 1.10, 2)`. Every resubmit recomputes all three from that step's price; the first step's bracket is never carried forward.
+2. **The existing "market moved" check is adjusted.** `refreshExecutionQuote` throws when the executable credit (the bid) differs from the validated credit by a cent, and rejects quotes older than 15 seconds. The walk sits above the bid on purpose, so with the checkbox on the check compares against the walk's own price and floor. With the checkbox off it is unchanged (regression test). A quote older than 15 seconds still stops the walk.
+3. Each step keeps the original time-in-force and runs the same dry-run and CSP collateral check as the original order.
+
+## Fixtures (Alan, 2026-10-13)
+
+Rules: work in integer cents (exact fractions, no float division); `start = mid + 0.75 x (ask - mid)` for credit, `mid - 0.75 x (mid - bid)` for debit; prices are evenly spaced from start to the end price over 5 steps; the end price is the floor (credit) or the ceiling (debit); each price is rounded to the tick for its band; **a price exactly halfway between two ticks rounds toward the mid**; consecutive duplicate prices are dropped (no waiting on the same price); if start is at or beyond the end price the walk does not start. Credit end = max(mid, minimum credit); debit end = min(mid, the trader's maximum debit).
+
+| Case | Market | Tick | Expected prices |
+|---|---|---|---|
+| Credit, 2-leg (the mock sample) | bid 1.20, ask 1.40 | 0.01 | 1.37, 1.36, 1.34, 1.32, 1.30 |
+| Credit, 4-leg condor | bid 2.10, ask 2.50 | 0.01 | 2.45, 2.41, 2.37, 2.34, 2.30 |
+| CSP (single leg) | bid 0.85, ask 1.05 | 0.01 | 1.02, 1.01, 0.99, 0.97, 0.95 |
+| Coarse tick (0.05 at or above 3.00) | bid 3.30, ask 3.70 | 0.01 / 0.05 | 3.65, 3.60, 3.55, 3.50 (4 prices, one duplicate dropped) |
+| Minimum-credit floor above mid | bid 0.85, ask 1.10, minimum credit 1.00 | 0.01 | 1.07, 1.05, 1.03, 1.02, 1.00 |
+| Floor at or above start | bid 0.85, ask 1.00, minimum credit 1.00 | 0.01 | does not start |
+| Debit, 2-leg | bid 2.00, ask 2.40 | 0.01 | 2.05, 2.09, 2.13, 2.16, 2.20 |
+| Very tight market | bid 1.28, ask 1.32 | 0.01 | 1.31, 1.30 (two prices) |
+
+Bracket fixtures for the first case (50% target, 2x stop): price 1.37 gives target 0.69, stop 2.74, stop limit 3.01; 1.36 gives 0.68 / 2.72 / 2.99; 1.34 gives 0.67 / 2.68 / 2.95; 1.32 gives 0.66 / 2.64 / 2.90; 1.30 gives 0.65 / 2.60 / 2.86.
+
+Expected benefit, stated plainly: with course-rule legs (each at most $0.10 wide) a 2-leg spread is at most about $0.20 wide, so the best case is about $0.17 per share over the bid at the first step, about $0.10 at the mid ($10 per contract). Wider markets (Relaxed / Low Vol presets) gain more.
 
 ## Race safety (Quinn and Ian)
 
