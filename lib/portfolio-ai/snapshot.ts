@@ -26,6 +26,9 @@ export interface PortfolioAiPositionInput {
   hasGtc: boolean;
   /** True for a long call that is paired with a held short call (PMCC). */
   pmccPaired?: boolean;
+  /** PORTFOLIO-AI-0002: the full workspace record as "Label: text" lines, plus its $/% figures. */
+  factLines?: string[];
+  factFigures?: number[];
 }
 
 export interface PortfolioAiLeverageGroupInput {
@@ -187,7 +190,8 @@ export function buildPortfolioAiSnapshot(input: PortfolioAiSnapshotInput): Portf
     if (finite(p.maxRisk)) allowed.push(p.maxRisk, Math.round(p.maxRisk));
     if (finite(p.bufferPct)) allowed.push(p.bufferPct, Math.round(p.bufferPct));
     allowed.push(p.dte);
-    return [
+    if (p.factFigures) allowed.push(...p.factFigures);
+    const head = [
       `${p.symbol} ${p.strategy}`,
       `DTE ${p.dte}`,
       `entry P&L ${finite(p.entryPnlPct) ? pct(p.entryPnlPct) : NOT_AVAILABLE}`,
@@ -196,6 +200,9 @@ export function buildPortfolioAiSnapshot(input: PortfolioAiSnapshotInput): Portf
       `app suggests: ${p.recommendationLabel ?? 'no canonical action'}${p.recommendationDetail ? ` (${p.recommendationDetail})` : ''}`,
       flags ? `flags: ${flags}` : '',
     ].filter(Boolean).join(' | ');
+    return p.factLines && p.factLines.length > 0
+      ? [head, ...p.factLines.map(line => `    ${line}`)].join('\n')
+      : head;
   });
 
   const leverageLines = input.leverageGroups
@@ -211,6 +218,7 @@ export function buildPortfolioAiSnapshot(input: PortfolioAiSnapshotInput): Portf
 
   const generatedLabel = new Date(input.generatedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   const contextText = [
+    'The screenshot rules at the end of this snapshot take precedence over any instruction to keep answers scoped to it.',
     `PORTFOLIO SNAPSHOT (built by TradeEdge at ${generatedLabel}; read-only data for the selected account)`,
     `Positions: ${positions.length} | Net theta/day: ${finite(input.thetaPerDay) ? signedMoney(input.thetaPerDay) : NOT_AVAILABLE} | At risk (reliable max risk only): ${reliable.length > 0 ? money(atRiskTotal) : NOT_AVAILABLE}${excluded > 0 && reliable.length > 0 ? ` (${excluded} excluded)` : ''}`,
     `Largest symbol share of at-risk: ${topShare != null && topSymbol != null ? `${topSymbol} ${pct(topShare)}` : NOT_AVAILABLE} | Close-now count: ${closeNow.length}`,
@@ -222,6 +230,8 @@ export function buildPortfolioAiSnapshot(input: PortfolioAiSnapshotInput): Portf
     '',
     'RULES FOR YOUR ANSWER:',
     '- Quote only figures that appear above. If a figure you need is not above, say it is not available.',
+    '- The detail lines under each position are the same values shown on the trader\'s Positions screen. Treat them as the full record for that position.',
+    '- If the trader attaches a screenshot of the Positions screen, you may read it. Where it shows a field this snapshot also has, the snapshot is authoritative: if they differ, report the difference on an "AI NOTE:" line and use the snapshot. Where the screenshot shows something the snapshot lacks, you may use it but label it "from your screenshot (not verified by the app)". Never refuse to discuss a position that is in the snapshot.',
     '- Do not contradict the "app suggests" action for a position. If you disagree, say so on a separate line starting "AI NOTE:".',
     '- You cannot place, change or cancel orders. Actions are taken by the trader in the Positions Workspace.',
   ].filter((line, index, all) => !(line === '' && all[index - 1] === '')).join('\n');

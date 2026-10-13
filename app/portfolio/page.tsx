@@ -5219,7 +5219,9 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th, suggestionC
       const rawReply = await callAIWithHistory(next, systemPrompt, initialContext);
       let reply = rawReply;
       let hidden = 0;
-      if (allowedFigures) {
+      // A screenshot's numbers cannot be checked against the snapshot, so figures are not hidden once the trader has attached one.
+      const hasAttachment = next.some(m => typeof m.content !== 'string' && m.content.some(part => part.type === 'image'));
+      if (allowedFigures && !hasAttachment) {
         const userTexts = next.filter(m => m.role === 'user').map(m => typeof m.content === 'string' ? m.content : m.content.filter((p): p is ChatMessagePart => p.type === 'text').map(p => p.text).join(' '));
         const redacted = redactUnsupportedFigures(rawReply, allowedFigures, userTexts);
         reply = redacted.text;
