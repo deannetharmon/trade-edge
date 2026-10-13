@@ -7,14 +7,17 @@ import type { Position } from '@/lib/portfolio-data/types';
 import type { LeveragedPositionExposureGroup } from '@/lib/portfolio/leveragedPositionExposure';
 import { entryPnlPct, reliableSupportedMaxRisk } from '@/lib/portfolio/positionMetrics';
 import { isPairedPmccLong } from '@/lib/portfolio-data/pmccPairDetection';
+import { buildPositionFacts } from './positionFacts';
 import {
   buildPortfolioAiSnapshot,
   type PortfolioAiPositionInput,
   type PortfolioAiSnapshot,
 } from './snapshot';
 
-export function toPortfolioAiPositions(positions: Position[]): PortfolioAiPositionInput[] {
-  return positions.map(pos => ({
+export function toPortfolioAiPositions(positions: Position[], nowMs: number = Date.now()): PortfolioAiPositionInput[] {
+  return positions.map(pos => {
+    const facts = buildPositionFacts(pos, nowMs);
+    return {
     key: pos.key,
     symbol: pos.symbol,
     strategy: pos.strategy,
@@ -28,7 +31,10 @@ export function toPortfolioAiPositions(positions: Position[]): PortfolioAiPositi
     hitTarget: pos.hitTarget === true,
     hasGtc: pos.hasGtc === true,
     pmccPaired: isPairedPmccLong(pos, positions),
-  }));
+    factLines: facts.lines,
+    factFigures: facts.figures,
+    };
+  });
 }
 
 export function buildPortfolioAiSnapshotFromPage(args: {
@@ -39,7 +45,7 @@ export function buildPortfolioAiSnapshotFromPage(args: {
 }): PortfolioAiSnapshot {
   return buildPortfolioAiSnapshot({
     generatedAt: (args.now ?? new Date()).toISOString(),
-    positions: toPortfolioAiPositions(args.positions),
+    positions: toPortfolioAiPositions(args.positions, (args.now ?? new Date()).getTime()),
     thetaPerDay: args.thetaPerDay,
     leverageGroups: args.leverageGroups.map(group => ({
       economicUnderlying: group.economicUnderlying,
