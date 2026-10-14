@@ -139,6 +139,7 @@ import { netQuoteFromLegs } from '@/lib/entry-walk/broker';
 import { buildFillRecord, recordWalkFill } from '@/lib/entry-walk/fillLog';
 import { tickTableFromNestedChain } from '@/lib/portfolio/tickSize';
 import { buildCspOrderLeg, computeCspMaxLoss } from '@/lib/scans/cspOrderMath';
+import { cspEntryLimitPerShare, cspPerShareToContractDollars, buildCspEntryPayload } from '@/lib/scans/cspEntryUnits';
 import { guardCspOrder } from '@/lib/scans/cspOrderSubmission';
 import type {
   SortField, SecondarySortField, SortSpec, SortableMetrics, OiEligibilityResult,
@@ -2739,6 +2740,20 @@ async function getAccountNumber(): Promise<string> {
   return requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
 }
 
+// CSP-UNITS-0001: TastyTrade nests the real reason under error.errors[]; the top-level message alone
+// ("One or more preflight checks failed") hid it. Show both.
+function brokerErrorText(data: any, fallback: string): string {
+  const parts: string[] = [];
+  const top = data?.error?.message;
+  if (top) parts.push(String(top));
+  const details = Array.isArray(data?.error?.errors) ? data.error.errors : Array.isArray(data?.errors) ? data.errors : [];
+  for (const d of details) {
+    const m = d?.message ?? d?.code;
+    if (m && !parts.includes(String(m))) parts.push(String(m));
+  }
+  return parts.length ? parts.join(' — ') : fallback;
+}
+
 // CSP-ORDERS-0001 -- single-leg CSP order placement, a dedicated modal per
 // Quinn's call (matching the existing PMCC precedent of its own
 // PmccTradeModal, rather than a 12th branch in the already-dense generic
@@ -2771,7 +2786,8 @@ function CspTradeModal({ result, th, onClose, qualification }: {
   const [walkOn, setWalkOn] = useState(false);
   const walk = useEntryWalk();
 
-  const [entryLimit, setEntryLimit] = useState(parseFloat((c.credit ?? 0).toFixed(2)));
+  // CSP-UNITS-0001: entryLimit is PER SHARE (what the broker takes); c.credit is total dollars.
+  const [entryLimit, setEntryLimit] = useState(cspEntryLimitPerShare(c));
   const [gtcPct, setGtcPct] = useState(50); // Ian, 2026-09-22: same defaults as spreads -- no CSP-specific default needed.
   const [stopMultiple, setStopMultiple] = useState(2);
 
@@ -2788,12 +2804,12 @@ function CspTradeModal({ result, th, onClose, qualification }: {
   const stopLimit = parseFloat((stopTrigger * 1.10).toFixed(2));
 
   const legBuild = buildCspOrderLeg(c.shortOccSymbol, quantity, result.underlyingType === 'index');
-  const maxLoss = computeCspMaxLoss(c.shortStrike, entryLimit, quantity);
+  const maxLoss = computeCspMaxLoss(c.shortStrike, cspPerShareToContractDollars(entryLimit), quantity);
   const requiredCash = c.shortStrike * 100 * quantity;
 
   const buildOtocoPayload = () => {
     if (!legBuild.ok) throw new Error(legBuild.reason);
-    return buildCreditEntryOtoco({ entryCredit: entryLimit, profitBuyback: gtcBuyback, stopTrigger, stopLimit, quantity, legs: [legBuild.leg] });
+    return buildCspEntryPayload({ entryPerShare: entryLimit, gtcPct, stopMultiple, quantity, leg: legBuild.leg });
   };
 
   const refreshExecutionQuote = async (expectedCredit?: number) => {
@@ -2818,7 +2834,7 @@ function CspTradeModal({ result, th, onClose, qualification }: {
   // Diane's mock: a freshly re-fetched collateral figure shown right before
   // Place, distinct from -- and never trusted from -- whatever the screen
   // showed when this modal opened.
-  const refreshCapital = async (creditPerContract: number = entryLimit): Promise<boolean> => {
+  const refreshCapital = async (creditPerContract: number = cspPerShareToContractDollars(entryLimit)): Promise<boolean> => {
     const token = await getAccessToken();
     const capital = await getCspCapitalContext(token);
     const guard = guardCspOrder(capital, { strike: c.shortStrike, creditPerContract, quantity });
@@ -2837,7 +2853,7 @@ function CspTradeModal({ result, th, onClose, qualification }: {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Dry run failed (${res.status})`);
+      if (!res.ok) throw new Error(brokerErrorText(data, `Dry run failed (${res.status})`));
       setDryRunResult(data?.data);
       setPhase('confirm');
     } catch (e: any) {
@@ -2864,7 +2880,7 @@ function CspTradeModal({ result, th, onClose, qualification }: {
       const ladder = buildWalkLadder({ side: 'credit', netBid: quote.netBid, netAsk: quote.netAsk, legSpreads: quote.legSpreads, minCredit: null, tickTable });
       if (!ladder.ok) throw new Error(`Price walking is off for this order. ${ladder.message} Untick "Walk the price" to place it normally.`);
       const firstPrice = ladder.prices[0];
-      const capitalOk = await refreshCapital(firstPrice);
+      const capitalOk = await refreshCapital(cspPerShareToContractDollars(firstPrice));
       if (!capitalOk) throw new Error('Collateral is no longer sufficient for this order. Refresh and try a smaller quantity.');
       const accountNumber = await getAccountNumber();
       const walkLeg = legBuild.leg;
@@ -2904,7 +2920,7 @@ function CspTradeModal({ result, th, onClose, qualification }: {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(buildPayload(firstPrice)),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
+      if (!res.ok) throw new Error(brokerErrorText(data, `Order failed (${res.status})`));
       const firstOrderId = data?.data?.['complex-order']?.id;
       if (firstOrderId == null) throw new Error('The broker did not return an order id. Check Pending orders before trying again.');
       await saveNote(data);
@@ -2946,7 +2962,7 @@ function CspTradeModal({ result, th, onClose, qualification }: {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
+      if (!res.ok) throw new Error(brokerErrorText(data, `Order failed (${res.status})`));
       const submittedOrderId = data?.data?.['complex-order']?.id ?? data?.data?.order?.id ?? 'submitted';
       setOrderId(submittedOrderId);
       // QUAL-STATES-0001 phase 3: record what the screener said about this put and whether the trader
@@ -3009,7 +3025,7 @@ function CspTradeModal({ result, th, onClose, qualification }: {
           </div>
           <RsiLine symbol={result.symbol} th={th} />
           <div className="flex justify-between text-xs items-center">
-            <span className={th.textFaint}>Entry limit / contract</span>
+            <span className={th.textFaint}>Entry limit / share <span className="text-[10px]">(${cspPerShareToContractDollars(entryLimit).toLocaleString()} / contract)</span></span>
             <div className="flex items-center gap-1">
               <button onClick={() => setEntryLimit(v => parseFloat(Math.max(0.01, v - 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs`}>−</button>
               <span className="text-emerald-400 font-bold text-xs w-12 text-center">${entryLimit.toFixed(2)}</span>
