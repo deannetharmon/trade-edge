@@ -20,7 +20,7 @@ import { ANALYSIS_COLUMNS, columnsForView } from './model/columns';
 import { activeFilterCount, DEFAULT_FILTERS, matchesAnalysisFilters } from './model/filters';
 import { DEFAULT_PREFERENCES, loadPreferences, savePreferences } from './model/preferences';
 import { buildCapitalViewModel, buildMoneynessMovementViewModel, buildMoneynessViewModel, comparisonTone, SEMANTIC_TONE_CLASS, stopPresentation, stopPresentationForPosition, type SemanticTone } from './model/presentation';
-import { buildBreakevenViewModel, priceBufferFor } from './model/breakeven';
+import { buildBreakevenViewModel, buildLongOptionOutlook, priceBufferFor, type LongOptionOutlook } from './model/breakeven';
 import { buildLongOptionRecovery } from './model/longOptionRecovery';
 import { equityEffectSortValue, signedMoney, sumEquityEffect } from './model/equityEffect';
 import type { AnalysisColumnId, AnalysisViewId, ExistingIncomeOpportunity, FinancialAggregate, PositionAnalysisFilters, PositionsWorkspaceModel, SymbolGroupViewModel } from './model/types';
@@ -52,6 +52,27 @@ const money = (value: number | null) => value == null || !Number.isFinite(value)
 const quotePrice = (value: number | null) => value == null || !Number.isFinite(value) ? 'Unavailable' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 const moneyExact = (value: number | null) => value == null || !Number.isFinite(value) ? 'Unavailable' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 const number = (value: number | null | undefined, digits = 1) => value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits);
+// LONG-OUTLOOK-0001 (Diane): a bought option's distance to its at-expiration breakeven. Price Buffer is a credit-spread
+// cushion; for a bought call or put the same number is ground still to cover, so it reads "Needs", is amber (never red,
+// it is not a loss) until the breakeven is passed, then green. The thin bar is the one the Close Value cell already uses.
+function LongBreakevenGap({ outlook }: { outlook: LongOptionOutlook }) {
+  const reached = outlook.breakevenReached;
+  const sign = outlook.direction === 'UP' ? '+' : '−';
+  const amount = moneyExact(Math.abs(outlook.gapDollars));
+  const pctText = outlook.gapPct == null ? '' : Math.abs(outlook.gapPct).toFixed(1);
+  const progressPct = Math.round(outlook.rangeProgress * 100);
+  const gapText = reached
+    ? `Past B/E by ${amount}${pctText ? ` (${pctText}%)` : ''}`
+    : `Needs ${sign}${amount}${pctText ? ` (${sign}${pctText}%)` : ''}`;
+  return (
+    <>
+      <span className={`block ${SEMANTIC_TONE_CLASS[reached ? 'positive' : 'warning']}`} data-testid="breakeven-gap" title={reached ? `The stock is past the at-expiration breakeven of ${moneyExact(outlook.breakeven)}` : `How far the stock still has to move ${outlook.direction === 'UP' ? 'up' : 'down'} to reach the at-expiration breakeven of ${moneyExact(outlook.breakeven)}`}>{gapText}</span>
+      <span className="mt-1 block h-1.5 w-24 overflow-hidden rounded bg-white/10" aria-hidden="true" data-testid="breakeven-range" data-progress={progressPct} title={`${progressPct}% of the way from the ${moneyExact(outlook.strike)} strike to the ${moneyExact(outlook.breakeven)} breakeven`}>
+        <span className={`block h-full ${reached ? 'bg-emerald-400' : 'bg-amber-300'}`} style={{ width: `${Math.max(2, progressPct)}%` }} />
+      </span>
+    </>
+  );
+}
 const POSITION_NOTE_MAX_LENGTH = 150;
 const INDEX_CHART_SYMBOLS: Record<string, string> = { SPX: '^GSPC', SPXW: '^GSPC', NDX: '^NDX', RUT: '^RUT', VIX: '^VIX', DJX: '^DJI' };
 
@@ -457,7 +478,7 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
       case 'value': return equityEffectSortValue(position);
       case 'pnl': return position.closeNowPnl ?? position.pnl ?? null;
       case 'netEdge': return netEdgeLive(position);
-      case 'pop': return position.pop;
+      case 'pop': return position.pop ?? buildLongOptionOutlook(position)?.popBreakeven ?? null;
       case 'volatility': return position.ivr;
       default: return null;
     }
@@ -696,6 +717,10 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
   const buffer = priceBufferFor(breakeven, p.stockPrice);
   const priceBuffer = buffer?.dollars ?? null;
   const priceBufferPct = buffer?.pct ?? null;
+  // LONG-OUTLOOK-0001: bought call / put only (null for every other structure, which keeps the original Price Buffer line).
+  const longOutlook = buildLongOptionOutlook(p, breakeven);
+  const popStrike = p.popVsStrike ?? longOutlook?.popStrike ?? null;
+  const popBreakeven = p.pop ?? longOutlook?.popBreakeven ?? null;
   const entryTone = p.entryPriceEffect === 'Credit' ? 'positive' : p.entryPriceEffect === 'Debit' ? 'warning' : 'neutral';
   const firstPnl = first?.pnl;
   const dayDetail = positionDayChangeDetail(p, Date.now());
@@ -703,7 +728,7 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
     identity: <><b className="text-white">{p.symbol}</b><span className="block text-amber-300">{standaloneLeap ? 'LEAPS CALL' : p.strategy}</span><span className={th.textFaint}>{standaloneLeap ? 'Standalone · ' : ''}{p.quantity} contract{p.quantity === 1 ? '' : 's'}</span><span className="mt-1 block"><IntentSelect position={p} onIntentChange={onIntentChange} /></span><span className="mt-1 block"><ChartLinkButton symbol={p.symbol} chartSymbol={INDEX_CHART_SYMBOLS[p.symbol.toUpperCase()] ?? p.symbol} instanceKey={p.key} th={th} showChart={chartOpen} setShowChart={setChartOpen} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} /></span>{earningsLine && <span className={`mt-1 block ${earningsLine.beforeExpiry ? 'text-amber-300' : th.textFaint}`} title={earningsLine.beforeExpiry ? 'Earnings fall on or before this position expires' : 'Next earnings date; it falls after this position expires'} data-testid="next-earnings">{earningsLine.text}</span>}</>,
     dates: <>{p.entryDate ?? 'Entry unavailable'}<b className="block text-white">{p.expDate}</b><span className="block text-white/55"><span className="font-bold text-white/80">DTE:</span> {first?.dte ?? p.dteAtEntry ?? '—'} <span className="px-1 text-white/30">→</span> <span className="font-bold text-white">{p.dte}</span></span></>,
     underlying: <>{p.stockPriceAtEntry != null && p.stockPrice != null ? <span className="block text-white/55"><span className="font-bold text-white/80">Price:</span> {quotePrice(p.stockPriceAtEntry)} <span className="px-1 text-white/30">→</span> <span className="font-bold text-white">{quotePrice(p.stockPrice)}</span></span> : <b className="block text-white">{quotePrice(p.stockPrice)}</b>}{moneynessMovement ? <span className={`mt-1 block ${SEMANTIC_TONE_CLASS[moneynessMovement.tone]}`}>{moneynessMovement.entry.state === moneynessMovement.current.state ? `${moneynessMovement.entry.distancePct.toFixed(1)}% → ${moneynessMovement.current.distancePct.toFixed(1)}% ${moneynessMovement.current.state} (${moneynessMovement.changePct >= 0 ? '+' : ''}${moneynessMovement.changePct.toFixed(1)}%)` : `${moneynessMovement.entry.distancePct.toFixed(1)}% ${moneynessMovement.entry.state} → ${moneynessMovement.current.distancePct.toFixed(1)}% ${moneynessMovement.current.state}`}</span> : moneyness ? <span className={`block ${SEMANTIC_TONE_CLASS[moneyness.tone]}`}>{moneyness.state === 'ATM' ? 'ATM' : `${moneyness.distancePct.toFixed(1)}% ${moneyness.state}`}</span> : <span className={`block ${th.textFaint}`} title="No unambiguous canonical management leg">Strike distance unavailable</span>}</>,
-    strike: <><span className="block">{p.legs.map(leg => `${leg.direction === 'Short' ? 'Short ' : 'Long '}${leg.strikePrice}${leg.optionType}`).join(' · ') || '—'}</span><span className={`mt-1 block ${breakeven.values.length ? 'text-white' : th.textFaint}`} title={breakeven.unavailableReason ?? undefined}>{breakeven.values.length ? `AT-EXP B/E ${breakeven.values.map(value => moneyExact(value)).join(' / ')}` : 'AT-EXP B/E —'}</span>{priceBuffer != null && <span className={`block ${SEMANTIC_TONE_CLASS[priceBuffer >= 0 ? 'positive' : 'negative']}`}>Price Buffer {priceBuffer >= 0 ? '' : '−'}{money(Math.abs(priceBuffer))}{priceBufferPct != null ? ` (${priceBufferPct.toFixed(1)}%)` : ''}</span>}{valueSplit && <><span className={`mt-1 block ${th.textMuted}`} data-testid="extrinsic-now" title={valueSplit.side === 'short' ? 'Extrinsic value still in the price you would pay to close: what is left to earn as time passes' : 'Time and volatility value in the option price: the option price minus how far it is in the money'}>{valueSplit.side === 'short' ? 'Extrinsic left' : 'Extrinsic'} {moneyExact(valueSplit.extrinsic.now)}{valueSplit.extrinsicPctOfValue != null ? ` (${valueSplit.extrinsicPctOfValue.toFixed(0)}%)` : ''}</span>{valueSplit.extrinsic.atEntry != null && valueSplit.extrinsic.change != null && <span className={`block ${th.textFaint}`} data-testid="extrinsic-was">was {moneyExact(valueSplit.extrinsic.atEntry)} at entry ({valueSplit.extrinsic.change >= 0 ? '+' : '−'}{moneyExact(Math.abs(valueSplit.extrinsic.change))})</span>}</>}</>,
+    strike: <><span className="block">{p.legs.map(leg => `${leg.direction === 'Short' ? 'Short ' : 'Long '}${leg.strikePrice}${leg.optionType}`).join(' · ') || '—'}</span><span className={`mt-1 block ${breakeven.values.length ? 'text-white' : th.textFaint}`} title={breakeven.unavailableReason ?? undefined}>{breakeven.values.length ? `AT-EXP B/E ${breakeven.values.map(value => moneyExact(value)).join(' / ')}` : 'AT-EXP B/E —'}</span>{longOutlook ? <LongBreakevenGap outlook={longOutlook} /> : priceBuffer != null && <span className={`block ${SEMANTIC_TONE_CLASS[priceBuffer >= 0 ? 'positive' : 'negative']}`}>Price Buffer {priceBuffer >= 0 ? '' : '−'}{money(Math.abs(priceBuffer))}{priceBufferPct != null ? ` (${priceBufferPct.toFixed(1)}%)` : ''}</span>}{valueSplit && <><span className={`mt-1 block ${th.textMuted}`} data-testid="extrinsic-now" title={valueSplit.side === 'short' ? 'Extrinsic value still in the price you would pay to close: what is left to earn as time passes' : 'Time and volatility value in the option price: the option price minus how far it is in the money'}>{valueSplit.side === 'short' ? 'Extrinsic left' : 'Extrinsic'} {moneyExact(valueSplit.extrinsic.now)}{valueSplit.extrinsicPctOfValue != null ? ` (${valueSplit.extrinsicPctOfValue.toFixed(0)}%)` : ''}</span>{valueSplit.extrinsic.atEntry != null && valueSplit.extrinsic.change != null && <span className={`block ${th.textFaint}`} data-testid="extrinsic-was">was {moneyExact(valueSplit.extrinsic.atEntry)} at entry ({valueSplit.extrinsic.change >= 0 ? '+' : '−'}{moneyExact(Math.abs(valueSplit.extrinsic.change))})</span>}</>}</>,
     capital: <><b className="text-white">{capital.label}</b>{capital.value == null ? <span className={`block max-w-40 ${th.textFaint}`} title={capital.reason}>{capital.reason}</span> : <span className="block">{capital.suffix ? `${capital.value}${capital.suffix}` : money(capital.value)}</span>}</>,
     entry: <><b className={SEMANTIC_TONE_CLASS[entryTone]}>{p.entryPriceEffect}</b><span className={`block ${SEMANTIC_TONE_CLASS[entryTone]}`}>{p.entryEconomicsComplete === false ? 'Unavailable' : money(p.entryCredit ?? p.creditReceived)}</span></>,
     // LONG-OPTION-RECOVERY-0001: bought options lead with what closing returns and how much of the debit that is.
@@ -745,12 +770,16 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
     // thresholds. Breakeven = "will I keep my credit" (existing p.pop).
     // Strike = "will price finish beyond my strike at expiration" (new,
     // p.popVsStrike) -- the terminal probability, not a touch/barrier
-    // probability (KEEP-CREDIT-0001 Dane review item 1). Both
-    // null for debit/long positions (NFLX/UBER/MRNA-style) -- same
-    // limitation calcPositionPop already has, not a regression.
+    // probability (KEEP-CREDIT-0001 Dane review item 1). Both stay
+    // null on Position for debit/long positions (NFLX/UBER/MRNA-style)
+    // because they feed the management-intent/objective logic, which was
+    // written for credit POP. LONG-OUTLOOK-0001: a bought call or put gets the
+    // same two readings from the same engine, computed here for display only
+    // (buildLongOptionOutlook). Strike is listed first and Breakeven second so
+    // each line sits beside its own price in the Strike / BE cell.
     pop: <>
-      <span className="block"><span className={th.textFaint}>Breakeven </span><b className="text-white">{p.pop == null ? '—' : `${p.pop.toFixed(1)}%`}</b></span>
-      <span className="block"><span className={th.textFaint}>Strike </span><b className="text-white">{p.popVsStrike == null ? '—' : `${p.popVsStrike.toFixed(1)}%`}</b></span>
+      <span className="block" data-testid="pop-strike" title={longOutlook ? `Chance the stock finishes ${longOutlook.direction === 'UP' ? 'above' : 'below'} the ${moneyExact(longOutlook.strike)} strike (in the money) at expiration. Model estimate from current IV.` : undefined}><span className={th.textFaint}>Strike </span><b className="text-white">{popStrike == null ? '—' : `${popStrike.toFixed(1)}%`}</b></span>
+      <span className="mt-1 block" data-testid="pop-breakeven" title={longOutlook ? `Chance the stock finishes ${longOutlook.direction === 'UP' ? 'above' : 'below'} the ${moneyExact(longOutlook.breakeven)} breakeven (a profit) at expiration. Model estimate from current IV.` : undefined}><span className={th.textFaint}>Breakeven </span><b className="text-white">{popBreakeven == null ? '—' : `${popBreakeven.toFixed(1)}%`}</b></span>
     </>,
     volatility: <>IV {number(p.iv)}%<br/>IVR {number(p.ivr)}</>,
     // GTC-SCOPE-0001: labeled by what this signal actually represents --
