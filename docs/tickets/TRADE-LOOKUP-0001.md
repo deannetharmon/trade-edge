@@ -1,6 +1,7 @@
 # TRADE-LOOKUP-0001 — Paste a group trade, inspect it on the chain
 
-Status: DRAFT v1 — needs Ian + Paul sign-off, Diane mock, Quinn architecture check before Dane builds.
+Status: v2, 2026-10-15. Ian approved (logic, risk, mock v2). Paul approved scope as recommended in session.
+Diane mock v2 published ("Trade Lookup Mock" canvas, 3 boards). Quinn architecture check still pending before UI code.
 
 ## Goal
 Dean pastes a trade post from his trading group. The app parses it, opens the live option chain for that
@@ -8,59 +9,72 @@ ticker and expiration with the posted contract highlighted, and shows nearby str
 pick the same trade or a neighbor with a different POP, then send it to the existing order dialog.
 
 ## Scope (v1)
-- CSP (short put) and CC (short call) only. Spreads, ICs and rolls are out of scope (none seen in samples).
-- Inspection only. No scoring, qualification or ranking logic changes. Order placement reuses the existing path.
+- CSP (short put) and CC (short call) only. Spreads, ICs and rolls are out of scope.
+- Inspection only. No scoring, qualification or ranking changes. Order placement reuses the existing path.
 - Entry point: a "Trade Lookup" box at the top of the Screener tab.
 - Browser-side TastyTrade calls only (Vercel IPs are blocked; token lives ~15 min).
 
 ## Parser rules
 - Tokens are recognized by shape, never by position (post order varies).
   - Expiry: `M/D`, `MM/DD`, optional year (`11/6`, `09/18`).
-  - Strike + type: optional `$`, number (decimals allowed, e.g. `75.5`), suffix `P` or `C` (`$120P`, `75.5P`, `16C`).
-  - Posted price: number after `@` (with or without `$`), or a bare decimal not otherwise matched (`75P 4.00 11/13`). Price is OPTIONAL.
-  - Ticker: 1–5 letters, not a keyword.
-  - Ignored keywords: `NEW`, `CSP`, `CC`, `COVERED`, `CALLS`, `@everyone`, usernames, emoji, reaction counts, body prose.
+  - Strike + type: optional `$`, number (decimals allowed, e.g. `75.5`), suffix `P` or `C`.
+  - Posted price: number after `@` (with or without `$`), or a bare decimal not otherwise matched (`75P 4.00 11/13`). Optional.
+  - Ticker: 1-5 letters, not a keyword.
+  - Ignored: `NEW`, `CSP`, `CC`, `COVERED`, `CALLS`, `@everyone`, usernames, timestamps (used only as the date reference), emoji, reaction counts, body prose.
 - Strategy comes from the suffix: `P` = CSP, `C` = CC. Keywords are never required.
-- `EXIT` post (e.g. `DFEN + GGLL EXIT`): recognized, answered with "Exit signal — no contract to look up".
-  Listing the tickers against open positions is v2.
-- Fail closed: zero or multiple strikes/expiries, no ticker, or an unreadable paste -> "Couldn't read this post". Never guess.
-- If the body mentions exit/roll (e.g. "exit the current cc and push this out"), show a "Looks like a roll" note. Roll math is v2.
-- Strike is matched against the real chain strikes; never rounded. No chain strike -> "Strike not listed" with nearest strikes.
+- `EXIT` post: recognized, answered "Exit signal. No contract to look up." Matching tickers to open positions is v2.
+- Fail closed: zero or multiple strikes/expiries, no ticker, or unreadable paste -> "Couldn't read this post". Never guess.
+- If the body mentions exit/roll, show "Looks like a roll". Roll math is v2.
+- Strike is matched against real chain strikes, never rounded. Not listed -> "Strike not listed" with nearest strikes.
 - Contracts default to 1.
 
-## Year resolution
+## Date resolution
 - If the paste includes a Discord timestamp (M/D/YY), use it as the reference date; otherwise use today.
 - Year = first occurrence of M/D on or after the reference date.
-- If the resolved expiry is already past today -> "This expiration has passed", no chain.
-- If the resolved expiry is more than 180 days out -> banner "Resolved to <full date> — confirm".
+- Resolved date already past today -> "This expiration has passed", no chain.
+- Resolved date is not a listed expiration for the ticker (for example a Saturday) -> "Not a listed expiration",
+  no chain, no confirm prompt.
+- Resolved date is listed but more than 180 days out -> banner "Resolved to <full date>, N days out. Confirm?".
 - The resolved full date is always shown.
 
 ## Chain view
-- Chain for the resolved expiration, with the posted contract highlighted.
-- Neighbors: 1–2 strikes either side, plus the same strike on the next expiration out.
-- Columns: strike, bid, ask, mid, delta, POP, credit, breakeven, max risk, DTE, open interest.
-- Posted price shown beside current mid with the difference ("posted $5.47, now $5.10").
-- Neighbors show credit and POP change versus the group's pick, sorted by closeness to the original — not by score.
-- Selecting any row sends it to the existing order dialog.
+- Chain for the resolved expiration with the posted contract highlighted.
+- Neighbors: 1-2 strikes either side, plus the same strike on the next expiration out. Sorted by closeness to the pick, not by score.
+- Header shows market state and quote time ("Market closed · quotes as of 4:00 PM MT") with a Refresh button.
+- Columns (CSP): strike, DTE, delta, POP, credit at mid with natural fill, bid/ask, breakeven, OI, credit vs pick, POP vs pick.
+  CC omits breakeven.
+- Column choice reuses the existing Column Visibility control and its category colors. Max risk is hidden by default
+  and always shown in the Selected bar. Do not build a new column control.
+- Posted price shown beside current mid with the difference; the post age is shown.
+- A leg with no bid/ask shows "no quote": Greeks and credit are blank, Select is disabled. Never fall back to last price.
+- Selecting a row opens the existing order dialog with a LIMIT order prefilled at mid; Dean can edit it.
 
 ## Math and data rules (Ian)
-- POP, breakeven, credit and max risk come from `lib/portfolio/positionMetrics.ts` (PM-0001). No second formula.
-- No bid/ask on a leg -> row shows "no quote". Never fall back to last price. Credit at mid, natural fill shown beside it.
-- Debit result -> debit label, never presented as a credit trade.
+- POP, breakeven, credit and max risk come from `lib/portfolio/positionMetrics.ts`. No second formula.
+- A debit result shows the debit label and is never presented as a credit trade.
 
-## Flags (advisory, never block, never feed a score)
-- DTE under 21; earnings inside the window (existing earnings data); short delta outside the Dean's band;
-  wide bid/ask; thin open interest; strike below cost basis (CC); daily RSI state as a read-only badge
-  from `lib/indicators/rsi.ts` / `rsiTurn.ts`.
-- CC coverage rule: a call may be sent to the order dialog only if covered by shares (>= 100 x contracts,
-  using the existing covered-call capacity model) or a paired LEAP (`isPairedPmccLong`,
-  `lib/portfolio-data/pmccPairDetection.ts`). Not covered -> "No share coverage — cannot be placed as a covered call",
-  inspection still works, order hand-off disabled. Naked calls are never offered.
+## Flags (advisory only: never block, never feed a score)
+- DTE under 21; short delta outside Dean's band (existing label); wide bid/ask; thin open interest;
+  strike below cost basis (CC); daily RSI as a read-only badge.
+- Liquidity thresholds (OI, bid/ask) come from the existing CSP/CC scan registry gates. No new numbers.
+- RSI wording comes from `lib/indicators/rsi.ts` / `rsiTurn.ts` labels. Do not invent copy.
+- Earnings flag only for single stocks. ETFs (SOXL, TQQQ, BITX, ETHU and similar) get no earnings flag.
+  Dane to find the existing instrument-type source; if none exists, raise it with Quinn before inventing a list.
 
-## Layout constraints
-- Parser, year resolution and flags live in `lib/tradeLookup/` (no named exports from any page.tsx).
+## Covered-call coverage rule
+- A call can go to the order dialog only if covered by shares (>= 100 x contracts, existing covered-call capacity model)
+  or a paired LEAP (`isPairedPmccLong`, `lib/portfolio-data/pmccPairDetection.ts`) whose expiry is AFTER the call's.
+- Not covered -> "No share coverage" panel, order hand-off disabled, inspection still works. Naked calls are never offered.
+
+## Layout and code constraints
+- Parser, date resolution and flags live in `lib/tradeLookup/` (no named exports from any page.tsx).
 - UI component in its own file; `app/screener/page.tsx` only mounts it.
-- Diane mock before UI code. Vercel preview (`next build`) is the authoritative build check.
+- Vercel preview (`next build`) is the authoritative build check.
+
+## Build order
+1. Parser + date resolution + golden fixtures (pure functions, no UI).
+2. Lookup service: chain fetch browser-side, neighbor selection, metrics via positionMetrics.
+3. UI to Diane's mock v2, after Quinn's check.
 
 ## Golden fixtures (parser unit tests)
 | Input | Expected |
@@ -72,14 +86,20 @@ pick the same trade or a neighbor with a different POP, then send it to the exis
 | `ETHU 8/21 15C @ 0.9 COVERED CALLS` | CC, ETHU, 08/21, C15, price 0.90 |
 | `BITX 8/28 16C @ 0.39 COVERED CALLS` | CC, BITX, 08/28, C16, price 0.39 |
 | `NEW BITX $16C 09/18` | CC, BITX, 09/18, C16, no price |
+| `NEW BITX $20C 6/18` | CC, BITX, 06/18/2027, C20, far-date confirm (246 days from 2026-10-15) |
 | `NEW SOXL 11/6 11/13 120P` | fail closed (two expiries) |
 | `hello world` | fail closed |
 
-Year cases: `ETHU 8/21 15C` pasted with timestamp 6/29/26 -> 08/21/2026, expired today -> "expiration has passed".
-Pasted with no timestamp on 2026-10-15 -> 08/21/2027, shows the "confirm" banner.
+Date cases (reference today 2026-10-15):
+- `ETHU 8/21 15C` with timestamp 6/29/26 -> 08/21/2026, "expiration has passed".
+- `ETHU 8/21 15C` with no timestamp -> 08/21/2027 is a Saturday, "Not a listed expiration".
 
 ## Non-goals / v2
-- Spreads, ICs, rolls (net credit vs open short call), exit posts matched to open positions, multi-post paste, saved post history.
+- Spreads, ICs, rolls (net credit vs open short call), exit posts matched to open positions, multi-post paste, saved history.
+- Leveraged-ETF concentration impact (amber 15%, red 25% tiers): waits on the approved concentration work.
 
 ## Approvals
-- [ ] Ian (logic/risk)  [ ] Paul (scope)  [ ] Diane (mock)  [ ] Quinn (architecture)
+- [x] Ian (logic, risk, mock v2) 2026-10-15
+- [x] Paul (scope as recommended in session) 2026-10-15
+- [x] Diane (mock v2 published)
+- [ ] Quinn (architecture): chain fetch placement, ETF instrument-type source
