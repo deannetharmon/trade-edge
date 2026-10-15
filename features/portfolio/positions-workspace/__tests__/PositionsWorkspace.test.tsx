@@ -306,7 +306,7 @@ describe('PositionsWorkspace', () => {
     expect(arrowClassFor('Ext')).toContain('text-red-400');     // extrinsic 12.24 -> 2.46: down, bad for the holder
   });
 
-  it('LONG-OUTLOOK-0001: a bought call says what it Needs (amber, not red), draws the strike-to-breakeven bar, and lists Strike then Breakeven odds', async () => {
+  it('LONG-OUTLOOK-0001: a bought call says what it Needs (amber, not red), draws the strike-to-breakeven bar, and lists ITM then Profit odds', async () => {
     const user = userEvent.setup();
     const nflx = { ...position, key: 'NFLX-1', symbol: 'NFLX', strategy: 'CALL', quantity: 1, dte: 337, iv: 48, stockPrice: 72.74, entryPriceEffect: 'Debit', entryCredit: 2085, pop: null, popVsStrike: null, legs: [{ symbol: 'c', optionType: 'C', strikePrice: 70, direction: 'Long', quantity: 1, avgOpenPrice: 20.85, currentPrice: 13.48 }] } as unknown as Position;
     const next = { ...model, analysisRows: [{ id: nflx.key, position: nflx, symbol: nflx.symbol, strategy: nflx.strategy, needsAttention: false }] };
@@ -321,8 +321,9 @@ describe('PositionsWorkspace', () => {
     expect(screen.queryByText(/Price Buffer/)).not.toBeInTheDocument();
     const strikeOdds = screen.getByTestId('pop-strike');
     const breakevenOdds = screen.getByTestId('pop-breakeven');
-    expect(strikeOdds).toHaveTextContent('Strike 44.1%');
-    expect(breakevenOdds).toHaveTextContent('Breakeven 23.8%');
+    expect(strikeOdds).toHaveTextContent('ITM 44.1%');
+    expect(breakevenOdds).toHaveTextContent('Profit 23.8%');
+    expect(breakevenOdds).not.toHaveTextContent('Breakeven');
     expect(strikeOdds.compareDocumentPosition(breakevenOdds) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(strikeOdds).toHaveAttribute('title', expect.stringContaining('above the $70.00 strike'));
   });

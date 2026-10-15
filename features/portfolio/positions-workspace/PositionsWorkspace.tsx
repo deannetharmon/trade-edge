@@ -775,11 +775,13 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
     // because they feed the management-intent/objective logic, which was
     // written for credit POP. LONG-OUTLOOK-0001: a bought call or put gets the
     // same two readings from the same engine, computed here for display only
-    // (buildLongOptionOutlook). Strike is listed first and Breakeven second so
-    // each line sits beside its own price in the Strike / BE cell.
+    // (buildLongOptionOutlook). Labeled ITM (finishes past the strike) and Profit
+    // (finishes past breakeven) because "Strike" read as a profit chance; credit
+    // rows keep Strike / Breakeven. ITM is first so each line sits beside its own
+    // price in the Strike / BE cell.
     pop: <>
-      <span className="block" data-testid="pop-strike" title={longOutlook ? `Chance the stock finishes ${longOutlook.direction === 'UP' ? 'above' : 'below'} the ${moneyExact(longOutlook.strike)} strike (in the money) at expiration. Model estimate from current IV.` : undefined}><span className={th.textFaint}>Strike </span><b className="text-white">{popStrike == null ? '—' : `${popStrike.toFixed(1)}%`}</b></span>
-      <span className="mt-1 block" data-testid="pop-breakeven" title={longOutlook ? `Chance the stock finishes ${longOutlook.direction === 'UP' ? 'above' : 'below'} the ${moneyExact(longOutlook.breakeven)} breakeven (a profit) at expiration. Model estimate from current IV.` : undefined}><span className={th.textFaint}>Breakeven </span><b className="text-white">{popBreakeven == null ? '—' : `${popBreakeven.toFixed(1)}%`}</b></span>
+      <span className="block" data-testid="pop-strike" title={longOutlook ? `Chance the stock finishes ${longOutlook.direction === 'UP' ? 'above' : 'below'} the ${moneyExact(longOutlook.strike)} strike (in the money) at expiration. Model estimate from current IV.` : undefined}><span className={th.textFaint}>{longOutlook ? 'ITM' : 'Strike'} </span><b className="text-white">{popStrike == null ? '—' : `${popStrike.toFixed(1)}%`}</b></span>
+      <span className="mt-1 block" data-testid="pop-breakeven" title={longOutlook ? `Chance the stock finishes ${longOutlook.direction === 'UP' ? 'above' : 'below'} the ${moneyExact(longOutlook.breakeven)} breakeven (a profit) at expiration. Model estimate from current IV.` : undefined}><span className={th.textFaint}>{longOutlook ? 'Profit' : 'Breakeven'} </span><b className="text-white">{popBreakeven == null ? '—' : `${popBreakeven.toFixed(1)}%`}</b></span>
     </>,
     volatility: <>IV {number(p.iv)}%<br/>IVR {number(p.ivr)}</>,
     // GTC-SCOPE-0001: labeled by what this signal actually represents --
