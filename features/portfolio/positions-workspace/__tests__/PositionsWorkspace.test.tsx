@@ -306,6 +306,53 @@ describe('PositionsWorkspace', () => {
     expect(arrowClassFor('Ext')).toContain('text-red-400');     // extrinsic 12.24 -> 2.46: down, bad for the holder
   });
 
+  it('LONG-OUTLOOK-0001: a bought call says what it Needs (amber, not red), draws the strike-to-breakeven bar, and lists Strike then Breakeven odds', async () => {
+    const user = userEvent.setup();
+    const nflx = { ...position, key: 'NFLX-1', symbol: 'NFLX', strategy: 'CALL', quantity: 1, dte: 337, iv: 48, stockPrice: 72.74, entryPriceEffect: 'Debit', entryCredit: 2085, pop: null, popVsStrike: null, legs: [{ symbol: 'c', optionType: 'C', strikePrice: 70, direction: 'Long', quantity: 1, avgOpenPrice: 20.85, currentPrice: 13.48 }] } as unknown as Position;
+    const next = { ...model, analysisRows: [{ id: nflx.key, position: nflx, symbol: nflx.symbol, strategy: nflx.strategy, needsAttention: false }] };
+    render(<PositionsWorkspace model={next} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.click(screen.getByRole('tab', { name: 'Full Detail' })); // the POP column is not in the default Management view
+    expect(screen.getByText('AT-EXP B/E $90.85')).toBeInTheDocument();
+    expect(screen.getByTestId('breakeven-gap')).toHaveTextContent('Needs +$18.11 (+24.9%)');
+    expect(screen.getByTestId('breakeven-gap')).toHaveClass('text-amber-300');
+    expect(screen.getByTestId('breakeven-gap')).not.toHaveClass('text-red-400');
+    expect(screen.getByTestId('breakeven-range')).toHaveAttribute('data-progress', '13');
+    expect(screen.queryByText(/Price Buffer/)).not.toBeInTheDocument();
+    const strikeOdds = screen.getByTestId('pop-strike');
+    const breakevenOdds = screen.getByTestId('pop-breakeven');
+    expect(strikeOdds).toHaveTextContent('Strike 44.1%');
+    expect(breakevenOdds).toHaveTextContent('Breakeven 23.8%');
+    expect(strikeOdds.compareDocumentPosition(breakevenOdds) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(strikeOdds).toHaveAttribute('title', expect.stringContaining('above the $70.00 strike'));
+  });
+
+  it('LONG-OUTLOOK-0001: a bought call past its breakeven says so in green with a full bar', async () => {
+    const user = userEvent.setup();
+    const winner = { ...position, key: 'NFLX-2', symbol: 'NFLX', strategy: 'CALL', quantity: 1, dte: 200, iv: 40, stockPrice: 95, entryPriceEffect: 'Debit', entryCredit: 2085, legs: [{ symbol: 'c', optionType: 'C', strikePrice: 70, direction: 'Long', quantity: 1, avgOpenPrice: 20.85, currentPrice: 30 }] } as unknown as Position;
+    const next = { ...model, analysisRows: [{ id: winner.key, position: winner, symbol: winner.symbol, strategy: winner.strategy, needsAttention: false }] };
+    render(<PositionsWorkspace model={next} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getByTestId('breakeven-gap')).toHaveTextContent('Past B/E by $4.15 (4.4%)');
+    expect(screen.getByTestId('breakeven-gap')).toHaveClass('text-emerald-400');
+    expect(screen.getByTestId('breakeven-range')).toHaveAttribute('data-progress', '100');
+  });
+
+  it('LONG-OUTLOOK-0001: a sold put keeps Price Buffer and its stored odds, now with Strike above Breakeven', async () => {
+    const user = userEvent.setup();
+    const put = { ...position, strategy: 'PUT', quantity: 1, entryPriceEffect: 'Credit', entryCredit: 935, stockPrice: 200, pop: 72.5, popVsStrike: 81.2, legs: [{ symbol: 'p', optionType: 'P', strikePrice: 175, direction: 'Short', quantity: 1, avgOpenPrice: 9.35, currentPrice: 9.1 }] } as unknown as Position;
+    const next = { ...model, analysisRows: [{ id: put.key, position: put, symbol: put.symbol, strategy: put.strategy, needsAttention: false }] };
+    render(<PositionsWorkspace model={next} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.click(screen.getByRole('tab', { name: 'Full Detail' })); // the POP column is not in the default Management view
+    expect(screen.getByText(/Price Buffer/)).toBeInTheDocument();
+    expect(screen.queryByTestId('breakeven-gap')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('breakeven-range')).not.toBeInTheDocument();
+    expect(screen.getByTestId('pop-strike')).toHaveTextContent('Strike 81.2%');
+    expect(screen.getByTestId('pop-breakeven')).toHaveTextContent('Breakeven 72.5%');
+    expect(screen.getByTestId('pop-strike')).not.toHaveAttribute('title');
+  });
+
   it('a sold put reads the other way: extrinsic left is what remains to earn, and it falling is green', async () => {
     const user = userEvent.setup();
     const put = { ...position, strategy: 'PUT', intent: 'income', quantity: 1, entryPriceEffect: 'Credit', stockPrice: 200, stockPriceAtEntry: 210, netVega: -9, legs: [{ symbol: 'p', optionType: 'P', strikePrice: 175, direction: 'Short', quantity: 1, avgOpenPrice: 9.35, currentPrice: 4.1 }] } as unknown as Position;
