@@ -9,6 +9,10 @@
 
 Last updated: 2026-10-06 (ANALYTICS-0001 go)
 
+## Trade Lookup — 2026-10-15
+
+- **TRADE-LOOKUP-0001** — slice 1 IMPLEMENTED 2026-10-15 (`lib/tradeLookup/`: pasted-post parser, expiration resolver, 39 tests). Paste a group post (CSP or covered call), see the chain with the posted contract highlighted, compare neighbors, send your pick to the order dialog. Inspection only: no scoring, qualification or order-path change. Ian approved scope and mock v2; Paul approved scope; Diane's mock v2 is on a claude.ai canvas. Entry point: a TRADE LOOKUP launcher in the Screener sidebar opening a `ScanModalShell` modal. **Next:** slice 2 lookup service (chain fetch, neighbors, metrics from positionMetrics), slice 3 modal and launcher; Quinn checks chain-fetch placement and the ETF source first. Ticket: `docs/tickets/TRADE-LOOKUP-0001.md`.
+
 ## Portfolio queue — 2026-10-05 (Dean, after the GGLL and SOXL reviews)
 
 0. **PCT-UNITS-0001** — FIXED 2026-10-05. Recommendations and the health score multiplied any P/L % or buffer % between -1 and 1 by 100 (0.4% read as 40%), producing the false SOXL "Take Profit" and making a strike 0.5% away look 50% away. Now read as given; IV/IVR/POP normalizers (which genuinely receive 0.63-style values) unchanged. Ian approved (units bug, no threshold change). Test: `lib/portfolio-intelligence/__tests__/percentUnits.test.ts` (5 of 7 fail on the old code).
