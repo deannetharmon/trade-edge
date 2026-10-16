@@ -79,6 +79,8 @@ import { CcTradeModal, type CcOrderInput } from '@/features/screener/components/
 import { defaultCcOrderDeps } from '@/lib/scans/ccOrderDeps';
 import { ccOrderInputFromScanResult } from '@/lib/scans/ccScanOrderInput';
 import { calculateCspScore } from '@/lib/scans/cspScore';
+import { scoreBand, type ScoreBandFloors } from '@/lib/scans/scoreBands';
+import { CspScoreBadge, CspScoreBreakdownPanel, SCORE_BAND_BORDER_L } from '@/features/screener/components/CspScoreBreakdown';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
@@ -6018,6 +6020,7 @@ function CspReturnThisCycleRow({ candidate }: { candidate: SpreadCandidate }) {
 function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade, onTradeCsp, onTradeCc, cachedEntry, existingPositions }: ResultCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showBestFinder, setShowBestFinder] = useState(false);
+  const [showCspScore, setShowCspScore] = useState(false);
   const [showChart, setShowChart] = useState(false);
   const [sparkData, setSparkData] = useState<number[] | null>(null);
   const [sparkLoading, setSparkLoading] = useState(false);
@@ -6129,6 +6132,18 @@ function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade,
   const cspScore = c?.strategy === 'CSP' && c.cspScore?.scoreStatus === 'AVAILABLE'
     ? Math.round(c.cspScore.total as number)
     : null;
+  // CSP-SCORE-REVIEW-0001: the CSP badge is colored by score band (floors from
+  // the live Rank config, default 75/55/35), never by strategy, and opens the
+  // component breakdown. One score per CSP card: the legacy Rank badge is not
+  // rendered for CSP.
+  const cspBandFloors: ScoreBandFloors | undefined = rankConfig
+    ? { green: rankConfig.thresholdGreen, yellow: rankConfig.thresholdYellow, orange: rankConfig.thresholdOrange }
+    : undefined;
+  const cspScoreResult = c?.strategy === 'CSP' && cspScore != null && c.cspScore?.scoreStatus === 'AVAILABLE' ? c.cspScore : null;
+  const cspBand = cspScoreResult && cspScore != null ? scoreBand(cspScore, cspBandFloors) : null;
+  const cspScoreBadge = cspScoreResult && cspScore != null && cspBand
+    ? <CspScoreBadge score={cspScore} band={cspBand} open={showCspScore} onToggle={() => setShowCspScore(v => !v)} />
+    : null;
   // Compute alternate strategy score for the + IC / + BPS badge
   // Compute visible strategy scores for this same symbol/expiration.
 // This is diagnostic first: it lets us see whether BPS, BCS, and IC are being
@@ -6230,6 +6245,7 @@ const strategyScores = useMemo(() => {
 
   const scoreBorderL = qualDerivation?.state === 'disqualified' ? 'border-l-4 border-l-red-500'
     : qualDerivation?.state === 'caution' ? 'border-l-4 border-l-amber-500'
+    : cspBand ? SCORE_BAND_BORDER_L[cspBand]
     : light
     ? light.emoji === '🟢' ? 'border-l-4 border-l-emerald-500'
     : light.emoji === '🟡' ? 'border-l-4 border-l-yellow-400'
@@ -6272,7 +6288,7 @@ const strategyScores = useMemo(() => {
         {/* Col 2: Badges — fixed width */}
         <div className="w-52 shrink-0 flex items-center gap-1 flex-wrap">
           {qualDerivation && <QualificationBadge derivation={qualDerivation} checks={qualChecks} />}
-          {isRankMode && scored && tierLight && (
+          {isRankMode && result.strategy !== 'CSP' && scored && tierLight && (
             <span className={`text-[9px] px-2 py-0.5 border rounded shrink-0 font-bold ${tierLight.color} ${tierLight.border} ${tierLight.bg}`}>
               {disqualifiedHere ? `Score ${scored.score} · not eligible` : `${tierLight.emoji} ${scored.score} — ${tierLight.label}`}
             </span>
@@ -6294,7 +6310,7 @@ const strategyScores = useMemo(() => {
                 : 'bg-blue-500/15 border-blue-500 text-blue-500';
             return (
               <>
-                <span
+                {cspScoreBadge ?? <span
                   title={result.strategy === 'CSP'
                     ? (cspScore != null ? `CSP Score: ${cspScore}` : 'CSP Score unavailable')
                     : (primary && primary.score != null ? `Strategy score (this candidate): ${primary.score}` : (primary?.reason ?? undefined))}
@@ -6304,7 +6320,7 @@ const strategyScores = useMemo(() => {
                   {result.strategy === 'CSP'
                     ? <span className="font-bold text-[9px]">{cspScore ?? '—'}</span>
                     : primary?.score != null && <span className="font-bold text-[9px]">{primary.score}</span>}
-                </span>
+                </span>}
                 {alternates.map(s => (
                   <span
                     key={s.strategy}
@@ -6318,7 +6334,7 @@ const strategyScores = useMemo(() => {
               </>
             );
           })() : (
-  <span className={`text-[10px] px-2 py-0.5 border rounded-md shrink-0 font-bold ${stratBadge} flex items-center gap-1`}>
+  cspScoreBadge ?? <span className={`text-[10px] px-2 py-0.5 border rounded-md shrink-0 font-bold ${stratBadge} flex items-center gap-1`}>
     {result.strategy}{result.strategy === 'CSP'
       ? <span className="font-bold text-[9px]">{cspScore ?? '—'}</span>
       : scored && <span className="font-bold text-[9px]">{scored.score}</span>}
@@ -6489,6 +6505,22 @@ const strategyScores = useMemo(() => {
           <div className={`${th.textFaint} text-xs`}>{expanded ? '▲' : '▼'}</div>
         </div>
       </div>
+
+      {showCspScore && cspScoreResult && cspBand && c && (
+        <CspScoreBreakdownPanel
+          score={cspScoreResult}
+          band={cspBand}
+          display={{
+            pop: c.pop,
+            otmPct: result.price != null && result.price > 0 ? ((result.price - c.shortStrike) / result.price) * 100 : null,
+            periodRocPct: c.cspExtrinsicRoc,
+            annualizedRocPct: c.cspExtrinsicAnnualizedRoc,
+            liquidityClass: c.cspLiquidityClass,
+            openInterest: c.shortOI,
+            ivr: result.ivr,
+          }}
+        />
+      )}
 
       {/* CSP-0002 corrective pass — "Complete the CSP metric presentation":
           Bid/Ask/Mid/Cash required/Breakeven previously lived only inside
