@@ -12,6 +12,7 @@ import userEvent from '@testing-library/user-event';
 import { StockHoldings } from '../StockHoldings';
 import type { EquityHolding } from '@/lib/portfolio-snapshot/types';
 import type { CapacityViewModel } from '../model/types';
+import { currentNewYorkDate } from '@/lib/scans/earningsPrecheck';
 
 const th = THEMES.dark;
 const holding = (over: Partial<EquityHolding>): EquityHolding => ({
@@ -118,8 +119,8 @@ describe('Stock holdings intent', () => {
 
 describe('Stock holdings symbol cell order and earnings', () => {
   it('reads: symbol, intent, chart link, then the next earnings date (the same order as the options table)', async () => {
-    // New York calendar date, the same basis the app uses (a UTC date is a day off in the evening).
-    const future = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(Date.now() + 30 * 86400000));
+    // New York calendar date plus whole calendar days, the same basis the app uses (clock arithmetic is a day off in the evening and across a clock change).
+    const future = new Date(Date.parse(`${currentNewYorkDate()}T00:00:00Z`) + 30 * 86400000).toISOString().slice(0, 10);
     const fetchMock = vi.fn().mockImplementation(async (url: string) => (
       String(url).startsWith('/api/tastytrade/proxy')
         ? { json: async () => ({ data: { items: [{ symbol: 'MRVL', earnings: { 'expected-report-date': future, estimated: true } }] } }) }

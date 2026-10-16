@@ -15,6 +15,7 @@ import type {
 } from '@/lib/scans/types';
 import type { RulesType, CspRulesType, CcRulesType } from '@/lib/scans/constants';
 import { assessOiLiquidity } from '@/lib/scans/oiLiquidity';
+import { SpreadsScanModal } from '@/features/screener/components/SpreadsScanModal';
 import { DEFAULT_SPREAD_WIDTH_RANGE, SPREAD_WIDTH_CHOICES, scanWidths, matchesDisplayedWidth, type SpreadWidthRange } from '@/lib/scans/spreadWidthSelection';
 import { computeExpectedMove } from '@/lib/scans/expectedMove';
 import {
@@ -6996,47 +6997,24 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
   const [tPreset, setTPreset] = useState(lastTargetedPreset || 'course');
   const [scanWidth, setScanWidth] = useState<SpreadWidthRange>(lastScanWidth);
 
-  return (
-    <ScanModalShell
-      th={th}
-      titleId="run-mode-modal-title"
-      title={<>SCAN SELECTED<br />INDEXES, ETFS, EQUITIES</>}
-      closeLabel="Close scan configuration"
-      onClose={onClose}
-    >
-      <div className="flex flex-col gap-5">
-        {/* Mode selection */}
-        <ScanModeRadioGroup
-          th={th}
-          ariaLabel="Scan mode"
-          value={mode}
-          onChange={setMode}
-          descriptions={{
-            filter: 'Gate by rules — pass/fail',
-            rank: 'Score & sort all tickers',
-            targeted: 'Deep scan by DTE + POP',
-          }}
-        />
+  // SCAN-MODAL-UX-0002B: the layout lives in SpreadsScanModal. State, preset logic, clamps and the run
+  // request stay here, unchanged.
+  const applyTargetedPreset = (key: string) => {
+    setTPreset(key);
+    const r = RULE_PRESETS.find(rp => rp.key === key)?.rules as Record<string, number | undefined> | undefined;
+    if (r?.IVR_MIN != null) setTIvrMin(r.IVR_MIN);
+    if (r?.DTE_MIN != null) setTDteMin(r.DTE_MIN);
+    if (r?.DTE_MAX != null) setTDteMax(r.DTE_MAX);
+    if (r?.CREDIT_RATIO_MIN != null) { setTCreditRatioMin(Math.round(r.CREDIT_RATIO_MIN * 100)); setTCreditRatioOverride(false); }
+    // Dean: POP min always 70, OTM min always 6% -- fixed
+    // universal defaults, since no preset defines either
+    // and every preset should apply the same baseline here.
+    setTPopMin(70);
+    setTOtmMin(6);
+  };
+  // Filter mode is not offered in the mode selector (FILTER-MODE-REMOVAL-0002); its preset list is kept here.
+  const filterBlock = (
 
-        <fieldset className={`rounded-lg border ${th.border} p-3`}>
-          <legend className={`px-1 text-xs font-semibold ${th.text}`}>SPREAD WIDTHS TO SCAN (PRE-SCAN)</legend>
-          <div className="flex gap-3">
-            <label className={`flex flex-1 flex-col gap-1 text-xs ${th.textMuted}`}>Minimum width
-              <select aria-label="Minimum spread width to scan" value={scanWidth.min} onChange={e => setScanWidth(current => ({ min: Number(e.target.value), max: Math.max(current.max, Number(e.target.value)) }))} className={`rounded border ${th.inputBorder} ${th.input} p-2 ${th.text}`}>
-                {SPREAD_WIDTH_CHOICES.map(width => <option key={width} value={width}>${width}</option>)}
-              </select>
-            </label>
-            <label className={`flex flex-1 flex-col gap-1 text-xs ${th.textMuted}`}>Maximum width
-              <select aria-label="Maximum spread width to scan" value={scanWidth.max} onChange={e => setScanWidth(current => ({ min: Math.min(current.min, Number(e.target.value)), max: Number(e.target.value) }))} className={`rounded border ${th.inputBorder} ${th.input} p-2 ${th.text}`}>
-                {SPREAD_WIDTH_CHOICES.map(width => <option key={width} value={width}>${width}</option>)}
-              </select>
-            </label>
-          </div>
-          <p className={`mt-2 text-[10px] ${th.textFaint}`}>Scan {scanWidths(scanWidth).map(width => `$${width}`).join(', ')}. Narrow the results afterward without another scan.</p>
-        </fieldset>
-
-        {/* Preset selection — filter mode */}
-        {mode === 'filter' && (
           <div className="flex flex-col gap-2">
             <p className={`text-[9px] tracking-widest font-medium ${th.textFaint}`}>SELECT PRESET</p>
             {FILTER_PRESETS.map(p => (
@@ -7066,192 +7044,46 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
               );
             })()}
           </div>
-        )}
+  );
 
-        {/* Rank mode previously showed nothing at all -- no preset selector
-            (Rank has none, by design; it scores and sorts the full universe
-            using the active saved ruleset rather than gating pass/fail) and
-            no indication of what that active ruleset actually was. Same
-            read-only visibility fix as Filter mode above. */}
-        {mode === 'rank' && (
-          <div className="flex flex-col gap-2">
-            <p className={`text-[9px] tracking-widest font-medium ${th.textFaint}`}>ACTIVE RULESET</p>
-            <p className={`text-[9px] ${th.textFaint}`}>
-              Rank scores and sorts every ticker using your currently active saved rules — set via RULES, not selected here.
-            </p>
-            <div className={`rounded-lg border ${th.border} bg-black/20 p-2.5 text-[9px] ${th.textFaint} leading-relaxed`} data-testid="rank-active-rules-preview">
-              IVR ≥ {activeRankRules.IVR_MIN}% · OI ≥ {activeRankRules.OI_MIN} · bid/ask ≤ ${activeRankRules.BID_ASK_MAX?.toFixed(2)} · credit ≥ {(activeRankRules.CREDIT_RATIO_MIN * 100).toFixed(0)}% of width
-              {' '}· ROC ≥ {activeRankRules.ROC_MIN_SPREAD}% (spread) / {activeRankRules.ROC_MIN_IC}% (IC)
-            </div>
-          </div>
-        )}
-
-        {/* Targeted scan config */}
-        {mode === 'targeted' && (
-          <div className="flex flex-col gap-4">
-            <p className={`text-[9px] tracking-widest font-medium ${th.textFaint}`}>SCAN CONFIG</p>
-
-            {/* TARGETED-PRESETS-0001 -- a preset here is a starting point,
-                never a lock: every field below stays editable after
-                selection, same as Filter mode's own preset never blocked
-                further edits in RulesModal. Only overrides fields the
-                preset actually defines (IVR always; DTE only for
-                shortterm/intermediate) -- POP and OTM have no preset
-                values to apply, so they're left untouched regardless of
-                which preset is picked. */}
-            <div>
-              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>START FROM A PRESET</p>
-              <div className="grid grid-cols-3 gap-1.5">
-                {FILTER_PRESETS.map(p => (
-                  <button key={p.key} onClick={() => {
-                    setTPreset(p.key);
-                    const r = RULE_PRESETS.find(rp => rp.key === p.key)?.rules as Record<string, number | undefined> | undefined;
-                    if (r?.IVR_MIN != null) setTIvrMin(r.IVR_MIN);
-                    if (r?.DTE_MIN != null) setTDteMin(r.DTE_MIN);
-                    if (r?.DTE_MAX != null) setTDteMax(r.DTE_MAX);
-                    if (r?.CREDIT_RATIO_MIN != null) { setTCreditRatioMin(Math.round(r.CREDIT_RATIO_MIN * 100)); setTCreditRatioOverride(false); }
-                    // Dean: POP min always 70, OTM min always 6% -- fixed
-                    // universal defaults, since no preset defines either
-                    // and every preset should apply the same baseline here.
-                    setTPopMin(70);
-                    setTOtmMin(6);
-                  }}
-                    className={`text-[9px] px-2 py-1.5 rounded border transition-colors font-bold ${
-                      tPreset === p.key ? 'border-teal-500 text-teal-300 bg-teal-500/15' : `${th.border} ${th.textFaint}`
-                    }`}>{p.label}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* DTE range */}
-            <div>
-              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>DTE RANGE</p>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  <span className={`text-[9px] ${th.textFaint}`}>Min</span>
-                  <DeferredNumberInput aria-label="Minimum DTE" step="1" value={tDteMin} onValueChange={value => setTDteMin(Math.max(0, Math.trunc(value)))}
-                    className={`w-16 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
-                </div>
-                <span className={`text-[9px] ${th.textFaint}`}>→</span>
-                <div className="flex items-center gap-1.5">
-                  <span className={`text-[9px] ${th.textFaint}`}>Max</span>
-                  <DeferredNumberInput aria-label="Maximum DTE" step="1" value={tDteMax} onValueChange={value => setTDteMax(Math.max(tDteMin + 1, Math.trunc(value)))}
-                    className={`w-16 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
-                </div>
-                <span className={`text-[9px] ${th.textFaint}`}>days</span>
-              </div>
-              <div className="flex gap-1.5 mt-2 flex-wrap">
-                {[
-                  { label: '7–13', min: 7, max: 13 },
-                  { label: '14–20', min: 14, max: 20 },
-                  { label: '21–29', min: 21, max: 29 },
-                  { label: '30–45', min: 30, max: 45 },
-                  { label: '46–60', min: 46, max: 60 },
-                  { label: '21–60', min: 21, max: 60 },
-                ].map(r => (
-                  <button key={r.label} onClick={() => { setTDteMin(r.min); setTDteMax(r.max); }}
-                    className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                      tDteMin === r.min && tDteMax === r.max
-                        ? 'border-teal-500 text-teal-300 bg-teal-500/15'
-                        : `${th.border} ${th.textFaint}`
-                    }`}>{r.label}</button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>MINIMUM CREDIT / RISK</p>
-              <div className="flex items-center gap-2 flex-wrap">
-                {[0, 15, 20, 25, 33, 35].map(v => (
-                  <button key={v} onClick={() => { setTCreditRatioMin(v); setTCreditRatioOverride(true); }}
-                    className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                      tCreditRatioMin === v ? 'border-teal-500 text-teal-300 bg-teal-500/15' : `${th.border} ${th.textFaint}`
-                    }`}>{v === 0 ? 'Any' : `${v}%`}</button>
-                ))}
-                <DeferredNumberInput aria-label="Custom minimum credit risk percentage" step="1" value={tCreditRatioMin}
-                  onValueChange={value => { setTCreditRatioMin(Math.min(100, Math.max(0, value))); setTCreditRatioOverride(true); }}
-                  className={`w-16 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
-                <span className={`text-[9px] ${th.textFaint}`}>% custom</span>
-              </div>
-              <p className={`text-[8px] ${th.textFaint} mt-1`}>Only show trades where conservative entry credit is at least this share of spread width. Higher minimums reduce results; they do not guarantee fills.</p>
-            </div>
-
-            {/* POP floor */}
-            <div>
-              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>POP EST. MIN</p>
-              <div className="flex items-center gap-2">
-                <DeferredNumberInput aria-label="Minimum estimated POP" step="1" value={tPopMin} onValueChange={value => setTPopMin(Math.min(95, Math.max(50, Math.trunc(value))))}
-                  className={`w-20 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
-                <span className={`text-[9px] ${th.textFaint}`}>%</span>
-                <div className="flex gap-1.5">
-                  {[65, 70, 75, 80].map(v => (
-                    <button key={v} onClick={() => setTPopMin(v)}
-                      className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                        tPopMin === v ? 'border-teal-500 text-teal-300 bg-teal-500/15' : `${th.border} ${th.textFaint}`
-                      }`}>{v}%</button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* OTM floor — hard reject below this % distance from spot. For IC,
-                gates on the worse (tighter) side of put/call, matching the OTM%
-                already shown in TargetedScanResultsPanel via calcTargetedEntryOtmPct. */}
-            <div>
-              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>MIN OTM %</p>
-              <div className="flex items-center gap-2">
-                <DeferredNumberInput aria-label="Minimum OTM percentage" step="0.1" value={tOtmMin} onValueChange={value => setTOtmMin(Math.min(30, Math.max(0, value)))}
-                  className={`w-20 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
-                <span className={`text-[9px] ${th.textFaint}`}>%</span>
-                <div className="flex gap-1.5">
-                  {[4, 8, 12, 16, 20].map(v => (
-                    <button key={v} onClick={() => setTOtmMin(v)}
-                      className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                        tOtmMin === v ? 'border-teal-500 text-teal-300 bg-teal-500/15' : `${th.border} ${th.textFaint}`
-                      }`}>{v}%</button>
-                  ))}
-                </div>
-              </div>
-              <p className={`text-[8px] ${th.textFaint} mt-1`}>For Iron Condors, gates on the tighter of put/call side</p>
-            </div>
-
-            {/* MIN IVR % -- IVR-0001: previously absent entirely; the floor
-                was silently whatever the (also-invisible) preset selection
-                happened to carry. Same explicit-field treatment as POP/OTM
-                above, and same 30% default the course preset used to
-                supply silently. */}
-            <div>
-              <p className={`text-[8px] ${th.textFaint} tracking-widest mb-1.5`}>MIN IVR %</p>
-              <div className="flex items-center gap-2">
-                <DeferredNumberInput aria-label="Minimum IVR percentage" step="0.1" value={tIvrMin} onValueChange={value => setTIvrMin(Math.min(100, Math.max(0, value)))}
-                  className={`w-20 ${th.input} border ${th.inputBorder} rounded px-2 py-1 text-[11px] ${th.text} text-center focus:outline-none`} />
-                <span className={`text-[9px] ${th.textFaint}`}>%</span>
-                <div className="flex gap-1.5">
-                  {[0, 10, 15, 20, 30, 40, 50].map(v => (
-                    <button key={v} onClick={() => setTIvrMin(v)}
-                      className={`text-[9px] px-2 py-0.5 rounded border transition-colors font-bold ${
-                        tIvrMin === v ? 'border-teal-500 text-teal-300 bg-teal-500/15' : `${th.border} ${th.textFaint}`
-                      }`}>{v === 0 ? 'Any' : `${v}%`}</button>
-                  ))}
-                </div>
-              </div>
-              <p className={`text-[8px] ${th.textFaint} mt-1`}>Guide: stocks 30%+ · ETFs and indexes 15%+ (their IV runs in a narrower range). One floor applies to every selected ticker, so 30% will filter out most ETFs and indexes; scan them separately at 15%.</p>
-            </div>
-          </div>
-        )}
-
-        <button onClick={() => {
-          if (mode === 'targeted') {
-            onRun(mode, undefined, { dteMin: tDteMin, dteMax: tDteMax, popMin: tPopMin, otmMin: tOtmMin, ivrMin: tIvrMin, creditRatioMin: tCreditRatioMin, creditRatioOverride: tCreditRatioOverride, preset: tPreset }, scanWidth);
-          } else {
-            onRun(mode, mode === 'filter' ? preset : undefined, undefined, scanWidth);
-          }
-        }}
-          className="w-full ac-btn-solid text-white py-2.5 rounded-xl text-xs font-bold tracking-widest transition-colors shadow-lg border ac-border/30">
-          RUN SCREENER →
-        </button>
-      </div>
-    </ScanModalShell>
+  return (
+    <SpreadsScanModal
+      th={th}
+      mode={mode}
+      onMode={setMode}
+      scanWidth={scanWidth}
+      widthChoices={SPREAD_WIDTH_CHOICES}
+      scannedWidths={scanWidths(scanWidth)}
+      onMinWidth={value => setScanWidth(current => ({ min: value, max: Math.max(current.max, value) }))}
+      onMaxWidth={value => setScanWidth(current => ({ min: Math.min(current.min, value), max: value }))}
+      presets={FILTER_PRESETS}
+      preset={tPreset}
+      onPreset={applyTargetedPreset}
+      dteMin={tDteMin}
+      dteMax={tDteMax}
+      onDteMin={value => setTDteMin(Math.max(0, Math.trunc(value)))}
+      onDteMax={value => setTDteMax(Math.max(tDteMin + 1, Math.trunc(value)))}
+      onDtePick={(min, max) => { setTDteMin(min); setTDteMax(max); }}
+      creditRatioMin={tCreditRatioMin}
+      onCreditPick={v => { setTCreditRatioMin(v); setTCreditRatioOverride(true); }}
+      onCreditInput={value => { setTCreditRatioMin(Math.min(100, Math.max(0, value))); setTCreditRatioOverride(true); }}
+      popMin={tPopMin}
+      onPopMin={value => setTPopMin(Math.min(95, Math.max(50, Math.trunc(value))))}
+      otmMin={tOtmMin}
+      onOtmMin={value => setTOtmMin(Math.min(30, Math.max(0, value)))}
+      ivrMin={tIvrMin}
+      onIvrMin={value => setTIvrMin(Math.min(100, Math.max(0, value)))}
+      activeRankRules={activeRankRules}
+      filterBlock={filterBlock}
+      onClose={onClose}
+      onRun={() => {
+        if (mode === 'targeted') {
+          onRun(mode, undefined, { dteMin: tDteMin, dteMax: tDteMax, popMin: tPopMin, otmMin: tOtmMin, ivrMin: tIvrMin, creditRatioMin: tCreditRatioMin, creditRatioOverride: tCreditRatioOverride, preset: tPreset }, scanWidth);
+        } else {
+          onRun(mode, mode === 'filter' ? preset : undefined, undefined, scanWidth);
+        }
+      }}
+    />
   );
 }
 
