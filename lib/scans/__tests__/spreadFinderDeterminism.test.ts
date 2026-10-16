@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest';
 import { findBestSpread } from '../spread-finder';
 import { DEFAULT_ETF_RULES } from '../constants';
 
@@ -15,6 +15,12 @@ import { DEFAULT_ETF_RULES } from '../constants';
 // trend-aligned Targeted scan would apply for a widely-held name).
 
 const EXP = '2026-10-16';
+
+// The fixture expiration is a fixed calendar date and the finder works from days-until, so the test pins "today" to
+// 30 days before it. Without this the test slowly rots as the real date approaches the fixture date (it started
+// failing when the expiration reached 0 DTE).
+beforeAll(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-09-16T15:00:00Z')); });
+afterAll(() => { vi.useRealTimers(); });
 const PRICE = 329.58;
 
 function makeCallLeg(strike: number, delta: number, bid: number, ask: number, oi: number) {

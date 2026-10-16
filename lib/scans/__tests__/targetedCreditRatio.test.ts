@@ -1,7 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { calculateTargetedConservativeCredit, findBestICUnfiltered, findBestTargetedICWithCreditRatioFloor } from '../spread-finder';
 
 const expiration = '2026-10-16';
+
+// The fixture expiration is a fixed calendar date and the finder works from days-until, so the test pins "today" to
+// 30 days before it. Without this the test slowly rots as the real date approaches the fixture date (it started
+// failing when the expiration reached 0 DTE).
+beforeAll(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-09-16T15:00:00Z')); });
+afterAll(() => { vi.useRealTimers(); });
 const leg = (optionType: 'P' | 'C', strikePrice: number, bid: number, ask: number, delta: number) => ({
   expirationDate: expiration, optionType, strikePrice, bid, ask, mid: (bid + ask) / 2,
   delta, openInterest: 1000, occSymbol: `${optionType}${strikePrice}`,
