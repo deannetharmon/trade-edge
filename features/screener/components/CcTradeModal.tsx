@@ -96,7 +96,9 @@ export function CcTradeModal({ th, order, deps, onClose }: Props) {
   }), [order.symbol, order.expiration, order.strike, quantity, entryLimit, acknowledged]);
 
   const guard = useMemo(() => guardCcOrder(reports, request), [reports, request]);
-  const costBasis = costBasisFromReports(reports, order.symbol);
+  const viaLeap = guard.coverage !== null && guard.coverage.status === 'covered_by_leap';
+  // A share cost basis only applies when shares cover the call; for a LEAP-covered call it is the wrong yardstick.
+  const costBasis = viaLeap ? null : costBasisFromReports(reports, order.symbol);
   const belowBasis = costBasis !== null && order.strike < costBasis;
   const legBuild = buildCcOrderLeg(order.occSymbol, quantity, order.isIndex);
   const profitBuyback = entryLimit > 0 ? ccProfitBuyback(entryLimit, profitPct) : 0;
@@ -242,9 +244,15 @@ export function CcTradeModal({ th, order, deps, onClose }: Props) {
         {/* What assignment means. */}
         <div className={`${th.card} border ${th.border} rounded-xl p-3 mb-4 text-xs space-y-1`}>
           <p className={`text-[10px] font-bold ${th.textMuted} uppercase tracking-wider`}>If assigned</p>
-          <div className="flex justify-between"><span className={th.textFaint}>Shares sold at ${order.strike}</span><span className={th.text}>{money0(proceeds)}</span></div>
+          {viaLeap ? (
+            <p data-testid="cc-leap-note" className={`text-[10px] ${th.textFaint}`}>
+              This call is covered by your LEAP, not shares. If assigned, you would exercise or sell the LEAP to settle, so the result depends on the LEAP&apos;s strike and value and is not shown here.
+            </p>
+          ) : (
+            <div className="flex justify-between"><span className={th.textFaint}>Shares sold at ${order.strike}</span><span className={th.text}>{money0(proceeds)}</span></div>
+          )}
           <div className="flex justify-between"><span className={th.textFaint}>Premium kept either way</span><span className="text-emerald-400">{money0(premium)}</span></div>
-          {costBasis !== null ? (
+          {viaLeap ? null : costBasis !== null ? (
             <div className="flex justify-between">
               <span className={th.textFaint}>Versus your ${costBasis.toFixed(2)} cost basis</span>
               <span data-testid="cc-vs-basis" className={belowBasis ? 'text-red-400' : 'text-emerald-400'}>

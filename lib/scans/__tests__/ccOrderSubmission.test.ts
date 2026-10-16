@@ -52,6 +52,16 @@ describe('guardCcOrder', () => {
     expect(guardCcOrder({ capacity: null, foundations: null }, req()).allowed).toBe(false);
     expect(guardCcOrder(reports({ shares: 0, foundStatus: 'unavailable' }), req()).allowed).toBe(false);
   });
+  it('a LEAP-covered call ignores the share cost basis: no acknowledgment, no gain numbers', () => {
+    const r = reports({ shares: 0, basis: 20, leap: { exp: '2027-01-15', avail: 1 } });
+    const g = guardCcOrder(r, req({ strike: 12 }));
+    expect(g.allowed).toBe(true);
+    if (g.allowed) {
+      expect(g.coverage.status).toBe('covered_by_leap');
+      expect(g.assignment.belowCostBasis).toBe(false);
+      expect(g.assignment.gainVsCostBasis).toBeNull();
+    }
+  });
   it('requires acknowledgment when the strike is below the cost basis, and only then', () => {
     const below = req({ strike: 12 });
     expect(guardCcOrder(reports(), below).allowed).toBe(false);

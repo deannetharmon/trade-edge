@@ -62,7 +62,10 @@ export function guardCcOrder(reports: CoverageReports | null, request: CcOrderRe
   const assignment = computeCcAssignment({
     strike: request.strike,
     creditPerShare: request.entryPerShare,
-    costBasis: costBasisFromReports(reports, request.symbol),
+    // The share cost basis only describes assignment when SHARES cover the call. A LEAP-covered call is a PMCC: the
+    // assignment is settled by exercising or selling the LEAP, so a share cost basis would be the wrong yardstick
+    // (and could demand a meaningless acknowledgment).
+    costBasis: coverage.status === 'covered_by_shares' ? costBasisFromReports(reports, request.symbol) : null,
     quantity: request.quantity,
   });
   if (assignment.belowCostBasis && !request.belowCostBasisAcknowledged) {

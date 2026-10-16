@@ -98,6 +98,18 @@ describe('CcTradeModal', () => {
     expect((screen.getByRole('button', { name: 'DRY RUN' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('a LEAP-covered call shows the LEAP note and never asks about share cost basis', async () => {
+    const leapReports: CoverageReports = {
+      capacity: { status: 'ok', bySymbol: { BITX: { availableCoveredContracts: 0, costBasis: 20, costBasisComplete: true } }, warnings: [] } as never,
+      foundations: { status: 'ok', warnings: [], foundations: [{ underlyingSymbol: 'BITX', expiration: '2027-01-15', strike: 10, availableShortCallContracts: 2 }] } as never,
+    };
+    await open(makeDeps({ readCoverage: async () => leapReports }));
+    expect(screen.getByTestId('cc-leap-note')).toBeTruthy();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.queryByTestId('cc-vs-basis')).toBeNull();
+    expect((screen.getByRole('button', { name: 'DRY RUN' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('shows no basis requirement when cost basis is unknown', async () => {
     await open(makeDeps({ readCoverage: async () => reports({ basis: null }) }));
     expect(screen.queryByRole('checkbox')).toBeNull();
