@@ -19,8 +19,6 @@ export interface CcOrderRequest {
   strike: number;
   quantity: number;
   entryPerShare: number;
-  /** Per-share cost basis, or null when unknown. */
-  costBasis: number | null;
   /** The trader acknowledged the below-cost-basis assignment note. */
   belowCostBasisAcknowledged: boolean;
 }
@@ -28,6 +26,17 @@ export interface CcOrderRequest {
 export type CcOrderGuardResult =
   | { allowed: false; reason: string; coverage: CoverageResult | null }
   | { allowed: true; coverage: CoverageResult; assignment: CcAssignmentResult };
+
+/**
+ * Per-share broker cost basis for the symbol from a coverage reading, or null when the report is missing or the basis
+ * is incomplete (some lot without a basis). Read from the SAME fresh reading that proves coverage.
+ */
+export function costBasisFromReports(reports: CoverageReports | null, symbol: string): number | null {
+  if (!reports || !reports.capacity || reports.capacity.status !== 'ok') return null;
+  const entry = reports.capacity.bySymbol[symbol.toUpperCase()];
+  if (!entry || !entry.costBasisComplete || entry.costBasis === null || !(entry.costBasis > 0)) return null;
+  return entry.costBasis;
+}
 
 /** Pure decision from reports that were just read. */
 export function guardCcOrder(reports: CoverageReports | null, request: CcOrderRequest): CcOrderGuardResult {
@@ -53,7 +62,7 @@ export function guardCcOrder(reports: CoverageReports | null, request: CcOrderRe
   const assignment = computeCcAssignment({
     strike: request.strike,
     creditPerShare: request.entryPerShare,
-    costBasis: request.costBasis,
+    costBasis: costBasisFromReports(reports, request.symbol),
     quantity: request.quantity,
   });
   if (assignment.belowCostBasis && !request.belowCostBasisAcknowledged) {

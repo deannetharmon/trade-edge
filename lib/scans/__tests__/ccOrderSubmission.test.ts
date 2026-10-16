@@ -1,12 +1,13 @@
 // lib/scans/__tests__/ccOrderSubmission.test.ts
 
 import { describe, expect, it, vi } from 'vitest';
-import { guardCcOrder, submitCcOrderIfSafe, type CcOrderRequest } from '../ccOrderSubmission';
+import { costBasisFromReports, guardCcOrder, submitCcOrderIfSafe, type CcOrderRequest } from '../ccOrderSubmission';
 import type { CoverageReports } from '@/lib/tradeLookup/loadLookup';
 
 function reports(over: { shares?: number | null; capStatus?: 'ok' | 'unavailable'; leap?: { exp: string; avail: number } | null; foundStatus?: 'ok' | 'unavailable'; basis?: number | null } = {}): CoverageReports {
+  const basis = over.basis === undefined ? 14 : over.basis;
   const bySymbol: Record<string, unknown> = {};
-  if (over.shares !== null) bySymbol.BITX = { availableCoveredContracts: over.shares === undefined ? 2 : over.shares, costBasis: over.basis ?? null, costBasisComplete: over.basis != null };
+  if (over.shares !== null) bySymbol.BITX = { availableCoveredContracts: over.shares === undefined ? 2 : over.shares, costBasis: basis, costBasisComplete: basis != null };
   return {
     capacity: { status: over.capStatus || 'ok', bySymbol, warnings: [] } as never,
     foundations: {
@@ -18,7 +19,7 @@ function reports(over: { shares?: number | null; capStatus?: 'ok' | 'unavailable
 }
 
 const req = (over: Partial<CcOrderRequest> = {}): CcOrderRequest => ({
-  symbol: 'BITX', expiration: '2026-11-06', strike: 16, quantity: 1, entryPerShare: 0.4, costBasis: 14, belowCostBasisAcknowledged: false, ...over,
+  symbol: 'BITX', expiration: '2026-11-06', strike: 16, quantity: 1, entryPerShare: 0.4, belowCostBasisAcknowledged: false, ...over,
 });
 
 describe('guardCcOrder', () => {
@@ -52,13 +53,13 @@ describe('guardCcOrder', () => {
     expect(guardCcOrder(reports({ shares: 0, foundStatus: 'unavailable' }), req()).allowed).toBe(false);
   });
   it('requires acknowledgment when the strike is below the cost basis, and only then', () => {
-    const below = req({ strike: 12, costBasis: 14 });
+    const below = req({ strike: 12 });
     expect(guardCcOrder(reports(), below).allowed).toBe(false);
     expect(guardCcOrder(reports(), { ...below, belowCostBasisAcknowledged: true }).allowed).toBe(true);
-    expect(guardCcOrder(reports(), req({ strike: 14, costBasis: 14 })).allowed).toBe(true);
+    expect(guardCcOrder(reports(), req({ strike: 14 })).allowed).toBe(true);
   });
   it('unknown cost basis needs no acknowledgment', () => {
-    expect(guardCcOrder(reports(), req({ costBasis: null, strike: 1 })).allowed).toBe(true);
+    expect(guardCcOrder(reports({ basis: null }), req({ strike: 1 })).allowed).toBe(true);
   });
   it('refuses bad quantity, price and strike before reading coverage', () => {
     expect(guardCcOrder(reports(), req({ quantity: 0 })).allowed).toBe(false);
@@ -107,5 +108,16 @@ describe('submitCcOrderIfSafe', () => {
     const r = await submitCcOrderIfSafe(read, req(), send); // ...the pre-Place reading is not
     expect(send).not.toHaveBeenCalled();
     expect(r.submitted).toBe(false);
+  });
+});
+
+describe('costBasisFromReports', () => {
+  it('reads the basis only when it is complete and the report is ok', () => {
+    expect(costBasisFromReports(reports({ basis: 14 }), 'BITX')).toBe(14);
+    expect(costBasisFromReports(reports({ basis: 14 }), 'bitx')).toBe(14);
+    expect(costBasisFromReports(reports({ basis: null }), 'BITX')).toBeNull();
+    expect(costBasisFromReports(reports({ basis: 14, capStatus: 'unavailable' }), 'BITX')).toBeNull();
+    expect(costBasisFromReports(reports({ shares: null }), 'BITX')).toBeNull();
+    expect(costBasisFromReports(null, 'BITX')).toBeNull();
   });
 });
