@@ -7032,7 +7032,7 @@ function RunModeModal({ th, lastMode, lastPreset, activeRankRules, lastTargetedD
               </select>
             </label>
           </div>
-          <p className={`mt-2 text-[10px] ${th.textFaint}`}>Scan ${scanWidths(scanWidth).map(width => `$${width}`).join(', ')}. Narrow the results afterward without another scan.</p>
+          <p className={`mt-2 text-[10px] ${th.textFaint}`}>Scan {scanWidths(scanWidth).map(width => `$${width}`).join(', ')}. Narrow the results afterward without another scan.</p>
         </fieldset>
 
         {/* Preset selection — filter mode */}

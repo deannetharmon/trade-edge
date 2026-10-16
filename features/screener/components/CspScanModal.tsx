@@ -346,7 +346,7 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
               <FieldHead lifecycle={capital.lifecycle} fixed={capital.fixed} rescan={capital.rescan} name="Capital" align="right"
                 tip={<><p>{capital.hint}</p><p className="mt-1">Collateral = strike × 100 × contracts. Blank uses available account cash.</p></>} />
               <label className="flex items-start gap-2 text-[11px] text-neutral-300"><input type="checkbox" className="mt-0.5" checked={request.affordableOnly} onChange={event => updateDraft(prev => ({ ...prev, affordableOnly: event.target.checked }))} />Only show affordable CSPs</label>
-              {request.affordableOnly && <label className="flex flex-col gap-1 text-[10px] text-neutral-400">Cash cap <span className="text-neutral-500">(optional)</span><DeferredNumberInput aria-label="Cash cap per CSP" step="1" value={request.capitalLimit ?? 0} onValueChange={value => updateDraft(prev => ({ ...prev, capitalLimit: value || null }))} className="w-28 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-white" /></label>}
+              {request.affordableOnly && <label className="flex items-center gap-1.5 text-[10px] text-neutral-400">Cash cap <span className="text-neutral-500">(opt.)</span><DeferredNumberInput aria-label="Cash cap per CSP" step="1" value={request.capitalLimit ?? 0} onValueChange={value => updateDraft(prev => ({ ...prev, capitalLimit: value || null }))} className="w-24 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-white" /></label>}
               <StatusLine message={errors.capitalLimit} />
             </div>
           )}

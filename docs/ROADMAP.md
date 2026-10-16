@@ -22,6 +22,8 @@ Last updated: 2026-10-06 (ANALYTICS-0001 go)
 ## Scan modals — 2026-10-15
 
 - **SCAN-MODAL-UX-0001** — IMPLEMENTED 2026-10-15 (Diane, Ian, Quinn, Paul). Find Covered Calls and Find Cash-Secured Puts now fit one screen (measured 439 / 481 / 608 px tall) instead of two and three scrolling screens: dots plus one legend line replace the tag pills, help text moved into tooltips, fixed rules are one strip, the summary box is a short recap. No scan logic changed. Ticket: `docs/tickets/SCAN-MODAL-UX-0001-one-screen-cc-csp-modals.md`.
+- **SCAN-MODAL-UX-0001A** — IMPLEMENTED 2026-10-15. Follow-up from Dean's live review: the Spreads scan modals read "Scan $$5, $10, ..." (stray `$`, `page.tsx` width note, fixed); CSP Targeted with "Only show affordable CSPs" checked overflowed the modal by about 21 px (Cash cap now one row; measured 629 px, limit 644). Wording only, no logic change.
+- **SCAN-MODAL-UX-0002** — PROPOSED. Same one-screen treatment for the PMCC (taller than a 700 px screen), LEAPS and Spreads Rank/Targeted modals (Spreads Targeted is the tallest). Includes one name per concept across modals ("OI min" vs "OI pref.", delta chip format). Needs Diane mocks and Ian sign-off before build.
 
 ## Portfolio queue — 2026-10-05 (Dean, after the GGLL and SOXL reviews)
 
