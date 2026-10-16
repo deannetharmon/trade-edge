@@ -383,6 +383,30 @@ describe('PMCC production integration', () => {
     }
   });
 
+  describe('held LEAP match diagnosis in the audit text', () => {
+    const held = (over: Partial<HeldPmccLongCandidate> = {}): HeldPmccLongCandidate => ({
+      accountNumber: '5WT00001', positionKey: 'h', underlyingSymbol: 'GS',
+      occSymbol: occ('2027-06-18', 720), expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1, avgOpenPrice: 345, ...over,
+    });
+    const reasonFor = (candidate: HeldPmccLongCandidate, longExpirations: string[], longLegs: PmccChainLeg[]) => runPmccProduction(
+      { shortExpirations: [], longExpirations, chains: {} }, context, snapshot,
+      { adapt: vi.fn(() => ({ longLegs, shortLegs: [leg('short', 1070)] })), pair: pairPmccCandidates },
+      [candidate],
+    )[0].failReasons.join(' ');
+
+    it('says the expiration is outside the loaded window', () => {
+      expect(reasonFor(held(), ['2027-01-15'], [leg('long', 700)])).toContain('expiration is not in the loaded long-call window');
+    });
+    it('says the feed returned no row for the strike and expiration', () => {
+      expect(reasonFor(held(), ['2027-06-18'], [leg('long', 700)])).toContain('the market-data feed returned no row for this strike and expiration');
+    });
+    it('says the symbol differs when the same strike and expiration exist under another symbol', () => {
+      const text = reasonFor(held(), ['2027-06-18'], [leg('long', 720, { occSymbol: 'GS1 270618C00720000' })]);
+      expect(text).toContain('option symbol differs');
+      expect(text).toContain('could not be matched exactly');
+    });
+  });
+
   it('records a held LEAP missing from the live chain as a failed-symbol audit, so the scan still completes', async () => {
     const held: HeldPmccLongCandidate = {
       accountNumber: '5WT00001', positionKey: 'missing-held', underlyingSymbol: 'GS',

@@ -3,7 +3,7 @@
 import type { CheckResult, ScreenResult, SpreadCandidate, TrendResult } from './types';
 import { adaptPmccChain, type RawPmccChain } from './pmccChainAdapter';
 import { pairPmccCandidates } from './pmccPairing';
-import type { PmccMarketSession, PmccPairResult, PmccScanSnapshot, PmccSessionResult } from './pmccTypes';
+import type { PmccChainLeg, PmccMarketSession, PmccPairResult, PmccScanSnapshot, PmccSessionResult } from './pmccTypes';
 import { matchHeldPmccLongCandidate, type HeldPmccLongCandidate } from './pmccHeldLeaps';
 import { evaluateHeldBreakevenFloor, heldLongKey, readHeldBasis, type HeldLongBasis } from './pmccHeldBreakeven';
 import { isNyseHoliday } from './nyseCalendar';
@@ -232,6 +232,28 @@ export interface PmccProductionDependencies {
   pair: typeof pairPmccCandidates;
 }
 
+/**
+ * Why a held LEAP did not match, for the audit text. The match itself is unchanged and exact; this only explains it:
+ * the expiration is outside the loaded long window, the feed returned no row for that strike and expiration (for
+ * example no market-data row after hours), or a row exists but its option symbol differs from the held one.
+ */
+function heldMatchDiagnosis(
+  candidates: readonly HeldPmccLongCandidate[],
+  chain: RawPmccChain,
+  longLegs: readonly PmccChainLeg[],
+): string {
+  const parts = candidates.map(candidate => {
+    const label = candidate.underlyingSymbol + ' ' + candidate.strike + 'C ' + candidate.expiration;
+    if (chain.longExpirations.indexOf(candidate.expiration) === -1) {
+      return label + ': expiration is not in the loaded long-call window';
+    }
+    const sameContract = longLegs.filter(leg => leg.optionType === 'C' && leg.expiration === candidate.expiration && leg.strike === candidate.strike)[0];
+    if (!sameContract) return label + ': the market-data feed returned no row for this strike and expiration';
+    return label + ': a row exists but its option symbol differs (held "' + candidate.occSymbol + '", feed "' + String(sameContract.occSymbol) + '")';
+  });
+  return parts.length > 0 ? ' (' + parts.join('; ') + ')' : '';
+}
+
 /** Callable production seam used by the page and runtime integration tests.
  * Deliberately has no legacy/greedy fallback. */
 export function runPmccProduction(
@@ -258,7 +280,7 @@ export function runPmccProduction(
     if (heldCandidatesForSymbol.length > 0 && matchedHeldLongs.length === 0) {
       return [buildPmccFailureAuditResult(
         context, snapshot.asOf, 'CHAIN_ADAPTATION_FAILURE',
-        'Held long call could not be matched exactly in the live option chain',
+        'Held long call could not be matched exactly in the live option chain' + heldMatchDiagnosis(heldCandidatesForSymbol, chain, adapted.longLegs),
       )];
     }
     // SCAN-ALIGN-0001D: earnings REMOVAL (a filter, not a gate). Shorts with T <= E <= X are dropped
