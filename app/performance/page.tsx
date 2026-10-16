@@ -821,6 +821,31 @@ export default function PerformancePage() {
             });
           }
         } catch { /* best effort: stored history above still applies */ }
+        // PERF-BALANCE-LOAD-0003: the snapshot list can start later than a 12M / YTD period needs. Net-liq history covers
+        // up to a year back; use it only to fill days nothing else has (stored and snapshot days win).
+        try {
+          const nl = await ttFetch(`/accounts/${accountId}/net-liq/history?time-back=1y`, token);
+          const raw = nl?.data;
+          const rows: Record<string, unknown>[] = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : [];
+          const todayNy = todayNewYork(Date.now());
+          const byDay = new Map<string, number>();
+          rows
+            .filter(r => typeof r.time === 'string' && Number.isFinite(Date.parse(r.time as string)))
+            .sort((a, b) => Date.parse(a.time as string) - Date.parse(b.time as string))
+            .forEach(r => {
+              const value = parseFloat(String(r.close ?? r['total-close'] ?? r.totalClose ?? '0'));
+              const day = todayNewYork(Date.parse(r.time as string));
+              if (Number.isFinite(value) && value !== 0 && day < todayNy) byDay.set(day, value);
+            });
+          if (byDay.size > 0) {
+            setBalanceHistory(prev => {
+              const byDate = new Map<string, BalanceDayPoint>();
+              byDay.forEach((value, date) => byDate.set(date, { date, netLiquidatingValue: value }));
+              (prev ?? []).forEach(d => { if (d.netLiquidatingValue !== 0) byDate.set(d.date, d); });
+              return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+            });
+          }
+        } catch { /* optional fallback source */ }
         try {
           const balData = await ttFetch(`/accounts/${accountId}/balances`, token);
           const live = parseFloat(String(balData?.data?.['net-liquidating-value'] ?? '0'));
@@ -848,7 +873,13 @@ export default function PerformancePage() {
   const accountProfit = useMemo(() => {
     if (balanceHistory == null || movementsStatus === 'loading') return null;
     if (movementsStatus === 'failed') return { status: 'UNAVAILABLE' as const, reason: 'Deposits and withdrawals could not be loaded, so account profit is not shown (a withdrawal would look like a loss).' };
-    return periodAccountProfit(withLivePoint(balanceHistory, today, liveNetLiq), movements, period.from, period.to);
+    const full = withLivePoint(balanceHistory, today, liveNetLiq);
+    const result = periodAccountProfit(full, movements, period.from, period.to);
+    if (result.status === 'UNAVAILABLE' && full.length > 0) {
+      const earliest = full.map(d => d.date).sort()[0];
+      return { ...result, reason: `${result.reason} Earliest balance available: ${earliest}.` };
+    }
+    return result;
   }, [balanceHistory, liveNetLiq, today, movements, movementsStatus, period.from, period.to]);
 
   // PERF-AI-0001: per-trade "deliberate" overrides of the 25%-of-net-liq rule (Dean); review only, never blocking.
