@@ -37,6 +37,8 @@ interface Props {
   order: CcOrderInput;
   deps: CcOrderDeps;
   onClose: () => void;
+  /** TRADE-LOOKUP-0001: called once when the order has been submitted, so Trade Lookup can close with it. */
+  onPlaced?: () => void;
 }
 
 type Phase = 'confirm' | 'dryrun' | 'placing' | 'done' | 'error';
@@ -47,12 +49,13 @@ const VALIDATION_WINDOW_MS = 15000;
 const money0 = (n: number) => '$' + Math.round(n).toLocaleString();
 const moneySigned = (n: number) => (n < 0 ? '−' : '+') + '$' + Math.abs(Math.round(n)).toLocaleString();
 
-export function CcTradeModal({ th, order, deps, onClose }: Props) {
+export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
   const [quantity, setQuantity] = useState(order.initialQuantity && order.initialQuantity > 0 ? order.initialQuantity : 1);
   const [entryLimit, setEntryLimit] = useState(parseFloat(order.midPerShare.toFixed(2)));
   const [profitPct, setProfitPct] = useState(50);
   const [acknowledged, setAcknowledged] = useState(false);
   const [phase, setPhase] = useState<Phase>('confirm');
+  useEffect(() => { if (phase === 'done') onPlaced?.(); }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
   const [reports, setReports] = useState<CoverageReports | null>(null);
   const [coverageLoaded, setCoverageLoaded] = useState(false);
   const [dryRunResult, setDryRunResult] = useState<any>(null);

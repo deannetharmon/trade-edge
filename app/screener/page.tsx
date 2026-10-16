@@ -2773,8 +2773,10 @@ function brokerErrorText(data: any, fallback: string): string {
 // Required" as the headline risk figure instead of "Max Loss", the card's
 // own assignment-warning sentence carried verbatim, and a freshly re-fetched
 // collateral figure shown immediately before the Place button.
-function CspTradeModal({ result, th, onClose, qualification }: {
+function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
   result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void;
+  /** TRADE-LOOKUP-0001: called once when the order has been submitted, so a caller that opened this from Trade Lookup can close the lookup too. */
+  onPlaced?: () => void;
   /** QUAL-STATES-0001 phase 3: the scan's verdict on this CSP; anything but Qualified must be acknowledged. */
   qualification?: { derivation: QualificationDerivation; checks: Record<string, CheckResult> } | null;
 }) {
@@ -2793,6 +2795,7 @@ function CspTradeModal({ result, th, onClose, qualification }: {
   // ENTRY-WALK-0001: opt-in per order, off by default.
   const [walkOn, setWalkOn] = useState(false);
   const walk = useEntryWalk();
+  useEffect(() => { if (phase === 'done') onPlaced?.(); }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
   // ORDER-TICK-0001: the option root's tick table, so the profit target and stop are sent at prices the exchange accepts
   // (a 2x stop on a $2.48 credit is $4.96, and prices at or above $3.00 sit on a $0.05 tick).
   const [tickTable, setTickTable] = useState<TickTable | null>(null);
@@ -9069,6 +9072,14 @@ export default function Home() {
   const [showTradeLookup, setShowTradeLookup] = useState(false);
   const [tradeLookupOrderOpen, setTradeLookupOrderOpen] = useState(false);
   const [ccLookupOrder, setCcLookupOrder] = useState<CcOrderInput | null>(null);
+  // Set when an order opened from Trade Lookup is submitted; closing that order dialog then closes the lookup too.
+  // Backing out of an order that was NOT placed still returns to the same chain.
+  const lookupOrderPlacedRef = useRef(false);
+  const finishLookupOrder = () => {
+    if (!lookupOrderPlacedRef.current) return;
+    lookupOrderPlacedRef.current = false;
+    setShowTradeLookup(false); setTradeLookupOrderOpen(false); setCcLookupOrder(null);
+  };
   const openCcFromScan = (r: ScreenResult) => { const order = ccOrderInputFromScanResult(r); if (order) setCcLookupOrder(order); };
   const [leapsResults, setLeapsResults] = useState<Array<{
     symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
@@ -13328,7 +13339,7 @@ export default function Home() {
       })()}
       {cspTradeResult && cspTradeResult.bestCandidate && (() => {
         const q = deriveCspQualification(cspTradeResult);
-        return <CspTradeModal result={cspTradeResult} th={th} onClose={() => setCspTradeResult(null)} qualification={q ? { derivation: q.derivation, checks: q.checks } : null} />;
+        return <CspTradeModal result={cspTradeResult} th={th} onClose={() => { setCspTradeResult(null); finishLookupOrder(); }} onPlaced={() => { if (tradeLookupOrderOpen) lookupOrderPlacedRef.current = true; }} qualification={q ? { derivation: q.derivation, checks: q.checks } : null} />;
       })()}
       {showTradeLookup && (
         <TradeLookupModal
@@ -13340,7 +13351,7 @@ export default function Home() {
           onOrderCc={(order) => { setTradeLookupOrderOpen(true); setCcLookupOrder(order); }}
         />
       )}
-      {ccLookupOrder && <CcTradeModal th={th} order={ccLookupOrder} deps={defaultCcOrderDeps} onClose={() => setCcLookupOrder(null)} />}
+      {ccLookupOrder && <CcTradeModal th={th} order={ccLookupOrder} deps={defaultCcOrderDeps} onClose={() => { setCcLookupOrder(null); finishLookupOrder(); }} onPlaced={() => { if (tradeLookupOrderOpen) lookupOrderPlacedRef.current = true; }} />}
       {leapsTradeCandidate && <LeapsTradeModal candidate={leapsTradeCandidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax} onClose={() => setLeapsTradeCandidate(null)} />}
       <LoadPromptModal state={loadPrompt} onClose={() => setLoadPrompt(p => ({ ...p, show: false }))} th={th} />
       {showRunModal && (

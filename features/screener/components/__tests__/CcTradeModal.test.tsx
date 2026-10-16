@@ -61,6 +61,19 @@ describe('CcTradeModal', () => {
     expect(deps.place).toHaveBeenCalledTimes(1);
   });
 
+  it('calls onPlaced exactly once after the order is submitted, and never when it is only backed out of', async () => {
+    const deps = makeDeps();
+    const onPlaced = vi.fn();
+    render(<CcTradeModal th={th} order={order} deps={deps} onClose={vi.fn()} onPlaced={onPlaced} />);
+    await waitFor(() => expect(screen.getByTestId('cc-coverage').textContent).not.toMatch(/Checking/));
+    await userEvent.click(screen.getByRole('button', { name: 'DRY RUN' }));
+    const place = await screen.findByRole('button', { name: /PLACE/ });
+    expect(onPlaced).not.toHaveBeenCalled();
+    await userEvent.click(place);
+    await screen.findByText(/ORD-1/);
+    expect(onPlaced).toHaveBeenCalledTimes(1);
+  });
+
   it('never places when coverage is unknown', async () => {
     const deps = makeDeps({ readCoverage: async () => { throw new Error('boom'); } });
     await open(deps);
