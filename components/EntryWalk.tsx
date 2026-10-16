@@ -112,9 +112,12 @@ export function WalkProgress({ log, running, outcome, onCancel }: {
         {outcome ? <p className="text-xs text-slate-300 pt-1">{outcomeLine(outcome)}</p> : null}
       </div>
       {running ? (
-        <button type="button" onClick={onCancel} className="w-full min-h-[44px] rounded-lg border border-red-500 text-red-300 text-sm font-bold">
-          Cancel
-        </button>
+        <>
+          <p className="text-xs text-amber-300">Stay on this page until the walk finishes (about 15 seconds). Leaving it stops the walk and leaves the order at its last price.</p>
+          <button type="button" onClick={onCancel} className="w-full min-h-[44px] rounded-lg border border-red-500 text-red-300 text-sm font-bold">
+            Cancel
+          </button>
+        </>
       ) : null}
     </div>
   );
