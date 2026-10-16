@@ -5,6 +5,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { getAccessToken } from '@/lib/auth/tastytradeToken';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
+import { balanceChangeRows } from '@/lib/portfolio-data/balanceChange';
 import { closedDaysOnly, extractMoneyMovements, performanceSeries, todayNewYork, withLivePoint, type BalanceDayPoint, type MoneyMovement } from '@/lib/portfolio-data/balancePerformance';
 
 const BASE = 'https://api.tastytrade.com';
@@ -225,6 +226,41 @@ function BalanceChart({ history, movements, range, mode }: { history: BalanceDay
   );
 }
 
+function BalanceChangeTable({ history, current, movements }: { history: BalanceDay[]; current: CurrentBalances; movements: MoneyMovement[] }) {
+  const rows = useMemo(() => balanceChangeRows(history, current, todayNewYork(Date.now()), movements, 8), [history, current, movements]);
+  if (rows.length === 0) return null;
+  const cell = (v: number) => <td className={`px-2 py-1 text-right tabular-nums ${v < 0 ? 'text-red-400' : v > 0 ? 'text-emerald-400' : 'text-white/40'}`}>{v === 0 ? '—' : fmtSignedMoney(v)}</td>;
+  return (
+    <div className="border border-white/10 rounded-xl p-5">
+      <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">What changed</p>
+      <p className="mb-3 text-[10px] text-white/40">Each stored day to the next, then to now. Trading = net liq change after taking deposits and withdrawals out. Other = stock and anything that is not cash or options.</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-widest text-white/40">
+              <th className="px-2 py-1 text-left font-normal">Period</th>
+              <th className="px-2 py-1 text-right font-normal">Net liq</th>
+              <th className="px-2 py-1 text-right font-normal">Cash</th>
+              <th className="px-2 py-1 text-right font-normal">Options</th>
+              <th className="px-2 py-1 text-right font-normal">Other</th>
+              <th className="px-2 py-1 text-right font-normal">Moved</th>
+              <th className="px-2 py-1 text-right font-normal">Trading</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.toDate} className="border-t border-white/5">
+                <td className="px-2 py-1 text-white/70">{r.fromDate.slice(5)} → {r.live ? 'now' : r.toDate.slice(5)}{r.gapDays > 4 ? <span className="ml-1 text-amber-400/80">({r.gapDays} days)</span> : null}</td>
+                {cell(r.netLiq)}{cell(r.cash)}{cell(r.options)}{cell(r.other)}{cell(r.moved)}{cell(r.trading)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function BalancesTab() {
   const [current, setCurrent] = useState<CurrentBalances | null>(null);
   const [history, setHistory] = useState<BalanceDay[]>([]);
@@ -300,6 +336,7 @@ export default function BalancesTab() {
             </div>
             <BalanceChart history={withLivePoint(history, todayNewYork(Date.now()), current.netLiquidatingValue)} movements={movements} range={range} mode={mode} />
           </div>
+          <BalanceChangeTable history={history} current={current} movements={movements} />
         </>
       )}
     </div>
