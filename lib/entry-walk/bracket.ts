@@ -53,3 +53,19 @@ export function bracketForPrice(entryCredit: number, gtcPct: number, stopMultipl
   const stopLimit = Math.max(ceilToTick(rawLimit, tickTable), stopTrigger);
   return { entryCredit, profitBuyback, stopTrigger, stopLimit };
 }
+
+/**
+ * ORDER-TICK-0001: one line for a rejected order, naming every price that was sent and the tick table in force, so a
+ * broker price error can be read off the screen instead of guessed at. Pure text; never changes what is sent.
+ */
+export function describeOrderPrices(payload: unknown, tickTable: TickTable | null): string {
+  const p = payload as {
+    'trigger-order'?: { price?: unknown };
+    orders?: Array<{ price?: unknown; 'stop-trigger'?: unknown }>;
+  } | null;
+  const show = (v: unknown) => (v == null || v === '' ? 'n/a' : `$${String(v)}`);
+  const table = tickTable
+    ? tickTable.map(step => (step.threshold == null ? `$${step.value}` : `$${step.value} below $${step.threshold}`)).join(', then ')
+    : 'not loaded (whole cents assumed)';
+  return `Sent: entry ${show(p?.['trigger-order']?.price)}, profit target ${show(p?.orders?.[0]?.price)}, stop trigger ${show(p?.orders?.[1]?.['stop-trigger'])}, stop limit ${show(p?.orders?.[1]?.price)}. Tick table: ${table}.`;
+}

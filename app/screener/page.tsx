@@ -142,7 +142,7 @@ import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import { buildCreditEntryOtoco } from '@/lib/screener/entryBracket';
 import { WalkCheckbox, WalkProgress, useEntryWalk } from '@/components/EntryWalk';
 import { buildWalkLadder } from '@/lib/entry-walk/ladder';
-import { bracketForPrice } from '@/lib/entry-walk/bracket';
+import { bracketForPrice, describeOrderPrices } from '@/lib/entry-walk/bracket';
 import { netQuoteFromLegs } from '@/lib/entry-walk/broker';
 import { buildFillRecord, recordWalkFill } from '@/lib/entry-walk/fillLog';
 import { tickTableFromNestedChain, type TickTable } from '@/lib/portfolio/tickSize';
@@ -2873,7 +2873,7 @@ function CspTradeModal({ result, th, onClose, qualification }: {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(brokerErrorText(data, `Dry run failed (${res.status})`));
+      if (!res.ok) throw new Error(`${brokerErrorText(data, `Dry run failed (${res.status})`)} ${describeOrderPrices(payload, tickTable)}`);
       setDryRunResult(data?.data);
       setPhase('confirm');
     } catch (e: any) {
@@ -4308,7 +4308,7 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Dry run failed (${res.status})`);
+      if (!res.ok) throw new Error(`${brokerErrorText(data, `Dry run failed (${res.status})`)} ${describeOrderPrices(payload, tickTable)}`);
       setDryRunResult(data?.data);
       setPhase('confirm');
     } catch (e: any) {

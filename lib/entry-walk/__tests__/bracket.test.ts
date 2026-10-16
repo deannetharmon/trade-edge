@@ -4,7 +4,7 @@
 // was $4.96 / $5.46, and prices at or above $3.00 must sit on a $0.05 tick ("Price must be in increments of $0.05").
 
 import { describe, it, expect } from 'vitest';
-import { bracketForPrice } from '../bracket';
+import { bracketForPrice, describeOrderPrices } from '../bracket';
 import { isOnTick, type TickTable } from '@/lib/portfolio/tickSize';
 
 // $0.01 below $3.00, $0.05 at or above (penny-pilot roots such as TQQQ and SOXL).
@@ -60,5 +60,23 @@ describe('bracketForPrice with a tick table', () => {
         }
       }
     }
+  });
+});
+
+describe('describeOrderPrices', () => {
+  const payload = {
+    'trigger-order': { price: '2.48' },
+    orders: [{ price: '1.24' }, { 'stop-trigger': '4.95', price: '5.50' }],
+  };
+  it('names every sent price and the tick table', () => {
+    expect(describeOrderPrices(payload, PENNY)).toBe(
+      'Sent: entry $2.48, profit target $1.24, stop trigger $4.95, stop limit $5.50. Tick table: $0.01 below $3, then $0.05.',
+    );
+  });
+  it('says so when no tick table was loaded', () => {
+    expect(describeOrderPrices(payload, null)).toContain('Tick table: not loaded (whole cents assumed).');
+  });
+  it('tolerates a malformed payload', () => {
+    expect(describeOrderPrices(null, null)).toContain('entry n/a');
   });
 });
