@@ -10287,7 +10287,11 @@ export default function Home() {
     const heldSelection = { ...discovery.heldSelection, candidates: heldCandidates };
     const scanSymbols = Array.from(new Set(heldCandidates.map(c => c.underlyingSymbol)));
     const heldLongDtes = heldCandidates.map(candidate => candidate.dte);
-    const effectiveDte = { ...dte, longMin: Math.min(...heldLongDtes), longMax: Math.max(...heldLongDtes) };
+    // PMCC-WINDOW-0001: the held-LEAPS window was exactly [min, max] of the held DTEs, but Portfolio counts calendar days
+    // while the chain loader (daysUntil) rounds from the current time, so they differ by a day and the held contract's own
+    // expiration fell outside the window ("expiration is not in the loaded long-call window"). The held match is by exact
+    // contract symbol, so a small margin is safe.
+    const effectiveDte = { ...dte, longMin: Math.max(0, Math.min(...heldLongDtes) - 3), longMax: Math.max(...heldLongDtes) + 3 };
     setError('');
     setScreenMode('filter');
     try { localStorage.setItem(LS_SCREEN_MODE, 'filter'); } catch {}
