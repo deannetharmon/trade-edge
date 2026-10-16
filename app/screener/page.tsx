@@ -74,6 +74,8 @@ import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { TradeLookupModal } from '@/features/screener/components/TradeLookupModal';
 import { defaultLookupDeps } from '@/lib/tradeLookup/defaultDeps';
+import { CcTradeModal, type CcOrderInput } from '@/features/screener/components/CcTradeModal';
+import { defaultCcOrderDeps } from '@/lib/scans/ccOrderDeps';
 import { calculateCspScore } from '@/lib/scans/cspScore';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
@@ -9163,6 +9165,7 @@ export default function Home() {
   // order dialog it opened is on top, so backing out of the order returns to the same chain.
   const [showTradeLookup, setShowTradeLookup] = useState(false);
   const [tradeLookupOrderOpen, setTradeLookupOrderOpen] = useState(false);
+  const [ccLookupOrder, setCcLookupOrder] = useState<CcOrderInput | null>(null);
   const [leapsResults, setLeapsResults] = useState<Array<{
     symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
     openInterest: number | null; bid: number | null; ask: number | null; occSymbol: string | null;
@@ -13423,11 +13426,13 @@ export default function Home() {
         <TradeLookupModal
           th={th}
           deps={defaultLookupDeps}
-          suspended={tradeLookupOrderOpen && cspTradeResult !== null}
-          onClose={() => { setShowTradeLookup(false); setTradeLookupOrderOpen(false); }}
+          suspended={tradeLookupOrderOpen && (cspTradeResult !== null || ccLookupOrder !== null)}
+          onClose={() => { setShowTradeLookup(false); setTradeLookupOrderOpen(false); setCcLookupOrder(null); }}
           onOrderCsp={(order) => { setTradeLookupOrderOpen(true); setCspTradeResult(order); }}
+          onOrderCc={(order) => { setTradeLookupOrderOpen(true); setCcLookupOrder(order); }}
         />
       )}
+      {ccLookupOrder && <CcTradeModal th={th} order={ccLookupOrder} deps={defaultCcOrderDeps} onClose={() => setCcLookupOrder(null)} />}
       {leapsTradeCandidate && <LeapsTradeModal candidate={leapsTradeCandidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax} onClose={() => setLeapsTradeCandidate(null)} />}
       <LoadPromptModal state={loadPrompt} onClose={() => setLoadPrompt(p => ({ ...p, show: false }))} th={th} />
       {showRunModal && (

@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildLookup } from '../buildLookup';
 import { applyFlags } from '../flags';
-import { buildCspOrderResult, handoffBlockReason } from '../orderHandoff';
+import { buildCcOrderInput, buildCspOrderResult, ccHandoffBlockReason, handoffBlockReason } from '../orderHandoff';
 import { cspEntryLimitPerShare } from '@/lib/scans/cspEntryUnits';
 import { contract, row } from './fixtures';
 
@@ -70,5 +70,41 @@ describe('buildCspOrderResult', () => {
   it('refuses a row that is not from this result', () => {
     const r = csp();
     expect(handoffBlockReason(r, Object.assign({}, r.pick!))).toBe('wrong_row');
+  });
+});
+
+describe('buildCcOrderInput', () => {
+  const cc = (canOrder = true, rows = [row(16, { right: 'C', delta: 0.25 })], classification: 'etf' | 'index' = 'etf', contracts = 2) => applyFlags(buildLookup({
+    contract: contract({ strategy: 'CC', right: 'C', ticker: 'BITX', strike: 16 }), expiration: '2026-11-06', nextExpiration: null, contracts,
+    rows, underlyingPrice: 15, classification, today,
+    coverage: { status: canOrder ? 'covered_by_shares' : 'not_covered', contractsNeeded: contracts, canOrder, message: '' },
+  }));
+
+  it('builds the call dialog input from a covered call row', () => {
+    const r = cc();
+    const out = buildCcOrderInput(r, r.rows[0])!;
+    expect(out).toMatchObject({ symbol: 'BITX', strike: 16, expiration: '2026-11-06', isIndex: false, initialQuantity: 2 });
+    expect(out.occSymbol).toBe(r.rows[0].occSymbol);
+    expect(out.delta).toBe(0.25);
+    expect(out.midPerShare).toBeCloseTo(r.rows[0].mid as number, 2);
+  });
+  it('marks index underlyings', () => {
+    const r = cc(true, [row(16, { right: 'C' })], 'index');
+    expect(buildCcOrderInput(r, r.rows[0])!.isIndex).toBe(true);
+  });
+  it('refuses when coverage is not proven', () => {
+    const r = cc(false);
+    expect(ccHandoffBlockReason(r, r.rows[0])).toBe('not_covered');
+    expect(buildCcOrderInput(r, r.rows[0])).toBeNull();
+  });
+  it('refuses no-quote, no-symbol, foreign rows, and puts', () => {
+    const nq = cc(true, [row(16, { right: 'C', bid: 0, ask: 0 })]);
+    expect(ccHandoffBlockReason(nq, nq.rows[0])).toBe('no_quote');
+    const ns = cc(true, [row(16, { right: 'C', occSymbol: '' })]);
+    expect(ccHandoffBlockReason(ns, ns.rows[0])).toBe('no_symbol');
+    const r = cc();
+    expect(ccHandoffBlockReason(r, Object.assign({}, r.rows[0]))).toBe('wrong_row');
+    const put = csp();
+    expect(ccHandoffBlockReason(put, put.pick!)).toBe('not_cc');
   });
 });

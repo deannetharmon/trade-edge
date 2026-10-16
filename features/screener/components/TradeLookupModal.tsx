@@ -14,7 +14,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScanModalShell, type ScanModalTheme } from './ScanModalShell';
 import { parsePost } from '@/lib/tradeLookup/parsePost';
 import { loadTradeLookup, type LookupDeps } from '@/lib/tradeLookup/loadLookup';
-import { buildCspOrderResult, handoffBlockReason } from '@/lib/tradeLookup/orderHandoff';
+import { buildCcOrderInput, buildCspOrderResult, ccHandoffBlockReason, handoffBlockReason } from '@/lib/tradeLookup/orderHandoff';
+import type { CcOrderInput } from './CcTradeModal';
 import {
   LOOKUP_COLUMNS, DEFAULT_LOOKUP_COLUMNS, LOCKED_COLUMN, loadLookupColumns, saveLookupColumns, toggleLookupColumn,
   type LookupColumnId,
@@ -30,6 +31,8 @@ interface Props {
   onClose: () => void;
   /** Hands a chosen put to the existing CSP order dialog. */
   onOrderCsp: (result: ScreenResult) => void;
+  /** Hands a chosen covered call to the call order dialog, which proves coverage itself. Omit to keep calls inspection-only. */
+  onOrderCc?: (order: CcOrderInput) => void;
   /** True while the order dialog is open on top: the modal keeps its state but draws nothing. */
   suspended?: boolean;
 }
@@ -74,7 +77,7 @@ function blockedMessage(res: ExpiryResolution): string {
   return '';
 }
 
-export function TradeLookupModal({ th, deps, onClose, onOrderCsp, suspended = false }: Props) {
+export function TradeLookupModal({ th, deps, onClose, onOrderCsp, onOrderCc, suspended = false }: Props) {
   const [text, setText] = useState('');
   const [notice, setNotice] = useState('');
   const [contract, setContract] = useState<ParsedContract | null>(null);
@@ -262,7 +265,11 @@ export function TradeLookupModal({ th, deps, onClose, onOrderCsp, suspended = fa
                 className={`rounded-lg border px-3 py-2 text-xs ${result.coverage.canOrder ? 'border-emerald-500/50 text-emerald-300' : 'border-amber-500/60 text-amber-200'}`}
               >
                 {result.coverage.message}
-                <span className="block opacity-80">Covered-call orders are not enabled in TradeEdge yet, so this table is for inspection.</span>
+                <span className="block opacity-80">
+                  {onOrderCc
+                    ? 'The order window reads your shares and LEAPs from the broker again before anything is placed.'
+                    : 'Covered-call orders are not enabled in TradeEdge yet, so this table is for inspection.'}
+                </span>
               </p>
             )}
 
@@ -359,7 +366,18 @@ export function TradeLookupModal({ th, deps, onClose, onOrderCsp, suspended = fa
                   <ul className="mt-1 text-amber-300">{selected.flags.map((f) => <li key={f.code}>{f.label}</li>)}</ul>
                 )}
                 <div className="mt-2 flex items-center gap-3">
-                  {handoffBlockReason(result, selected) === null ? (
+                  {result.contract.strategy === 'CC' && onOrderCc && ccHandoffBlockReason(result, selected) === null ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const order = buildCcOrderInput(result, selected);
+                        if (order) onOrderCc(order);
+                      }}
+                      className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold tracking-widest text-white hover:bg-emerald-500"
+                    >
+                      SEND TO ORDER {'→'}
+                    </button>
+                  ) : handoffBlockReason(result, selected) === null ? (
                     <button
                       type="button"
                       onClick={() => {
@@ -373,7 +391,9 @@ export function TradeLookupModal({ th, deps, onClose, onOrderCsp, suspended = fa
                   ) : (
                     <span className={th.textFaint}>
                       {result.contract.strategy === 'CC'
-                        ? 'Covered-call orders are not enabled in TradeEdge yet.'
+                        ? (onOrderCc
+                            ? (result.coverage.canOrder ? 'This call has no usable quote, so it cannot be ordered.' : 'Coverage is not proven for this call, so it cannot be ordered.')
+                            : 'Covered-call orders are not enabled in TradeEdge yet.')
                         : 'This contract has no usable quote, so it cannot be ordered.'}
                     </span>
                   )}

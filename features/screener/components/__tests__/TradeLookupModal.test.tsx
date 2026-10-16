@@ -133,6 +133,41 @@ describe('TradeLookupModal', () => {
     expect(other.querySelector('td[title*="Open interest 0"]')).not.toBeNull();
   });
 
+  describe('covered-call hand-off', () => {
+    const ccDeps = (shares: number | null) => makeDeps({
+      fetchChain: async (_s, _t, exp) => ({ chains: { [exp]: [15, 16, 17].map((k) => raw(k, exp, { optionType: 'C', delta: 0.25, bid: 0.38, ask: 0.4 })) }, classification: 'etf' }),
+      getCoverageReports: async () => ({ capacity: shares === null ? null : { status: 'ok', warnings: [], bySymbol: { BITX: { availableCoveredContracts: shares, costBasis: null, costBasisComplete: false } } } as never, foundations: null }),
+    });
+    const open = async (deps: LookupDeps, onOrderCc?: (o: unknown) => void) => {
+      render(<TradeLookupModal th={th} deps={deps} onClose={vi.fn()} onOrderCsp={vi.fn()} onOrderCc={onOrderCc as never} />);
+      await userEvent.click(screen.getByLabelText('Group post'));
+      await userEvent.paste('BITX 11/6 16C @ 0.39 COVERED CALLS');
+      await userEvent.click(screen.getByRole('button', { name: /LOOK UP/ }));
+      await screen.findByTestId('trade-lookup-coverage');
+      await userEvent.click(screen.getByRole('button', { name: 'Select 16C 2026-11-06' }));
+    };
+
+    it('offers SEND TO ORDER for a covered call and hands over the call', async () => {
+      const onOrderCc = vi.fn();
+      await open(ccDeps(2), onOrderCc);
+      await userEvent.click(screen.getByRole('button', { name: /SEND TO ORDER/ }));
+      expect(onOrderCc).toHaveBeenCalledTimes(1);
+      expect(onOrderCc.mock.calls[0][0]).toMatchObject({ symbol: 'BITX', strike: 16, expiration: '2026-11-06', midPerShare: 0.39, isIndex: false });
+    });
+
+    it('offers no order when coverage is not proven', async () => {
+      const onOrderCc = vi.fn();
+      await open(ccDeps(0), onOrderCc);
+      expect(screen.queryByRole('button', { name: /SEND TO ORDER/ })).not.toBeInTheDocument();
+      expect(screen.getByTestId('trade-lookup-selected')).toHaveTextContent(/Coverage is not proven/);
+    });
+
+    it('offers no order when coverage is unknown', async () => {
+      await open(ccDeps(null), vi.fn());
+      expect(screen.queryByRole('button', { name: /SEND TO ORDER/ })).not.toBeInTheDocument();
+    });
+  });
+
   it('an unreadable post explains why and fetches nothing', async () => {
     const deps = makeDeps({ getToken: vi.fn(async () => 'tok') });
     await lookup('hello there', deps);

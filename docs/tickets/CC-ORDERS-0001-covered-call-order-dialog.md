@@ -1,6 +1,6 @@
 # CC-ORDERS-0001: covered-call order dialog
 
-Status: slice A IMPLEMENTED 2026-10-15 (`lib/scans/ccOrderMath.ts`, `ccOrderSubmission.ts`; 31 tests; not wired to any screen). Slice B (dialog `features/screener/components/CcTradeModal.tsx`, broker deps `lib/scans/ccOrderDeps.ts`) IMPLEMENTED 2026-10-15, not wired to any screen. Slice C next.
+Status: slice A IMPLEMENTED 2026-10-15 (`lib/scans/ccOrderMath.ts`, `ccOrderSubmission.ts`; 31 tests; not wired to any screen). Slice B (dialog `features/screener/components/CcTradeModal.tsx`, broker deps `lib/scans/ccOrderDeps.ts`) IMPLEMENTED 2026-10-15, not wired to any screen. Slice C IMPLEMENTED 2026-10-15 (Trade Lookup SEND TO ORDER for covered calls). Remaining: Covered Call scan card 'Analysis only' line (separate approval).
 Origin: TRADE-LOOKUP-0001 shows covered-call posts but cannot order them because TradeEdge has no covered-call order
 dialog (the Covered Call scan card says "Analysis only", TE-0007C). Order path: Ian gate required, decisions below.
 

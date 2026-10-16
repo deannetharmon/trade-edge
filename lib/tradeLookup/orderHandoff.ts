@@ -10,6 +10,7 @@
 // "nothing to acknowledge" (the lookup's own flags are advisory).
 
 import type { CheckResult, ScreenResult, SpreadCandidate } from '@/lib/scans/types';
+import type { CcOrderInput } from '@/features/screener/components/CcTradeModal';
 import type { LookupResult, LookupRow } from './lookupTypes';
 
 const pending = (): CheckResult => ({ status: 'pending', value: '—', reason: 'Not evaluated: opened from Trade Lookup.' });
@@ -70,5 +71,37 @@ export function buildCspOrderResult(result: LookupResult, row: LookupRow): Scree
       ivr: pending(), earnings: pending(), oi: pending(), delta: pending(), credit: pending(),
       roc: pending(), pop: pending(), iv: pending(), emClearance: pending(),
     },
+  };
+}
+
+export type CcHandoffBlock = 'not_cc' | 'not_covered' | 'no_quote' | 'no_symbol' | 'wrong_row';
+
+/**
+ * CC-ORDERS-0001C: a covered call can go to the call order dialog only when the lookup-time coverage check passed
+ * and the row has a real quote. This is a convenience gate only: the dialog proves coverage again from a fresh broker
+ * read at open, before the dry run, and inside the submit gate.
+ */
+export function ccHandoffBlockReason(result: LookupResult, row: LookupRow): CcHandoffBlock | null {
+  if (result.contract.strategy !== 'CC' || row.right !== 'C') return 'not_cc';
+  if (result.rows.indexOf(row) === -1) return 'wrong_row';
+  if (!result.coverage.canOrder) return 'not_covered';
+  if (row.noQuote || row.mid === null || row.mid <= 0 || row.bid === null || row.ask === null) return 'no_quote';
+  if (!row.occSymbol) return 'no_symbol';
+  return null;
+}
+
+/** What the covered-call order dialog takes, or null when this row cannot be ordered. */
+export function buildCcOrderInput(result: LookupResult, row: LookupRow): CcOrderInput | null {
+  if (ccHandoffBlockReason(result, row) !== null) return null;
+  return {
+    symbol: result.contract.ticker,
+    occSymbol: row.occSymbol,
+    strike: row.strike,
+    expiration: row.expiration,
+    dte: row.dte,
+    delta: row.delta === null ? null : Math.abs(row.delta),
+    midPerShare: parseFloat((row.mid as number).toFixed(2)),
+    isIndex: result.classification === 'index',
+    initialQuantity: result.contracts,
   };
 }
