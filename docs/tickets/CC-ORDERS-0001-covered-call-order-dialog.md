@@ -1,6 +1,6 @@
 # CC-ORDERS-0001: covered-call order dialog
 
-Status: scoped 2026-10-15 (Paul, Ian, Quinn, Alan). Build slice A next.
+Status: slice A IMPLEMENTED 2026-10-15 (`lib/scans/ccOrderMath.ts`, `ccOrderSubmission.ts`; 31 tests; not wired to any screen). Slice B next.
 Origin: TRADE-LOOKUP-0001 shows covered-call posts but cannot order them because TradeEdge has no covered-call order
 dialog (the Covered Call scan card says "Analysis only", TE-0007C). Order path: Ian gate required, decisions below.
 

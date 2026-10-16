@@ -15,7 +15,7 @@ Last updated: 2026-10-06 (ANALYTICS-0001 go)
 
 ## Covered-call orders — 2026-10-15
 
-- **CC-ORDERS-0001** — SCOPED 2026-10-15 (Paul, Ian, Quinn, Alan). A dedicated covered-call order dialog so Trade Lookup (and later the Covered Call scan card) can place a call, only when a fresh broker read proves it is covered by shares or a longer-dated LEAP. Entry + GTC 50% buy-to-close, no stop; strike below cost basis needs an explicit acknowledgment. Build order: A pure builders and guard with tests, B dialog, C wire entry points. Ticket: `docs/tickets/CC-ORDERS-0001-covered-call-order-dialog.md`.
+- **CC-ORDERS-0001** — SCOPED 2026-10-15 (Paul, Ian, Quinn, Alan). A dedicated covered-call order dialog so Trade Lookup (and later the Covered Call scan card) can place a call, only when a fresh broker read proves it is covered by shares or a longer-dated LEAP. Entry + GTC 50% buy-to-close, no stop; strike below cost basis needs an explicit acknowledgment. Build order: A pure builders and guard with tests (IMPLEMENTED 2026-10-15, not wired to any screen), B dialog, C wire entry points. Ticket: `docs/tickets/CC-ORDERS-0001-covered-call-order-dialog.md`.
 
 ## Portfolio queue — 2026-10-05 (Dean, after the GGLL and SOXL reviews)
 
