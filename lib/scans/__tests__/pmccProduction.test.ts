@@ -383,6 +383,36 @@ describe('PMCC production integration', () => {
     }
   });
 
+  it('records a held LEAP missing from the live chain as a failed-symbol audit, so the scan still completes', async () => {
+    const held: HeldPmccLongCandidate = {
+      accountNumber: '5WT00001', positionKey: 'missing-held', underlyingSymbol: 'GS',
+      occSymbol: 'missing', expiration: '2027-06-18', dte: 308, strike: 720, quantity: 1, avgOpenPrice: null,
+    };
+    const outcome = await runPmccSymbolProduction({
+      snapshot, fallbackContext: { ...context, price: null },
+      acquire: async () => ({ chain: { shortExpirations: [], longExpirations: [], chains: {} }, context }),
+      dependencies: { adapt: vi.fn(() => ({ longLegs: [leg('long', 700)], shortLegs: [leg('short', 1070)] })), pair: vi.fn(pairPmccCandidates) },
+      heldLongCandidates: [held],
+    });
+    expect(outcome.status).toBe('failed');
+    if (outcome.status !== 'failed') return;
+    expect(outcome.audit.pmccAuditKind).toBe('CHAIN_ADAPTATION_FAILURE');
+    expect(outcome.audit.failReasons.join(' ')).toContain('could not be matched exactly');
+    let session = createScanSession({
+      mode: 'filter', requestedStrategy: 'pmcc',
+      scope: { universeSymbols: ['GS'], eligibleSymbols: ['GS'] }, pmccSnapshot: snapshot,
+    });
+    session = completeSession(recordSymbolFailed(session, 'GS', 'MARKET_DATA_REQUEST_FAILED', outcome.audit));
+    expect(session.status).toBe('complete');
+    expect(session.results).toHaveLength(1);
+    // The old path recorded the audit as evaluated and could never complete.
+    const stale = createScanSession({
+      mode: 'filter', requestedStrategy: 'pmcc',
+      scope: { universeSymbols: ['GS'], eligibleSymbols: ['GS'] }, pmccSnapshot: snapshot,
+    });
+    expect(() => completeSession(recordSymbolEvaluated(stale, 'GS', [outcome.audit]))).toThrow(/do not reconcile/);
+  });
+
   it('replaces a prior strategy session with isolated PMCC results and suppresses recommendations', async () => {
     const source = buildPmccScreenResults(run([leg('long', 720)], [leg('short', 1070)]), context)[0];
     const priorResult = {

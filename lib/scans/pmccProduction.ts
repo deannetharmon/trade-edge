@@ -376,10 +376,14 @@ export async function runPmccSymbolProduction(args: {
     };
   }
   try {
-    return {
-      status: 'evaluated',
-      results: runPmccProduction(acquired.chain, acquired.context, args.snapshot, args.dependencies, args.heldLongCandidates),
-    };
+    const results = runPmccProduction(acquired.chain, acquired.context, args.snapshot, args.dependencies, args.heldLongCandidates);
+    // runPmccProduction reports "held LEAP not found in the live chain" as an audit result, not a throw. An audit
+    // result is not a candidate, so it must be recorded as a failed symbol: recording it as evaluated made the
+    // session's candidate count (which counts it) disagree with its reconciliation (which excludes audits), and
+    // completeSession threw "candidate counts do not reconcile" instead of showing the audit.
+    const audit = results.filter(result => result.pmccAuditKind != null)[0];
+    if (audit) return { status: 'failed', audit };
+    return { status: 'evaluated', results };
   } catch (error) {
     const kind = error instanceof PmccProductionError ? error.stage : 'PAIRING_ENGINE_FAILURE';
     return {
