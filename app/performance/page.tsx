@@ -769,6 +769,8 @@ export default function PerformancePage() {
   const [balanceHistory, setBalanceHistory] = useState<BalanceDayPoint[] | null>(null);
   const [movements, setMovements] = useState<MoneyMovement[]>([]);
   const [liveNetLiq, setLiveNetLiq] = useState<number | null>(null);
+  // Withdrawals and deposits must be known before any profit is shown, otherwise a withdrawal reads as a trading loss.
+  const [movementsStatus, setMovementsStatus] = useState<'loading' | 'ok' | 'failed'>('loading');
   useEffect(() => {
     (async () => {
       try {
@@ -783,8 +785,23 @@ export default function PerformancePage() {
         // live balance, merged in memory over whatever is stored. It no longer depends on the Balances tab having been
         // opened recently (the stored copy is only written there, so it went stale and this showed "Unavailable").
         try {
-          const snapData = await ttFetch(`/accounts/${accountId}/balance-snapshots`, token);
-          const items: Record<string, unknown>[] = snapData?.data?.items ?? [];
+          // Without a date range the broker returns only the latest few snapshots, which is why 3M / 6M / 12M / YTD had
+          // no start balance. Ask for the full 400-day range (end-of-day snapshots, paged), falling back to the
+          // plain call if the ranged one is rejected.
+          const items: Record<string, unknown>[] = [];
+          try {
+            const rangeStart = new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10);
+            for (let page = 0; page < 6; page += 1) {
+              const snap = await ttFetch(`/accounts/${accountId}/balance-snapshots?time-of-day=EOD&start-date=${rangeStart}&end-date=${todayNewYork(Date.now())}&per-page=250&page-offset=${page}`, token);
+              const pageItems: Record<string, unknown>[] = snap?.data?.items ?? [];
+              items.push(...pageItems);
+              if (pageItems.length === 0 || page + 1 >= Number(snap?.pagination?.['total-pages'] ?? 1)) break;
+            }
+          } catch { /* fall through to the plain call */ }
+          if (items.length === 0) {
+            const plain = await ttFetch(`/accounts/${accountId}/balance-snapshots`, token);
+            items.push(...((plain?.data?.items ?? []) as Record<string, unknown>[]));
+          }
           const days = items
             .map(item => ({
               date: String(item['snapshot-date'] ?? ''),
@@ -818,7 +835,8 @@ export default function PerformancePage() {
           if (items.length === 0 || page + 1 >= Number(tx?.pagination?.['total-pages'] ?? 1)) break;
         }
         setMovements(extractMoneyMovements(all));
-      } catch { setMovements([]); }
+        setMovementsStatus('ok');
+      } catch { setMovements([]); setMovementsStatus('failed'); }
     })();
   }, []);
   const report = useMemo(() => {
@@ -827,7 +845,11 @@ export default function PerformancePage() {
     const inPeriod = trades.filter(t => t.closeDate >= period.from && t.closeDate <= period.to).map(t => ({ ...t, excluded: excludedIds.has(t.id) }));
     return buildPerformanceReport(inPeriod);
   }, [trades, period.from, period.to]);
-  const accountProfit = useMemo(() => (balanceHistory == null ? null : periodAccountProfit(withLivePoint(balanceHistory, today, liveNetLiq), movements, period.from, period.to)), [balanceHistory, liveNetLiq, today, movements, period.from, period.to]);
+  const accountProfit = useMemo(() => {
+    if (balanceHistory == null || movementsStatus === 'loading') return null;
+    if (movementsStatus === 'failed') return { status: 'UNAVAILABLE' as const, reason: 'Deposits and withdrawals could not be loaded, so account profit is not shown (a withdrawal would look like a loss).' };
+    return periodAccountProfit(withLivePoint(balanceHistory, today, liveNetLiq), movements, period.from, period.to);
+  }, [balanceHistory, liveNetLiq, today, movements, movementsStatus, period.from, period.to]);
 
   // PERF-AI-0001: per-trade "deliberate" overrides of the 25%-of-net-liq rule (Dean); review only, never blocking.
   const [sizeOverrides, setSizeOverrides] = useState<Set<string>>(new Set());
