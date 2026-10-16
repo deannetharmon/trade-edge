@@ -168,6 +168,41 @@ describe('TradeLookupModal', () => {
     });
   });
 
+  describe('RSI and earnings', () => {
+    const fall: number[] = [];
+    for (let k = 0; k < 60; k++) fall.push(100 - k * 0.5);
+    const closes = fall.concat([70.5, 71.2, 72.1, 73.3, 74.6]);
+    const stockDeps = (earnings: string | null) => makeDeps({
+      fetchChain: async (_s, _t, exp) => ({ chains: { [exp]: [115, 120, 125].map((k) => raw(k, exp)) }, classification: 'stock' }),
+      getDailyCloses: async () => closes,
+      getEarningsDate: async () => earnings,
+    });
+
+    it('shows an RSI badge and highlights an expiration that earnings fall on or before', async () => {
+      await lookup('NEW CSP SOXL 11/6 $120P @ $5.47', stockDeps('2026-10-30'));
+      expect(await screen.findByTestId('trade-lookup-rsi')).toHaveTextContent('RSI 44 · Turning up');
+      expect(screen.getByTestId('trade-lookup-earnings')).toHaveTextContent('Earnings 2026-10-30 (15d)');
+      const pick = screen.getByTestId('trade-lookup-pick-row');
+      const expCell = pick.querySelector('td[title*="on or before this expiration"]');
+      expect(expCell).not.toBeNull();
+      expect(expCell!.className).toContain('text-amber-300');
+      // SELECT is never affected.
+      expect(within(pick).getByRole('button', { name: /Select 120P/ })).toBeEnabled();
+    });
+
+    it('shows no earnings for an ETF and no highlight when earnings are far out', async () => {
+      await lookup('NEW CSP SOXL 11/6 $120P @ $5.47', makeDeps({ getDailyCloses: async () => closes, getEarningsDate: async () => '2026-10-30' }));
+      await screen.findByTestId('trade-lookup-rsi');
+      expect(screen.queryByTestId('trade-lookup-earnings')).not.toBeInTheDocument();
+    });
+
+    it('is silent about both when the data is unavailable and still looks up fine', async () => {
+      await lookup('NEW CSP SOXL 11/6 $120P @ $5.47', stockDeps(null));
+      await screen.findByTestId('trade-lookup-pick-row');
+      expect(screen.queryByTestId('trade-lookup-earnings')).not.toBeInTheDocument();
+    });
+  });
+
   it('an unreadable post explains why and fetches nothing', async () => {
     const deps = makeDeps({ getToken: vi.fn(async () => 'tok') });
     await lookup('hello there', deps);

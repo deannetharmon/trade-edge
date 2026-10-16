@@ -16,6 +16,7 @@ import { normalizeChainRows } from './chainRows';
 import { evaluateCoverage } from './coverage';
 import { applyFlags, type FlagRules } from './flags';
 import { resolveExpiry } from './resolveExpiry';
+import { buildSignals } from './signals';
 import type { CoveredCallCapacityReport } from '@/lib/scans/covered-call-capacity';
 import type { PmccFoundationReport } from '@/lib/scans/pmcc-foundations';
 import type { ChainRow, Classification, LoadOutcome } from './lookupTypes';
@@ -41,6 +42,10 @@ export interface LookupDeps {
   getUnderlyingPrice(symbol: string, token: string): Promise<number | null>;
   /** Broker share and LEAP coverage. Only called for covered calls. */
   getCoverageReports(token: string): Promise<CoverageReports>;
+  /** Daily closes, oldest first, for RSI. Optional: without it the RSI badge is simply absent. */
+  getDailyCloses?(symbol: string): Promise<number[] | null>;
+  /** Next expected earnings date 'YYYY-MM-DD', or null. Optional, same fail-soft rule. */
+  getEarningsDate?(symbol: string, token: string): Promise<string | null>;
   today(): DateParts;
 }
 
@@ -110,7 +115,11 @@ export async function loadTradeLookup(contract: ParsedContract, deps: LookupDeps
   const coveragePromise: Promise<CoverageReports | null> =
     contract.strategy === 'CC' ? deps.getCoverageReports(tok).catch(function () { return null; }) : Promise.resolve(null);
 
-  const [chainResult, nextChain, underlyingPrice, reports] = await Promise.all([chainPromise, nextPromise, pricePromise, coveragePromise]);
+  // RSI and earnings are information only, so a failure here never delays or fails the lookup.
+  const closesPromise: Promise<number[] | null> = deps.getDailyCloses ? deps.getDailyCloses(symbol).catch(function () { return null; }) : Promise.resolve(null);
+  const earningsPromise: Promise<string | null> = deps.getEarningsDate ? deps.getEarningsDate(symbol, tok).catch(function () { return null; }) : Promise.resolve(null);
+
+  const [chainResult, nextChain, underlyingPrice, reports, closes, earningsDate] = await Promise.all([chainPromise, nextPromise, pricePromise, coveragePromise, closesPromise, earningsPromise]);
 
   if (!chainResult.ok) {
     return { kind: 'error', message: messageOf(chainResult.error, 'Could not load the ' + symbol + ' chain.') };
@@ -146,5 +155,10 @@ export async function loadTradeLookup(contract: ParsedContract, deps: LookupDeps
   const entry = reports && reports.capacity && reports.capacity.status === 'ok' ? reports.capacity.bySymbol[symbol.toUpperCase()] : null;
   if (entry && entry.costBasisComplete && entry.costBasis !== null) costBasis = entry.costBasis;
 
-  return { kind: 'result', result: applyFlags(result, opts.flagRules, costBasis), resolution };
+  const two = function (n: number) { return (n < 10 ? '0' : '') + n; };
+  const asOf = today.year + '-' + two(today.month) + '-' + two(today.day) + 'T16:00:00Z';
+  const expirations = nextChain && nextExpiration ? [expiration, nextExpiration] : [expiration];
+  const signals = buildSignals({ closes, earningsDate, classification: chainResult.value.classification, expirations, asOf });
+
+  return { kind: 'result', result: Object.assign({}, applyFlags(result, opts.flagRules, costBasis), { signals }), resolution };
 }

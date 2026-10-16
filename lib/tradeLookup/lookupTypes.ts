@@ -4,6 +4,7 @@
 // Pure data. No React, no network.
 
 import type { ExpiryResolution, IsoDate, OptionRight, ParsedContract } from './types';
+import type { LookupSignals } from './signals';
 
 /** One option contract from the broker chain, already normalized. Missing values are null, never 0. */
 export interface ChainRow {
@@ -103,6 +104,8 @@ export interface LookupResult {
   coverage: CoverageResult;
   /** Most recent broker quote time among the pick expiration's rows. */
   quotesAsOf: string | null;
+  /** RSI and earnings, information only. Absent when the loader had no way to read them. */
+  signals?: LookupSignals;
   notes: string[];
 }
 

@@ -7,9 +7,10 @@
 //   - coverage:     getCoveredCallCapacityReport + getPmccBrokerSnapshot (the Covered Call and PMCC scans' own reads)
 // lib/screener/provider.ts is legacy and is deliberately not used here.
 
-import { DEFAULT_RULES } from '@/lib/scans/constants';
-import { daysUntil } from '@/lib/scans/scan-utils';
-import { getAccessToken, getChain, getCoveredCallCapacityReport, getPmccBrokerSnapshot, getQuote, ttFetch } from '@/lib/scans/tastytrade-client';
+import { DEFAULT_RULES, YAHOO_INDEX_CHART_MAP } from '@/lib/scans/constants';
+import { fetchDailyBars } from '@/lib/scans/dailyBarsMemo';
+import { daysUntil, normalizeTickerToken } from '@/lib/scans/scan-utils';
+import { getAccessToken, getChain, getCoveredCallCapacityReport, getMarketMetrics, getPmccBrokerSnapshot, getQuote, ttFetch } from '@/lib/scans/tastytrade-client';
 import type { LookupDeps } from './loadLookup';
 
 export const defaultLookupDeps: LookupDeps = {
@@ -50,6 +51,20 @@ export const defaultLookupDeps: LookupDeps = {
       getPmccBrokerSnapshot(token).catch(function () { return null; }),
     ]);
     return { capacity, foundations: snapshot ? snapshot.foundations : null };
+  },
+
+  async getDailyCloses(symbol) {
+    // Same chart request the trend and RSI code use, through the shared 60 s memo.
+    const clean = normalizeTickerToken(symbol) || symbol.toUpperCase();
+    const bars = (await fetchDailyBars(YAHOO_INDEX_CHART_MAP[clean] || clean, clean)) as Array<{ c: number }>;
+    const closes = bars.map(function (b) { return b.c; }).filter(function (c) { return typeof c === 'number' && isFinite(c); });
+    return closes.length > 0 ? closes : null;
+  },
+
+  async getEarningsDate(symbol, token) {
+    const items = await getMarketMetrics([symbol], token);
+    const first = items && items[0];
+    return first && typeof first.earningsExpectedDate === 'string' ? first.earningsExpectedDate : null;
   },
 
   today() {

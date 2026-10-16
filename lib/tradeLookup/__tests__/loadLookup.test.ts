@@ -178,4 +178,44 @@ describe('loadTradeLookup', () => {
     const out = await loadTradeLookup(contract({ strategy: 'CC', right: 'C' }), deps);
     if (out.kind === 'result') expect(out.result.pick!.flags.map((f) => f.code)).not.toContain('below_cost_basis');
   });
+
+  describe('RSI and earnings signals', () => {
+    const fall: number[] = [];
+    for (let k = 0; k < 60; k++) fall.push(100 - k * 0.5);
+    const closes = fall.concat([70.5, 71.2, 72.1, 73.3, 74.6]);
+
+    it('attaches RSI and, for a single stock, earnings per expiration', async () => {
+      const { deps } = makeDeps({
+        fetchChain: async (_s, _t, exp) => ({ chains: { [exp]: [115, 120, 125].map((k) => rawRow(k, exp)) }, classification: 'stock' }),
+        getDailyCloses: async () => closes,
+        getEarningsDate: async () => '2026-10-30',
+      });
+      const out = await loadTradeLookup(contract(), deps);
+      if (out.kind !== 'result') throw new Error('expected a result');
+      const s = out.result.signals!;
+      expect(s.rsi!.label).toBe('Turning up');
+      expect(s.earnings.applies).toBe(true);
+      expect(s.earnings.forExpiration[out.result.expiration].highlight).toBe(true);
+    });
+
+    it('never fails or blocks the lookup when the signal reads fail', async () => {
+      const { deps } = makeDeps({
+        getDailyCloses: async () => { throw new Error('chart down'); },
+        getEarningsDate: async () => { throw new Error('metrics down'); },
+      });
+      const out = await loadTradeLookup(contract(), deps);
+      expect(out.kind).toBe('result');
+      if (out.kind !== 'result') return;
+      expect(out.result.status).toBe('ok');
+      expect(out.result.signals!.rsi).toBeNull();
+      expect(out.result.signals!.earnings.date).toBeNull();
+    });
+
+    it('works with deps that do not provide the signal reads at all', async () => {
+      const { deps } = makeDeps();
+      const out = await loadTradeLookup(contract(), deps);
+      expect(out.kind).toBe('result');
+      if (out.kind === 'result') expect(out.result.signals!.rsi).toBeNull();
+    });
+  });
 });

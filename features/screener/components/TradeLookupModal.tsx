@@ -44,6 +44,11 @@ function flagOf(row: LookupRow, code: string): string {
   return f ? f.label : '';
 }
 
+function earningsSignalFor(result: LookupResult, expiration: string): { highlight: boolean; text: string } {
+  const s = result.signals && result.signals.earnings.forExpiration[expiration];
+  return s || { highlight: false, text: '' };
+}
+
 const GROUP_TEXT: Record<string, string> = {
   Contract: 'text-neutral-300',
   Risk: 'text-purple-300',
@@ -240,6 +245,20 @@ export function TradeLookupModal({ th, deps, onClose, onOrderCsp, onOrderCc, sus
             <div className={`flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border ${th.border} px-3 py-2 text-xs`} data-testid="trade-lookup-header">
               <span className={th.text}>{result.contract.ticker}{result.underlyingPrice !== null ? ' $' + result.underlyingPrice.toFixed(2) : ''}</span>
               <span className={stale ? 'text-amber-300' : th.textMuted} data-testid="trade-lookup-quote-status">{quoteStatusLine(result.quotesAsOf, now)}</span>
+              {result.signals && result.signals.rsi && (
+                <span
+                  data-testid="trade-lookup-rsi"
+                  title="RSI(14) on daily bars. Information only; the latest bar may be live."
+                  className={`rounded-full border px-2 py-0.5 text-[10px] ${result.signals.rsi.tone === 'up' ? 'border-teal-700 text-teal-300' : result.signals.rsi.tone === 'down' ? 'border-amber-700 text-amber-300' : `border-slate-700 ${th.textFaint}`}`}
+                >
+                  RSI {result.signals.rsi.value} {'·'} {result.signals.rsi.label}
+                </span>
+              )}
+              {result.signals && result.signals.earnings.applies && result.signals.earnings.date && (
+                <span data-testid="trade-lookup-earnings" className={result.signals.earnings.forExpiration[result.expiration] && result.signals.earnings.forExpiration[result.expiration].highlight ? 'text-amber-300' : th.textMuted}>
+                  Earnings {result.signals.earnings.date}{result.signals.earnings.daysOut !== null && result.signals.earnings.daysOut >= 0 ? ' (' + result.signals.earnings.daysOut + 'd)' : ''}
+                </span>
+              )}
               <button
                 type="button"
                 disabled={loading}
@@ -320,7 +339,14 @@ export function TradeLookupModal({ th, deps, onClose, onOrderCsp, onOrderCc, sus
                             {r.noQuote && <span className="ml-1 text-[9px] text-amber-300">NO QUOTE</span>}
                           </td>
                         )}
-                        {show('expiration') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{r.expiration} <span className={th.textFaint}>({r.dte}d)</span></td>}
+                        {show('expiration') && (
+                          <td
+                            className={`px-2 py-1.5 ${earningsSignalFor(result, r.expiration).highlight ? OUT_OF_RANGE : th.textMuted}`}
+                            title={earningsSignalFor(result, r.expiration).text || undefined}
+                          >
+                            {r.expiration} <span className={earningsSignalFor(result, r.expiration).highlight ? '' : th.textFaint}>({r.dte}d)</span>
+                          </td>
+                        )}
                         {show('delta') && <td className={`px-2 py-1.5 ${flagOf(r, 'delta_outside_band') ? OUT_OF_RANGE : th.textMuted}`} title={flagOf(r, 'delta_outside_band') || undefined}>{r.delta === null ? '—' : Math.abs(r.delta).toFixed(2)}</td>}
                         {show('pop') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{pct0(r.pop)}</td>}
                         {show('credit') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{money(r.mid)} <span className={th.textFaint}>/ {money(r.natural)}</span></td>}
