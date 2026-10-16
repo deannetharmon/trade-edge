@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { calculateCspScore } from '../cspScore';
 import { buildCspScoreRows, cspScoreMaxPoints } from '../cspScoreBreakdown';
-import { DEFAULT_SCORE_BAND_FLOORS, scoreBand } from '../scoreBands';
+import { DEFAULT_SCORE_BAND_FLOORS, GREEN_MIN_ANNUALIZED_ROC_PCT, capScoreBandByReturn, returnCapNote, scoreBand } from '../scoreBands';
 
 const TQQQ_70P = {
   pop: 62,
@@ -75,5 +75,35 @@ describe('buildCspScoreRows', () => {
     expect(buildCspScoreRows(missing, {
       pop: 62, otmPct: 3.7, periodRocPct: 4.7, annualizedRocPct: 59, liquidityClass: 'STRONG', openInterest: 1498, ivr: 45.8,
     })).toEqual([]);
+  });
+});
+
+describe('capScoreBandByReturn (CSP-SCORE-REVIEW-0001B2)', () => {
+  it('holds a green score at yellow when annualized return is under 30%', () => {
+    expect(GREEN_MIN_ANNUALIZED_ROC_PCT).toBe(30);
+    // TQQQ 55P from the 2026-10-16 export: score 75.2, 18% annualized
+    expect(capScoreBandByReturn('green', 18)).toEqual({ band: 'yellow', capped: true });
+    expect(capScoreBandByReturn('green', 29.9)).toEqual({ band: 'yellow', capped: true });
+  });
+
+  it('keeps green at or above 30% and for the in-band greens in the export', () => {
+    expect(capScoreBandByReturn('green', 30)).toEqual({ band: 'green', capped: false });
+    // SOXL 11/13 85P (78%), 11/20 90P (92%), 11/27 90P (81%), 11/20 75P (52%)
+    for (const roc of [78, 92, 81, 52]) expect(capScoreBandByReturn('green', roc).capped).toBe(false);
+  });
+
+  it('treats a missing return as not meeting the cap', () => {
+    expect(capScoreBandByReturn('green', null)).toEqual({ band: 'yellow', capped: true });
+    expect(capScoreBandByReturn('green', undefined).capped).toBe(true);
+  });
+
+  it('never changes a band that is not green', () => {
+    for (const band of ['yellow', 'orange', 'red'] as const) {
+      expect(capScoreBandByReturn(band, 1)).toEqual({ band, capped: false });
+    }
+  });
+
+  it('has a plain-language note', () => {
+    expect(returnCapNote()).toBe('Score reaches Strong, but annualized return is under 30%, so the band stays Acceptable.');
   });
 });

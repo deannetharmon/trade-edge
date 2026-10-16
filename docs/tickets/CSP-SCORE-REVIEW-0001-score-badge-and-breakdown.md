@@ -1,6 +1,6 @@
 # CSP-SCORE-REVIEW-0001 — CSP Score badge, band color and breakdown (slice A)
 
-Status: slice A IMPLEMENTED 2026-10-15; slice B (csp-score-v3 weights) IMPLEMENTED 2026-10-16. B2 and C open (below).
+Status: slice A IMPLEMENTED 2026-10-15; slice B (csp-score-v3 weights) IMPLEMENTED 2026-10-16. B2 (return cap on the green band) IMPLEMENTED 2026-10-16. C open (below).
 
 ## Why
 
@@ -33,9 +33,15 @@ Dean compared TradeEdge with Prosper Trading, Guac and TastyTrade on TQQQ 11/13 
 - Effect on a 2,409-row Rank export, in-band qualified (49 rows): mean −3.6 points, top 10 keeps 7 of 10, average delta of the top 10 .287 → .241. Green (75+) is 4 of 49, down from about 9.
 - Known side effect (follow-up B2): puts below delta .15 (outside the preferred band, so never Best Opportunities) gain points and can reach 75+ with only 1.4–2.1% period ROC (about 17–22% annualized), for example TQQQ 55P at delta .12 scores 75.2. A minimum-return cap on the green band is the candidate fix. Needs Ian and Alan.
 
+## Slice B2 (green needs a real return) — IMPLEMENTED 2026-10-16 (Ian, Alan, Quinn)
+
+- A Strong (green) CSP band also needs an annualized return of at least 30% (the return the card shows). Below that the band reads Acceptable (yellow). The score number is never changed.
+- Evidence (2026-10-16 export, csp-score-v3): 8 green rows; four were TQQQ 55P/56P/57P puts below delta .15 earning 17-22% annualized (outside the preferred band, never Best Opportunities); the other four were SOXL in-band puts earning 52-92%. With the cap: 4 green, all SOXL.
+- Where it shows: badge color and card border, plus a one-line note on the badge hover text and under the panel ("Score reaches Strong, but annualized return is under 30%, so the band stays Acceptable.").
+- Constant `GREEN_MIN_ANNUALIZED_ROC_PCT` in `lib/scans/scoreBands.ts`. To confirm after the open with a default-settings export that includes ordinary stocks.
+
 ## Open
 
-- B2: minimum-return cap so far-OTM, low-premium puts cannot read Strong (Ian, Alan).
 - C: same badge and panel for PMCC (already has a score breakdown) and LEAPS; CC and Spreads label only until their scores have components.
 - Recheck the $72.72 vs 73.82 underlying price at market open.
 - Label "Pre-market" shows midnight to 4 AM Eastern (`derivePmccMarketSession`); fix in a later push.

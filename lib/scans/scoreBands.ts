@@ -28,3 +28,31 @@ export function scoreBand(score: number, floors: ScoreBandFloors = DEFAULT_SCORE
   if (score >= floors.orange) return 'orange';
   return 'red';
 }
+
+// CSP-SCORE-REVIEW-0001B2 (Ian, Alan) -- a Strong (green) CSP score also needs
+// a real return. After the csp-score-v3 reweight, far-OTM puts earning 1.4-2.1%
+// per cycle (about 17-22% annualized) could reach green on cushion alone. Green
+// requires at least this annualized return; below it the band reads Acceptable.
+// The score number itself is never changed. 30% is the lowest return that still
+// leaves every in-band green in the 2026-10-16 Rank export (they run 52-92%).
+export const GREEN_MIN_ANNUALIZED_ROC_PCT = 30;
+
+export interface CappedScoreBand {
+  band: ScoreBand;
+  /** True when the score alone earned green but the return was too low. */
+  capped: boolean;
+}
+
+export function capScoreBandByReturn(
+  band: ScoreBand,
+  annualizedRocPct: number | null | undefined,
+  minPct: number = GREEN_MIN_ANNUALIZED_ROC_PCT,
+): CappedScoreBand {
+  if (band !== 'green') return { band, capped: false };
+  const ok = typeof annualizedRocPct === 'number' && Number.isFinite(annualizedRocPct) && annualizedRocPct >= minPct;
+  return ok ? { band, capped: false } : { band: 'yellow', capped: true };
+}
+
+export function returnCapNote(minPct: number = GREEN_MIN_ANNUALIZED_ROC_PCT): string {
+  return `Score reaches Strong, but annualized return is under ${minPct}%, so the band stays Acceptable.`;
+}

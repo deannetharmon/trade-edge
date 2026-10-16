@@ -79,7 +79,7 @@ import { CcTradeModal, type CcOrderInput } from '@/features/screener/components/
 import { defaultCcOrderDeps } from '@/lib/scans/ccOrderDeps';
 import { ccOrderInputFromScanResult } from '@/lib/scans/ccScanOrderInput';
 import { calculateCspScore } from '@/lib/scans/cspScore';
-import { scoreBand, type ScoreBandFloors } from '@/lib/scans/scoreBands';
+import { scoreBand, capScoreBandByReturn, returnCapNote, type ScoreBandFloors } from '@/lib/scans/scoreBands';
 import { CspScoreBadge, CspScoreBreakdownPanel, SCORE_BAND_BORDER_L } from '@/features/screener/components/CspScoreBreakdown';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
@@ -6140,9 +6140,14 @@ function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade,
     ? { green: rankConfig.thresholdGreen, yellow: rankConfig.thresholdYellow, orange: rankConfig.thresholdOrange }
     : undefined;
   const cspScoreResult = c?.strategy === 'CSP' && cspScore != null && c.cspScore?.scoreStatus === 'AVAILABLE' ? c.cspScore : null;
-  const cspBand = cspScoreResult && cspScore != null ? scoreBand(cspScore, cspBandFloors) : null;
+  // CSP-SCORE-REVIEW-0001B2: green also needs a real annualized return (the number the card shows).
+  const cspBandCapped = cspScoreResult && cspScore != null
+    ? capScoreBandByReturn(scoreBand(cspScore, cspBandFloors), c?.annualizedRoc)
+    : null;
+  const cspBand = cspBandCapped?.band ?? null;
+  const cspCapNote = cspBandCapped?.capped ? returnCapNote() : null;
   const cspScoreBadge = cspScoreResult && cspScore != null && cspBand
-    ? <CspScoreBadge score={cspScore} band={cspBand} open={showCspScore} onToggle={() => setShowCspScore(v => !v)} />
+    ? <CspScoreBadge score={cspScore} band={cspBand} open={showCspScore} onToggle={() => setShowCspScore(v => !v)} capNote={cspCapNote} />
     : null;
   // Compute alternate strategy score for the + IC / + BPS badge
   // Compute visible strategy scores for this same symbol/expiration.
@@ -6510,6 +6515,7 @@ const strategyScores = useMemo(() => {
         <CspScoreBreakdownPanel
           score={cspScoreResult}
           band={cspBand}
+          capNote={cspCapNote}
           display={{
             pop: c.pop,
             otmPct: result.price != null && result.price > 0 ? ((result.price - c.shortStrike) / result.price) * 100 : null,

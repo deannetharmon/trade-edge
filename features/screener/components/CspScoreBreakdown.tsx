@@ -24,17 +24,19 @@ interface BadgeProps {
   band: ScoreBand;
   open: boolean;
   onToggle: () => void;
+  /** Set when the return cap held a Strong score at Acceptable. */
+  capNote?: string | null;
 }
 
 /** "CSP Score 74 | Details" -- colored by quality band, never by strategy. */
-export function CspScoreBadge({ score, band, open, onToggle }: BadgeProps) {
+export function CspScoreBadge({ score, band, open, onToggle, capNote }: BadgeProps) {
   return (
     <button
       type="button"
       data-testid="csp-score-badge"
       aria-expanded={open}
       aria-label={`CSP Score ${score}, ${SCORE_BAND_LABEL[band]}. ${open ? 'Hide' : 'Show'} score breakdown`}
-      title={`CSP Score ${score} (${SCORE_BAND_LABEL[band]})`}
+      title={`CSP Score ${score} (${SCORE_BAND_LABEL[band]})${capNote ? `. ${capNote}` : ''}`}
       onClick={(e) => { e.stopPropagation(); onToggle(); }}
       className={`text-[10px] px-2 py-0.5 border rounded-md shrink-0 font-bold flex items-center gap-2 ${SCORE_BAND_CLASS[band]}`}
     >
@@ -48,9 +50,10 @@ interface PanelProps {
   score: CspScoreResult;
   display: CspScoreDisplayValues;
   band: ScoreBand;
+  capNote?: string | null;
 }
 
-export function CspScoreBreakdownPanel({ score, display, band }: PanelProps) {
+export function CspScoreBreakdownPanel({ score, display, band, capNote }: PanelProps) {
   const rows = buildCspScoreRows(score, display);
   if (rows.length === 0 || score.total == null) return null;
   return (
@@ -100,6 +103,7 @@ export function CspScoreBreakdownPanel({ score, display, band }: PanelProps) {
           </tfoot>
         </table>
       </div>
+      {capNote && <p className="mt-2 text-[10px] text-orange-300" data-testid="csp-score-cap-note">{capNote}</p>}
     </div>
   );
 }

@@ -60,4 +60,21 @@ describe('CSP score badge and panel', () => {
     expect(screen.getByTestId('csp-score-row-technical')).toHaveTextContent('1.4 / 15');
     expect(screen.getByTestId('csp-score-panel')).toHaveTextContent('68.1 / 100');
   });
+
+  it('shows the return-cap note in the badge title and the panel when a green score is held at Acceptable', async () => {
+    const note = 'Score reaches Strong, but annualized return is under 30%, so the band stays Acceptable.';
+    render(
+      <div>
+        <CspScoreBadge score={76} band="yellow" open={false} onToggle={() => {}} capNote={note} />
+        <CspScoreBreakdownPanel score={score} display={display} band="yellow" capNote={note} />
+      </div>,
+    );
+    expect(screen.getByTestId('csp-score-badge')).toHaveAttribute('title', expect.stringContaining('annualized return is under 30%'));
+    expect(screen.getByTestId('csp-score-cap-note')).toHaveTextContent(note);
+  });
+
+  it('shows no cap note when none applies', async () => {
+    render(<CspScoreBreakdownPanel score={score} display={display} band="yellow" />);
+    expect(screen.queryByTestId('csp-score-cap-note')).not.toBeInTheDocument();
+  });
 });
