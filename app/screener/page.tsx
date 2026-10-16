@@ -76,6 +76,7 @@ import { TradeLookupModal } from '@/features/screener/components/TradeLookupModa
 import { defaultLookupDeps } from '@/lib/tradeLookup/defaultDeps';
 import { CcTradeModal, type CcOrderInput } from '@/features/screener/components/CcTradeModal';
 import { defaultCcOrderDeps } from '@/lib/scans/ccOrderDeps';
+import { ccOrderInputFromScanResult } from '@/lib/scans/ccScanOrderInput';
 import { calculateCspScore } from '@/lib/scans/cspScore';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
@@ -5454,6 +5455,8 @@ type ResultCardProps = {
   // CSP-ORDERS-0001 -- deliberately separate from onTrade: a CSP opens
   // CspTradeModal (single-leg), never the multi-leg TradeModal.
   onTradeCsp?: (result: ScreenResult) => void;
+  // CC-ORDERS-0001E: a covered call opens CcTradeModal, which proves share/LEAP coverage from the broker itself.
+  onTradeCc?: (result: ScreenResult) => void;
   // PMCC-HELD-BREAKEVEN-0001B-1: held-LEAP outcome card. False/undefined = this pair's LEAP has no short
   // that cleared the floor. Refresh action reuses the page's existing refreshPortfolioRef path.
   heldLeapHasResults?: boolean;
@@ -6011,7 +6014,7 @@ function CspReturnThisCycleRow({ candidate }: { candidate: SpreadCandidate }) {
   </div>;
 }
 
-function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade, onTradeCsp, cachedEntry, existingPositions }: ResultCardProps) {
+function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade, onTradeCsp, onTradeCc, cachedEntry, existingPositions }: ResultCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showBestFinder, setShowBestFinder] = useState(false);
   const [showChart, setShowChart] = useState(false);
@@ -6777,15 +6780,21 @@ const strategyScores = useMemo(() => {
                 "Find Better" for CSP is not yet wired up
               </p>
             )}
-            {c && c.strategy === 'CC' && (
-              // TE-0007C scope: no live order placement. A covered call has
-              // different safety requirements than a spread order (proof of
-              // share coverage at execution time) — that belongs to a future
-              // ticket, not a reuse of the spread order flow.
+            {c && c.strategy === 'CC' && (onTradeCc && ccOrderInputFromScanResult(result) !== null ? (
+              // CC-ORDERS-0001E: ordering is enabled through CcTradeModal, which re-proves coverage from a fresh
+              // broker read at open, before the dry run and inside the submit gate (TE-0007C's "proof of share
+              // coverage at execution time" requirement).
+              <button
+                onClick={(e) => { e.stopPropagation(); onTradeCc(result); }}
+                className="flex-1 py-2.5 rounded-xl text-xs tracking-widest transition-colors bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+              >
+                {'\u26A1'} TRADE THIS
+              </button>
+            ) : (
               <p className={`flex-1 text-[9px] ${th.textFaint} italic py-2.5 text-center`}>
-                Analysis only — CC trade placement is not yet enabled
+                Analysis only — this call cannot be ordered from here
               </p>
-            )}
+            ))}
           </div>
         </div>
       )}
@@ -9166,6 +9175,7 @@ export default function Home() {
   const [showTradeLookup, setShowTradeLookup] = useState(false);
   const [tradeLookupOrderOpen, setTradeLookupOrderOpen] = useState(false);
   const [ccLookupOrder, setCcLookupOrder] = useState<CcOrderInput | null>(null);
+  const openCcFromScan = (r: ScreenResult) => { const order = ccOrderInputFromScanResult(r); if (order) setCcLookupOrder(order); };
   const [leapsResults, setLeapsResults] = useState<Array<{
     symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
     openInterest: number | null; bid: number | null; ask: number | null; occSymbol: string | null;
@@ -12527,7 +12537,7 @@ export default function Home() {
                       className={isJumpHighlighted ? 'transition-colors duration-500 ring-2 ring-cyan-400 rounded-xl' : 'transition-colors duration-500'}
                     >
                       {isTopOpportunity && <p className="mb-1 text-[9px] font-bold text-emerald-400" data-testid="top-opportunity-marker">★ Top opportunity — see Best Opportunities above</p>}
-                      <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} onTradeCsp={setCspTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions}
+                      <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} onTradeCsp={setCspTradeResult} onTradeCc={openCcFromScan} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions}
                         pmccBestFit={pmccBestFitWinner?.result === r ? { profile: pmccBestFitProfile, score: pmccBestFitWinner.score, runnerUp: pmccBestFitRanked[1]?.result ?? null, earningsBlocksRecommendation: pmccEarningsBlocksBestFit(r) } : undefined} />
                       {(filteredOiByResult.get(r)?.protectiveLegWarnings ?? []).map((w, wi) => <p key={wi} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">⚠ {w}</p>)}
                     </div>
@@ -12750,7 +12760,7 @@ export default function Home() {
                               rules={r.isEtf ? runtimeEtfRules : runtimeStockRules}
                               screenMode={screenMode}
                               rankConfig={rankConfig}
-                              onTrade={setTradeResult} onTradeCsp={setCspTradeResult}
+                              onTrade={setTradeResult} onTradeCsp={setCspTradeResult} onTradeCc={openCcFromScan}
                               cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)}
                               existingPositions={existingPositions}
                             />
@@ -13114,7 +13124,7 @@ export default function Home() {
                             {trendAgainst && <span className="text-[8px] text-amber-400" title="Against trend">⚠</span>}
                           </div>
                           <div className="flex-1">
-                            <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} onTradeCsp={setCspTradeResult} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} />
+                            <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} onTradeCsp={setCspTradeResult} onTradeCc={openCcFromScan} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} />
                             {(rankOiByResult.get(r)?.protectiveLegWarnings ?? []).map((w, wi) => (
                               <p key={wi} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">
                                 ⚠ {w}
