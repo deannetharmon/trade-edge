@@ -11,7 +11,7 @@ Last updated: 2026-10-06 (ANALYTICS-0001 go)
 
 ## Trade Lookup — 2026-10-15
 
-- **TRADE-LOOKUP-0001** — slice 1 IMPLEMENTED 2026-10-15 (`lib/tradeLookup/`: pasted-post parser, expiration resolver, 39 tests). Paste a group post (CSP or covered call), see the chain with the posted contract highlighted, compare neighbors, send your pick to the order dialog. Inspection only: no scoring, qualification or order-path change. Ian approved scope and mock v2; Paul approved scope; Diane's mock v2 is on a claude.ai canvas. Entry point: a TRADE LOOKUP launcher in the Screener sidebar opening a `ScanModalShell` modal. **Next:** slice 2 lookup service (chain fetch, neighbors, metrics from positionMetrics), slice 3 modal and launcher; Quinn checks chain-fetch placement and the ETF source first. Ticket: `docs/tickets/TRADE-LOOKUP-0001.md`.
+- **TRADE-LOOKUP-0001** — slice 1 IMPLEMENTED 2026-10-15 (`lib/tradeLookup/`: pasted-post parser, expiration resolver, 39 tests). Paste a group post (CSP or covered call), see the chain with the posted contract highlighted, compare neighbors, send your pick to the order dialog. Inspection only: no scoring, qualification or order-path change. Ian approved scope and mock v2; Paul approved scope; Diane's mock v2 is on a claude.ai canvas. Entry point: a TRADE LOOKUP launcher in the Screener sidebar opening a `ScanModalShell` modal. Slice 2 IMPLEMENTED 2026-10-15 (lookup service: chain rows, neighbor selection, pricing from positionMetrics, covered-call coverage, load flow, broker wiring; 88 tradeLookup tests total). **Next:** slice 2b advisory flags, slice 3 modal and launcher. Ticket: `docs/tickets/TRADE-LOOKUP-0001.md`.
 
 ## Portfolio queue — 2026-10-05 (Dean, after the GGLL and SOXL reviews)
 

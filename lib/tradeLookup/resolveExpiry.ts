@@ -33,8 +33,16 @@ function isRealDate(p: DateParts): boolean {
   return d.getUTCFullYear() === p.year && d.getUTCMonth() === p.month - 1 && d.getUTCDate() === p.day;
 }
 
-function daysBetween(from: DateParts, to: DateParts): number {
+export function daysBetween(from: DateParts, to: DateParts): number {
   return Math.round((utcMs(to) - utcMs(from)) / 86400000);
+}
+
+/** Reads 'YYYY-MM-DD' into parts. Returns null for anything else, including impossible dates. */
+export function parseIsoDate(iso: string): DateParts | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return null;
+  const parts = { year: parseInt(m[1], 10), month: parseInt(m[2], 10), day: parseInt(m[3], 10) };
+  return isRealDate(parts) ? parts : null;
 }
 
 function isOnOrAfter(a: DateParts, b: DateParts): boolean {

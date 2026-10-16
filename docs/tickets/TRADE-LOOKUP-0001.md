@@ -46,7 +46,7 @@ pick the same trade or a neighbor with a different POP, then send it to the exis
 
 ## Chain view (slices 2-3)
 - Chain for the resolved expiration with the posted contract highlighted.
-- Neighbors: 1-2 strikes either side, plus the same strike on the next expiration out. Sorted by closeness to the pick, not by score.
+- Neighbors: up to 2 listed strikes either side of the pick (same right, same expiration), shown in ascending strike order with the pick highlighted, then the same strike on the next listed expiration out as the last row. Not sorted by score. If the posted strike is not listed, nothing is rounded: the closest listed strikes are offered instead.
 - Header shows market state and quote time ("Market closed · quotes as of 4:00 PM MT") with a Refresh button.
 - Columns (CSP): strike, DTE, delta, POP, credit at mid with natural fill, bid/ask, breakeven, OI, credit vs pick, POP vs pick.
   CC omits breakeven.
@@ -70,19 +70,19 @@ pick the same trade or a neighbor with a different POP, then send it to the exis
 
 ## Covered-call coverage rule
 - A call can go to the order dialog only if covered by shares (>= 100 x contracts, existing covered-call capacity model)
-  or a paired LEAP (`isPairedPmccLong`, `lib/portfolio-data/pmccPairDetection.ts`) whose expiry is AFTER the call's.
+  or an existing LEAP from the PMCC foundation report (`buildPmccFoundationReport` via `getPmccBrokerSnapshot`: same underlying, expiration AFTER the call's, `availableShortCallContracts` >= contracts). Share capacity comes from `getCoveredCallCapacityReport` (`availableCoveredContracts`). If either report is unavailable and the other does not cover the call, coverage is unknown and ordering stays off.
 - Not covered -> "No share coverage" panel, order hand-off disabled, inspection still works. Naked calls are never offered.
 
 ## Open for Quinn (before slices 2-3)
-1. Chain fetch placement. Browser-side candidates already in the repo: `lib/tastytrade.ts`, `lib/scans/tastytrade-client.ts`,
-   `lib/scans/pmccChainClient.ts`, `lib/screener/provider.ts`. Dane confirms which one the CSP scan uses and reuses its token handling.
-2. ETF detection for the earnings flag. A source exists: `lib/instrument-metadata` (broker-backed resolver reports the broker's
+1. RESOLVED (slice 2): chain fetch is `lib/scans/tastytrade-client.ts` (`getChain` with a one-day DTE window, `ttFetch` nested chain for the real expirations, `getAccessToken` for the token). `lib/screener/provider.ts` is legacy and is not used.
+2. ETF detection for the earnings flag (slice 2b). The lookup result carries `classification` from `getChain` / `classifyUnderlying` ('etf' | 'stock' | 'index'). A source also exists: `lib/instrument-metadata` (broker-backed resolver reports the broker's
    stock/ETF fact) and `lib/leveragedEtfs.ts` (`isLeveragedEtf`, which already lists SOXL, TQQQ, BITX, ETHU, DFEN, GGLL).
    Use the resolver's ETF fact; `isLeveragedEtf` is a fallback only, because it does not cover non-leveraged ETFs.
 
 ## Build order
 1. DONE: parser + date resolution + golden fixtures (`lib/tradeLookup/`, 39 tests).
-2. Lookup service: chain fetch browser-side, neighbor selection, metrics via positionMetrics.
+2. DONE: lookup service (`lib/tradeLookup/` chainRows, coverage, buildLookup, loadLookup, defaultDeps; 49 new tests). Metrics via positionMetrics; no-quote rule enforced; calls carry a coverage result.
+2b. Flags (delta band, wide bid/ask, thin OI from the scan registry gates, strike below cost basis, RSI badge, single-stock earnings). Advisory only.
 3. `TradeLookupModal` + sidebar launcher, to Diane's mock v2.
 
 ## Golden fixtures
