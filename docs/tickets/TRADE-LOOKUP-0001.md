@@ -82,7 +82,8 @@ pick the same trade or a neighbor with a different POP, then send it to the exis
 ## Build order
 1. DONE: parser + date resolution + golden fixtures (`lib/tradeLookup/`, 39 tests).
 2. DONE: lookup service (`lib/tradeLookup/` chainRows, coverage, buildLookup, loadLookup, defaultDeps; 49 new tests). Metrics via positionMetrics; no-quote rule enforced; calls carry a coverage result.
-2b. Flags (delta band, wide bid/ask, thin OI from the scan registry gates, strike below cost basis, RSI badge, single-stock earnings). Advisory only.
+2b. DONE: `lib/tradeLookup/flags.ts` (delta band, wide bid/ask, thin OI, strike below cost basis). Uses the scans' own checks (`classifyCspLiquidity`, `evaluateHybridSpread`, `assessOiLiquidity`) and the CSP/CC default rules; the modal can pass the live scan controls. Advisory only.
+2c. RSI badge and single-stock earnings flag: need candle and earnings data sources; scoped when the modal is built (slice 3).
 3. `TradeLookupModal` + sidebar launcher, to Diane's mock v2.
 
 ## Golden fixtures

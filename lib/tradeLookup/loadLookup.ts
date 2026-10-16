@@ -8,11 +8,13 @@
 //   1. token, then the ticker's real listed expirations (also the expired / weekend / not-listed check)
 //   2. far dates (> 180 days) stop here until the caller passes confirmedFar
 //   3. the posted expiration and the next listed one, the underlying price, and (calls only) coverage
+// Rows then get advisory flags (flags.ts); cost basis for the covered-call flag comes from the capacity report.
 // A failed next-expiration fetch or price fetch degrades that part only. A failed posted-expiration fetch is an error.
 
 import { buildLookup } from './buildLookup';
 import { normalizeChainRows } from './chainRows';
 import { evaluateCoverage } from './coverage';
+import { applyFlags, type FlagRules } from './flags';
 import { resolveExpiry } from './resolveExpiry';
 import type { CoveredCallCapacityReport } from '@/lib/scans/covered-call-capacity';
 import type { PmccFoundationReport } from '@/lib/scans/pmcc-foundations';
@@ -46,6 +48,8 @@ export interface LoadOptions {
   contracts?: number;
   /** The user confirmed a date more than 180 days out. */
   confirmedFar?: boolean;
+  /** Live scan controls. Defaults to the scan default rules. */
+  flagRules?: FlagRules;
 }
 
 function nextListedAfter(listed: IsoDate[], expiration: IsoDate): IsoDate | null {
@@ -138,5 +142,9 @@ export async function loadTradeLookup(contract: ParsedContract, deps: LookupDeps
     today,
     coverage,
   });
-  return { kind: 'result', result, resolution };
+  let costBasis: number | null = null;
+  const entry = reports && reports.capacity && reports.capacity.status === 'ok' ? reports.capacity.bySymbol[symbol.toUpperCase()] : null;
+  if (entry && entry.costBasisComplete && entry.costBasis !== null) costBasis = entry.costBasis;
+
+  return { kind: 'result', result: applyFlags(result, opts.flagRules, costBasis), resolution };
 }

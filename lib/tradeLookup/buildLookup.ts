@@ -76,6 +76,7 @@ function priceRow(
     creditVsPick: null,
     popVsPick: null,
     occSymbol: row.occSymbol,
+    flags: [],
   };
   if (!isUsableQuote(row.bid, row.ask)) {
     // No quote: keep the strike and open interest, blank everything that depends on a price.

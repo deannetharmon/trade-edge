@@ -151,4 +151,31 @@ describe('loadTradeLookup', () => {
     const out = await loadTradeLookup(contract(), deps, { contracts: 2 });
     if (out.kind === 'result') expect(out.result.contracts).toBe(2);
   });
+
+  it('rows come back flagged, and CC cost basis flows from the capacity report', async () => {
+    const { deps } = makeDeps({
+      fetchChain: async (_s, _t, exp) => ({ chains: { [exp]: [115, 120, 125].map((k) => rawRow(k, exp, 'C')) }, classification: 'etf' }),
+      getCoverageReports: async () => ({
+        capacity: { status: 'ok', warnings: [], bySymbol: { SOXL: { availableCoveredContracts: 1, costBasis: 122, costBasisComplete: true } } } as never,
+        foundations: null,
+      }),
+    });
+    const out = await loadTradeLookup(contract({ strategy: 'CC', right: 'C' }), deps);
+    expect(out.kind).toBe('result');
+    if (out.kind !== 'result') return;
+    expect(out.result.pick!.flags.map((f) => f.code)).toContain('below_cost_basis');
+    expect(out.result.rows.filter((r) => r.strike === 125 && !r.isNextExpiration)[0].flags.map((f) => f.code)).not.toContain('below_cost_basis');
+  });
+
+  it('an incomplete cost basis raises no cost-basis flag', async () => {
+    const { deps } = makeDeps({
+      fetchChain: async (_s, _t, exp) => ({ chains: { [exp]: [120].map((k) => rawRow(k, exp, 'C')) }, classification: 'etf' }),
+      getCoverageReports: async () => ({
+        capacity: { status: 'ok', warnings: [], bySymbol: { SOXL: { availableCoveredContracts: 1, costBasis: null, costBasisComplete: false } } } as never,
+        foundations: null,
+      }),
+    });
+    const out = await loadTradeLookup(contract({ strategy: 'CC', right: 'C' }), deps);
+    if (out.kind === 'result') expect(out.result.pick!.flags.map((f) => f.code)).not.toContain('below_cost_basis');
+  });
 });

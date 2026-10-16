@@ -23,6 +23,14 @@ export interface ChainRow {
 
 export type Classification = 'index' | 'etf' | 'stock';
 
+export type FlagCode = 'delta_outside_band' | 'wide_spread' | 'thin_oi' | 'below_cost_basis';
+
+/** Advisory only. A flag never blocks a row, disables Select, or feeds a score. */
+export interface RowFlag {
+  code: FlagCode;
+  label: string;
+}
+
 export interface LookupRow {
   strike: number;
   right: OptionRight;
@@ -55,6 +63,7 @@ export interface LookupRow {
   /** Row POP minus the pick's POP, in percentage points. */
   popVsPick: number | null;
   occSymbol: string;
+  flags: RowFlag[];
 }
 
 export type CoverageStatus = 'not_applicable' | 'covered_by_shares' | 'covered_by_leap' | 'not_covered' | 'unknown';
