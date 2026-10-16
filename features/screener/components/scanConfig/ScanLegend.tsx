@@ -11,10 +11,12 @@ const LEGEND_ORDER: Array<[Lifecycle, string]> = [
   ['fetch', 'Search range'], ['gate', 'Gate'], ['rank', 'Preference'], ['advisory', 'Advisory'],
 ];
 
-export function ScanLegend({ lifecycles, afterScan }: {
+export function ScanLegend({ lifecycles, afterScan, note = 'Changing any setting here needs a new scan.' }: {
   lifecycles: readonly Lifecycle[];
   /** The after-scan result-filter note, when this mode has one. `attr` is the registry data attribute. */
   afterScan?: { attr: Record<string, string>; hint: string };
+  /** The closing sentence. The default fits a modal where every setting needs a rescan. */
+  note?: string;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-neutral-400" data-testid="scan-legend">
@@ -30,7 +32,7 @@ export function ScanLegend({ lifecycles, afterScan }: {
           <InfoTip align="right">{afterScan.hint}</InfoTip>
         </span>
       )}
-      <span>Changing any setting here needs a new scan.</span>
+      <span>{note}</span>
     </div>
   );
 }

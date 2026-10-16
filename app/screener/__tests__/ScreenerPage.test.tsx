@@ -696,7 +696,7 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     const shortMax = screen.getByLabelText('Max DTE') as HTMLInputElement;
     const deltaMin = screen.getByLabelText('Min Δ') as HTMLInputElement;
     const deltaMax = screen.getByLabelText('Max Δ') as HTMLInputElement;
-    const oiMin = screen.getByLabelText('Short OI min') as HTMLInputElement;
+    const oiMin = screen.getByLabelText('Short OI pref.') as HTMLInputElement;
     const maxSpread = screen.getByLabelText('Max spread %') as HTMLInputElement;
 
     expect(shortMin.value).toBe('30');
@@ -756,7 +756,7 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     expect(screen.getByLabelText('Max DTE')).toHaveValue('30');
     expect(screen.getByLabelText('Min Δ')).toHaveValue('0.22');
     expect(screen.getByLabelText('Max Δ')).toHaveValue('0.33');
-    expect(screen.getByLabelText('Short OI min')).toHaveValue('150');
+    expect(screen.getByLabelText('Short OI pref.')).toHaveValue('150');
     expect(screen.getByLabelText('Max spread %')).toHaveValue('8');
     expect(screen.getByLabelText('Width ceiling ($)')).toHaveValue('0.75');
   });

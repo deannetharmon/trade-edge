@@ -42,7 +42,7 @@ const maxField = () => screen.getByLabelText('Max Δ') as HTMLInputElement;
 describe('SCAN-ALIGN-0001 F1 PMCC delta chips', () => {
   it('renders the group label and hint, and keeps the existing note unchanged', () => {
     renderModal();
-    expect(screen.getByText('Delta range (absolute)')).toBeInTheDocument();
+    expect(screen.getByText('Delta range')).toBeInTheDocument();
     expect(screen.getByText('Absolute delta of the short call. Lower = further OTM.')).toBeInTheDocument();
     expect(screen.queryByText(/Delta guides rank/)).not.toBeInTheDocument();
     expect(minField()).toBeInTheDocument();
@@ -51,32 +51,32 @@ describe('SCAN-ALIGN-0001 F1 PMCC delta chips', () => {
 
   it('a chip sets both Min and Max delta', async () => {
     renderModal();
-    await userEvent.click(chip('0.20-0.30'));
+    await userEvent.click(chip('Δ .20–.30'));
     expect(minField().value).toBe('0.2');
     expect(maxField().value).toBe('0.3');
-    await userEvent.click(chip('0.25-0.35'));
+    await userEvent.click(chip('Δ .25–.35'));
     expect(minField().value).toBe('0.25');
     expect(maxField().value).toBe('0.35');
   });
 
   it('highlights only the chip matching the current fields, and follows chip clicks', async () => {
     renderModal({ shortDeltaMin: 0.2, shortDeltaMax: 0.3 });
-    expect(chip('0.20-0.30')).toHaveAttribute('aria-pressed', 'true');
-    expect(chip('0.15-0.25')).toHaveAttribute('aria-pressed', 'false');
-    expect(chip('0.25-0.35')).toHaveAttribute('aria-pressed', 'false');
-    await userEvent.click(chip('0.15-0.25'));
-    expect(chip('0.15-0.25')).toHaveAttribute('aria-pressed', 'true');
-    expect(chip('0.20-0.30')).toHaveAttribute('aria-pressed', 'false');
+    expect(chip('Δ .20–.30')).toHaveAttribute('aria-pressed', 'true');
+    expect(chip('Δ .15–.25')).toHaveAttribute('aria-pressed', 'false');
+    expect(chip('Δ .25–.35')).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.click(chip('Δ .15–.25'));
+    expect(chip('Δ .15–.25')).toHaveAttribute('aria-pressed', 'true');
+    expect(chip('Δ .20–.30')).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('no chip is highlighted for the default 0.15-0.40 range', () => {
     renderModal();
-    ['0.15-0.25', '0.20-0.30', '0.25-0.35'].forEach(n => expect(chip(n)).toHaveAttribute('aria-pressed', 'false'));
+    ['Δ .15–.25', 'Δ .20–.30', 'Δ .25–.35'].forEach(n => expect(chip(n)).toHaveAttribute('aria-pressed', 'false'));
   });
 
   it('a chip result runs with both values', async () => {
     const onRun = renderModal();
-    await userEvent.click(chip('0.25-0.35'));
+    await userEvent.click(chip('Δ .25–.35'));
     await userEvent.click(screen.getByRole('button', { name: /RUN PMCC SCAN/ }));
     expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ shortDeltaMin: 0.25, shortDeltaMax: 0.35 }));
   });
@@ -107,25 +107,48 @@ describe('PMCC delta validation message', () => {
   });
 });
 
-describe('SCAN-GUIDE-0001 part 3 PMCC width help lines', () => {
-  it('shows one muted help line under Max spread % and Width ceiling ($), no tooltip', () => {
+describe('SCAN-MODAL-UX-0002A PMCC compact layout', () => {
+  it('keeps the three width help lines and the F1 hint in tooltips, in the page', () => {
     renderModal();
-    const spread = screen.getByText('Calls with a wider bid/ask gap than this are removed (minimum allowance $0.05).');
-    const ceiling = screen.getByText('Removes calls whose gap exceeds this many dollars per share, even if the percent rule passes.');
-    expect(spread).toHaveClass('text-neutral-400');
-    expect(ceiling).toHaveClass('text-neutral-400');
-    expect(spread).not.toHaveAttribute('title');
-    expect(ceiling).not.toHaveAttribute('title');
-    // Each help line sits directly after its own field.
-    expect(screen.getByLabelText('Max spread %').closest('label')!.nextElementSibling).toBe(spread);
-    expect(screen.getByLabelText('Width ceiling ($)').closest('label')!.nextElementSibling).toBe(ceiling);
+    expect(screen.getByTestId('pmcc-spread-help')).toHaveTextContent('Calls with a wider bid/ask gap than this are removed (minimum allowance $0.05).');
+    expect(screen.getByTestId('pmcc-ceiling-help')).toHaveTextContent('Removes calls whose gap exceeds this many dollars per share, even if the percent rule passes.');
+    expect(screen.getByTestId('pmcc-width-hint')).toHaveTextContent('Short call only. Rejects wider than max(10% of mid, $0.05), or over the ceiling.');
+    expect(screen.getByTestId('pmcc-delta-hint')).toHaveTextContent('Absolute delta of the short call. Lower = further OTM.');
   });
 
-  it('keeps existing labels, the F1 hint and the width hint', () => {
+  it('keeps every input name the page and the engine tests rely on', () => {
     renderModal();
-    expect(screen.getByLabelText('Max spread %')).toBeInTheDocument();
-    expect(screen.getByLabelText('Width ceiling ($)')).toBeInTheDocument();
-    expect(screen.getByText('Absolute delta of the short call. Lower = further OTM.')).toBeInTheDocument();
-    expect(screen.getByTestId('pmcc-width-hint')).toBeInTheDocument();
+    ['Min DTE', 'Max DTE', 'Min Δ', 'Max Δ', 'Max spread %', 'Width ceiling ($)', 'Short OI pref.'].forEach(n => expect(screen.getByLabelText(n)).toBeInTheDocument());
+    expect(screen.queryByLabelText('Short OI min')).not.toBeInTheDocument();
+  });
+
+  it('shows one legend line with only search range and advisory dots', () => {
+    renderModal();
+    const legend = screen.getByTestId('scan-legend');
+    expect(legend).toHaveTextContent('Search range');
+    expect(legend).toHaveTextContent('Advisory');
+    expect(legend).not.toHaveTextContent('Gate');
+    expect(legend).toHaveTextContent('Changing any setting here needs a new scan.');
+  });
+
+  it('lists the six fixed rules on one Always applied strip', () => {
+    renderModal();
+    const strip = screen.getByRole('region', { name: 'Always applied' });
+    ['Short strike above price', 'Two-sided quote', 'Earnings before expiry = excluded', 'Net debit below width', 'Held LEAP exempt', 'No short OI = rejected']
+      .forEach(label => expect(strip).toHaveTextContent(label));
+  });
+
+  it('shows a recap that follows the fields and the selection count', async () => {
+    renderModal();
+    expect(screen.getByTestId('pmcc-rule-preview')).toHaveTextContent('20–45d · Δ .15–.40 · ≤10% / $0.50 · OI pref 100');
+    expect(screen.getByTestId('pmcc-rule-preview')).toHaveTextContent('1 LEAPS selected');
+    await userEvent.click(chip('Δ .25–.35'));
+    expect(screen.getByTestId('pmcc-rule-preview')).toHaveTextContent('Δ .25–.35');
+  });
+
+  it('the run request is unchanged', async () => {
+    const onRun = renderModal();
+    await userEvent.click(screen.getByRole('button', { name: /RUN PMCC SCAN/ }));
+    expect(onRun).toHaveBeenCalledWith(initial);
   });
 });
