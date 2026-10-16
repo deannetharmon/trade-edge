@@ -122,16 +122,29 @@ function isStandaloneLongCallOnly(legs: LifecycleLeg[] = []): boolean {
   return longCalls.length > 0 && shortPuts.length === 0 && longPuts.length === 0 && shortCalls.length === 0;
 }
 
+/** CALL / MID CALL / LEAP for a call, PUT / MID PUT / LEAP PUT for a put, by entry DTE. */
+export function horizonOptionLabel(optionType: 'C' | 'P', pos: Pick<Position, 'entryDte' | 'dte'>): string {
+  const horizon = holdingHorizonFor(pos);
+  if (optionType === 'C') return horizon === 'LEAP' ? 'LEAP' : horizon === 'MID' ? 'MID CALL' : 'CALL';
+  return horizon === 'LEAP' ? 'LEAP PUT' : horizon === 'MID' ? 'MID PUT' : 'PUT';
+}
+
+/** Label for a position that is exactly one long option leg (the positions table), otherwise null. */
+export function standaloneLongOptionLabel(pos: Pick<Position, 'legs' | 'entryDte' | 'dte'>): string | null {
+  const legs = pos.legs ?? [];
+  if (legs.length !== 1 || legs[0]?.direction !== 'Long') return null;
+  const t = legs[0].optionType;
+  return t === 'C' || t === 'P' ? horizonOptionLabel(t, pos) : null;
+}
+
 export function resolvePositionStrategyDisplayLabel(pos: Position): string {
   const key = resolvePositionStrategyFilterKey(pos);
   if (key === 'LEAP' || (key === null && isStandaloneLongCallOnly(pos.legs))) {
-    const horizon = holdingHorizonFor(pos);
-    return horizon === 'LEAP' ? 'LEAP' : horizon === 'MID' ? 'MID CALL' : 'CALL';
+    return horizonOptionLabel('C', pos);
   }
   if (key === null) return pos.strategy;
   if (key === 'PUT') {
-    const horizon = holdingHorizonFor(pos);
-    return horizon === 'LEAP' ? 'LEAP PUT' : horizon === 'MID' ? 'MID PUT' : 'PUT';
+    return horizonOptionLabel('P', pos);
   }
   if (key === 'NAKED') {
     const { shortPuts, shortCalls } = splitOptionLegs(pos.legs);

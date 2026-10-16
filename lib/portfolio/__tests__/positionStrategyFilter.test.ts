@@ -12,6 +12,7 @@ import {
   POSITION_STRATEGY_FILTER_KEYS,
   POSITION_STRATEGY_FILTER_GROUPS,
   resolvePositionStrategyDisplayLabel,
+  standaloneLongOptionLabel,
   stratColorForFilterKey,
 } from '@/lib/portfolio/positionStrategyFilter';
 import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
@@ -309,6 +310,23 @@ describe('holding-horizon labels (entry DTE: 90 or fewer, 91 to 269, 270 or more
 
   it('falls back to the current DTE when entryDte is missing', () => {
     expect(resolvePositionStrategyDisplayLabel(longCall(300, undefined as unknown as number))).toBe('LEAP');
+  });
+});
+
+describe('standaloneLongOptionLabel (positions table badge)', () => {
+  const single = (type: 'C' | 'P', direction: 'Long' | 'Short', dte: number, entryDte: number) => position({
+    dte, entryDte,
+    legs: [leg({ optionType: type, direction, symbol: occSymbol('UBER', dte, type, 67), strikePrice: 67 })],
+  });
+  it('labels the screenshot cases: UBER call entered at 392 DTE is LEAP, MRNA put entered at 91 is MID PUT', () => {
+    expect(standaloneLongOptionLabel(single('C', 'Long', 336, 392))).toBe('LEAP');
+    expect(standaloneLongOptionLabel(single('P', 'Long', 35, 91))).toBe('MID PUT');
+    expect(standaloneLongOptionLabel(single('P', 'Long', 20, 60))).toBe('PUT');
+    expect(standaloneLongOptionLabel(single('C', 'Long', 150, 150))).toBe('MID CALL');
+  });
+  it('returns null for short legs and multi-leg positions so the existing strategy label is kept', () => {
+    expect(standaloneLongOptionLabel(single('P', 'Short', 30, 45))).toBeNull();
+    expect(standaloneLongOptionLabel(position({ legs: [leg(), leg()] }))).toBeNull();
   });
 });
 
