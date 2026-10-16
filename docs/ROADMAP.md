@@ -28,7 +28,7 @@ Last updated: 2026-10-06 (ANALYTICS-0001 go)
 
 ## Score display — 2026-10-15
 
-- **CSP-SCORE-REVIEW-0001** — slice A IMPLEMENTED 2026-10-15 (Diane mock https://claude.ai/artifact/WZnPckPbvRsFQN4fCtNBTa; Ian, Alan, Quinn, Paul). CSP card shows one badge "CSP Score N | Details" colored by band (75/55/35), opening a nine-component points panel; the contradicting legacy Rank badge is removed on CSP cards. Presentation only; no scoring change. Open: B delta penalty and cushion reweight (Ian, Alan), C same pattern for PMCC and LEAPS. Ticket: `docs/tickets/CSP-SCORE-REVIEW-0001-score-badge-and-breakdown.md`.
+- **CSP-SCORE-REVIEW-0001** — slice A IMPLEMENTED 2026-10-15 (Diane mock https://claude.ai/artifact/WZnPckPbvRsFQN4fCtNBTa; Ian, Alan, Quinn, Paul). CSP card shows one badge "CSP Score N | Details" colored by band (75/55/35), opening a nine-component points panel; the contradicting legacy Rank badge is removed on CSP cards. Presentation only; no scoring change. Slice B IMPLEMENTED 2026-10-16: csp-score-v3 reweight (cushion 20 → 30, premium efficiency 25 → 15), golden fixtures from the real TQQQ 11/13 puts, band floors unchanged at 75/55/35, no separate delta penalty. Open: B2 minimum-return cap so far-OTM low-premium puts cannot read Strong (Ian, Alan); C same pattern for PMCC and LEAPS. Ticket: `docs/tickets/CSP-SCORE-REVIEW-0001-score-badge-and-breakdown.md`.
 
 ## Portfolio queue — 2026-10-05 (Dean, after the GGLL and SOXL reviews)
 

@@ -12,12 +12,12 @@
 //
 // Six weighted dimensions, each an independently normalized 0-100 subscore
 // BEFORE weighting, summing to 100 points when every input is available:
-//   1. Downside/entry cushion   -- 20 pts (POP 10, OTM% 10)
-//   2. Premium efficiency       -- 25 pts (period ROC 10, annualized ROC 15)
-//   3. Liquidity quality        -- 20 pts (width/classification 15, OI 5)
+//   1. Downside/entry cushion   -- 30 pts (POP 15, OTM% 15)
+//   2. Premium efficiency       -- 15 pts (period ROC 5, annualized ROC 10)
+//   3. Liquidity quality        -- 17 pts (width/classification 15, OI 2)
 //   4. Underlying technical     -- 15 pts (trend/technicalFit input)
-//   5. Volatility context       -- 10 pts (IVR)
-//   6. Event risk               -- 10 pts (earnings-before-expiration)
+//   5. Volatility context       -- 18 pts (IVR)
+//   6. Event risk               --  5 pts (earnings-before-expiration)
 //
 // Missing-data policy (CSP-WORKFLOW-0001 core-correction, BLOCKER-03 —
 // supersedes the original renormalize-over-available-weight policy this
@@ -36,7 +36,7 @@
 // constant lives in CSP_SCORE_CONFIG below, not scattered through
 // components.
 
-export const CSP_SCORE_VERSION = 'csp-score-v2';
+export const CSP_SCORE_VERSION = 'csp-score-v3';
 
 // OE-0003 reweighting, Ian's explicit call: IVR's penalty needed to be
 // *felt*, not just theoretically present, without letting it govern the
@@ -48,11 +48,21 @@ export const CSP_SCORE_VERSION = 'csp-score-v2';
 // measure like IVR does) -- deliberately NOT from pop/otm/periodRoc/
 // annualizedRoc/liquidityWidth/technical, since those measure trade
 // soundness, which Ian was explicit should outweigh premium efficiency.
+//
+// CSP-SCORE-REVIEW-0001B (csp-score-v3), Ian and Alan, 2026-10-16: cushion
+// (POP + OTM) 20 -> 30 and premium efficiency (period + annualized ROC)
+// 25 -> 15; total unchanged at 100. Evidence: in the TQQQ 11/13 comparison a
+// delta .38 put (70P) tied a delta .29 put (67P) because annualized ROC
+// saturates at its 50% cap while cushion carried only 20 of 100 points. On a
+// 2,409-row Rank export the change lowers in-band scores by 3.6 points on
+// average, keeps 7 of the top 10, and moves the top 10's average delta from
+// .287 to .241. No separate delta penalty: the preferred delta band is
+// already a hard Best Opportunities gate set by the trader.
 export const CSP_SCORE_WEIGHTS = {
-  pop: 10,
-  otm: 10,
-  periodRoc: 10,
-  annualizedRoc: 15,
+  pop: 15,
+  otm: 15,
+  periodRoc: 5,
+  annualizedRoc: 10,
   liquidityWidth: 15,
   liquidityOi: 2,
   technical: 15,

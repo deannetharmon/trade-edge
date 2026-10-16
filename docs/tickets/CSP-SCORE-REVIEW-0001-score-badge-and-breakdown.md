@@ -1,6 +1,6 @@
 # CSP-SCORE-REVIEW-0001 — CSP Score badge, band color and breakdown (slice A)
 
-Status: slice A IMPLEMENTED 2026-10-15. Slices B and C open (below).
+Status: slice A IMPLEMENTED 2026-10-15; slice B (csp-score-v3 weights) IMPLEMENTED 2026-10-16. B2 and C open (below).
 
 ## Why
 
@@ -24,9 +24,18 @@ Dean compared TradeEdge with Prosper Trading, Guac and TastyTrade on TQQQ 11/13 
 - New: `lib/scans/scoreBands.ts`, `lib/scans/cspScoreBreakdown.ts`, `features/screener/components/CspScoreBreakdown.tsx`. No weight, cap, formula, gate or default changed.
 - Diane mock: https://claude.ai/artifact/WZnPckPbvRsFQN4fCtNBTa
 
+## Slice B (csp-score-v3) — IMPLEMENTED 2026-10-16 (Ian, Alan, Quinn; Dean approved "go")
+
+- Weights: POP 10 → 15, OTM 10 → 15, period ROC 10 → 5, annualized ROC 15 → 10. Cushion 20 → 30, premium efficiency 25 → 15; total stays 100. Technical, IVR, liquidity and event weights unchanged. `CSP_SCORE_VERSION` is now `csp-score-v3`.
+- No separate delta penalty (Ian): the preferred delta band is already a hard Best Opportunities gate set by the trader, so a penalty would count the same risk twice.
+- Band floors stay 75 / 55 / 35 (Ian). Lowering them to 72 / 52 / 32 would turn 15 far-OTM, low-premium puts green.
+- Golden fixtures (Alan): `lib/scans/__tests__/cspScoreGolden.test.ts`, real TQQQ 11/13 puts. 63P 72.63, 66P 70.92, 67P 70.79, 70P 68.23 (were 71.36, 72.45, 73.56, 73.89). The 70P no longer ties the 67P.
+- Effect on a 2,409-row Rank export, in-band qualified (49 rows): mean −3.6 points, top 10 keeps 7 of 10, average delta of the top 10 .287 → .241. Green (75+) is 4 of 49, down from about 9.
+- Known side effect (follow-up B2): puts below delta .15 (outside the preferred band, so never Best Opportunities) gain points and can reach 75+ with only 1.4–2.1% period ROC (about 17–22% annualized), for example TQQQ 55P at delta .12 scores 75.2. A minimum-return cap on the green band is the candidate fix. Needs Ian and Alan.
+
 ## Open
 
-- B (Ian, Alan): delta penalty above the preferred band and a cushion reweight (cushion 20 → about 30, return 25 → about 15). Changes every CSP score. Needs golden fixtures rebuilt first.
+- B2: minimum-return cap so far-OTM, low-premium puts cannot read Strong (Ian, Alan).
 - C: same badge and panel for PMCC (already has a score breakdown) and LEAPS; CC and Spreads label only until their scores have components.
 - Recheck the $72.72 vs 73.82 underlying price at market open.
 - Label "Pre-market" shows midnight to 4 AM Eastern (`derivePmccMarketSession`); fix in a later push.

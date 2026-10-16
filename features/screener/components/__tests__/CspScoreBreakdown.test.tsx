@@ -58,6 +58,6 @@ describe('CSP score badge and panel', () => {
       expect(screen.getByTestId(`csp-score-row-${key}`)).toBeInTheDocument();
     }
     expect(screen.getByTestId('csp-score-row-technical')).toHaveTextContent('1.4 / 15');
-    expect(screen.getByTestId('csp-score-panel')).toHaveTextContent('73.8 / 100');
+    expect(screen.getByTestId('csp-score-panel')).toHaveTextContent('68.1 / 100');
   });
 });

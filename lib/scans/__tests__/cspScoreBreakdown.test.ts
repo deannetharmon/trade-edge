@@ -1,7 +1,7 @@
 // lib/scans/__tests__/cspScoreBreakdown.test.ts
 //
 // CSP-SCORE-REVIEW-0001: band mapping and the breakdown rows. The TQQQ 70P case uses the real scan
-// values from the 2026-10-15 comparison (trend fit 9, IVR 45.8%, strong liquidity, OI 1,498).
+// values from the 2026-10-15 comparison (trend fit 9, IVR 45.8%, strong liquidity, OI 1,498); totals are csp-score-v3.
 
 import { describe, expect, it } from 'vitest';
 import { calculateCspScore } from '../cspScore';
@@ -52,7 +52,7 @@ describe('buildCspScoreRows', () => {
     expect(cspScoreMaxPoints()).toBe(100);
     const sum = rows.reduce((s, r) => s + r.points, 0);
     expect(sum).toBeCloseTo(result.total as number, 6);
-    expect(result.total).toBeCloseTo(73.8, 1);
+    expect(result.total).toBeCloseTo(68.1, 1);
   });
 
   it('flags the rows that lose most of their points', () => {
