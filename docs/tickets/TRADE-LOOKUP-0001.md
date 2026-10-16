@@ -84,7 +84,7 @@ pick the same trade or a neighbor with a different POP, then send it to the exis
 2. DONE: lookup service (`lib/tradeLookup/` chainRows, coverage, buildLookup, loadLookup, defaultDeps; 49 new tests). Metrics via positionMetrics; no-quote rule enforced; calls carry a coverage result.
 2b. DONE: `lib/tradeLookup/flags.ts` (delta band, wide bid/ask, thin OI, strike below cost basis). Uses the scans' own checks (`classifyCspLiquidity`, `evaluateHybridSpread`, `assessOiLiquidity`) and the CSP/CC default rules; the modal can pass the live scan controls. Advisory only.
 2c. RSI badge and single-stock earnings flag: need candle and earnings data sources; scoped when the modal is built (slice 3).
-3. `TradeLookupModal` + sidebar launcher, to Diane's mock v2.
+3. DONE: `TradeLookupModal` + sidebar launcher (button label POST LOOKUP, because an existing Screener test forbids any button named like Trade/Open). CSP rows hand off to the existing `CspTradeModal`; covered calls are inspection-only because TradeEdge has no covered-call order dialog (Covered Call scan: "Analysis only"). Column control mirrors Portfolio's Customize columns (its component is internal to Portfolio). A covered-call order dialog is a separate order-path ticket.
 
 ## Golden fixtures
 Live in `lib/tradeLookup/__tests__/parsePost.test.ts` and `resolveExpiry.test.ts`. Every post Dean shared is a fixture

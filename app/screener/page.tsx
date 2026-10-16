@@ -72,6 +72,8 @@ import { evaluateEventRisk, type EventRiskResult } from '@/lib/scans/eventRisk';
 import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
+import { TradeLookupModal } from '@/features/screener/components/TradeLookupModal';
+import { defaultLookupDeps } from '@/lib/tradeLookup/defaultDeps';
 import { calculateCspScore } from '@/lib/scans/cspScore';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
@@ -9157,6 +9159,10 @@ export default function Home() {
   const [ccReceipt, setCcReceipt] = useState<{ sessionId: string; rules: CcRulesType } | null>(null);
   const [ccBypassUniverse, setCcBypassUniverse] = useState(false);
   const [showPmccPairLookup, setShowPmccPairLookup] = useState(false);
+  // TRADE-LOOKUP-0001D: paste a group post, see it on the live chain. The modal stays mounted (hidden) while the CSP
+  // order dialog it opened is on top, so backing out of the order returns to the same chain.
+  const [showTradeLookup, setShowTradeLookup] = useState(false);
+  const [tradeLookupOrderOpen, setTradeLookupOrderOpen] = useState(false);
   const [leapsResults, setLeapsResults] = useState<Array<{
     symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
     openInterest: number | null; bid: number | null; ask: number | null; occSymbol: string | null;
@@ -11619,6 +11625,16 @@ export default function Home() {
               >
                 FIND LEAPS
               </LauncherButton>
+              <LauncherButton
+                strategy="spreads"
+                label="POST LOOKUP"
+                isSelected={showTradeLookup}
+                isRunning={false}
+                onClick={() => setShowTradeLookup(true)}
+                title="Paste a trading-group post to see it on the live option chain and compare nearby strikes."
+              >
+                POST LOOKUP
+              </LauncherButton>
             </div>
 
           </div>
@@ -13403,6 +13419,15 @@ export default function Home() {
         const q = deriveCspQualification(cspTradeResult);
         return <CspTradeModal result={cspTradeResult} th={th} onClose={() => setCspTradeResult(null)} qualification={q ? { derivation: q.derivation, checks: q.checks } : null} />;
       })()}
+      {showTradeLookup && (
+        <TradeLookupModal
+          th={th}
+          deps={defaultLookupDeps}
+          suspended={tradeLookupOrderOpen && cspTradeResult !== null}
+          onClose={() => { setShowTradeLookup(false); setTradeLookupOrderOpen(false); }}
+          onOrderCsp={(order) => { setTradeLookupOrderOpen(true); setCspTradeResult(order); }}
+        />
+      )}
       {leapsTradeCandidate && <LeapsTradeModal candidate={leapsTradeCandidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax} onClose={() => setLeapsTradeCandidate(null)} />}
       <LoadPromptModal state={loadPrompt} onClose={() => setLoadPrompt(p => ({ ...p, show: false }))} th={th} />
       {showRunModal && (
