@@ -97,10 +97,42 @@ export const POSITION_STRATEGY_FILTER_GROUPS: PositionStrategyFilterGroup[] = [
 // touch) -- this is a purely additive label used only where the card badge
 // renders, falling back to pos.strategy unchanged for anything outside the
 // nine filter buckets (ASSIGNED_STOCK, UNKNOWN, etc.).
+// -- Holding-horizon labels (Dean, 2026-10-16) ----------------------------------------------------
+//
+// A standalone long call or long put is tagged by the days to expiration it had WHEN IT WAS OPENED
+// (entryDte), so the label never changes as the position ages: 90 or fewer = plain CALL / PUT,
+// 91 to 269 = MID CALL / MID PUT, 270 or more = LEAP / LEAP PUT. This is a DISPLAY label only. It does
+// not change classifyPositionLifecycle, the LEAP filter key, PMCC pairing, or stop eligibility, which
+// still use PMCC_LONG_DTE_MIN (120). Falls back to the current dte when entryDte is not available.
+export const MID_LABEL_MIN_ENTRY_DTE = 91;
+export const LEAP_LABEL_MIN_ENTRY_DTE = 270;
+
+export type HoldingHorizon = 'SHORT' | 'MID' | 'LEAP';
+
+export function holdingHorizonFor(pos: Pick<Position, 'entryDte' | 'dte'>): HoldingHorizon {
+  const dte = Number.isFinite(pos.entryDte) ? pos.entryDte : pos.dte;
+  if (!Number.isFinite(dte)) return 'SHORT';
+  if (dte >= LEAP_LABEL_MIN_ENTRY_DTE) return 'LEAP';
+  if (dte >= MID_LABEL_MIN_ENTRY_DTE) return 'MID';
+  return 'SHORT';
+}
+
+function isStandaloneLongCallOnly(legs: LifecycleLeg[] = []): boolean {
+  const { shortPuts, longPuts, shortCalls, longCalls } = splitOptionLegs(legs);
+  return longCalls.length > 0 && shortPuts.length === 0 && longPuts.length === 0 && shortCalls.length === 0;
+}
+
 export function resolvePositionStrategyDisplayLabel(pos: Position): string {
   const key = resolvePositionStrategyFilterKey(pos);
+  if (key === 'LEAP' || (key === null && isStandaloneLongCallOnly(pos.legs))) {
+    const horizon = holdingHorizonFor(pos);
+    return horizon === 'LEAP' ? 'LEAP' : horizon === 'MID' ? 'MID CALL' : 'CALL';
+  }
   if (key === null) return pos.strategy;
-  if (key === 'PUT') return 'LONG PUT';
+  if (key === 'PUT') {
+    const horizon = holdingHorizonFor(pos);
+    return horizon === 'LEAP' ? 'LEAP PUT' : horizon === 'MID' ? 'MID PUT' : 'PUT';
+  }
   if (key === 'NAKED') {
     const { shortPuts, shortCalls } = splitOptionLegs(pos.legs);
     if (shortCalls.length > 0 && shortPuts.length > 0) return 'NAKED STRANGLE';

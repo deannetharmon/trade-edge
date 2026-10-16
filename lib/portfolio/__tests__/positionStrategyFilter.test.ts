@@ -219,14 +219,14 @@ describe('POSITION_STRATEGY_FILTER_GROUPS', () => {
 });
 
 describe('resolvePositionStrategyDisplayLabel', () => {
-  it('labels a standalone long put as LONG PUT, distinct from a CSP\'s bare CSP label', () => {
+  it('labels a short-dated standalone long put as PUT (entered at 45 DTE), distinct from a CSP\'s CSP label', () => {
     const csp = position({ strategy: 'NONE', legs: [leg({ optionType: 'P', direction: 'Short' })] });
     const longPut = position({
       strategy: 'NONE',
       legs: [{ symbol: occSymbol('SPY', 30, 'P', 500), optionType: 'P', strikePrice: 500, direction: 'Long', quantity: 1, avgOpenPrice: 3, currentPrice: null , currentDelta: null}],
     });
     expect(resolvePositionStrategyDisplayLabel(csp)).toBe('CSP');
-    expect(resolvePositionStrategyDisplayLabel(longPut)).toBe('LONG PUT');
+    expect(resolvePositionStrategyDisplayLabel(longPut)).toBe('PUT');
   });
 
   it('labels an uncovered short call as NAKED CALL, an uncovered short put group as NAKED PUT, and both together as NAKED STRANGLE', () => {
@@ -267,6 +267,48 @@ describe('resolvePositionStrategyDisplayLabel', () => {
   it('falls back to pos.strategy unchanged for a position outside the nine buckets', () => {
     const pos = position({ strategy: 'UNKNOWN', legs: [] });
     expect(resolvePositionStrategyDisplayLabel(pos)).toBe('UNKNOWN');
+  });
+});
+
+describe('holding-horizon labels (entry DTE: 90 or fewer, 91 to 269, 270 or more)', () => {
+  const longCall = (daysFromNow: number, entryDte: number) => position({
+    strategy: 'CALL', dte: daysFromNow, entryDte,
+    legs: [leg({ optionType: 'C', direction: 'Long', symbol: occSymbol('NVDA', daysFromNow, 'C', 100), strikePrice: 100 })],
+  });
+  const longPut = (daysFromNow: number, entryDte: number) => position({
+    strategy: 'PUT', dte: daysFromNow, entryDte,
+    legs: [leg({ optionType: 'P', direction: 'Long', symbol: occSymbol('SPY', daysFromNow, 'P', 500), strikePrice: 500 })],
+  });
+
+  it('labels a standalone long call by entry DTE: CALL, MID CALL, LEAP', () => {
+    expect(resolvePositionStrategyDisplayLabel(longCall(60, 60))).toBe('CALL');
+    expect(resolvePositionStrategyDisplayLabel(longCall(90, 90))).toBe('CALL');
+    expect(resolvePositionStrategyDisplayLabel(longCall(91, 91))).toBe('MID CALL');
+    expect(resolvePositionStrategyDisplayLabel(longCall(200, 200))).toBe('MID CALL');
+    expect(resolvePositionStrategyDisplayLabel(longCall(269, 269))).toBe('MID CALL');
+    expect(resolvePositionStrategyDisplayLabel(longCall(270, 270))).toBe('LEAP');
+    expect(resolvePositionStrategyDisplayLabel(longCall(400, 400))).toBe('LEAP');
+  });
+
+  it('labels a standalone long put by entry DTE: PUT, MID PUT, LEAP PUT', () => {
+    expect(resolvePositionStrategyDisplayLabel(longPut(45, 45))).toBe('PUT');
+    expect(resolvePositionStrategyDisplayLabel(longPut(180, 180))).toBe('MID PUT');
+    expect(resolvePositionStrategyDisplayLabel(longPut(270, 270))).toBe('LEAP PUT');
+  });
+
+  it('keeps the entry-time label as the position ages (a LEAP bought at 392 DTE is still a LEAP at 100 DTE)', () => {
+    expect(resolvePositionStrategyDisplayLabel(longCall(100, 392))).toBe('LEAP');
+    expect(resolvePositionStrategyDisplayLabel(longCall(30, 392))).toBe('LEAP');
+    expect(resolvePositionStrategyDisplayLabel(longPut(30, 392))).toBe('LEAP PUT');
+  });
+
+  it('is display-only: the LEAP filter key still follows the existing DTE > 120 rule', () => {
+    expect(resolvePositionStrategyFilterKey(longCall(200, 200))).toBe('LEAP');
+    expect(resolvePositionStrategyFilterKey(longCall(60, 60))).toBeNull();
+  });
+
+  it('falls back to the current DTE when entryDte is missing', () => {
+    expect(resolvePositionStrategyDisplayLabel(longCall(300, undefined as unknown as number))).toBe('LEAP');
   });
 });
 
