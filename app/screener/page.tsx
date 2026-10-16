@@ -145,7 +145,7 @@ import { buildWalkLadder } from '@/lib/entry-walk/ladder';
 import { bracketForPrice } from '@/lib/entry-walk/bracket';
 import { netQuoteFromLegs } from '@/lib/entry-walk/broker';
 import { buildFillRecord, recordWalkFill } from '@/lib/entry-walk/fillLog';
-import { tickTableFromNestedChain } from '@/lib/portfolio/tickSize';
+import { tickTableFromNestedChain, type TickTable } from '@/lib/portfolio/tickSize';
 import { buildCspOrderLeg, computeCspMaxLoss } from '@/lib/scans/cspOrderMath';
 import { cspEntryLimitPerShare, cspPerShareToContractDollars, buildCspEntryPayload } from '@/lib/scans/cspEntryUnits';
 import { guardCspOrder } from '@/lib/scans/cspOrderSubmission';
@@ -2793,6 +2793,20 @@ function CspTradeModal({ result, th, onClose, qualification }: {
   // ENTRY-WALK-0001: opt-in per order, off by default.
   const [walkOn, setWalkOn] = useState(false);
   const walk = useEntryWalk();
+  // ORDER-TICK-0001: the option root's tick table, so the profit target and stop are sent at prices the exchange accepts
+  // (a 2x stop on a $2.48 credit is $4.96, and prices at or above $3.00 sit on a $0.05 tick).
+  const [tickTable, setTickTable] = useState<TickTable | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getAccessToken();
+        const table = tickTableFromNestedChain(await ttFetch(`/option-chains/${encodeURIComponent(result.symbol)}/nested`, token), String(c.shortOccSymbol ?? ''));
+        if (!cancelled) setTickTable(table);
+      } catch { if (!cancelled) setTickTable(null); }
+    })();
+    return () => { cancelled = true; };
+  }, [result.symbol, c.shortOccSymbol]);
 
   // CSP-UNITS-0001: entryLimit is PER SHARE (what the broker takes); c.credit is total dollars.
   const [entryLimit, setEntryLimit] = useState(cspEntryLimitPerShare(c));
@@ -2807,9 +2821,7 @@ function CspTradeModal({ result, th, onClose, qualification }: {
   const validationFresh = quoteValidation != null && validationNow - quoteValidation.at <= 15_000;
 
   const exitCredit = entryLimit;
-  const gtcBuyback = parseFloat((exitCredit * (1 - gtcPct / 100)).toFixed(2));
-  const stopTrigger = parseFloat((exitCredit * stopMultiple).toFixed(2));
-  const stopLimit = parseFloat((stopTrigger * 1.10).toFixed(2));
+  const { profitBuyback: gtcBuyback, stopTrigger, stopLimit } = bracketForPrice(exitCredit, gtcPct, stopMultiple, tickTable);
 
   const legBuild = buildCspOrderLeg(c.shortOccSymbol, quantity, result.underlyingType === 'index');
   const maxLoss = computeCspMaxLoss(c.shortStrike, cspPerShareToContractDollars(entryLimit), quantity);
@@ -2817,7 +2829,7 @@ function CspTradeModal({ result, th, onClose, qualification }: {
 
   const buildOtocoPayload = () => {
     if (!legBuild.ok) throw new Error(legBuild.reason);
-    return buildCspEntryPayload({ entryPerShare: entryLimit, gtcPct, stopMultiple, quantity, leg: legBuild.leg });
+    return buildCspEntryPayload({ entryPerShare: entryLimit, gtcPct, stopMultiple, quantity, leg: legBuild.leg, tickTable });
   };
 
   const refreshExecutionQuote = async (expectedCredit?: number) => {
@@ -2892,7 +2904,7 @@ function CspTradeModal({ result, th, onClose, qualification }: {
       if (!capitalOk) throw new Error('Collateral is no longer sufficient for this order. Refresh and try a smaller quantity.');
       const accountNumber = await getAccountNumber();
       const walkLeg = legBuild.leg;
-      const buildPayload = (price: number) => buildCreditEntryOtoco({ ...bracketForPrice(price, gtcPct, stopMultiple), quantity, legs: [walkLeg] });
+      const buildPayload = (price: number) => buildCreditEntryOtoco({ ...bracketForPrice(price, gtcPct, stopMultiple, tickTable), quantity, legs: [walkLeg] });
       // Same Trade Log note as the normal path, re-saved for each new order id so the live order always has its verdict.
       const saveNote = async (response: any) => {
         const id = String(response?.data?.['complex-order']?.id ?? response?.data?.order?.id ?? 'submitted');
@@ -4076,6 +4088,20 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
   // ENTRY-WALK-0001: opt-in per order, off by default; credit spreads only (PMCC is a debit and is not walked in v1).
   const [walkOn, setWalkOn] = useState(false);
   const walk = useEntryWalk();
+  // ORDER-TICK-0001: the option root's tick table, so the profit target and stop are sent at prices the exchange accepts.
+  const [tickTable, setTickTable] = useState<TickTable | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getAccessToken();
+        const firstLegSymbol = String(buildOrderLegs(result, c)[0]?.symbol ?? '');
+        const table = tickTableFromNestedChain(await ttFetch(`/option-chains/${encodeURIComponent(result.symbol)}/nested`, token), firstLegSymbol);
+        if (!cancelled) setTickTable(table);
+      } catch { if (!cancelled) setTickTable(null); }
+    })();
+    return () => { cancelled = true; };
+  }, [result.symbol, c.shortOccSymbol]);
   const [quoteValidation, setQuoteValidation] = useState<{ at: number; executableCredit: number; maxAgeSeconds: number } | null>(null);
   const [validationNow, setValidationNow] = useState(Date.now());
   const isPMCC = c.strategy === 'PMCC';
@@ -4097,9 +4123,7 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
   // original quote. If the trader adjusts the entry price, the bracket stays
   // aligned with the credit they are asking the broker to fill.
   const exitCredit = entryLimit;
-  const gtcBuyback = parseFloat((exitCredit * (1 - gtcPct / 100)).toFixed(2));
-  const stopTrigger = parseFloat((exitCredit * stopMultiple).toFixed(2));
-  const stopLimit = parseFloat((stopTrigger * 1.10).toFixed(2));
+  const { profitBuyback: gtcBuyback, stopTrigger, stopLimit } = bracketForPrice(exitCredit, gtcPct, stopMultiple, tickTable);
   const stopCreditPct = Math.round(stopMultiple * 100);
   const stopPnlPct = Math.round((1 - stopMultiple) * 100);
 
@@ -4313,12 +4337,12 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
       const ladder = buildWalkLadder({ side: 'credit', netBid: quote.netBid, netAsk: quote.netAsk, legSpreads: quote.legSpreads, minCredit: null, tickTable });
       if (!ladder.ok) throw new Error(`Price walking is off for this order. ${ladder.message} Untick "Walk the price" to place it normally.`);
       const accountNumber = await getAccountNumber();
-      const buildPayload = (price: number) => buildCreditEntryOtoco({ ...bracketForPrice(price, gtcPct, stopMultiple), quantity, legs });
+      const buildPayload = (price: number) => buildCreditEntryOtoco({ ...bracketForPrice(price, gtcPct, stopMultiple, tickTable), quantity, legs });
       const persist = async (response: any, price: number) => {
         const id = String(response?.data?.['complex-order']?.id ?? response?.data?.order?.id ?? 'submitted');
         const triggerId = response?.data?.['complex-order']?.['trigger-order']?.id;
         const openingOrderIds = triggerId == null ? [] : [String(triggerId)];
-        const bracket = bracketForPrice(price, gtcPct, stopMultiple);
+        const bracket = bracketForPrice(price, gtcPct, stopMultiple, tickTable);
         const plan = { gtcBuyback: bracket.profitBuyback, stopTrigger: bracket.stopTrigger };
         setOrderId(id);
         try { await persistPendingEntry(accountNumber, id, openingOrderIds, plan); await persistPendingIronCondorEntry(accountNumber, id, openingOrderIds, plan); }

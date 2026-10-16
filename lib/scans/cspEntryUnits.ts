@@ -9,6 +9,7 @@
 
 import { buildCreditEntryOtoco } from '../screener/entryBracket';
 import { bracketForPrice } from '../entry-walk/bracket';
+import type { TickTable } from '../portfolio/tickSize';
 
 /** Per-share entry limit pre-fill: the scan's mid per share, never the total-dollar `credit`. */
 export function cspEntryLimitPerShare(candidate: { cspMid?: number | null; credit?: number | null }): number {
@@ -31,6 +32,8 @@ export function buildCspEntryPayload(input: {
   stopMultiple: number;
   quantity: number;
   leg: { action: string; quantity: number; [key: string]: unknown };
+  /** ORDER-TICK-0001: the option root's tick table; exits are rounded to it when known. */
+  tickTable?: TickTable | null;
 }) {
-  return buildCreditEntryOtoco({ ...bracketForPrice(input.entryPerShare, input.gtcPct, input.stopMultiple), quantity: input.quantity, legs: [input.leg] });
+  return buildCreditEntryOtoco({ ...bracketForPrice(input.entryPerShare, input.gtcPct, input.stopMultiple, input.tickTable ?? null), quantity: input.quantity, legs: [input.leg] });
 }
