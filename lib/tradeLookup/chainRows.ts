@@ -6,6 +6,7 @@
 // getChain reports a missing bid or ask as 0, so a bid of 0 with an ask of 0 is "no quote", and the
 // lookup treats it that way (see buildLookup.ts). A non-numeric field becomes null here, never 0.
 
+import { normalizeIv } from '@/lib/scans/scan-utils';
 import type { ChainRow } from './lookupTypes';
 
 function num(value: unknown): number | null {
@@ -36,7 +37,8 @@ export function normalizeChainRows(chains: Record<string, unknown[]> | null | un
         ask: num(raw.ask),
         delta: num(raw.delta),
         openInterest: num(raw.openInterest),
-        iv: num(raw.iv),
+        // The broker gives IV as a decimal (0.8 = 80%); the scans convert it with normalizeIv and so does the lookup.
+        iv: normalizeIv(raw.iv),
         occSymbol: typeof raw.occSymbol === 'string' ? raw.occSymbol : '',
         quoteUpdatedAt: typeof raw.quoteUpdatedAt === 'string' ? raw.quoteUpdatedAt : null,
       });

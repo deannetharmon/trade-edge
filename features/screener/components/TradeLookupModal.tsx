@@ -34,6 +34,13 @@ interface Props {
   suspended?: boolean;
 }
 
+/** A value outside the trader's range is shown in amber with its reason on hover. The numbers are always shown. */
+const OUT_OF_RANGE = 'font-bold text-amber-300 bg-amber-500/10';
+function flagOf(row: LookupRow, code: string): string {
+  const f = row.flags.filter((x) => x.code === code)[0];
+  return f ? f.label : '';
+}
+
 const GROUP_TEXT: Record<string, string> = {
   Contract: 'text-neutral-300',
   Risk: 'text-purple-300',
@@ -299,7 +306,7 @@ export function TradeLookupModal({ th, deps, onClose, onOrderCsp, suspended = fa
                         className={`border-t ${th.border} ${r.isPick ? 'bg-cyan-400/10' : ''} ${isSel ? 'outline outline-1 outline-cyan-400' : ''} ${r.isNextExpiration ? 'border-dashed' : ''}`}
                       >
                         {show('strike') && (
-                          <td className={`px-2 py-1.5 font-bold ${th.text}`}>
+                          <td className={`px-2 py-1.5 font-bold ${flagOf(r, 'below_cost_basis') ? OUT_OF_RANGE : th.text}`} title={flagOf(r, 'below_cost_basis') || undefined}>
                             {r.strike}{r.right}
                             {r.isPick && <span className="ml-1 rounded bg-cyan-400 px-1 text-[9px] text-black">POSTED</span>}
                             {r.isNextExpiration && <span className={`ml-1 text-[9px] ${th.textFaint}`}>NEXT EXP</span>}
@@ -307,24 +314,20 @@ export function TradeLookupModal({ th, deps, onClose, onOrderCsp, suspended = fa
                           </td>
                         )}
                         {show('expiration') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{r.expiration} <span className={th.textFaint}>({r.dte}d)</span></td>}
-                        {show('delta') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{r.delta === null ? '—' : Math.abs(r.delta).toFixed(2)}</td>}
+                        {show('delta') && <td className={`px-2 py-1.5 ${flagOf(r, 'delta_outside_band') ? OUT_OF_RANGE : th.textMuted}`} title={flagOf(r, 'delta_outside_band') || undefined}>{r.delta === null ? '—' : Math.abs(r.delta).toFixed(2)}</td>}
                         {show('pop') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{pct0(r.pop)}</td>}
                         {show('credit') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{money(r.mid)} <span className={th.textFaint}>/ {money(r.natural)}</span></td>}
-                        {show('bidAsk') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{r.noQuote ? '—' : num2(r.bid) + ' / ' + num2(r.ask)}</td>}
-                        {show('breakeven') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{money(r.breakeven)}</td>}
-                        {show('maxRisk') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{r.maxRisk === null ? '—' : '$' + Math.round(r.maxRisk).toLocaleString()}</td>}
-                        {show('openInterest') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{r.openInterest === null ? '—' : r.openInterest.toLocaleString()}</td>}
-                        {show('creditVsPick') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{r.isPick ? '' : signed(r.creditVsPick, 2, '$')}</td>}
-                        {show('popVsPick') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{r.isPick ? '' : signed(r.popVsPick, 0) + (r.popVsPick === null ? '' : ' pts')}</td>}
-                        {show('flags') && (
-                          <td className="px-2 py-1.5">
-                            {r.flags.map((f) => (
-                              <span key={f.code} title={f.label} className="mr-1 inline-block rounded border border-amber-500/60 px-1 text-[9px] text-amber-300">
-                                {f.code === 'delta_outside_band' ? 'DELTA' : f.code === 'wide_spread' ? 'SPREAD' : f.code === 'thin_oi' ? 'OI' : 'BASIS'}
-                              </span>
-                            ))}
+                        {show('bidAsk') && (
+                          <td className={`px-2 py-1.5 ${flagOf(r, 'wide_spread') ? OUT_OF_RANGE : th.textMuted}`} title={flagOf(r, 'wide_spread') || undefined}>
+                            {r.noQuote ? '—' : num2(r.bid) + ' / ' + num2(r.ask)}
+                            {!r.noQuote && r.bid !== null && r.ask !== null && <span className="block text-[10px] opacity-80">spread ${(r.ask - r.bid).toFixed(2)}</span>}
                           </td>
                         )}
+                        {show('breakeven') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{money(r.breakeven)}</td>}
+                        {show('maxRisk') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{r.maxRisk === null ? '—' : '$' + Math.round(r.maxRisk).toLocaleString()}</td>}
+                        {show('openInterest') && <td className={`px-2 py-1.5 ${flagOf(r, 'thin_oi') ? OUT_OF_RANGE : th.textMuted}`} title={flagOf(r, 'thin_oi') || undefined}>{r.openInterest === null ? '—' : r.openInterest.toLocaleString()}</td>}
+                        {show('creditVsPick') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{r.isPick ? '' : signed(r.creditVsPick, 2, '$')}</td>}
+                        {show('popVsPick') && <td className={`px-2 py-1.5 ${th.textMuted}`}>{r.isPick ? '' : signed(r.popVsPick, 0) + (r.popVsPick === null ? '' : ' pts')}</td>}
                         <td className="px-2 py-1.5 text-right">
                           <button
                             type="button"

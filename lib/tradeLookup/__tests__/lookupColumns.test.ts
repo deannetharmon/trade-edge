@@ -10,7 +10,10 @@ describe('lookup columns', () => {
   it('max risk is hidden by default and everything else useful is shown', () => {
     expect(DEFAULT_LOOKUP_COLUMNS).not.toContain('maxRisk');
     expect(DEFAULT_LOOKUP_COLUMNS).toContain('pop');
-    expect(DEFAULT_LOOKUP_COLUMNS).toContain('flags');
+    expect(DEFAULT_LOOKUP_COLUMNS).not.toContain('flags' as never);
+  });
+  it('a saved choice that still lists the retired flags column just loses it', () => {
+    expect(sanitizeLookupColumns(['strike', 'delta', 'flags'])).toEqual(['strike', 'delta']);
   });
   it('sanitize drops unknown ids, keeps table order, always keeps strike', () => {
     expect(sanitizeLookupColumns(['pop', 'bogus', 'delta'])).toEqual(['strike', 'delta', 'pop']);

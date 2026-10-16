@@ -35,4 +35,11 @@ describe('normalizeChainRows', () => {
     const [r] = normalizeChainRows({ '2026-12-18': [raw({ expirationDate: undefined })] });
     expect(r.expiration).toBe('2026-12-18');
   });
+
+  it('converts a decimal IV (0.8 = 80%) to percent so POP is not pinned at 100%, and leaves percent alone', () => {
+    const [dec] = normalizeChainRows({ '2026-11-06': [raw({ iv: 0.8 })] });
+    const [pct] = normalizeChainRows({ '2026-11-06': [raw({ iv: 63 })] });
+    expect(dec.iv).toBeCloseTo(80, 10);
+    expect(pct.iv).toBe(63);
+  });
 });

@@ -6,7 +6,7 @@
 
 export type LookupColumnId =
   | 'strike' | 'expiration' | 'delta' | 'pop' | 'credit' | 'bidAsk' | 'breakeven' | 'openInterest'
-  | 'creditVsPick' | 'popVsPick' | 'maxRisk' | 'flags';
+  | 'creditVsPick' | 'popVsPick' | 'maxRisk';
 
 export const LOOKUP_COLUMNS: ReadonlyArray<{ id: LookupColumnId; label: string; group: string }> = [
   { id: 'strike', label: 'Strike', group: 'Contract' },
@@ -20,11 +20,10 @@ export const LOOKUP_COLUMNS: ReadonlyArray<{ id: LookupColumnId; label: string; 
   { id: 'openInterest', label: 'Open interest', group: 'Liquidity' },
   { id: 'creditVsPick', label: 'Credit vs pick', group: 'Compare' },
   { id: 'popVsPick', label: 'POP vs pick', group: 'Compare' },
-  { id: 'flags', label: 'Flags', group: 'Compare' },
 ];
 
 export const DEFAULT_LOOKUP_COLUMNS: LookupColumnId[] = [
-  'strike', 'expiration', 'delta', 'pop', 'credit', 'bidAsk', 'breakeven', 'openInterest', 'creditVsPick', 'popVsPick', 'flags',
+  'strike', 'expiration', 'delta', 'pop', 'credit', 'bidAsk', 'breakeven', 'openInterest', 'creditVsPick', 'popVsPick',
 ];
 
 export const LOCKED_COLUMN: LookupColumnId = 'strike';

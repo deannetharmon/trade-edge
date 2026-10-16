@@ -108,6 +108,31 @@ describe('TradeLookupModal', () => {
     expect(onOrder).not.toHaveBeenCalled();
   });
 
+  it('shows delta, spread and open interest as values and highlights only the ones out of range', async () => {
+    const deps = makeDeps({
+      fetchChain: async (_s, _t, exp) => ({
+        chains: { [exp]: [
+          raw(115, exp, { delta: -0.09, openInterest: 0, bid: 1, ask: 2 }),
+          raw(120, exp, { delta: -0.2, openInterest: 800, bid: 5.45, ask: 5.5 }),
+        ] },
+        classification: 'etf',
+      }),
+    });
+    await lookup('NEW CSP SOXL 11/6 $120P @ $5.47', deps);
+    const pick = await screen.findByTestId('trade-lookup-pick-row');
+    // The in-range posted contract has no highlight anywhere and there are no flag chips.
+    expect(pick.innerHTML).not.toContain('text-amber-300');
+    expect(screen.queryByText('DELTA')).not.toBeInTheDocument();
+    expect(screen.queryByText('SPREAD')).not.toBeInTheDocument();
+    // The out-of-range neighbor shows its numbers, highlighted, with the reason on hover.
+    const other = screen.getAllByTestId('trade-lookup-row').filter((r) => r.textContent!.startsWith('115P'))[0];
+    expect(other.querySelectorAll('td.text-amber-300').length).toBe(3);
+    expect(other.textContent).toContain('0.09');
+    expect(other.textContent).toContain('spread $1.00');
+    expect(other.querySelector('td[title*="Delta 0.09"]')).not.toBeNull();
+    expect(other.querySelector('td[title*="Open interest 0"]')).not.toBeNull();
+  });
+
   it('an unreadable post explains why and fetches nothing', async () => {
     const deps = makeDeps({ getToken: vi.fn(async () => 'tok') });
     await lookup('hello there', deps);
