@@ -9,6 +9,7 @@ import {
   CSP_CARD_ORDER, CSP_CRITERIA, IVR_UNAVAILABLE_NOTE, buildCspReceipt, criteriaForCard, criteriaForMode, getCriterion,
   summarizeCspResults, valuesFromSnapshot, type CspConfigValues, type CspCountableResult,
 } from '@/lib/screener/scanConfig/cspRegistry';
+import { getCcCriterion } from '@/lib/screener/scanConfig/ccRegistry';
 import { LIFECYCLES, LIFECYCLE_TAG_LABEL, RETENTION } from '@/lib/screener/scanConfig/types';
 
 const values = (over: Partial<CspConfigValues> = {}): CspConfigValues => ({
@@ -216,5 +217,26 @@ describe('summarizeCspResults', () => {
 
   it('an empty result set counts nothing', () => {
     expect(summarizeCspResults([])).toEqual({ qualified: 0, targetedNearMisses: 0, disqualified: 0, symbolsIvrUnavailable: 0 });
+  });
+});
+
+// SCAN-MODAL-UX-0001: the fixed rules show on a one-line strip by short name; the hint is their tooltip.
+describe('SCAN-MODAL-UX-0001 strip names and one name per concept', () => {
+  it('every fixed criterion on the Always applied card has a short strip name and a hint', () => {
+    const fixed = criteriaForCard('rank', 'always').filter(c => c.fixed);
+    expect(fixed.map(c => c.id)).toEqual(['liquidity', 'earnings']);
+    for (const c of fixed) {
+      expect(c.chipLabel, c.id).toBeTruthy();
+      expect(c.hint.length, c.id).toBeGreaterThan(0);
+    }
+  });
+
+  it('CC and CSP show the earnings rule under the same name', () => {
+    expect(getCriterion('earnings').chipLabel).toBe(getCcCriterion('earnings').chipLabel);
+    expect(getCriterion('oi').label).toBe(getCcCriterion('oi').label);
+  });
+
+  it('the secondary sort is still a registry criterion (the request keeps carrying it), only not drawn in the modal', () => {
+    expect(getCriterion('rankSecondary').rescan).toBe(false);
   });
 });

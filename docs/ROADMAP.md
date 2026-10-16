@@ -17,6 +17,12 @@ Last updated: 2026-10-06 (ANALYTICS-0001 go)
 
 - **CC-ORDERS-0001** — SCOPED 2026-10-15 (Paul, Ian, Quinn, Alan). A dedicated covered-call order dialog so Trade Lookup (and later the Covered Call scan card) can place a call, only when a fresh broker read proves it is covered by shares or a longer-dated LEAP. Entry + GTC 50% buy-to-close, no stop; strike below cost basis needs an explicit acknowledgment. Build order: A pure builders and guard with tests (IMPLEMENTED 2026-10-15, not wired to any screen), B dialog (IMPLEMENTED 2026-10-15, not wired), C wire entry points (Trade Lookup IMPLEMENTED 2026-10-15; scan card separate). Ticket: `docs/tickets/CC-ORDERS-0001-covered-call-order-dialog.md`.
 
+- **CC-ORDERS-0001 follow-ups** — IMPLEMENTED 2026-10-15: D (LEAP-covered calls show a PMCC note, no share cost basis), E (TRADE THIS on the Covered Call scan card). Also done the same day: TRADE-LOOKUP-0001E (order from a lookup, flags shown as highlighted cells, POP fix for decimal IV) and 0001F (RSI turn badge and earnings-vs-expiry signal), PMCC-HELD-0002 (an audit result no longer breaks the candidate count) and PMCC-HELD-0003 (the held-LEAP audit says why a LEAP did not match the live chain), and a clock pin in two spread-finder tests. Open: Dean's live checks in market hours; EARNINGS-DATEBASIS-0001 (UTC versus New York date math) still needs its own ticket.
+
+## Scan modals — 2026-10-15
+
+- **SCAN-MODAL-UX-0001** — IMPLEMENTED 2026-10-15 (Diane, Ian, Quinn, Paul). Find Covered Calls and Find Cash-Secured Puts now fit one screen (measured 439 / 481 / 608 px tall) instead of two and three scrolling screens: dots plus one legend line replace the tag pills, help text moved into tooltips, fixed rules are one strip, the summary box is a short recap. No scan logic changed. Ticket: `docs/tickets/SCAN-MODAL-UX-0001-one-screen-cc-csp-modals.md`.
+
 ## Portfolio queue — 2026-10-05 (Dean, after the GGLL and SOXL reviews)
 
 0. **PCT-UNITS-0001** — FIXED 2026-10-05. Recommendations and the health score multiplied any P/L % or buffer % between -1 and 1 by 100 (0.4% read as 40%), producing the false SOXL "Take Profit" and making a strike 0.5% away look 50% away. Now read as given; IV/IVR/POP normalizers (which genuinely receive 0.63-style values) unchanged. Ian approved (units bug, no threshold change). Test: `lib/portfolio-intelligence/__tests__/percentUnits.test.ts` (5 of 7 fail on the old code).

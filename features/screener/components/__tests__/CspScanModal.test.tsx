@@ -87,6 +87,20 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     expect(screen.queryByText(/Capital is verified against/i)).not.toBeInTheDocument();
   });
 
+  // SCAN-MODAL-UX-0001: "Then order by" left the modal (the results view already offers it). The request still
+  // carries whatever value it was given, so a saved choice is not lost and the default stays None.
+  it('has no secondary-sort control and passes the request\'s rankSecondary through unchanged', async () => {
+    const onRun = vi.fn();
+    const { unmount } = render(<CspScanModal th={th} selectedTickerCount={1} initial={initial} onClose={vi.fn()} onRun={onRun} />);
+    expect(screen.queryByLabelText('CSP secondary sort')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
+    expect(onRun.mock.calls[0][0].rankSecondary).toBe('none');
+    unmount();
+    render(<CspScanModal th={th} selectedTickerCount={1} initial={{ ...initial, rankSecondary: 'rocPct' as const }} onClose={vi.fn()} onRun={onRun} />);
+    await userEvent.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
+    expect(onRun.mock.calls[1][0].rankSecondary).toBe('rocPct');
+  });
+
   it('closes on Escape and traps Tab focus inside the dialog', async () => {
     const onClose = vi.fn();
     render(<CspScanModal th={th} selectedTickerCount={2} initial={initial} onClose={onClose} onRun={vi.fn()} />);
@@ -100,7 +114,8 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     await userEvent.click(screen.getByRole('radio', { name: /^Rank/i }));
     await userEvent.clear(screen.getByLabelText('Min DTE'));
     await userEvent.type(screen.getByLabelText('Min DTE'), '25');
-    await userEvent.selectOptions(screen.getByLabelText('CSP secondary sort'), 'rocPct');
+    await userEvent.clear(screen.getByLabelText('OI pref.'));
+    await userEvent.type(screen.getByLabelText('OI pref.'), '250');
     await userEvent.click(screen.getByRole('radio', { name: /^Targeted/i }));
     expect(screen.getByLabelText('Min DTE')).toHaveValue('30');
     expect(screen.getByRole('button', { name: 'RUN CSP SCAN →' })).toBeDisabled();
@@ -109,7 +124,7 @@ describe('CSP-WORKFLOW-0001 CSP configuration modal', () => {
     expect(screen.getByRole('button', { name: 'RUN CSP SCAN →' })).toBeEnabled();
     await userEvent.click(screen.getByRole('radio', { name: /^Rank/i }));
     expect(screen.getByLabelText('Min DTE')).toHaveValue('25');
-    expect(screen.getByLabelText('CSP secondary sort')).toHaveValue('rocPct');
+    expect(screen.getByLabelText('OI pref.')).toHaveValue('250');
     expect(screen.queryByLabelText('Minimum estimated POP')).not.toBeInTheDocument();
   });
 

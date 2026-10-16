@@ -68,6 +68,8 @@ export interface CcCriterion {
   card: CcCard;
   summaryGroup: SummaryGroup;
   hint: string;
+  /** SCAN-MODAL-UX-0001: the short name a fixed rule shows on the Always applied strip. The full hint is its tooltip. */
+  chipLabel?: string;
   control: CcControl;
   summary: (values: CcConfigValues) => string | null;
 }
@@ -107,7 +109,7 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
     rescan: true,
     card: 'search',
     summaryGroup: 'search',
-    hint: 'A hard limit for covered calls: a call outside the range is never a candidate. (For cash-secured puts, delta is only a preference.)',
+    hint: 'A hard limit for covered calls: a call outside the range is never a candidate.',
     control: {
       kind: 'range', minKey: 'DELTA_MIN', maxKey: 'DELTA_MAX', minLabel: 'Min Δ', maxLabel: 'Max Δ',
       minTitle: 'Lower edge of the call delta range', maxTitle: 'Upper edge of the call delta range', step: '0.01',
@@ -153,7 +155,7 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
   },
   {
     id: 'oi',
-    label: 'OI min',
+    label: 'OI pref.',
     unit: 'contracts',
     lifecycle: 'advisory',
     fixed: false,
@@ -161,7 +163,7 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
     card: 'advisory',
     summaryGroup: 'advisory',
     hint: 'Lower open interest is kept and shown with a warning. The results view shows every call by default (Call OI: Any).',
-    control: { kind: 'rule', key: 'OI_MIN', label: 'OI min', title: 'Preferred minimum open interest', step: '1', unit: 'contracts', presets: oiPresets() },
+    control: { kind: 'rule', key: 'OI_MIN', label: 'OI pref.', title: 'Preferred minimum open interest', step: '1', unit: 'contracts', presets: oiPresets() },
     summary: (v) => `OI ${num(v.rules.OI_MIN)}`,
   },
   {
@@ -174,6 +176,7 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
     card: 'always',
     summaryGroup: 'always',
     hint: 'Calls must sit at or above the stock price, and at or above your cost basis when it is known. If your cost basis is unavailable, the call is kept and flagged.',
+    chipLabel: 'Strike ≥ price and cost basis',
     control: { kind: 'info' },
     summary: () => 'strike ≥ stock price (and cost basis when known)',
   },
@@ -187,6 +190,7 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
     card: 'always',
     summaryGroup: 'always',
     hint: 'A call needs a two-sided, uncrossed bid and ask.',
+    chipLabel: 'Two-sided quote',
     control: { kind: 'info' },
     summary: () => 'two-sided quotes',
   },
@@ -200,6 +204,7 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
     card: 'always',
     summaryGroup: 'always',
     hint: 'A call that expires within 10 days before the earnings date, or on or after it, is excluded, so only calls expiring at least 10 days before earnings qualify. Earnings dates are estimates that can move earlier. If no earnings date is on file, the check cannot apply.',
+    chipLabel: 'Earnings buffer · 10 days',
     control: { kind: 'info' },
     summary: () => 'expires 10+ days before earnings',
   },
@@ -213,6 +218,7 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
     card: 'always',
     summaryGroup: 'capacity',
     hint: 'Quantity is limited to the covered contracts each position has available. A position with none is skipped.',
+    chipLabel: 'Shares only',
     control: { kind: 'info' },
     summary: (v) => {
       if (v.positionsSelected == null) return null;

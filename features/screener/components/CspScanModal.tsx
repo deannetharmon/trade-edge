@@ -5,12 +5,15 @@ import type { CspRulesType } from '@/lib/scans/constants';
 import type { CspRankSort, CspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
 import { ScanModalShell, ScanModeRadioGroup, type ScanModalTheme } from './ScanModalShell';
 import { DeferredNumberInput } from './DeferredNumberInput';
-import { CriterionInput } from './scanConfig/CriterionInput';
+import { AlwaysAppliedStrip, type StripItem } from './scanConfig/AlwaysAppliedStrip';
+import { COMPACT_INPUT, CompactRange, CompactRule, FieldHead, StatusLine } from './scanConfig/CompactControls';
 import { CriterionPills, type CriterionPill } from './scanConfig/CriterionPills';
-import { LifecycleTag } from './scanConfig/LifecycleTag';
-import { ScanReceiptPanel } from './scanConfig/ScanReceiptPanel';
+import { CriterionInput } from './scanConfig/CriterionInput';
+import { CriterionTipBody } from './scanConfig/InfoTip';
+import { lifecycleTagText } from './scanConfig/LifecycleTag';
+import { ScanLegend } from './scanConfig/ScanLegend';
 import {
-  CSP_CARD_ORDER, CSP_CARD_TITLE, buildCspReceipt, criteriaForCard,
+  IVR_UNAVAILABLE_NOTE, criteriaForCard, criteriaForMode, getCriterion,
   type CspConfigValues, type CspCriterion, type CspMode, type CspRuleKey,
 } from '@/lib/screener/scanConfig/cspRegistry';
 import { cspFieldErrors, hasTargetedGate, isCspConfigValid } from '@/lib/screener/scanConfig/cspValidation';
@@ -106,6 +109,12 @@ export const CSP_TARGETED_PRESETS: CspTargetedPreset[] = [
   },
 ];
 
+// SCAN-MODAL-UX-0001 -- one-screen layout: dots decoded by one legend line replace the tag pills, help text is in
+// tooltips, the fixed rules are one "Always applied" strip, and the scan summary is a short recap by the
+// buttons. The controls, defaults, gates and rescan requirements are unchanged. "Then order by" moved
+// out of this modal: it only seeds the sort the results view already offers, and the request still
+// carries its current value (default None).
+//
 // SCREENER-CONFIG-0001A -- Rank and Targeted only (Filter was removed 2026-09-21).
 // Every control below is rendered from the CSP criterion registry
 // (lib/screener/scanConfig/cspRegistry.ts): its label, unit, lifecycle tag, quick
@@ -121,8 +130,6 @@ const toValues = (request: CspScanRequest, mode: CspMode): CspConfigValues => ({
   affordableOnly: request.affordableOnly ?? false,
   capitalLimit: request.capitalLimit ?? null,
 });
-
-const INPUT_CLASS = 'mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white';
 
 export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode, onClose, onRun }: Props) {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -155,7 +162,6 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
   const values = useMemo(() => toValues(request, mode), [mode, request]);
   const errors = useMemo(() => cspFieldErrors(values), [values]);
   const valid = useMemo(() => isCspConfigValid(values), [values]);
-  const receipt = useMemo(() => buildCspReceipt(values), [values]);
 
   const updateDraft = (updater: (current: CspScanRequest) => CspScanRequest) => {
     setDrafts(prev => ({ ...prev, [mode]: updater(prev[mode]) }));
@@ -201,73 +207,93 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
     contentRef.current?.querySelector<HTMLButtonElement>(`[data-csp-preset="${PRESET_CHOICES[nextIndex].key}"]`)?.focus();
   };
 
-  // Renders the control of one registry criterion. The kind decides the widget; the
-  // registry supplies every label, title, step, and quick-select value.
-  const renderControl = (criterion: CspCriterion) => {
-    const control = criterion.control;
-    switch (control.kind) {
-      case 'range': {
-        const min = request.rules[control.minKey];
-        const max = request.rules[control.maxKey];
-        const matched = matchRangePreset(min, max, control.presets);
-        const pills: CriterionPill[] = control.presets.map(p => ({
-          key: p.label, label: p.label, pressed: matched?.label === p.label,
-          onSelect: () => setRules({ [control.minKey]: p.min, [control.maxKey]: p.max }),
-        }));
-        return (
-          <>
-            <div className="flex flex-wrap gap-3">
-              <CriterionInput id={control.minKey} label={control.minLabel} title={control.minTitle} step={control.step} value={min} onValueChange={value => setRule(control.minKey, value)} error={errors[control.minKey]} />
-              <CriterionInput id={control.maxKey} label={control.maxLabel} title={control.maxTitle} step={control.step} value={max} onValueChange={value => setRule(control.maxKey, value)} error={errors[control.maxKey]} />
-            </div>
-            <CriterionPills th={th} groupLabel={`${criterion.label} quick select`} pills={pills} />
-          </>
-        );
-      }
-      case 'rule': {
-        const value = request.rules[control.key];
-        const pills: CriterionPill[] = control.presets.map(p => ({
-          key: p.label, label: p.label, pressed: sameNumber(p.value, value),
-          onSelect: () => setRule(control.key, p.value as number),
-        }));
-        return (
-          <>
-            <CriterionInput id={control.key} label={control.label} title={control.title} step={control.step} value={value} onValueChange={next => setRule(control.key, next)} unit={criterion.unit} error={errors[control.key]} />
-            <CriterionPills th={th} groupLabel={`${criterion.label} quick select`} pills={pills} />
-          </>
-        );
-      }
-      case 'target': {
-        const current = request[control.field];
-        const pills: CriterionPill[] = control.presets.map(p => ({
-          key: p.label, label: p.value == null ? `${criterion.off ?? 'Any'}` : p.label, pressed: sameNumber(p.value, current), off: p.value == null,
-          onSelect: () => setTarget(control.field, p.value),
-        }));
-        return (
-          <>
-            <CriterionInput id={control.field} label={control.label} ariaLabel={control.ariaLabel} title={control.title} step={control.step} value={current ?? 0} onValueChange={next => setTarget(control.field, next)} unit={criterion.unit} error={errors[control.field]} />
-            <CriterionPills th={th} groupLabel={`${criterion.label} quick select`} pills={pills} />
-          </>
-        );
-      }
-      case 'secondary-sort':
-        return (
-          <label className="flex flex-col gap-1 text-[10px] text-neutral-400">{criterion.label}
-            <select aria-label={control.ariaLabel} value={request.rankSecondary} onChange={e => updateDraft(prev => ({ ...prev, rankSecondary: e.target.value as CspRankSort }))} className={INPUT_CLASS}>
-              {control.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </label>
-        );
-      case 'capital':
-        return (
-          <fieldset className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-3 text-[10px] text-neutral-300"><legend className="px-1 text-xs font-bold text-neutral-300">Capital</legend><label className="flex items-center gap-2"><input type="checkbox" checked={request.affordableOnly} onChange={event => updateDraft(prev => ({ ...prev, affordableOnly: event.target.checked }))} />Only show affordable CSPs</label>{request.affordableOnly && <label className="mt-3 flex flex-col gap-1">Cash cap <span className="text-neutral-500">(optional)</span><DeferredNumberInput aria-label="Cash cap per CSP" step="1" value={request.capitalLimit ?? 0} onValueChange={value => updateDraft(prev => ({ ...prev, capitalLimit: value || null }))} className="w-48 rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs text-white" /></label>}<span role="status" aria-live="polite" className="block min-h-0 text-[9px] text-red-400">{errors.capitalLimit ?? ''}</span><p className="mt-2 text-neutral-400">Collateral = strike × 100 × contracts. Blank uses available account cash.</p></fieldset>
-        );
-      case 'info':
-        return null;
-      default:
-        return null;
-    }
+  const tip = (c: CspCriterion) => <CriterionTipBody label={c.label} unit={c.unit || undefined} hint={c.hint} />;
+  const present = (id: string): CspCriterion | null => {
+    const c = getCriterion(id);
+    return c.modes.includes(mode) ? c : null;
   };
+
+  // A range criterion (DTE, preferred delta): two inputs and the quick selects from the registry.
+  const rangeCell = (c: CspCriterion, align: 'left' | 'right') => {
+    const control = c.control;
+    if (control.kind !== 'range') return null;
+    const matched = matchRangePreset(request.rules[control.minKey], request.rules[control.maxKey], control.presets);
+    const pills: CriterionPill[] = control.presets.map(p => ({
+      key: p.label, label: p.label, pressed: matched?.label === p.label,
+      onSelect: () => setRules({ [control.minKey]: p.min, [control.maxKey]: p.max }),
+    }));
+    return (
+      <div key={c.id} data-csp-criterion={c.id} className="flex min-w-0 flex-col gap-1">
+        <FieldHead lifecycle={c.lifecycle} fixed={c.fixed} rescan={c.rescan} name={c.label} tip={tip(c)} align={align} />
+        <CompactRange
+          th={th} groupLabel={`${c.label} quick select`}
+          minId={control.minKey} maxId={control.maxKey} minLabel={control.minLabel} maxLabel={control.maxLabel}
+          minTitle={control.minTitle} maxTitle={control.maxTitle} step={control.step}
+          min={request.rules[control.minKey]} max={request.rules[control.maxKey]}
+          onMin={value => setRule(control.minKey, value)} onMax={value => setRule(control.maxKey, value)}
+          minError={errors[control.minKey]} maxError={errors[control.maxKey]} pills={pills}
+        />
+      </div>
+    );
+  };
+
+  // A single-value rule criterion (OI preference, IVR cap, IVR preference).
+  const ruleCell = (c: CspCriterion, suffix: string, align: 'left' | 'right') => {
+    const control = c.control;
+    if (control.kind !== 'rule') return null;
+    return (
+      <div key={c.id} data-csp-criterion={c.id} className="flex min-w-0 flex-col gap-1">
+        <FieldHead lifecycle={c.lifecycle} fixed={c.fixed} rescan={c.rescan} name={control.label} tip={tip(c)} align={align} />
+        <CompactRule id={control.key} label={control.label} title={control.title} step={control.step} value={request.rules[control.key]} onValue={next => setRule(control.key, next)} suffix={suffix} error={errors[control.key]} />
+      </div>
+    );
+  };
+
+  // Targeted POP / OTM / ROC: a gate with an explicit Any (off) state. The input's accessible name stays the registry's ariaLabel.
+  const targetInput = (c: CspCriterion) => {
+    const control = c.control;
+    if (control.kind !== 'target') return null;
+    const current = request[control.field];
+    return (
+      <CriterionInput id={control.field} label={control.label} ariaLabel={control.ariaLabel} title={control.title} step={control.step} value={current ?? 0} onValueChange={next => setTarget(control.field, next)} hideLabel hideStatus invalid={!!errors[control.field]} inputClassName="w-14 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-white" />
+    );
+  };
+
+  const capital = present('capital');
+
+  const alwaysItems: StripItem[] = criteriaForCard(mode, 'always')
+    .filter(c => c.fixed)
+    .map(c => ({
+      id: c.id,
+      label: c.chipLabel ?? c.label,
+      tag: lifecycleTagText(c.lifecycle, c.fixed, c.rescan),
+      tip: tip(c),
+      attr: { 'data-csp-criterion': c.id },
+    }));
+  // A symbol with no IV rank is removed, and nothing else on the screen would say so: it keeps its own chip.
+  alwaysItems.push({
+    id: 'ivrUnavailable',
+    label: 'No IV rank = disqualified',
+    tag: 'GATE · FIXED',
+    tip: <p>{IVR_UNAVAILABLE_NOTE}</p>,
+    attr: { 'data-csp-note': 'ivr-unavailable' },
+    emphasis: true,
+  });
+
+  // The recap: what the registry says about the settings that can be changed.
+  const recap = useMemo(() => {
+    const parts: string[] = [];
+    for (const c of criteriaForMode(mode)) {
+      if (c.fixed || c.lifecycle === 'result-filter' || c.id === 'rankSecondary') continue;
+      const text = c.summary(values);
+      if (text) parts.push(text);
+    }
+    return parts.join(' · ');
+  }, [mode, values]);
+
+  const afterScan = present('resultChips');
+  const lifecycles = Array.from(new Set(criteriaForMode(mode).filter(c => !c.fixed && c.lifecycle !== 'result-filter' && c.id !== 'rankSecondary').map(c => c.lifecycle)));
+  const gates = criteriaForCard(mode, 'gates');
 
   return (
     <ScanModalShell
@@ -277,56 +303,96 @@ export function CspScanModal({ th, selectedTickerCount, initial, requestsByMode,
       subtitle={`${selectedTickerCount} selected ticker${selectedTickerCount === 1 ? '' : 's'} · configure before scanning`}
       closeLabel="Close Cash-Secured Put scan configuration"
       onClose={onClose}
+      maxWidthClassName="max-w-[760px]"
+      compact
     >
-      <div ref={contentRef} className="flex flex-col gap-0">
-        <ScanModeRadioGroup
-          th={th}
-          ariaLabel="Cash-Secured Put scan mode"
-          value={mode}
-          onChange={chooseMode}
-          descriptions={{
-            filter: 'Apply CSP qualification rules',
-            rank: 'Order the CSP universe by score',
-            targeted: 'Search a deliberately narrowed CSP area',
-          }}
-        />
+      <div ref={contentRef} className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
+          <ScanModeRadioGroup
+            th={th}
+            ariaLabel="Cash-Secured Put scan mode"
+            value={mode}
+            onChange={chooseMode}
+            compact
+            descriptions={{
+              filter: 'Apply CSP qualification rules',
+              rank: 'Order the CSP universe by score',
+              targeted: 'Search a deliberately narrowed CSP area',
+            }}
+          />
 
-        {mode !== 'targeted' && <fieldset className="mt-5"><legend className="text-xs font-bold text-neutral-300">CSP preset</legend><div role="radiogroup" aria-label="Cash-Secured Put preset" className="mt-2 grid gap-2 sm:grid-cols-3">
-          {PRESET_CHOICES.map((p, index) => <button ref={request.preset === p.key ? selectedPresetRef : undefined} data-csp-preset={p.key} key={p.key} role="radio" aria-checked={request.preset === p.key} tabIndex={request.preset === p.key ? 0 : -1} onKeyDown={event => onPresetKeyDown(event, index)} onClick={() => applyPreset(p.key)} className={`rounded-lg border p-3 text-left ${request.preset === p.key ? 'border-amber-400 bg-amber-400/10' : 'border-neutral-700'}`}><span className="block text-xs font-bold">{request.preset === p.key ? '✓ ' : ''}{p.label}</span>{request.preset === p.key && <span className="block text-[9px] font-bold">Selected</span>}<span className="text-[10px] text-neutral-400">{p.description}</span></button>)}
-        </div></fieldset>}
+          {mode !== 'targeted' && <fieldset className="min-w-0"><legend className="mb-1 text-[10px] font-bold uppercase tracking-wider text-neutral-500">CSP preset</legend><div role="radiogroup" aria-label="Cash-Secured Put preset" className={`inline-flex flex-wrap overflow-hidden rounded-lg border ${th.border}`}>
+            {PRESET_CHOICES.map((p, index) => <button ref={request.preset === p.key ? selectedPresetRef : undefined} data-csp-preset={p.key} key={p.key} role="radio" aria-checked={request.preset === p.key} tabIndex={request.preset === p.key ? 0 : -1} title={p.description} onKeyDown={event => onPresetKeyDown(event, index)} onClick={() => applyPreset(p.key)} className={`px-3 py-1.5 text-[11px] ${request.preset === p.key ? 'border-amber-400 bg-amber-400/10 font-bold text-amber-200' : 'text-neutral-300'}`}>{request.preset === p.key ? '✓ ' : ''}{p.label}{request.preset === p.key && <span className="sr-only"> Selected</span>}</button>)}
+          </div></fieldset>}
 
-        {mode === 'targeted' && <fieldset className="mt-5"><legend className="text-xs font-bold text-neutral-300">Targeted preset</legend><div role="radiogroup" aria-label="Cash-Secured Put targeted preset" className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {CSP_TARGETED_PRESETS.map(p => <button key={p.key} data-csp-targeted-preset={p.key} role="radio" aria-checked={request.preset === p.key} aria-label={`${p.label} targeted preset${request.preset === p.key ? ', selected' : ''}`} onClick={() => applyTargetedPreset(p.key)} className={`rounded-lg border p-2 text-left ${request.preset === p.key ? `${p.color} bg-white/5` : 'border-neutral-700 text-neutral-300'}`}><span className="block text-[11px] font-bold">{request.preset === p.key ? '✓ ' : ''}{p.label}</span></button>)}
-        </div></fieldset>}
-
-        {CSP_CARD_ORDER.map(card => {
-          const criteria = criteriaForCard(mode, card);
-          if (criteria.length === 0) return null;
-          if (card === 'capital') {
-            return <div key={card} className="mt-5" data-csp-card={card}>{criteria.map(c => <div key={c.id}>{renderControl(c)}</div>)}</div>;
-          }
-          return (
-            <section key={card} data-csp-card={card} aria-label={CSP_CARD_TITLE[card]} className="mt-5 rounded-lg border border-neutral-800 bg-neutral-900/40 p-3">
-              <h3 className="text-xs font-bold uppercase tracking-wide text-neutral-200">{CSP_CARD_TITLE[card]}</h3>
-              <div className="mt-2 flex flex-col gap-4">
-                {criteria.map(c => (
-                  <div key={c.id} data-csp-criterion={c.id}>
-                    <p className="text-[10px] font-bold text-neutral-300">{c.label}<LifecycleTag lifecycle={c.lifecycle} fixed={c.fixed} rescan={c.rescan} /></p>
-                    <p className="mb-2 mt-1 text-[10px] text-neutral-400">{c.hint}</p>
-                    {renderControl(c)}
-                  </div>
-                ))}
-              </div>
-            </section>
-          );
-        })}
-
-        <div className="mt-4">
-          <ScanReceiptPanel th={th} receipt={receipt} heading="Scan summary" testId="csp-rule-preview" showLimits />
+          {mode === 'targeted' && <fieldset className="min-w-0"><legend className="mb-1 text-[10px] font-bold uppercase tracking-wider text-neutral-500">Targeted preset</legend><div role="radiogroup" aria-label="Cash-Secured Put targeted preset" className="flex flex-wrap gap-1">
+            {CSP_TARGETED_PRESETS.map(p => <button key={p.key} data-csp-targeted-preset={p.key} role="radio" aria-checked={request.preset === p.key} aria-label={`${p.label} targeted preset${request.preset === p.key ? ', selected' : ''}`} title={p.description} onClick={() => applyTargetedPreset(p.key)} className={`rounded-lg border px-2.5 py-1.5 text-[11px] ${request.preset === p.key ? `${p.color} bg-white/5 font-bold` : 'border-neutral-700 text-neutral-300'}`}>{request.preset === p.key ? '✓ ' : ''}{p.label}</button>)}
+          </div></fieldset>}
         </div>
-        {mode === 'targeted' && !hasTargetedGate(values) && <p role="alert" className="mt-2 text-xs text-amber-300">Set at least one POP, OTM, or period ROC target to narrow this scan.</p>}
-        {error && <p role="alert" className="mt-2 text-xs text-red-400">{error}</p>}
-        <div className="mt-5 flex justify-end gap-2"><button onClick={onClose} className="rounded-lg border border-neutral-700 px-4 py-2 text-xs">Cancel</button>{mode === 'targeted' && !targetedConfirmed && <button disabled={!valid} onClick={() => setTargetedConfirmed(true)} className="rounded-lg border border-amber-400 px-4 py-2 text-xs font-bold text-amber-300 disabled:opacity-50">CONFIRM TARGETS</button>}<button disabled={!valid || (mode === 'targeted' && !targetedConfirmed)} onClick={() => { if (!valid) { setError('Correct the CSP ranges before running.'); return; } onRun(request); }} className="rounded-lg border border-amber-400 bg-amber-400 px-4 py-2 text-xs font-bold text-black disabled:cursor-not-allowed disabled:opacity-40">RUN CSP SCAN →</button></div>
+
+        <ScanLegend lifecycles={lifecycles} afterScan={afterScan ? { attr: { 'data-csp-criterion': afterScan.id }, hint: afterScan.hint } : undefined} />
+
+        <section aria-label="Search range" data-csp-card="search" className={`grid grid-cols-1 gap-x-5 gap-y-3 border-t ${th.border} pt-3 sm:grid-cols-2`}>
+          {rangeCell(getCriterion('dte'), 'left')}
+          {rangeCell(getCriterion('delta'), 'right')}
+        </section>
+
+        <section aria-label="Volatility, liquidity and capital" data-csp-card="advisory" className={`grid grid-cols-2 gap-x-4 gap-y-3 border-t ${th.border} pt-3 sm:grid-cols-4`}>
+          {ruleCell(getCriterion('oi'), 'contracts', 'left')}
+          {ruleCell(getCriterion('ivrCap'), '% max', 'left')}
+          {ruleCell(getCriterion('ivrFloor'), '% floor', 'right')}
+          {capital && (
+            <div data-csp-criterion={capital.id} data-csp-card="capital" className="flex min-w-0 flex-col gap-1">
+              <FieldHead lifecycle={capital.lifecycle} fixed={capital.fixed} rescan={capital.rescan} name="Capital" align="right"
+                tip={<><p>{capital.hint}</p><p className="mt-1">Collateral = strike × 100 × contracts. Blank uses available account cash.</p></>} />
+              <label className="flex items-start gap-2 text-[11px] text-neutral-300"><input type="checkbox" className="mt-0.5" checked={request.affordableOnly} onChange={event => updateDraft(prev => ({ ...prev, affordableOnly: event.target.checked }))} />Only show affordable CSPs</label>
+              {request.affordableOnly && <label className="flex flex-col gap-1 text-[10px] text-neutral-400">Cash cap <span className="text-neutral-500">(optional)</span><DeferredNumberInput aria-label="Cash cap per CSP" step="1" value={request.capitalLimit ?? 0} onValueChange={value => updateDraft(prev => ({ ...prev, capitalLimit: value || null }))} className="w-28 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-white" /></label>}
+              <StatusLine message={errors.capitalLimit} />
+            </div>
+          )}
+        </section>
+
+        {mode === 'targeted' && gates.length > 0 && (
+          <section aria-label="Targets" data-csp-card="gates" className={`border-t ${th.border} pt-3`}>
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+              Targets <span className="font-normal normal-case tracking-normal">{hasTargetedGate(values) ? 'Set at least one to narrow this scan' : ''}</span>
+            </p>
+            <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-3">
+              {gates.map((c, index) => {
+                const control = c.control;
+                if (control.kind !== 'target') return null;
+                return (
+                  <div key={c.id} data-csp-criterion={c.id} className="flex min-w-0 flex-col gap-1">
+                    <FieldHead lifecycle={c.lifecycle} fixed={c.fixed} rescan={c.rescan} name={control.label} tip={tip(c)} align={index === gates.length - 1 ? 'right' : 'left'} />
+                    <div className="flex items-center gap-1.5">
+                      {targetInput(c)}
+                      <span className="text-[10px] text-neutral-500">%</span>
+                    </div>
+                    <StatusLine message={errors[control.field]} />
+                    <CriterionPills
+                      th={th}
+                      groupLabel={`${c.label} quick select`}
+                      compact
+                      pills={control.presets.map(p => ({
+                        key: p.label, label: p.value == null ? `${c.off ?? 'Any'}` : p.label, pressed: sameNumber(p.value, request[control.field]), off: p.value == null,
+                        onSelect: () => setTarget(control.field, p.value),
+                      }))}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        <AlwaysAppliedStrip th={th} items={alwaysItems} />
+
+        {mode === 'targeted' && !hasTargetedGate(values) && <p role="alert" className="text-xs text-amber-300">Set at least one POP, OTM, or period ROC target to narrow this scan.</p>}
+        {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
+        <div className={`flex items-center justify-between gap-4 border-t ${th.border} pt-3`}>
+          <p data-testid="csp-rule-preview" className="min-w-0 text-[10px] leading-snug text-neutral-400">{recap}</p>
+          <div className="flex shrink-0 gap-2"><button onClick={onClose} className="rounded-lg border border-neutral-700 px-4 py-2 text-xs">Cancel</button>{mode === 'targeted' && !targetedConfirmed && <button disabled={!valid} onClick={() => setTargetedConfirmed(true)} className="rounded-lg border border-amber-400 px-4 py-2 text-xs font-bold text-amber-300 disabled:opacity-50">CONFIRM TARGETS</button>}<button disabled={!valid || (mode === 'targeted' && !targetedConfirmed)} onClick={() => { if (!valid) { setError('Correct the CSP ranges before running.'); return; } onRun(request); }} className="rounded-lg border border-amber-400 bg-amber-400 px-4 py-2 text-xs font-bold text-black disabled:cursor-not-allowed disabled:opacity-40">RUN CSP SCAN →</button></div>
+        </div>
       </div>
     </ScanModalShell>
   );

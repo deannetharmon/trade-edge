@@ -15,10 +15,10 @@ export interface CriterionPill {
  * buttons with aria-pressed (not radios), so the mode and preset radiogroups stay
  * the only radios in the dialog.
  */
-export function CriterionPills({ th, groupLabel, pills }: { th: ScanModalTheme; groupLabel: string; pills: CriterionPill[] }) {
+export function CriterionPills({ th, groupLabel, pills, compact = false }: { th: ScanModalTheme; groupLabel: string; pills: CriterionPill[]; compact?: boolean }) {
   if (pills.length === 0) return null;
   return (
-    <div role="group" aria-label={groupLabel} className="mt-2 flex flex-wrap gap-1.5">
+    <div role="group" aria-label={groupLabel} className={`flex flex-wrap ${compact ? 'mt-1 gap-1' : 'mt-2 gap-1.5'}`}>
       {pills.map((pill) => (
         <button
           key={pill.key}
@@ -26,7 +26,7 @@ export function CriterionPills({ th, groupLabel, pills }: { th: ScanModalTheme; 
           aria-pressed={pill.pressed}
           data-pill={pill.key}
           onClick={pill.onSelect}
-          className={`rounded-md border px-2.5 py-1.5 text-[10px] ${pill.off ? 'border-dashed' : ''} ${
+          className={`${compact ? 'rounded-full px-2 py-0.5' : 'rounded-md px-2.5 py-1.5'} border text-[10px] ${pill.off ? 'border-dashed' : ''} ${
             pill.pressed ? 'border-amber-400 bg-amber-400/15 font-bold text-amber-200' : `${th.inputBorder} ${th.textMuted}`
           }`}
         >

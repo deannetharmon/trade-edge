@@ -559,14 +559,16 @@ describe('CSP-WORKFLOW-0001: strategy-aware launch modes', () => {
     expect(screen.queryByText('QUICK RULE PRESETS:')).not.toBeInTheDocument();
   });
 
-  it('restores the confirmed Rank draft (including its secondary sort) when Edit / Run Again reopens the modal -- per-mode draft restoration, not the last-used mode\'s draft', async () => {
+  it('restores the confirmed Rank draft (including its OI preference) when Edit / Run Again reopens the modal -- per-mode draft restoration, not the last-used mode\'s draft', async () => {
     getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingCspChain(symbol)));
     inBandIvr(['NKE']);
     renderScreener();
     await addToUniverse('NKE');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
     await userEvent.click(screen.getByRole('radio', { name: /^Rank/i }));
-    await userEvent.selectOptions(screen.getByLabelText('CSP secondary sort'), 'rocPct');
+    // SCAN-MODAL-UX-0001: the secondary sort left the modal; the OI preference stands in as the edited Rank field.
+    await userEvent.clear(screen.getByLabelText('OI pref.'));
+    await userEvent.type(screen.getByLabelText('OI pref.'), '250');
     await userEvent.click(screen.getByLabelText(/Only show affordable CSPs/i));
     await userEvent.type(screen.getByLabelText('Cash cap per CSP'), '8000');
     await userEvent.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
@@ -575,10 +577,10 @@ describe('CSP-WORKFLOW-0001: strategy-aware launch modes', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Edit / Run Again' }));
 
     // The reopened modal must show the SAME confirmed Rank draft -- mode
-    // still Rank, secondary sort still rocPct -- not a fresh Filter default
+    // still Rank, OI preference still 250 -- not a fresh Filter default
     // and not merely "whatever was last edited."
     expect(screen.getByRole('radio', { name: /^Rank/i })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByLabelText('CSP secondary sort')).toHaveValue('rocPct');
+    expect(screen.getByLabelText('OI pref.')).toHaveValue('250');
     expect(screen.getByLabelText('Cash cap per CSP')).toHaveValue('8000');
   });
 });

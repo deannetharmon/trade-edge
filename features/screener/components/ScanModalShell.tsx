@@ -46,10 +46,12 @@ export interface ScanModalShellProps {
   onClose: () => void;
   children: ReactNode;
   maxWidthClassName?: string;
+  /** SCAN-MODAL-UX-0001: tighter padding and gaps, for the one-screen Covered Call and CSP modals. */
+  compact?: boolean;
 }
 
 export function ScanModalShell({
-  th, titleId, title, subtitle, closeLabel, onClose, children, maxWidthClassName = 'max-w-2xl',
+  th, titleId, title, subtitle, closeLabel, onClose, children, maxWidthClassName = 'max-w-2xl', compact = false,
 }: ScanModalShellProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -106,7 +108,7 @@ export function ScanModalShell({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`${th.card} border ${th.border} max-h-[92vh] w-full ${maxWidthClassName} overflow-y-auto rounded-2xl p-5 shadow-2xl flex flex-col gap-5`}
+        className={`${th.card} border ${th.border} max-h-[92vh] w-full ${maxWidthClassName} overflow-y-auto rounded-2xl ${compact ? 'p-4 gap-3' : 'p-5 gap-5'} shadow-2xl flex flex-col`}
       >
         <div className="relative flex items-start justify-between gap-4">
           <div>
@@ -161,9 +163,11 @@ export interface ScanModeRadioGroupProps {
   value: ScanMode;
   onChange: (mode: ScanMode) => void;
   descriptions: Record<ScanMode, string>;
+  /** SCAN-MODAL-UX-0001: a one-row segmented control. The descriptions move to hover text. */
+  compact?: boolean;
 }
 
-export function ScanModeRadioGroup({ th, ariaLabel, value, onChange, descriptions }: ScanModeRadioGroupProps) {
+export function ScanModeRadioGroup({ th, ariaLabel, value, onChange, descriptions, compact = false }: ScanModeRadioGroupProps) {
   const buttonRefs = useRef<Partial<Record<ScanMode, HTMLButtonElement | null>>>({});
 
   const onKeyDown = (event: React.KeyboardEvent, index: number) => {
@@ -174,6 +178,37 @@ export function ScanModeRadioGroup({ th, ariaLabel, value, onChange, description
     onChange(next);
     buttonRefs.current[next]?.focus();
   };
+
+  if (compact) {
+    return (
+      <div role="radiogroup" aria-label={ariaLabel} className={`inline-flex overflow-hidden rounded-lg border ${th.border}`}>
+        {MODE_ORDER.map((mode, index) => {
+          const selected = value === mode;
+          return (
+            <button
+              key={mode}
+              ref={(el) => { buttonRefs.current[mode] = el; }}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-label={`${MODE_LABEL[mode]} scan mode${selected ? ', selected' : ''}`}
+              data-mode={mode}
+              title={descriptions[mode]}
+              tabIndex={selected ? 0 : -1}
+              onKeyDown={(event) => onKeyDown(event, index)}
+              onClick={() => onChange(mode)}
+              className={`px-3 py-1.5 text-[11px] font-bold tracking-wider transition-colors ${
+                selected ? MODE_SELECTED_CLASS[mode] : `${th.card} ${th.textFaint} hover:${th.textMuted}`
+              }`}
+            >
+              <span aria-hidden="true">{selected ? '✓ ' : ''}{MODE_LABEL[mode]}</span>
+              {selected && <span className="sr-only">Selected</span>}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div role="radiogroup" aria-label={ariaLabel} className="grid grid-cols-2 gap-2">

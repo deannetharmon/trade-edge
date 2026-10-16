@@ -8,7 +8,7 @@ const INPUT_CLASS = 'mt-1 w-20 rounded border border-neutral-700 bg-neutral-900 
  * announced politely when the value is invalid.
  */
 export function CriterionInput({
-  id, label, ariaLabel, title, step, value, onValueChange, unit, error,
+  id, label, ariaLabel, title, step, value, onValueChange, unit, error, hideLabel = false, inputClassName, invalid = false, hideStatus = false,
 }: {
   id: string;
   label: string;
@@ -19,13 +19,26 @@ export function CriterionInput({
   onValueChange: (value: number) => void;
   unit?: string;
   error?: string;
+  /** Compact layout: the caller shows the visible name, so the label text is for screen readers only. */
+  hideLabel?: boolean;
+  inputClassName?: string;
+  /** Marks the field invalid when the caller shows the message elsewhere. */
+  invalid?: boolean;
+  /** The caller renders the polite status message itself. */
+  hideStatus?: boolean;
 }) {
   return (
-    <label title={title} data-criterion-input={id} className="flex flex-col gap-1 text-[10px] text-neutral-400">
-      {label}
-      <DeferredNumberInput aria-label={ariaLabel ?? label} step={step} value={value} onValueChange={onValueChange} className={INPUT_CLASS} />
+    <label title={title} data-criterion-input={id} className={`flex flex-col text-[10px] text-neutral-400 ${hideLabel ? 'gap-0' : 'gap-1'}`}>
+      {hideLabel ? <span className="sr-only">{label}</span> : label}
+      <DeferredNumberInput
+        aria-label={ariaLabel ?? label}
+        step={step}
+        value={value}
+        onValueChange={onValueChange}
+        className={`${inputClassName ?? INPUT_CLASS}${invalid || error ? ' !border-red-500' : ''}`}
+      />
       {unit ? <span className="text-[9px] text-neutral-500">{unit}</span> : null}
-      <span role="status" aria-live="polite" className="min-h-0 text-[9px] text-red-400">{error ?? ''}</span>
+      {hideStatus ? null : <span role="status" aria-live="polite" className="min-h-0 text-[9px] text-red-400">{error ?? ''}</span>}
     </label>
   );
 }

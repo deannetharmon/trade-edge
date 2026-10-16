@@ -153,3 +153,19 @@ describe('ccFieldErrors keeps the validation the modal always enforced, now besi
     expect(ccFieldErrors({ ...DEFAULT_CC_RULES, DTE_MIN: Number.NaN }).DTE_MIN).toBe('Enter a number.');
   });
 });
+
+// SCAN-MODAL-UX-0001: the fixed rules show on a one-line strip by short name; the hint is their tooltip.
+describe('SCAN-MODAL-UX-0001 strip names and one name per concept', () => {
+  it('every criterion on the Always applied card has a short strip name and a hint', () => {
+    for (const c of ccCriteriaForCard('always')) {
+      expect(c.chipLabel, c.id).toBeTruthy();
+      expect(c.hint.length, c.id).toBeGreaterThan(0);
+    }
+  });
+
+  it('open interest is named "OI pref." as it is in CSP, and the delta hint no longer mentions CSP', () => {
+    expect(getCcCriterion('oi').label).toBe('OI pref.');
+    expect(getCcCriterion('delta').hint).not.toMatch(/cash-secured/i);
+    expect(getCcCriterion('delta').hint).toMatch(/hard limit for covered calls/);
+  });
+});

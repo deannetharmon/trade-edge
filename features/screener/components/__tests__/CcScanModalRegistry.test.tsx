@@ -62,7 +62,7 @@ describe('lifecycle tags say what the engine does', () => {
 describe('controls keep their accessible names and behavior', () => {
   it('shows the six original inputs, by their original names', () => {
     open();
-    for (const name of ['Min DTE', 'Max DTE', 'Min Δ', 'Max Δ', 'OI min', 'Max width']) expect(screen.getByLabelText(name)).toBeInTheDocument();
+    for (const name of ['Min DTE', 'Max DTE', 'Min Δ', 'Max Δ', 'OI pref.', 'Max width']) expect(screen.getByLabelText(name)).toBeInTheDocument();
     expect(screen.getByLabelText('Max width')).toHaveValue('10');
     expect(screen.getByLabelText('Width ceiling')).toHaveValue('0.5');
   });
@@ -100,36 +100,67 @@ describe('quick-select pills follow the shared pill and input contract', () => {
     expect(onRun.mock.calls[0][0].rules).toMatchObject({ DELTA_MIN: 0.3, DELTA_MAX: 0.4 });
   });
 
-  it('a width pill sets the percent, a ceiling pill sets the dollar ceiling, and an OI pill sets the OI preference', async () => {
+  // SCAN-MODAL-UX-0001: width, ceiling and OI are typed values now (their quick selects only repeated the input).
+  it('the width percent, the dollar ceiling, and the OI preference are typed and reach the request', async () => {
     const onRun = vi.fn();
     open({ onRun });
-    await userEvent.click(pill('Max bid/ask width quick select', '15%'));
-    expect(screen.getByLabelText('Max width')).toHaveValue('15');
-    await userEvent.click(pill('Width ceiling quick select', '$0.75'));
-    expect(screen.getByLabelText('Width ceiling')).toHaveValue('0.75');
-    await userEvent.click(pill('OI min quick select', '300'));
-    expect(screen.getByLabelText('OI min')).toHaveValue('300');
+    for (const [name, text] of [['Max width', '15'], ['Width ceiling', '0.75'], ['OI pref.', '300']] as const) {
+      await userEvent.clear(screen.getByLabelText(name));
+      await userEvent.type(screen.getByLabelText(name), text);
+      expect(screen.getByLabelText(name)).toHaveValue(text);
+    }
     await userEvent.click(screen.getByRole('button', { name: 'RUN CC SCAN →' }));
     expect(onRun.mock.calls[0][0].rules).toMatchObject({ WIDTH_PCT_MAX: 15, WIDTH_CEILING: 0.75, OI_MIN: 300 });
   });
 
-  it('a click in one group never changes the pressed state of another', async () => {
+  it('only DTE and delta keep quick selects, and a click in one group never changes the other', async () => {
     open();
-    await userEvent.click(pill('OI min quick select', '500'));
+    expect(screen.getAllByRole('group').map(g => g.getAttribute('aria-label')).filter(l => l?.endsWith('quick select')))
+      .toEqual(['DTE range quick select', 'Delta range quick select']);
+    await userEvent.click(pill('Delta range quick select', 'Δ .10–.20'));
     expect(pill('DTE range quick select', '21–45')).toHaveAttribute('aria-pressed', 'true');
-    expect(pill('Max bid/ask width quick select', '10%')).toHaveAttribute('aria-pressed', 'true');
-    expect(pill('Width ceiling quick select', '$0.50')).toHaveAttribute('aria-pressed', 'true');
   });
 });
 
-describe('the scan summary is built from the registry and updates as you edit', () => {
-  it('shows the search range, always-applied limits, advisory, and capacity from the selected holdings', async () => {
+describe('the Always applied strip names every fixed rule and keeps its full text in a tooltip', () => {
+  it('lists the four fixed rules by name, each with its tooltip and no input', () => {
+    open();
+    const strip = screen.getByRole('region', { name: 'Always applied' });
+    for (const name of ['Strike ≥ price and cost basis', 'Two-sided quote', 'Earnings buffer · 10 days', 'Shares only']) expect(within(strip).getByText(name)).toBeInTheDocument();
+    expect(within(strip).getAllByRole('tooltip')).toHaveLength(4);
+    expect(within(strip).queryAllByRole('textbox')).toHaveLength(0);
+    expect(criterion('capacity')).toHaveTextContent(/A position with none is skipped/);
+  });
+
+  it('a tooltip opens on click and closes when focus leaves', async () => {
+    open();
+    const tipButton = within(criterion('earnings')).getByRole('button', { name: 'More information' });
+    expect(tipButton).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(tipButton);
+    expect(tipButton).toHaveAttribute('aria-expanded', 'true');
+    expect(tipButton).toHaveAttribute('aria-describedby', within(criterion('earnings')).getByRole('tooltip').id);
+    await userEvent.tab();
+    expect(tipButton).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('the legend lists the kinds of control shown, and the after-scan note carries the result-filter text', () => {
+    open();
+    const legend = screen.getByTestId('scan-legend');
+    for (const label of ['Search range', 'Advisory', 'Adjust after scan']) expect(legend).toHaveTextContent(label);
+    expect(legend).not.toHaveTextContent('Preference');
+    expect(within(criterion('resultChips')).getByText('RESULT FILTER')).toBeInTheDocument();
+    expect(criterion('resultChips')).toHaveTextContent(/No rescan/);
+  });
+});
+
+describe('the recap is built from the registry and updates as you edit', () => {
+  it('shows the settings that can change and the capacity from the selected holdings, not the fixed rules', async () => {
     open();
     const summary = screen.getByTestId('cc-rule-preview');
     expect(summary).toHaveTextContent('21–45 DTE');
     expect(summary).toHaveTextContent('Δ 0.20–0.35');
     expect(summary).toHaveTextContent('width ≤ 10% of mid (min $0.05) · cap $0.50');
-    expect(summary).toHaveTextContent('strike ≥ stock price (and cost basis when known)');
+    expect(summary).not.toHaveTextContent('strike ≥ stock price');
     expect(summary).toHaveTextContent('OI 100');
     // Two positions with capacity (AAA 4 + BBB 2 = 6); the fully covered one is not counted.
     expect(summary).toHaveTextContent('2 positions selected · up to 6 contracts');

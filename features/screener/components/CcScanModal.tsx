@@ -33,22 +33,29 @@
 import { useMemo, useState } from 'react';
 import type { CcRulesType } from '@/lib/scans/constants';
 import { ScanModalShell, type ScanModalTheme } from './ScanModalShell';
-import { CriterionInput } from './scanConfig/CriterionInput';
-import { CriterionPills, type CriterionPill } from './scanConfig/CriterionPills';
-import { LifecycleTag } from './scanConfig/LifecycleTag';
-import { CcReceiptPanel } from './scanConfig/ScanReceiptPanel';
+import { AlwaysAppliedStrip, type StripItem } from './scanConfig/AlwaysAppliedStrip';
+import { COMPACT_INPUT, CompactRange, CompactRule, FieldHead } from './scanConfig/CompactControls';
+import { CriterionTipBody, InfoTip } from './scanConfig/InfoTip';
+import { type CriterionPill } from './scanConfig/CriterionPills';
+import { lifecycleTagText } from './scanConfig/LifecycleTag';
+import { LifecycleDot } from './scanConfig/LifecycleDot';
+import { ScanLegend } from './scanConfig/ScanLegend';
 import {
-  CC_CARD_ORDER, CC_CARD_TITLE, buildCcReceipt, ccCriteriaForCard, ccFieldErrors,
+  ccCriteriaForCard, ccFieldErrors, getCcCriterion,
   type CcConfigValues, type CcCriterion,
 } from '@/lib/screener/scanConfig/ccRegistry';
-import { matchRangePreset, sameNumber } from '@/lib/screener/scanConfig/presets';
+import { matchRangePreset } from '@/lib/screener/scanConfig/presets';
 
 // SCREENER-CONFIG-0001B -- every control below is rendered from the covered-call criterion
-// registry (lib/screener/scanConfig/ccRegistry.ts): its label, unit, lifecycle tag, quick selects,
+// registry (lib/screener/scanConfig/ccRegistry.ts): its label, unit, lifecycle, quick selects,
 // and hint come from there, and the scan summary is built from the same registry, so the modal and
 // the result receipt cannot disagree. The controls, their accessible names, and the validation
-// rules are the ones this modal always had; the tags, quick selects, summary, and the fixed
-// always-applied rows are new.
+// rules are the ones this modal always had.
+//
+// SCAN-MODAL-UX-0001 -- one-screen layout. The same controls and rules, drawn compactly: a colored dot per
+// control (decoded by one legend line) replaces the tag pills, the help text is in a tooltip, the
+// fixed rules are one "Always applied" strip, and the scan summary is a short recap by the buttons.
+// No rule, default, gate or rescan requirement changed.
 
 export interface CcScanRequest {
   rules: CcRulesType;
@@ -76,6 +83,8 @@ interface Props {
   onRun: (request: CcScanRequest) => void;
 }
 
+const ATTR = 'data-cc-criterion';
+
 export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, onToggleSymbol, holdingsLoading, initial, onClose, onRun }: Props) {
   const [draft, setDraft] = useState<CcScanRequest>(initial);
   const [error, setError] = useState('');
@@ -96,50 +105,100 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
     () => ({ rules: draft.rules, positionsSelected: holdingsLoading ? null : selectedCount, contractsAvailable: holdingsLoading ? null : contractsAvailable }),
     [draft.rules, holdingsLoading, selectedCount, contractsAvailable],
   );
-  const receipt = useMemo(() => buildCcReceipt(values), [values]);
 
   const setRule = (key: keyof CcRulesType, value: number) =>
     setDraft(prev => ({ rules: { ...prev.rules, [key]: value } }));
   const setRules = (patch: Partial<CcRulesType>) =>
     setDraft(prev => ({ rules: { ...prev.rules, ...patch } }));
 
-  // Renders the control of one registry criterion. The kind decides the widget; the registry
-  // supplies every label, title, step, and quick-select value.
-  const renderControl = (criterion: CcCriterion) => {
-    const control = criterion.control;
-    if (control.kind === 'range') {
-      const min = draft.rules[control.minKey];
-      const max = draft.rules[control.maxKey];
-      const matched = matchRangePreset(min, max, control.presets);
-      const pills: CriterionPill[] = control.presets.map(p => ({
-        key: p.label, label: p.label, pressed: matched?.label === p.label,
-        onSelect: () => setRules({ [control.minKey]: p.min, [control.maxKey]: p.max } as Partial<CcRulesType>),
-      }));
-      return (
-        <>
-          <div className="flex flex-wrap gap-3">
-            <CriterionInput id={control.minKey} label={control.minLabel} title={control.minTitle} step={control.step} value={min} onValueChange={value => setRule(control.minKey, value)} error={errors[control.minKey]} />
-            <CriterionInput id={control.maxKey} label={control.maxLabel} title={control.maxTitle} step={control.step} value={max} onValueChange={value => setRule(control.maxKey, value)} error={errors[control.maxKey]} />
-          </div>
-          <CriterionPills th={th} groupLabel={`${criterion.label} quick select`} pills={pills} />
-        </>
-      );
-    }
-    if (control.kind === 'rule') {
-      const value = draft.rules[control.key];
-      const pills: CriterionPill[] = control.presets.map(p => ({
-        key: p.label, label: p.label, pressed: sameNumber(p.value, value),
-        onSelect: () => setRule(control.key, p.value as number),
-      }));
-      return (
-        <>
-          <CriterionInput id={control.key} label={control.label} title={control.title} step={control.step} value={value} onValueChange={next => setRule(control.key, next)} unit={control.unit} error={errors[control.key]} />
-          <CriterionPills th={th} groupLabel={`${criterion.label} quick select`} pills={pills} />
-        </>
-      );
-    }
-    return null;
+  const tip = (c: CcCriterion) => <CriterionTipBody label={c.label} unit={c.unit || undefined} hint={c.hint} />;
+
+  // A range criterion (DTE, delta): two inputs and the quick selects from the registry.
+  const rangeCell = (c: CcCriterion, align: 'left' | 'right') => {
+    const control = c.control;
+    if (control.kind !== 'range') return null;
+    const matched = matchRangePreset(draft.rules[control.minKey], draft.rules[control.maxKey], control.presets);
+    const pills: CriterionPill[] = control.presets.map(p => ({
+      key: p.label, label: p.label, pressed: matched?.label === p.label,
+      onSelect: () => setRules({ [control.minKey]: p.min, [control.maxKey]: p.max } as Partial<CcRulesType>),
+    }));
+    return (
+      <div key={c.id} {...{ [ATTR]: c.id }} className="flex min-w-0 flex-col gap-1">
+        <FieldHead lifecycle={c.lifecycle} fixed={c.fixed} rescan={c.rescan} name={c.label} tip={tip(c)} align={align} />
+        <CompactRange
+          th={th} groupLabel={`${c.label} quick select`}
+          minId={control.minKey} maxId={control.maxKey} minLabel={control.minLabel} maxLabel={control.maxLabel}
+          minTitle={control.minTitle} maxTitle={control.maxTitle} step={control.step}
+          min={draft.rules[control.minKey]} max={draft.rules[control.maxKey]}
+          onMin={value => setRule(control.minKey, value)} onMax={value => setRule(control.maxKey, value)}
+          minError={errors[control.minKey]} maxError={errors[control.maxKey]} pills={pills}
+        />
+      </div>
+    );
   };
+
+  // A single-value rule criterion (OI preference).
+  const ruleCell = (c: CcCriterion, align: 'left' | 'right') => {
+    const control = c.control;
+    if (control.kind !== 'rule') return null;
+    return (
+      <div key={c.id} {...{ [ATTR]: c.id }} className="flex min-w-0 flex-col gap-1">
+        <FieldHead lifecycle={c.lifecycle} fixed={c.fixed} rescan={c.rescan} name={control.label} tip={tip(c)} align={align} />
+        <CompactRule id={control.key} label={control.label} title={control.title} step={control.step} value={draft.rules[control.key]} onValue={next => setRule(control.key, next)} suffix={c.unit} error={errors[control.key]} />
+      </div>
+    );
+  };
+
+  // Max bid/ask width and its dollar ceiling are two registry criteria shown as one field. Both rules apply.
+  const widthCell = () => {
+    const width = getCcCriterion('width');
+    const ceiling = getCcCriterion('widthCeiling');
+    if (width.control.kind !== 'rule' || ceiling.control.kind !== 'rule') return null;
+    const wc = width.control;
+    const cc = ceiling.control;
+    return (
+      <div key="width" className="flex min-w-0 flex-col gap-1">
+        <FieldHead
+          lifecycle={width.lifecycle} fixed={width.fixed} rescan={width.rescan} name={width.label} dot={false}
+          tip={<>{tip(width)}<div className="mt-2 border-t border-neutral-700 pt-2">{tip(ceiling)}</div></>}
+        />
+        <div className="flex flex-wrap items-start gap-x-2">
+          <span {...{ [ATTR]: width.id }} className="flex flex-col">
+            <LifecycleDot lifecycle={width.lifecycle} fixed={width.fixed} rescan={width.rescan} visual={false} />
+            <CompactRule id={wc.key} label={wc.label} title={wc.title} step={wc.step} value={draft.rules[wc.key]} onValue={next => setRule(wc.key, next)} suffix="% of mid" error={errors[wc.key]} widthClass="w-14 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-white" />
+          </span>
+          <span aria-hidden="true" className="pt-1.5 text-[10px] text-neutral-500">and</span>
+          <span {...{ [ATTR]: ceiling.id }} className="flex flex-col">
+            <LifecycleDot lifecycle={ceiling.lifecycle} fixed={ceiling.fixed} rescan={ceiling.rescan} visual={false} />
+            <CompactRule id={cc.key} label={cc.label} title={cc.title} step={cc.step} value={draft.rules[cc.key]} onValue={next => setRule(cc.key, next)} suffix="$ cap" error={errors[cc.key]} widthClass={COMPACT_INPUT} />
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  const alwaysItems: StripItem[] = ccCriteriaForCard('always').map(c => ({
+    id: c.id,
+    label: c.chipLabel ?? c.label,
+    tag: lifecycleTagText(c.lifecycle, c.fixed, c.rescan),
+    tip: tip(c),
+    attr: { [ATTR]: c.id },
+  }));
+
+  // The recap: what the registry says about the settings that can be changed, plus the capacity line.
+  const recapLines = useMemo(() => {
+    const settings: string[] = [];
+    for (const card of ['search', 'advisory'] as const) {
+      for (const c of ccCriteriaForCard(card)) {
+        const text = c.summary(values);
+        if (text) settings.push(text);
+      }
+    }
+    const capacity = getCcCriterion('capacity').summary(values);
+    return { settings: settings.join(' · '), capacity };
+  }, [values]);
+
+  const afterScan = getCcCriterion('resultChips');
 
   return (
     <ScanModalShell
@@ -149,18 +208,24 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
       subtitle={`${selectedTickerCount} eligible position${selectedTickerCount === 1 ? '' : 's'} · configure before scanning`}
       closeLabel="Close Covered Call scan configuration"
       onClose={onClose}
+      maxWidthClassName="max-w-[720px]"
+      compact
     >
-      <div className="flex flex-col gap-0">
-        <p className="text-[10px] text-neutral-400">Only broker-verified covered shares are eligible.</p>
+      <div className="flex flex-col gap-3">
+        <ScanLegend lifecycles={['fetch', 'advisory']} afterScan={{ attr: { [ATTR]: afterScan.id }, hint: afterScan.hint }} />
 
         {holdingsLoading ? (
-          <p className="mt-3 text-[10px] text-neutral-400">Loading eligible holdings...</p>
+          <p className="text-[11px] text-neutral-400">Loading eligible holdings...</p>
         ) : holdings.length === 0 ? (
-          <p className="mt-3 text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 leading-relaxed font-medium">
-            ⚠ No eligible covered-call holdings found in your connected broker account.
+          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] font-medium leading-relaxed text-amber-400">
+            ⚠ No eligible covered-call holdings found in your connected broker account. Only broker-verified covered shares are eligible.
           </p>
         ) : (
-        <div className="mt-3 flex flex-wrap gap-1" data-testid="cc-holdings-selection" role="group" aria-label="Eligible covered-call positions">
+          <div className="flex flex-wrap items-center gap-1" data-testid="cc-holdings-selection" role="group" aria-label="Eligible covered-call positions">
+            <span className="mr-1 text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+              Covered shares
+              <InfoTip>Only broker-verified covered shares are eligible. A position can be left out of this scan by clicking it.</InfoTip>
+            </span>
             {holdings.map(h => {
               const hidden = hiddenSymbols.includes(h.symbol);
               const blocked = h.availableCoveredContracts === 0;
@@ -171,76 +236,68 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
                   onClick={() => !blocked && onToggleSymbol(h.symbol)}
                   disabled={blocked}
                   title={blocked ? 'Fully covered -- no available capacity' : undefined}
-                  className={`text-[9px] px-2 py-0.5 rounded border font-bold transition-colors ${
+                  className={`rounded border px-2 py-0.5 text-[10px] font-bold transition-colors ${
                     blocked
-                      ? 'border-neutral-700 text-neutral-600 line-through opacity-40 cursor-not-allowed'
+                      ? 'cursor-not-allowed border-neutral-700 text-neutral-600 line-through opacity-40'
                       : hidden
                       ? 'border-neutral-700 text-neutral-500 line-through opacity-40'
-                      : 'border-amber-500 text-amber-300 bg-amber-500/10'
+                      : 'border-amber-500 bg-amber-500/10 text-amber-300'
                   }`}
                 >
                   {h.symbol} <span className="opacity-60">({h.availableCoveredContracts})</span>
                 </button>
               );
             })}
-        </div>
+          </div>
         )}
 
-        {CC_CARD_ORDER.map(card => {
-          const criteria = ccCriteriaForCard(card);
-          if (criteria.length === 0) return null;
-          return (
-            <section key={card} data-cc-card={card} aria-label={CC_CARD_TITLE[card]} className="mt-5 rounded-lg border border-neutral-800 bg-neutral-900/40 p-3">
-              <h3 className="text-xs font-bold uppercase tracking-wide text-neutral-200">{CC_CARD_TITLE[card]}</h3>
-              <div className="mt-2 flex flex-col gap-4">
-                {criteria.map(c => (
-                  <div key={c.id} data-cc-criterion={c.id}>
-                    <p className="text-[10px] font-bold text-neutral-300">{c.label}<LifecycleTag lifecycle={c.lifecycle} fixed={c.fixed} rescan={c.rescan} /></p>
-                    <p className="mb-2 mt-1 text-[10px] text-neutral-400">{c.hint}</p>
-                    {renderControl(c)}
-                  </div>
-                ))}
-              </div>
-            </section>
-          );
-        })}
+        <section aria-label="Search and preferences" data-cc-card="search" className={`grid grid-cols-1 gap-x-5 gap-y-3 border-t ${th.border} pt-3 sm:grid-cols-2`}>
+          {rangeCell(getCcCriterion('dte'), 'left')}
+          {rangeCell(getCcCriterion('delta'), 'right')}
+          {widthCell()}
+          {ruleCell(getCcCriterion('oi'), 'right')}
+        </section>
 
-        <div className="mt-4">
-          <CcReceiptPanel th={th} receipt={receipt} heading="Scan summary" testId="cc-rule-preview" />
-        </div>
+        <AlwaysAppliedStrip th={th} items={alwaysItems} />
 
         {!holdingsLoading && holdings.length > 0 && selectedCount === 0 && (
-          <p role="alert" className="mt-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2 leading-relaxed font-medium">
+          <p role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs font-medium leading-relaxed text-amber-400">
             ⚠ Select at least one eligible holding before running.
           </p>
         )}
 
         {error && (
-          <p role="alert" className="mt-2 text-xs text-red-400">
+          <p role="alert" className="text-xs text-red-400">
             {error}
           </p>
         )}
 
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="rounded-lg border border-neutral-700 px-4 py-2 text-xs"
-          >
-            Cancel
-          </button>
-          <button
-            disabled={!valid}
-            onClick={() => {
-              if (!valid) {
-                setError('Correct the covered call ranges before running.');
-                return;
-              }
-              onRun(draft);
-            }}
-            className="rounded-lg border border-amber-400 bg-amber-400 px-4 py-2 text-xs font-bold text-black disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            RUN CC SCAN →
-          </button>
+        <div className={`flex items-center justify-between gap-4 border-t ${th.border} pt-3`}>
+          <div data-testid="cc-rule-preview" className="min-w-0 text-[10px] leading-snug text-neutral-400">
+            <p>{recapLines.settings}</p>
+            {recapLines.capacity && <p>{recapLines.capacity}</p>}
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <button
+              onClick={onClose}
+              className="rounded-lg border border-neutral-700 px-4 py-2 text-xs"
+            >
+              Cancel
+            </button>
+            <button
+              disabled={!valid}
+              onClick={() => {
+                if (!valid) {
+                  setError('Correct the covered call ranges before running.');
+                  return;
+                }
+                onRun(draft);
+              }}
+              className="rounded-lg border border-amber-400 bg-amber-400 px-4 py-2 text-xs font-bold text-black disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              RUN CC SCAN →
+            </button>
+          </div>
         </div>
       </div>
     </ScanModalShell>

@@ -57,9 +57,10 @@ describe('lifecycle tags say what the engine does', () => {
 });
 
 describe('modes show only the criteria that apply', () => {
-  it('Rank has the ordering and the after-scan chips and no Targeted gates', () => {
+  it('Rank has the after-scan note and no ordering control and no Targeted gates', () => {
     open();
-    expect(screen.getByLabelText('CSP secondary sort')).toBeInTheDocument();
+    expect(screen.queryByLabelText('CSP secondary sort')).not.toBeInTheDocument();
+    expect(criterion('rankSecondary')).toBeNull();
     expect(criterion('resultChips')).toHaveTextContent(/No rescan/);
     expect(within(criterion('resultChips')).getByText('RESULT FILTER')).toBeInTheDocument();
     expect(screen.queryByLabelText('Minimum estimated POP')).not.toBeInTheDocument();
@@ -109,12 +110,13 @@ describe('quick-select pills follow the shared pill and input contract', () => {
     expect(screen.getByLabelText('Max Δ')).toHaveValue('0.3');
   });
 
-  it('an open-interest pill sets the OI preference and is carried into the request', async () => {
+  // SCAN-MODAL-UX-0001: the OI preference is typed (its quick selects only repeated the input).
+  it('the OI preference is typed and carried into the request', async () => {
     const onRun = vi.fn();
     open({}, { onRun });
-    await userEvent.click(pressed('OI pref. quick select', '200'));
+    await userEvent.clear(screen.getByLabelText('OI pref.'));
+    await userEvent.type(screen.getByLabelText('OI pref.'), '200');
     expect(screen.getByLabelText('OI pref.')).toHaveValue('200');
-    expect(pressed('OI pref. quick select', '200')).toHaveAttribute('aria-pressed', 'true');
     await userEvent.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
     expect(onRun.mock.calls[0][0].rules.OI_MIN).toBe(200);
   });
@@ -144,29 +146,43 @@ describe('quick-select pills follow the shared pill and input contract', () => {
   });
 });
 
-describe('the scan summary is built from the registry and updates as you edit', () => {
-  it('shows the search range, gates, preferences, and capital, and states the IVR limit', async () => {
+describe('the Always applied strip and the recap are built from the registry', () => {
+  it('names the fixed rules, keeps the IVR rule visible with its reason, and holds no input', () => {
+    open();
+    const strip = screen.getByRole('region', { name: 'Always applied' });
+    for (const name of ['Bid/ask tiers', 'Earnings buffer · 10 days', 'No IV rank = disqualified']) expect(within(strip).getByText(name)).toBeInTheDocument();
+    expect(within(strip).queryAllByRole('textbox')).toHaveLength(0);
+    expect(screen.getByText(/A symbol with no IV rank is disqualified: the IVR cap cannot be verified/)).toBeInTheDocument();
+    expect(document.querySelector('[data-csp-note="ivr-unavailable"]')).toHaveTextContent('GATE · FIXED');
+  });
+
+  it('the recap shows the settings that can change, updates as you edit, and leaves out the fixed rules and the order', async () => {
     open();
     const summary = screen.getByTestId('csp-rule-preview');
     expect(summary).toHaveTextContent('30–45 DTE');
     expect(summary).toHaveTextContent('IVR ≤ 70%');
-    expect(summary).toHaveTextContent('bid/ask tiers (fixed)');
     expect(summary).toHaveTextContent('Δ 0.15–0.25 preferred (outside it: not a Best Opportunity)');
     expect(summary).toHaveTextContent('Affordable only off');
-    expect(summary).toHaveTextContent(/A symbol with no IV rank is disqualified: the IVR cap cannot be verified/);
+    expect(summary).not.toHaveTextContent('bid/ask tiers');
+    expect(summary).not.toHaveTextContent('Score →');
     await userEvent.click(pressed('DTE range quick select', '21–60 DTE'));
     expect(summary).toHaveTextContent('21–60 DTE');
   });
 
-  it('a Targeted summary lists the Targeted gates, a Rank summary lists the order', async () => {
+  it('a Targeted recap lists the Targeted gates, a Rank recap does not', async () => {
     open();
-    const summary = screen.getByTestId('csp-rule-preview');
-    expect(summary).toHaveTextContent('Score → None');
-    expect(summary).not.toHaveTextContent('POP ≥');
+    expect(screen.getByTestId('csp-rule-preview')).not.toHaveTextContent('POP ≥');
     await userEvent.click(screen.getByRole('radio', { name: /^Targeted/i }));
     await userEvent.click(pressed('POP at least quick select', '70%'));
     expect(screen.getByTestId('csp-rule-preview')).toHaveTextContent('POP ≥ 70%');
-    expect(screen.getByTestId('csp-rule-preview')).not.toHaveTextContent('Score →');
+  });
+
+  it('the legend lists the kinds of control shown, and Targeted has no after-scan note', async () => {
+    open();
+    const legend = screen.getByTestId('scan-legend');
+    for (const label of ['Search range', 'Gate', 'Preference', 'Advisory', 'Adjust after scan']) expect(legend).toHaveTextContent(label);
+    await userEvent.click(screen.getByRole('radio', { name: /^Targeted/i }));
+    expect(screen.getByTestId('scan-legend')).not.toHaveTextContent('Adjust after scan');
   });
 });
 
@@ -210,7 +226,8 @@ describe('drafts', () => {
     const onRun = vi.fn();
     const { unmount } = open({}, { onClose, onRun });
     await userEvent.click(pressed('DTE range quick select', '21–60 DTE'));
-    await userEvent.click(pressed('OI pref. quick select', '200'));
+    await userEvent.clear(screen.getByLabelText('OI pref.'));
+    await userEvent.type(screen.getByLabelText('OI pref.'), '200');
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onRun).not.toHaveBeenCalled();

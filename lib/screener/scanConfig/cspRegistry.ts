@@ -89,6 +89,8 @@ export interface CspCriterion {
   summaryGroup: SummaryGroup;
   /** One or two sentences on what the engine actually does with it. */
   hint: string;
+  /** SCAN-MODAL-UX-0001: the short name a fixed rule shows on the Always applied strip. The full hint is its tooltip. */
+  chipLabel?: string;
   /** Text for the explicit off state ("Any", "None"), or null when there is none. */
   off: string | null;
   control: CspControl;
@@ -317,6 +319,7 @@ export const CSP_CRITERIA: readonly CspCriterion[] = [
     card: 'always',
     summaryGroup: 'gates',
     hint: 'A fixed policy, not a setting. Strong: width at or under the larger of $0.10 or 10% of mid. Borderline: up to 15% of mid, kept but excluded from Best Opportunities. Wider fails.',
+    chipLabel: 'Bid/ask tiers',
     off: null,
     control: { kind: 'info' },
     summary: () => 'bid/ask tiers (fixed)',
@@ -332,6 +335,7 @@ export const CSP_CRITERIA: readonly CspCriterion[] = [
     card: 'always',
     summaryGroup: 'gates',
     hint: 'A candidate whose expiration spans an earnings date, or expires within 10 days before it, is disqualified. Earnings dates are estimates that can move earlier.',
+    chipLabel: 'Earnings buffer · 10 days',
     off: null,
     control: { kind: 'info' },
     summary: () => 'earnings buffer after expiry: 10 days',

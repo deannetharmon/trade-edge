@@ -13,15 +13,20 @@ const TAG_CLASS: Record<Lifecycle, string> = {
  * The lifecycle tag beside a control: what the engine does with the value.
  * Text always carries the meaning; color only reinforces it.
  */
-export function LifecycleTag({ lifecycle, fixed = false, rescan = false }: { lifecycle: Lifecycle; fixed?: boolean; rescan?: boolean }) {
+/** The tag text for a control, for example "SEARCH RANGE · RESCAN". Also the screen-reader text of the compact dot. */
+export function lifecycleTagText(lifecycle: Lifecycle, fixed = false, rescan = false): string {
   const parts = [LIFECYCLE_TAG_LABEL[lifecycle]];
   // Read-only and result-filter rows are not settings, so "fixed" would say nothing.
   if (fixed && lifecycle !== 'result-filter' && lifecycle !== 'read-only') parts.push('FIXED');
   // A fixed limit cannot be changed, so it never asks for a rescan.
   if (lifecycle === 'fetch' && rescan && !fixed) parts.push('RESCAN');
+  return parts.join(' · ');
+}
+
+export function LifecycleTag({ lifecycle, fixed = false, rescan = false }: { lifecycle: Lifecycle; fixed?: boolean; rescan?: boolean }) {
   return (
     <span data-lifecycle={lifecycle} className={`ml-2 inline-block whitespace-nowrap rounded-full border px-2 py-0.5 align-middle text-[9px] font-bold tracking-wider ${TAG_CLASS[lifecycle]}`}>
-      {parts.join(' · ')}
+      {lifecycleTagText(lifecycle, fixed, rescan)}
     </span>
   );
 }
