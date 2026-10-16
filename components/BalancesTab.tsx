@@ -165,8 +165,8 @@ function BalanceChart({ history, movements, range, mode }: { history: BalanceDay
   const areaD = `${pathD} L ${points[points.length - 1].x.toFixed(1)} ${height - pad} L ${points[0].x.toFixed(1)} ${height - pad} Z`;
   const first = series[0].netLiquidatingValue;
   const last = series[series.length - 1].netLiquidatingValue;
-  const isUp = last >= first;
-  const lineColor = isUp ? '#00d4aa' : '#f87171';
+  // Forest green, shaded to black below the line, in both views. Direction reads from the line and the What changed table.
+  const lineColor = '#2e9e5e';
   // Money movements are marked on the first plotted day on or after their date.
   const marks = movements
     .filter(m => m.date > series[0].date && m.date <= series[series.length - 1].date)
@@ -192,7 +192,7 @@ function BalanceChart({ history, movements, range, mode }: { history: BalanceDay
       >
         <defs>
           <linearGradient id="balanceFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={lineColor} stopOpacity="0.25" />
+            <stop offset="0%" stopColor={lineColor} stopOpacity="0.4" />
             <stop offset="100%" stopColor={lineColor} stopOpacity="0" />
           </linearGradient>
         </defs>
