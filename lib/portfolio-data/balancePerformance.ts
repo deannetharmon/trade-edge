@@ -74,7 +74,7 @@ export function todayNewYork(nowMs: number): string {
 }
 
 export type PeriodAccountProfit =
-  | { status: 'OK'; startDate: string; endDate: string; startValue: number; endValue: number; netMoved: number; profit: number; returnPct: number | null }
+  | { status: 'OK'; startDate: string; endDate: string; startValue: number; endValue: number; netMoved: number; profit: number; returnPct: number | null; clampedFrom?: string; realizedInWindow?: number }
   | { status: 'UNAVAILABLE'; reason: string };
 
 function daysBetween(a: string, b: string): number {
@@ -85,16 +85,23 @@ function daysBetween(a: string, b: string): number {
  * PERF-0001 (Ian): account profit for [from, to] = value at the end - value at the start - money moved in between.
  * Start = the last stored close before `from` (or the first on/after it), end = the last stored close on/before `to`,
  * each within `toleranceDays`; the dates actually used are returned. Missing history is reported, never guessed.
+ * PERF-0002 (Dean): with `clampToEarliest`, a period that begins before the first saved balance starts at that first
+ * balance instead of failing; `clampedFrom` carries the date that was asked for so the screen can say so.
  */
-export function periodAccountProfit(history: readonly BalanceDayPoint[], movements: readonly MoneyMovement[], from: string, to: string, toleranceDays = 5): PeriodAccountProfit {
+export function periodAccountProfit(history: readonly BalanceDayPoint[], movements: readonly MoneyMovement[], from: string, to: string, toleranceDays = 5, clampToEarliest = false): PeriodAccountProfit {
   const days = history.filter((d) => d.netLiquidatingValue !== 0).slice().sort((a, b) => a.date.localeCompare(b.date));
   const before = days.filter((d) => d.date < from).pop();
   const onOrAfter = days.find((d) => d.date >= from && d.date <= to);
-  const start = before && daysBetween(before.date, from) <= toleranceDays ? before : onOrAfter && daysBetween(from, onOrAfter.date) <= toleranceDays ? onOrAfter : null;
+  let start = before && daysBetween(before.date, from) <= toleranceDays ? before : onOrAfter && daysBetween(from, onOrAfter.date) <= toleranceDays ? onOrAfter : null;
+  let clampedFrom: string | undefined;
+  if (!start && clampToEarliest && days.length > 0 && days[0].date > from && days[0].date <= to) {
+    start = days[0];
+    clampedFrom = from;
+  }
   const end = days.filter((d) => d.date <= to).pop();
   if (!start) return { status: 'UNAVAILABLE', reason: `No saved account balance within ${toleranceDays} days of ${from}.` };
   if (!end || daysBetween(end.date, to) > toleranceDays || end.date <= start.date) return { status: 'UNAVAILABLE', reason: `No saved account balance within ${toleranceDays} days of ${to}.` };
   const netMoved = movements.filter((m) => m.date > start.date && m.date <= end.date).reduce((n, m) => n + m.amount, 0);
   const profit = end.netLiquidatingValue - start.netLiquidatingValue - netMoved;
-  return { status: 'OK', startDate: start.date, endDate: end.date, startValue: start.netLiquidatingValue, endValue: end.netLiquidatingValue, netMoved, profit, returnPct: start.netLiquidatingValue > 0 ? (profit / start.netLiquidatingValue) * 100 : null };
+  return { status: 'OK', startDate: start.date, endDate: end.date, startValue: start.netLiquidatingValue, endValue: end.netLiquidatingValue, netMoved, profit, returnPct: start.netLiquidatingValue > 0 ? (profit / start.netLiquidatingValue) * 100 : null, ...(clampedFrom ? { clampedFrom } : {}) };
 }

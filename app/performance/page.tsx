@@ -874,13 +874,20 @@ export default function PerformancePage() {
     if (balanceHistory == null || movementsStatus === 'loading') return null;
     if (movementsStatus === 'failed') return { status: 'UNAVAILABLE' as const, reason: 'Deposits and withdrawals could not be loaded, so account profit is not shown (a withdrawal would look like a loss).' };
     const full = withLivePoint(balanceHistory, today, liveNetLiq);
-    const result = periodAccountProfit(full, movements, period.from, period.to);
+    const result = periodAccountProfit(full, movements, period.from, period.to, 5, true);
+    if (result.status === 'OK' && result.clampedFrom) {
+      // The balance history starts after the period does: realized P/L is taken over the same window so "open positions and other" compares like with like.
+      let excluded = new Set<string>();
+      try { const raw = localStorage.getItem('hunter-tradelog-excluded'); if (raw) excluded = new Set<string>(JSON.parse(raw)); } catch {}
+      const inWindow = trades.filter(t => t.closeDate >= result.startDate && t.closeDate <= period.to).map(t => ({ ...t, excluded: excluded.has(t.id) }));
+      return { ...result, realizedInWindow: buildPerformanceReport(inWindow).headline.pnl };
+    }
     if (result.status === 'UNAVAILABLE' && full.length > 0) {
       const earliest = full.map(d => d.date).sort()[0];
       return { ...result, reason: `${result.reason} Earliest balance available: ${earliest}.` };
     }
     return result;
-  }, [balanceHistory, liveNetLiq, today, movements, movementsStatus, period.from, period.to]);
+  }, [balanceHistory, liveNetLiq, today, movements, movementsStatus, period.from, period.to, trades]);
 
   // PERF-AI-0001: per-trade "deliberate" overrides of the 25%-of-net-liq rule (Dean); review only, never blocking.
   const [sizeOverrides, setSizeOverrides] = useState<Set<string>>(new Set());

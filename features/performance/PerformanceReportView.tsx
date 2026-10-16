@@ -73,7 +73,7 @@ export function PerformanceReportView({ th, report, accountProfit, periodLabel, 
 }) {
   const h = report.headline;
   const realized = h.pnl;
-  const other = accountProfit?.status === 'OK' ? accountProfit.profit - realized : null;
+  const other = accountProfit?.status === 'OK' ? accountProfit.profit - (accountProfit.realizedInWindow ?? realized) : null;
   const months = report.byMonth.map((m) => m.month);
   const exitMax = Math.max(1, ...Object.values(report.exits).map((e) => Math.abs(e.pnl)));
   const r = report.rules;
@@ -92,7 +92,7 @@ export function PerformanceReportView({ th, report, accountProfit, periodLabel, 
       <Panel th={th} title="Profit for this period" sub={`${periodLabel}. Account profit is the change in account value with deposits and withdrawals taken out (the Balances "Performance" line).`}>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {accountProfit?.status === 'OK'
-            ? <Kpi th={th} label="Account profit" value={money(accountProfit.profit)} valueClass={tone(accountProfit.profit)} note={`balances ${accountProfit.startDate} → ${accountProfit.endDate}${accountProfit.netMoved ? ` · ${money(accountProfit.netMoved)} moved in/out excluded` : ''}`} />
+            ? <Kpi th={th} label="Account profit" value={money(accountProfit.profit)} valueClass={tone(accountProfit.profit)} note={`balances ${accountProfit.startDate} → ${accountProfit.endDate}${accountProfit.clampedFrom ? ` · first saved balance (period starts ${accountProfit.clampedFrom})` : ''}${accountProfit.netMoved ? ` · ${money(accountProfit.netMoved)} moved in/out excluded` : ''}`} />
             : <Kpi th={th} label="Account profit" value="Unavailable" note={accountProfit?.reason ?? 'Loading balance history…'} />}
           <Kpi th={th} label="From closed trades" value={money(realized)} valueClass={tone(realized)} note={`realized after $${h.fees.toFixed(0)} fees · ${h.trades} trades`} />
           <Kpi th={th} label="Open positions and other" value={money(other)} valueClass={tone(other)} note="interest and account fees included" />

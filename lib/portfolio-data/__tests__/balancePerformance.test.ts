@@ -59,4 +59,12 @@ describe('PERF-0001 period account profit', () => {
     expect(periodAccountProfit(history, withdrawal, '2026-08-01', '2026-10-05').status).toBe('UNAVAILABLE');
     expect(periodAccountProfit(history, withdrawal, '2026-09-28', '2026-12-31')).toMatchObject({ status: 'UNAVAILABLE', reason: expect.stringContaining('2026-12-31') });
   });
+  it('PERF-0002: clampToEarliest starts a too-early period at the first saved balance and says what was asked for', () => {
+    const r = periodAccountProfit(history, withdrawal, '2026-01-01', '2026-10-05', 5, true);
+    expect(r).toMatchObject({ status: 'OK', startDate: '2026-09-25', endDate: '2026-10-05', clampedFrom: '2026-01-01', netMoved: -5000, profit: 900 });
+  });
+  it('PERF-0002: no clamp when the start is covered, or when the flag is off', () => {
+    expect(periodAccountProfit(history, withdrawal, '2026-09-28', '2026-10-05', 5, true)).not.toHaveProperty('clampedFrom');
+    expect(periodAccountProfit(history, withdrawal, '2026-01-01', '2026-10-05').status).toBe('UNAVAILABLE');
+  });
 });
