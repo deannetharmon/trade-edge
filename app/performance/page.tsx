@@ -30,7 +30,7 @@ import { buildStrategyBreakdown } from '@/lib/tradeLog/strategyBreakdown';
 import { buildPerformanceReport } from '@/lib/tradeLog/performanceMetrics';
 import { buildCoachingInput } from '@/lib/tradeLog/coachingInput';
 import { CoachingPanel } from '@/features/performance/CoachingPanel';
-import { extractMoneyMovements, periodAccountProfit, todayNewYork, type BalanceDayPoint, type MoneyMovement } from '@/lib/portfolio-data/balancePerformance';
+import { closedDaysOnly, extractMoneyMovements, periodAccountProfit, todayNewYork, withLivePoint, type BalanceDayPoint, type MoneyMovement } from '@/lib/portfolio-data/balancePerformance';
 import { PerformanceReportView } from '@/features/performance/PerformanceReportView';
 
 // PERF-0001: one period selector for every panel. Trades are loaded once for 12 months and filtered by close date.
@@ -768,6 +768,7 @@ export default function PerformancePage() {
   const choosePreset = (p: PeriodPreset) => { setPreset(p); try { localStorage.setItem(LS_PERF_PERIOD, p); } catch {} };
   const [balanceHistory, setBalanceHistory] = useState<BalanceDayPoint[] | null>(null);
   const [movements, setMovements] = useState<MoneyMovement[]>([]);
+  const [liveNetLiq, setLiveNetLiq] = useState<number | null>(null);
   useEffect(() => {
     (async () => {
       try {
@@ -778,6 +779,36 @@ export default function PerformancePage() {
       try {
         const token = await getAccessToken();
         const accountId = await requireActiveBrokerAccount(token, ttFetch);
+        // PERF-BALANCE-LOAD-0001: account profit is derived at load from the broker's own balance snapshots plus today's
+        // live balance, merged in memory over whatever is stored. It no longer depends on the Balances tab having been
+        // opened recently (the stored copy is only written there, so it went stale and this showed "Unavailable").
+        try {
+          const snapData = await ttFetch(`/accounts/${accountId}/balance-snapshots`, token);
+          const items: Record<string, unknown>[] = snapData?.data?.items ?? [];
+          const days = items
+            .map(item => ({
+              date: String(item['snapshot-date'] ?? ''),
+              netLiquidatingValue: parseFloat(String(item['net-liquidating-value'] ?? '0')),
+              cashBalance: parseFloat(String(item['cash-balance'] ?? '0')),
+              netOptionsValue: parseFloat(String(item['long-derivative-value'] ?? '0')) - parseFloat(String(item['short-derivative-value'] ?? '0')),
+            }))
+            .filter(d => d.date && Number.isFinite(d.netLiquidatingValue) && d.netLiquidatingValue !== 0);
+          const closed = closedDaysOnly(days, todayNewYork(Date.now()));
+          if (closed.length > 0) {
+            // Stored days win (first write wins, as on the Balances tab); broker snapshots fill every gap.
+            setBalanceHistory(prev => {
+              const byDate = new Map<string, BalanceDayPoint>();
+              closed.forEach(d => byDate.set(d.date, { date: d.date, netLiquidatingValue: d.netLiquidatingValue }));
+              (prev ?? []).forEach(d => { if (d.netLiquidatingValue !== 0) byDate.set(d.date, d); });
+              return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+            });
+          }
+        } catch { /* best effort: stored history above still applies */ }
+        try {
+          const balData = await ttFetch(`/accounts/${accountId}/balances`, token);
+          const live = parseFloat(String(balData?.data?.['net-liquidating-value'] ?? '0'));
+          setLiveNetLiq(Number.isFinite(live) && live !== 0 ? live : null);
+        } catch { setLiveNetLiq(null); }
         const start = new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10);
         const all: Record<string, unknown>[] = [];
         for (let page = 0; page < 8; page += 1) {
@@ -796,7 +827,7 @@ export default function PerformancePage() {
     const inPeriod = trades.filter(t => t.closeDate >= period.from && t.closeDate <= period.to).map(t => ({ ...t, excluded: excludedIds.has(t.id) }));
     return buildPerformanceReport(inPeriod);
   }, [trades, period.from, period.to]);
-  const accountProfit = useMemo(() => (balanceHistory == null ? null : periodAccountProfit(balanceHistory, movements, period.from, period.to)), [balanceHistory, movements, period.from, period.to]);
+  const accountProfit = useMemo(() => (balanceHistory == null ? null : periodAccountProfit(withLivePoint(balanceHistory, today, liveNetLiq), movements, period.from, period.to)), [balanceHistory, liveNetLiq, today, movements, period.from, period.to]);
 
   // PERF-AI-0001: per-trade "deliberate" overrides of the 25%-of-net-liq rule (Dean); review only, never blocking.
   const [sizeOverrides, setSizeOverrides] = useState<Set<string>>(new Set());
