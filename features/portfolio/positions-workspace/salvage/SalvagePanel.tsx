@@ -10,7 +10,10 @@ import { createPortal } from 'react-dom';
 import type { Position } from '@/lib/portfolio-data/types';
 import { useAutoRefreshPause } from '@/components/portfolio-data/usePortfolioAutoRefresh';
 import { loadSalvageChain, type SalvageChain } from '@/lib/salvage/salvageChainClient';
+import { buildWingRows } from '@/lib/salvage/salvageCandidates';
 import { salvageEligibility } from '@/lib/salvage/salvageEligibility';
+import { useSalvageDeps } from './SalvageDeps';
+import { SalvageReview } from './SalvageReview';
 import {
   buildSalvageViewModel,
   type ObjectiveKind,
@@ -37,7 +40,7 @@ const pill = (active: boolean) =>
 
 export function SalvageView({
   vm, p, objective, setObjective, amountText, setAmountText, rankBy, setRankBy,
-  wingQuantity, setWingQuantity, maxWing, selectedStrike, setSelectedStrike, onRefresh, loading, onClose,
+  wingQuantity, setWingQuantity, maxWing, selectedStrike, setSelectedStrike, onRefresh, loading, onClose, onReview, reviewBlockedReason,
 }: {
   vm: SalvageViewModel; p: Position;
   objective: ObjectiveKind; setObjective: (o: ObjectiveKind) => void;
@@ -46,6 +49,7 @@ export function SalvageView({
   wingQuantity: number; setWingQuantity: (n: number) => void; maxWing: number;
   selectedStrike: number | null; setSelectedStrike: (n: number) => void;
   onRefresh: () => void; loading: boolean; onClose: () => void;
+  onReview?: () => void; reviewBlockedReason?: string | null;
 }) {
   const leg = p.legs[0];
   const right = leg.optionType;
@@ -216,7 +220,13 @@ export function SalvageView({
             <p className="text-xs text-slate-400">Holding can pay more than the wing if {p.symbol} falls a long way; that is the trade-off.</p>
           </section>
         )}
-        <p className="rounded-lg border border-slate-800 bg-slate-900 p-3 text-sm text-slate-300">Proposal only. Salvage never places, changes or cancels an order. Order review arrives in the next release.</p>
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4" aria-label="Order">
+          <p className="max-w-xl text-sm text-slate-300">Proposal only. You review the order, run a broker dry run, and press Submit yourself. Salvage never places, changes or cancels an order on its own.</p>
+          <div className="flex flex-col items-end gap-1">
+            <button type="button" onClick={onReview} disabled={!onReview || !!reviewBlockedReason || !sel} data-testid="salvage-review-open" className="min-h-11 rounded-lg bg-emerald-500 px-4 text-sm font-bold text-emerald-950 focus:outline-none focus:ring-2 focus:ring-teal-400 disabled:cursor-not-allowed disabled:opacity-40">{sel ? `Review order: sell ${wingQuantity} ${p.symbol} ${sel.strike} ${right === 'P' ? 'put' : 'call'}` : 'Review order'}</button>
+            {(reviewBlockedReason || !onReview) && <p className="text-xs text-amber-300" data-testid="salvage-review-blocked">{reviewBlockedReason ?? 'Order review is not available here.'}</p>}
+          </div>
+        </section>
       </>)}
     </div>
   );
@@ -247,6 +257,8 @@ function SalvageDialog({ position, onClose }: { position: Position; onClose: () 
   const [wingQuantity, setWingQuantity] = useState(1);
   const [selectedStrike, setSelectedStrike] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const deps = useSalvageDeps();
+  const [reviewing, setReviewing] = useState(false);
 
   const load = useCallback(async () => {
     if (!eligibility.eligible) return;
@@ -272,19 +284,55 @@ function SalvageDialog({ position, onClose }: { position: Position; onClose: () 
     eligible: eligibility, position, quotes: chain?.quotes ?? null, nowMs, todayYmd: nyTodayYmd(),
     objective, amount: Number.isFinite(amount) ? amount : null, rankBy, wingQuantity, selectedStrike,
   });
+  const sel = vm.selected;
+  const reviewBlockedReason = !deps
+    ? 'Order review is not available here.'
+    : !sel ? 'Select a wing first.'
+    : !sel.occSymbol ? 'The option symbol is missing, so an order cannot be built.'
+    : vm.longQuoteStale || !sel.proposable ? 'Quotes are more than 60 seconds old. Refresh quotes first.'
+    : loading ? 'Loading quotes…' : null;
+  const reload = async () => {
+    const c = await loadSalvageChain(position.symbol, eligibility.expDate, eligibility.right, '');
+    setChain(c); setNowMs(Date.now());
+    const wingQ = Math.max(1, Math.min(eligibility.quantity, Math.floor(wingQuantity) || 1));
+    const own = c.quotes.find((x) => x.right === eligibility.right && x.strike === eligibility.strike);
+    if (!own || own.bid == null) return { row: null, tickTable: c.tickTable };
+    const rows = buildWingRows(c.quotes, {
+      long: { right: eligibility.right, strike: eligibility.strike, quantity: eligibility.quantity, bid: own.bid, entryDebit: eligibility.entryDebit },
+      wingQuantity: wingQ, nowMs: Date.now(),
+    });
+    return { row: rows.find((r) => r.strike === sel?.strike) ?? null, tickTable: c.tickTable };
+  };
+  const req = sel?.objective?.required;
+  const objectiveLine = !sel ? '' : (() => {
+    const label = objective === 'amount' ? usd(vm.target, 0) : `Original debit ${usd(vm.target, 0)}`;
+    if (req && 'price' in req) return `${label}: can meet only if ${position.symbol} finishes at or ${eligibility.right === 'P' ? 'below' : 'above'} ${usd(req.price)}.`;
+    if (req && 'already' in req) return `${label}: already covered by the credit.`;
+    return `${label}: cannot be reached with this wing.`;
+  })();
   const shown: SalvageViewModel = error ? { ...vm, unavailable: error } : loading && !chain ? { ...vm, unavailable: 'Loading the option chain…' } : vm;
   if (typeof document === 'undefined') return null;
   // Portal to <body>: rendered inside a table row, the page's sticky headers (z-30/z-40) stack over the dialog.
   return createPortal(
     <div className="fixed inset-0 z-[200] overflow-y-auto bg-black/80 p-4" role="dialog" aria-modal="true" aria-label={`Salvage ${position.symbol}`}>
       <div className="mx-auto max-w-5xl rounded-2xl border border-slate-700 bg-slate-950 p-5">
+        {reviewing && deps && sel && sel.occSymbol ? (
+          <SalvageReview
+            position={position} eligible={eligibility} row={sel}
+            wingQuantity={Math.max(1, Math.min(eligibility.quantity, Math.floor(wingQuantity) || 1))}
+            tickTable={chain?.tickTable ?? null} objectiveLine={objectiveLine} earnings={vm.earnings}
+            deps={deps} reload={reload} onBack={() => setReviewing(false)} onClose={onClose}
+          />
+        ) : (
         <SalvageView
           vm={shown} p={position} objective={objective} setObjective={setObjective}
           amountText={amountText} setAmountText={setAmountText} rankBy={rankBy} setRankBy={setRankBy}
           wingQuantity={wingQuantity} setWingQuantity={setWingQuantity} maxWing={eligibility.quantity}
           selectedStrike={selectedStrike} setSelectedStrike={setSelectedStrike}
           onRefresh={() => void load()} loading={loading} onClose={onClose}
+          onReview={deps ? () => setReviewing(true) : undefined} reviewBlockedReason={reviewBlockedReason}
         />
+        )}
       </div>
     </div>,
     document.body,

@@ -5,6 +5,7 @@
 // any missing piece throws, and the panel shows "Salvage unavailable".
 
 import { ttFetch } from '@/lib/scans/tastytrade-client';
+import { tickTableFromNestedChain, type TickTable } from '@/lib/portfolio/tickSize';
 import type { ChainQuote } from './salvageCandidates';
 import type { OptionRight } from './salvageMath';
 
@@ -12,6 +13,8 @@ export interface SalvageChain {
   symbol: string;
   expDate: string;
   quotes: ChainQuote[];
+  /** The option root's tick table, or null when the chain publishes none (whole cents are used). */
+  tickTable: TickTable | null;
   /** Epoch ms when this load finished. */
   fetchedAtMs: number;
 }
@@ -70,10 +73,11 @@ export async function loadSalvageChain(
         bid: num(item.bid),
         ask: num(item.ask),
         delta: num(item.delta),
+        occSymbol: typeof item.symbol === 'string' ? item.symbol : null,
         asOfMs: Number.isFinite(parsed) ? parsed : loadedAt,
       });
     }
   }
   if (quotes.length === 0) throw new Error('No option quotes came back.');
-  return { symbol, expDate, quotes, fetchedAtMs: nowMs() };
+  return { symbol, expDate, quotes, tickTable: tickTableFromNestedChain(nested, symbols[0]), fetchedAtMs: nowMs() };
 }

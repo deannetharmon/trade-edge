@@ -27,6 +27,8 @@ export interface ChainQuote {
   bid: number | null;
   ask: number | null;
   delta: number | null;
+  /** Space-padded OCC symbol, needed to build an order. */
+  occSymbol?: string | null;
   /** Epoch ms of the quote. Null means unknown age, treated as stale. */
   asOfMs: number | null;
 }
@@ -35,6 +37,7 @@ export type CandidateWarning = 'WIDE_MARKET' | 'STALE_QUOTE';
 
 export interface WingRow {
   strike: number;
+  occSymbol: string | null;
   bid: number;
   ask: number | null;
   delta: number | null;
@@ -86,6 +89,7 @@ export function buildWingRows(chain: ChainQuote[], o: BuildOptions): WingRow[] {
     const cap = maxExpiryPayoff(o.long, wing, o.wingQuantity);
     rows.push({
       strike: q.strike,
+      occSymbol: q.occSymbol ?? null,
       bid: q.bid,
       ask: q.ask,
       delta: q.delta,

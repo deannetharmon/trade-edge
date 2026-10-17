@@ -99,3 +99,19 @@ describe('Salvage dialog stacking', () => {
     expect(dialog.className).toContain('z-[200]');
   });
 });
+
+describe('Salvage panel order button', () => {
+  it('is disabled with a reason when no broker deps are provided', () => {
+    const noop = () => {};
+    render(<SalvageView vm={vmFor()} p={pos} objective="most" setObjective={noop} amountText="" setAmountText={noop} rankBy="most" setRankBy={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={110} setSelectedStrike={noop} onRefresh={noop} loading={false} onClose={noop} />);
+    expect((screen.getByTestId('salvage-review-open') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('salvage-review-blocked').textContent).toContain('not available');
+  });
+  it('is enabled and named for the selected wing when review is available', () => {
+    const noop = () => {};
+    render(<SalvageView vm={vmFor()} p={pos} objective="most" setObjective={noop} amountText="" setAmountText={noop} rankBy="most" setRankBy={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={110} setSelectedStrike={noop} onRefresh={noop} loading={false} onClose={noop} onReview={noop} reviewBlockedReason={null} />);
+    const b = screen.getByTestId('salvage-review-open') as HTMLButtonElement;
+    expect(b.disabled).toBe(false);
+    expect(b.textContent).toContain('sell 1 MRNA 110 put');
+  });
+});

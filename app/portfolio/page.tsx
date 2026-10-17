@@ -230,6 +230,8 @@ import { buildLeveragedPositionExposureGroups, buildLeveragedPositionExposureExc
 // See docs/implementation/WA-0004-Briefing-Separation-Implementation-Report.md.
 import { BASE, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
 import { buildSnapshotCapacityReport } from '@/lib/portfolio-snapshot/capacity';
+import { SalvageDepsProvider, type SalvageDeps } from '@/features/portfolio/positions-workspace/salvage/SalvageDeps';
+import { parseSalvageDryRun } from '@/lib/salvage/salvageDryRun';
 import type { StockSellOrder } from '@/lib/portfolio/stockOrderBuilder';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { PercentPriceInputs, formatPct } from '@/features/portfolio/components/PercentPriceInputs';
@@ -10721,6 +10723,35 @@ export default function PortfolioPage() {
     },
   }), [fetchPositions, portfolioMode.status, portfolioMode.mode]);
 
+  // SALVAGE-0001 slice D: broker access for the Salvage order review (read-only until the trader presses Submit,
+  // and Submit is reachable only through submitSalvageOrderIfSafe).
+  const salvageDeps = useMemo<SalvageDeps>(() => ({
+    fetchFreshPosition: async (positionKey: string) => {
+      const result = await fetchPositions();
+      if (result.status !== 'success') {
+        throw new Error(result.status === 'error' ? result.message : 'Portfolio refresh was superseded. Try again.');
+      }
+      return result.positions.find(p => p.key === positionKey) ?? null;
+    },
+    dryRun: async (order, accountNumber) => {
+      assertLiveContextReady(portfolioMode.status, portfolioMode.mode, 'dry-run a salvage order');
+      const token = await getAccessToken();
+      const res = await fetch(`${BASE}/accounts/${accountNumber}/orders/dry-run`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(order),
+      });
+      const body = await res.json().catch(() => ({}));
+      return parseSalvageDryRun(res.ok, body);
+    },
+    submit: async (order, accountNumber) => {
+      assertLiveContextReady(portfolioMode.status, portfolioMode.mode, 'submit a salvage order');
+      const token = await getAccessToken();
+      const data = await ttPost(`/accounts/${accountNumber}/orders`, token, order);
+      return { orderId: data?.data?.order?.id ?? data?.data?.id ?? 'submitted' };
+    },
+  }), [fetchPositions, portfolioMode.status, portfolioMode.mode]);
+
   const findPmccShortCall = useCallback((opportunity: {
     accountNumber: string | null; positionKey: string | null; symbol: string; exactContract: string | null;
   }) => {
@@ -11322,6 +11353,7 @@ export default function PortfolioPage() {
               <div className="px-4 pt-4 sm:px-6 sm:pt-6">
                 <PortfolioGreeksDashboard positions={positions} th={th} />
               </div>
+              <SalvageDepsProvider value={salvageDeps}>
               <PositionsWorkspace
                 model={positionsWorkspaceModel}
                 pendingOrders={pendingOrders}
@@ -11342,6 +11374,7 @@ export default function PortfolioPage() {
                 onIntentChange={handleIntentChange}
                 onRefresh={fetchPositions}
               />
+              </SalvageDepsProvider>
             </>
           ) : (
           <div className="overflow-x-auto">
