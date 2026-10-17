@@ -11,6 +11,7 @@
 //   - no retries anywhere: any unexpected result stops the walk and says whether an order is still live
 //   - each next price comes from the live quote (nextWalkPrice); a halt (stale, opening window, bad market) leaves the order as it is
 //   - the walk only ever moves toward the market, never past the boundary re-derived from the live quote
+//   - the close-order safety gate (deps.checkPrice) runs on every next price before the cancel; a refusal leaves the order working
 
 import { WalkAuthError, type WalkOrderStatus } from '@/lib/entry-walk/walk';
 import type { TickTable } from '@/lib/portfolio/tickSize';
@@ -54,6 +55,11 @@ export interface ExitWalkDeps {
   cancel(orderId: string): Promise<void>;
   /** Fresh NBBO for the contract being closed; null when unavailable. */
   getQuote(): Promise<Quote | null>;
+  /**
+   * Runs the close-order safety gate on the next price BEFORE anything is cancelled. Returns a refusal message, or null
+   * when the price may be sent. A refusal stops the walk with the working order left exactly as it is.
+   */
+  checkPrice?(price_c: number, quote: Quote): string | null;
   /** Epoch milliseconds. The module never reads a clock itself. */
   nowMs(): number;
   sleep(ms: number): Promise<void>;
@@ -72,6 +78,7 @@ export interface ExitWalkLogEntry {
 
 export type ExitWalkStopReason =
   | 'halted'
+  | 'price_blocked'
   | 'unknown_status'
   | 'order_closed'
   | 'cancel_failed'
@@ -199,6 +206,8 @@ export async function runExitWalk({ side, tickTable, config, firstOrderId, first
         anchor = next.anchor;
         continue;
       }
+      const refusal = deps.checkPrice?.(next.price_c, quote as Quote) ?? null;
+      if (refusal) return stop('price_blocked', `${refusal} The working order was left as it is.`, true);
       if (deps.abandoned()) return stop('abandoned', 'The page was closed. The order stays at its last price.', true);
       if (deps.cancelRequested()) return await cancelAndFinish();
 

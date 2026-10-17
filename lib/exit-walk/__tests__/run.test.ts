@@ -267,6 +267,33 @@ describe('runExitWalk: halts leave the working order as it is', () => {
   });
 });
 
+describe('runExitWalk: safety gate on every next price', () => {
+  it('a refused price stops the walk before any cancel, leaving the order working', async () => {
+    const h = harness(MRNA);
+    h.deps.checkPrice = price => (price === 236 ? 'MATERIAL_PNL_DEVIATION: price too far from marketable.' : null);
+    const out = await run(h, 'sell', MRNA.bid, MRNA.ask, MRNA.first);
+    expect(out).toMatchObject({ kind: 'stopped', reason: 'price_blocked', orderLive: true, price_c: 245 });
+    expect(h.submits).toEqual([245]);
+    expect(h.cancels).toEqual(['o1', 'o2'].slice(0, 1)); // only the earlier, allowed step cancelled
+  });
+  it('the check sees the next price and the live quote; allowed prices pass through', async () => {
+    const h = harness(MRNA);
+    const seen: Array<[number, number, number]> = [];
+    h.deps.checkPrice = (price, quote) => { seen.push([price, quote.bid_c, quote.ask_c]); return null; };
+    const out = await run(h, 'sell', MRNA.bid, MRNA.ask, MRNA.first);
+    expect(out.kind).toBe('ended_working');
+    expect(seen.map(x => x[0])).toEqual([245, 236, 227, 218, 209, 208]);
+    expect(seen.every(x => x[1] === 208 && x[2] === 300)).toBe(true);
+  });
+  it('no check is run when the price is not moving toward the market', async () => {
+    const h = harness({ ...MRNA, onSleep: x => { x.quote.bid = 260; x.quote.ask = 320; } });
+    let calls = 0;
+    h.deps.checkPrice = () => { calls += 1; return null; };
+    await run(h, 'sell', MRNA.bid, MRNA.ask, MRNA.first);
+    expect(calls).toBe(0);
+  });
+});
+
 describe('runExitWalk: market moves', () => {
   it('re-anchors when the mid moves more than a step, keeping the step index and never going below the live bid', async () => {
     const moved = { bid: 150, ask: 242 };

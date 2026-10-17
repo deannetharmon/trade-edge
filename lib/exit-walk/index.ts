@@ -30,3 +30,15 @@ export type {
 } from './run';
 export { centsToPriceString, createBrowserExitWalkDeps, createDryRunExitWalkDeps, exitQuoteFromLegs } from './browserDeps';
 export type { BrowserExitWalkConfig } from './browserDeps';
+export {
+  buildExitCloseOrder,
+  checkExitWalkEligibility,
+  closeEffectFor,
+  exitSideFor,
+  exitWalkGateRefusal,
+  expectedClosePnlDollars,
+  instrumentTypeFor,
+  isRegularSession,
+  runExitWalkGate,
+} from './closeOrder';
+export type { ExitCloseOrderBody, ExitCloseOrderLeg, ExitWalkEligibility, ExitWalkGateInput, ExitWalkIneligible } from './closeOrder';
