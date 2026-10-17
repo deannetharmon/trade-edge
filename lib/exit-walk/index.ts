@@ -28,3 +28,5 @@ export type {
   WalkStartCheck,
   WalkStartInput,
 } from './run';
+export { centsToPriceString, createBrowserExitWalkDeps, createDryRunExitWalkDeps, exitQuoteFromLegs } from './browserDeps';
+export type { BrowserExitWalkConfig } from './browserDeps';
