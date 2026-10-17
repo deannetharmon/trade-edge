@@ -21,7 +21,7 @@ import {
 } from '@/lib/salvage/salvageMath';
 
 export type ObjectiveKind = 'most' | 'amount' | 'debit';
-export type RankBy = 'most' | 'credit' | 'easiest';
+export type RankBy = 'nearest' | 'most' | 'credit' | 'easiest';
 
 export type ScenarioKind = 'now' | 'strike' | 'target' | 'wing' | 'deep';
 
@@ -70,7 +70,8 @@ function rank(rows: WingRow[], by: RankBy, right: 'P' | 'C'): WingRow[] {
     const req = r.objective?.required;
     return req && 'price' in req ? req.price : null;
   };
-  if (by === 'credit') copy.sort((a, b) => b.creditNet - a.creditNet);
+  if (by === 'nearest') copy.sort((a, b) => (right === 'P' ? b.strike - a.strike : a.strike - b.strike));
+  else if (by === 'credit') copy.sort((a, b) => b.creditNet - a.creditNet);
   else if (by === 'most') copy.sort((a, b) => b.maxFromToday - a.maxFromToday);
   else {
     // Easiest to reach: the price needed is closest to where the stock is now

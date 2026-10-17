@@ -39,6 +39,13 @@ describe('buildSalvageViewModel', () => {
     expect(vm.scenarios[4]).toMatchObject({ price: 86.36 });
     expect(vm.earnings).toMatchObject({ before: true, daysAway: 21 });
   });
+  it('nearest ranking (the default) lists the strike closest to the long strike first and selects it', () => {
+    const vm = vmFor({ rankBy: 'nearest', selectedStrike: null });
+    expect(vm.rows.map((r) => r.strike)).toEqual([130, 120, 110, 100]);
+    expect(vm.selected?.strike).toBe(130);
+    const calls = vmFor({ rankBy: 'nearest' });
+    expect(calls.rows[0].strike).toBeGreaterThan(calls.rows[calls.rows.length - 1].strike);
+  });
   it('ranking: most from today puts 100 first; credit puts 130 first; easiest puts the highest price first', () => {
     expect(vmFor({ rankBy: 'most' }).rows[0].strike).toBe(100);
     expect(vmFor({ rankBy: 'credit' }).rows[0].strike).toBe(130);
@@ -64,30 +71,35 @@ describe('Salvage UI', () => {
   });
   it('SalvageView shows the three choices, the gives-up line, and the earnings note', () => {
     const noop = () => {};
-    render(<SalvageView vm={vmFor()} p={pos} objective="most" setObjective={noop} amountText="" setAmountText={noop} rankBy="most" setRankBy={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={110} setSelectedStrike={noop} onRefresh={noop} loading={false} onClose={noop} />);
+    render(<SalvageView vm={vmFor()} p={pos} objective="most" setObjective={noop} amountText="" setAmountText={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={110} setSelectedStrike={noop} onRefresh={noop} loading={false} onClose={noop} />);
     expect(screen.getByTestId('salvage-close').textContent).toBe('$207.86');
-    expect(screen.getByTestId('salvage-wing-credit').textContent).toContain('+$48.86');
+    expect(screen.getByTestId('salvage-wing-credit').textContent).toContain('$48.86');
     expect(screen.getByTestId('salvage-gives-up').textContent).toContain('adds at most $3,000');
     expect(screen.getByTestId('salvage-earnings').textContent).toContain('Event volatility impact is not available');
-    expect(screen.getByTestId('salvage-row-110').textContent).toContain('Can meet');
-    expect(screen.getByTestId('salvage-row-130').textContent).toContain('Partial only');
+    expect(screen.getByTestId('salvage-row-110').textContent).toContain('$3,048.86');
+    expect(screen.queryByText('Rank wings by')).toBeNull();
+    // the wing is optional: collapsed until opened, and Close now / Hold lead the screen
+    expect((screen.getByTestId('salvage-wing-section') as HTMLDetailsElement).open).toBe(false);
+    const hold = screen.getByTestId('salvage-hold').textContent ?? '';
+    expect(hold).toContain('time value');
+    expect(hold).toContain('at expiry');
+    expect(hold).toContain('$100 for every $1 below $140');
   });
   it('SalvageView leads with a plain-words summary and rows are selectable', async () => {
     const { fireEvent } = await import('@testing-library/react');
     let picked: number | null = null;
     const noop = () => {};
-    render(<SalvageView vm={vmFor()} p={pos} objective="debit" setObjective={noop} amountText="" setAmountText={noop} rankBy="most" setRankBy={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={110} setSelectedStrike={(n) => { picked = n; }} onRefresh={noop} loading={false} onClose={noop} />);
+    render(<SalvageView vm={vmFor()} p={pos} objective="debit" setObjective={noop} amountText="" setAmountText={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={110} setSelectedStrike={(n) => { picked = n; }} onRefresh={noop} loading={false} onClose={noop} />);
     const text = screen.getByTestId('salvage-bottom-line').textContent ?? '';
-    expect(text).toContain('$207.86');
     expect(text).toContain('$114.74');
     expect(text).toContain('the $2,574 you paid');
+    expect(text).toContain('Nobody knows where MRNA ends');
     fireEvent.click(screen.getByTestId('salvage-row-120'));
     expect(picked).toBe(120);
-    expect(screen.getByTestId('salvage-legend')).toBeTruthy();
   });
   it('SalvageView shows "Salvage unavailable" when the model is unavailable', () => {
     const noop = () => {};
-    render(<SalvageView vm={vmFor({ quotes: null })} p={pos} objective="most" setObjective={noop} amountText="" setAmountText={noop} rankBy="most" setRankBy={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={null} setSelectedStrike={noop} onRefresh={noop} loading={false} onClose={noop} />);
+    render(<SalvageView vm={vmFor({ quotes: null })} p={pos} objective="most" setObjective={noop} amountText="" setAmountText={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={null} setSelectedStrike={noop} onRefresh={noop} loading={false} onClose={noop} />);
     expect(screen.getByTestId('salvage-unavailable').textContent).toContain('Salvage unavailable');
   });
 });
@@ -107,13 +119,13 @@ describe('Salvage dialog stacking', () => {
 describe('Salvage panel order button', () => {
   it('is disabled with a reason when no broker deps are provided', () => {
     const noop = () => {};
-    render(<SalvageView vm={vmFor()} p={pos} objective="most" setObjective={noop} amountText="" setAmountText={noop} rankBy="most" setRankBy={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={110} setSelectedStrike={noop} onRefresh={noop} loading={false} onClose={noop} />);
+    render(<SalvageView vm={vmFor()} p={pos} objective="most" setObjective={noop} amountText="" setAmountText={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={110} setSelectedStrike={noop} onRefresh={noop} loading={false} onClose={noop} />);
     expect((screen.getByTestId('salvage-review-open') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('salvage-review-blocked').textContent).toContain('not available');
   });
   it('is enabled and named for the selected wing when review is available', () => {
     const noop = () => {};
-    render(<SalvageView vm={vmFor()} p={pos} objective="most" setObjective={noop} amountText="" setAmountText={noop} rankBy="most" setRankBy={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={110} setSelectedStrike={noop} onRefresh={noop} loading={false} onClose={noop} onReview={noop} reviewBlockedReason={null} />);
+    render(<SalvageView vm={vmFor()} p={pos} objective="most" setObjective={noop} amountText="" setAmountText={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={110} setSelectedStrike={noop} onRefresh={noop} loading={false} onClose={noop} onReview={noop} reviewBlockedReason={null} />);
     const b = screen.getByTestId('salvage-review-open') as HTMLButtonElement;
     expect(b.disabled).toBe(false);
     expect(b.textContent).toContain('sell 1 MRNA 110 put');
@@ -121,18 +133,19 @@ describe('Salvage panel order button', () => {
 });
 
 describe('Salvage plain scenarios', () => {
-  it('shows three ways it could go with the best total ticked and the shortfall against what was paid', () => {
+  it('shows three plain sentences, marks the most dollars in words, and keeps the sunk-cost framing', () => {
     const noop = () => {};
-    render(<SalvageView vm={vmFor()} p={pos} objective="most" setObjective={noop} amountText="" setAmountText={noop} rankBy="most" setRankBy={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={110} setSelectedStrike={noop} onRefresh={noop} loading={false} onClose={noop} />);
+    render(<SalvageView vm={vmFor()} p={pos} objective="most" setObjective={noop} amountText="" setAmountText={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={110} setSelectedStrike={noop} onRefresh={noop} loading={false} onClose={noop} />);
     const box = screen.getByTestId('salvage-simple-scenarios');
     const text = box.textContent ?? '';
     expect(box.children).toHaveLength(3);
-    expect(text).toContain('Here ($215.90)');
-    expect(text).toContain('gets back the $2,574 you paid');
-    expect(text).toContain('well past the wing');
-    expect(text).toContain('−$2,366'); // best of the three when MRNA stays put, against the $2,574 paid
-    // when MRNA stays put, closing now ($207.86) is the best of the three
+    expect(text).toContain('MRNA stays near $215.90');
+    expect(text).toContain('This is the price that gets back the $2,574 you paid');
+    expect(text).toContain('MRNA falls to $86.36');
+    expect(text).toContain('Keeping beats the wing by');
+    // when MRNA stays put, closing now ($207.86) is the most of the three; stated in words, not a tick mark
     const first = box.children[0].textContent ?? '';
-    expect(first).toContain('$207.86 ✓');
+    expect(first).toContain('closing now gives $207.86 (most)');
+    expect(text).not.toContain('✓');
   });
 });
