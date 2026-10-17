@@ -23,8 +23,11 @@ import {
 export type ObjectiveKind = 'most' | 'amount' | 'debit';
 export type RankBy = 'most' | 'credit' | 'easiest';
 
+export type ScenarioKind = 'now' | 'strike' | 'target' | 'wing' | 'deep';
+
 export interface ScenarioColumn {
   price: number;
+  kind: ScenarioKind;
   label: string;
   hold: number;
   wing: number | null;
@@ -58,8 +61,8 @@ export interface SalvageInputs {
   selectedStrike: number | null;
 }
 
-const PUT_FACTORS = [1, 0.9, 0.75, 0.65, 0.55, 0.4];
-const CALL_FACTORS = [1, 1.1, 1.25, 1.35, 1.45, 1.6];
+/** Far-past-the-wing price: 60% away from today (down for puts, up for calls). */
+const DEEP_FACTOR = { P: 0.4, C: 1.6 } as const;
 
 function rank(rows: WingRow[], by: RankBy, right: 'P' | 'C'): WingRow[] {
   const copy = [...rows];
@@ -105,18 +108,24 @@ export function buildSalvageViewModel(i: SalvageInputs): SalvageViewModel {
   );
   const selected = rows.find((r) => r.strike === i.selectedStrike) ?? rows[0] ?? null;
 
-  const factors = e.right === 'P' ? PUT_FACTORS : CALL_FACTORS;
-  const scenarios: ScenarioColumn[] = factors.map((f, idx) => {
-    const price = Math.round(underlying * f * 100) / 100;
-    const wing = selected ? wingTotalFromToday(long, { strike: selected.strike, bid: selected.bid }, wingQuantity, price) : null;
-    return {
-      price,
-      label: idx === 0 ? 'now' : `${f > 1 ? '+' : '−'}${Math.round(Math.abs(f - 1) * 100)}%`,
-      hold: holdAtExpiry(long, price),
-      wing,
-      wingVsPaid: wing == null ? null : pnlFromEntry(long, wing),
-    };
-  });
+  // Anchors that mean something for THIS position (Ian, 2026-10-16), not round percentages.
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const req = selected?.objective?.required;
+  const anchors: Array<{ price: number; kind: ScenarioKind; label: string }> = [
+    { price: r2(underlying), kind: 'now', label: 'now' },
+    { price: e.strike, kind: 'strike', label: 'your strike' },
+  ];
+  if (req && 'price' in req) anchors.push({ price: req.price, kind: 'target', label: 'reaches your target' });
+  if (selected) anchors.push({ price: selected.strike, kind: 'wing', label: 'wing strike' });
+  anchors.push({ price: r2(underlying * DEEP_FACTOR[e.right]), kind: 'deep', label: e.right === 'P' ? '−60%' : '+60%' });
+  // Nearest-to-today first; drop an anchor that lands on the same price as one already kept.
+  anchors.sort((a, b) => (e.right === 'P' ? b.price - a.price : a.price - b.price));
+  const scenarios: ScenarioColumn[] = anchors
+    .filter((a, k, arr) => arr.findIndex((o) => Math.abs(o.price - a.price) < 0.005) === k)
+    .map((a) => {
+      const wing = selected ? wingTotalFromToday(long, { strike: selected.strike, bid: selected.bid }, wingQuantity, a.price) : null;
+      return { price: a.price, kind: a.kind, label: a.label, hold: holdAtExpiry(long, a.price), wing, wingVsPaid: wing == null ? null : pnlFromEntry(long, wing) };
+    });
   return {
     unavailable: null,
     long,

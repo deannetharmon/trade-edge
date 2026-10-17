@@ -205,13 +205,17 @@ export function SalvageView({
             <p className="text-sm font-semibold text-white">Three ways it could go (total dollars you end up with from today)</p>
             {(() => {
               const sc = vm.scenarios;
-              const idx = [0, sc.findIndex((x) => x.hold > 0), sc.length - 1].filter((v, i, a) => v >= 0 && a.indexOf(v) === i);
-              const picks = idx.map((k) => sc[k]);
+              const pick = (kind: string) => sc.find((x) => x.kind === kind);
+              const picks = [pick('now'), pick('target') ?? pick('wing'), pick('deep')].filter((x, i, a): x is NonNullable<typeof x> => !!x && a.indexOf(x) === i);
               return (
                 <div className="grid gap-3 sm:grid-cols-3" data-testid="salvage-simple-scenarios">
-                  {picks.map((x, n) => {
+                  {picks.map((x) => {
                     const beyond = right === 'P' ? x.price > leg.strikePrice : x.price < leg.strikePrice;
-                    const title = n === 0 ? `${p.symbol} stays about here (${usd(x.price)})` : `${p.symbol} falls to ${usd(x.price)} (${x.label})`;
+                    const targetWords = objective === 'amount' ? `reach your ${usd(vm.target, 0)}` : `get back the ${usd(vm.target, 0)} you paid`;
+                    const title = x.kind === 'now' ? `${p.symbol} stays about here (${usd(x.price)})`
+                      : x.kind === 'target' ? `${p.symbol} falls to ${usd(x.price)}, enough to ${targetWords}`
+                      : x.kind === 'wing' ? `${p.symbol} falls to the wing strike (${usd(x.price, 0)})`
+                      : `${p.symbol} falls to ${usd(x.price)} (${x.label}), well past the wing`;
                     const vals = [
                       { name: 'Close now', v: vm.closeNow ?? 0 },
                       { name: 'Keep it, do nothing', v: x.hold },

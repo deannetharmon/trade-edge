@@ -31,8 +31,12 @@ describe('buildSalvageViewModel', () => {
     expect(vm.closeNow).toBe(207.86);
     expect(vm.rows.map((r) => r.strike).sort((a, b) => b - a)).toEqual([130, 120, 110, 100]);
     expect(vm.selected?.strike).toBe(110);
-    expect(vm.scenarios).toHaveLength(6);
+    expect(vm.scenarios.map((x) => x.kind)).toEqual(['now', 'strike', 'target', 'wing', 'deep']);
     expect(vm.scenarios[0]).toMatchObject({ price: 215.9, label: 'now', hold: 0 });
+    expect(vm.scenarios[1]).toMatchObject({ price: 140, hold: 0 });
+    expect(vm.scenarios[2].price).toBeCloseTo(114.74, 2);
+    expect(vm.scenarios[3]).toMatchObject({ price: 110 });
+    expect(vm.scenarios[4]).toMatchObject({ price: 86.36 });
     expect(vm.earnings).toMatchObject({ before: true, daysAway: 21 });
   });
   it('ranking: most from today puts 100 first; credit puts 130 first; easiest puts the highest price first', () => {
@@ -124,6 +128,8 @@ describe('Salvage plain scenarios', () => {
     const text = box.textContent ?? '';
     expect(box.children).toHaveLength(3);
     expect(text).toContain('stays about here');
+    expect(text).toContain('enough to get back the $2,574 you paid');
+    expect(text).toContain('well past the wing');
     expect(text).toContain('Keep it, do nothing');
     expect(text).toContain('finishes worthless');
     expect(text).toContain('below the $2,574 you paid');
