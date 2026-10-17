@@ -283,6 +283,25 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByRole('button', { name: 'Quick chart for AAPL' }).closest('td')).not.toBe(cell);
   });
 
+  it('STICKY-HEADERS-0001: the Portfolio list header is sticky below the page bars, and its card does not clip stickiness', () => {
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    const header = screen.getByTestId('positions-list-header');
+    expect(header).toHaveClass('sticky', 'bg-slate-950');
+    expect(header.style.top).toMatch(/^\d+px$/);
+    const card = header.parentElement!;
+    expect(card).toHaveClass('overflow-clip');
+    expect(card).not.toHaveClass('overflow-hidden');
+  });
+
+  it('STICKY-HEADERS-0001: the Analysis table scrolls in a box that ends at the bottom of the window and does not chain to the page', async () => {
+    const user = userEvent.setup();
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    const box = screen.getByTestId('analysis-scroll-box');
+    expect(box.style.maxHeight).toMatch(/^calc\(100vh - \d+px - 1rem\)$/);
+    expect(box).toHaveClass('overflow-auto', 'lg:overscroll-y-contain');
+  });
+
   it('the sticky Position cell uses the page background (black), not the grey card color', async () => {
     const user = userEvent.setup();
     render(<PositionsWorkspace model={model} th={THEMES.dark} />);

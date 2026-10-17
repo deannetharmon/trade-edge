@@ -11113,7 +11113,7 @@ export default function PortfolioPage() {
       />
 
       {/* Sub-tab bar */}
-      <div className={`${th.sidebar} border-b ${th.border} px-6 sticky top-[var(--app-header-h,85px)] z-40`}>
+      <div data-portfolio-subtabs className={`${th.sidebar} border-b ${th.border} px-6 sticky top-[var(--app-header-h,85px)] z-40`}>
         <div className="flex gap-0 overflow-x-auto whitespace-nowrap">
           {([
             { key: 'todays-priorities', label: "Today's Priorities", icon: '✦' },

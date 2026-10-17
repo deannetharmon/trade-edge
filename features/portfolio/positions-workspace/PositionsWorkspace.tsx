@@ -9,12 +9,14 @@ import { buildPortfolioSummary, positionDayChangeDetail, positionInSummaryGroup,
 import { sameWidths } from './model/stockColumnAlignment';
 import { nextEarningsLine } from './model/nextEarnings';
 import { profitTargetOrderPct, stopOrderPct } from './model/orderPercents';
+import { installWheelHandoff, readStickyTop } from './stickyScroll';
+import { useStickyTop } from './useStickyTop';
 import { buildValueSplit } from './model/extrinsic';
 import { extrinsicTone, intrinsicTone, ivTone } from './model/valueTone';
 import { intentFamilyFor } from '@/lib/positionIntent/vocabulary';
 import { standaloneLongOptionLabel } from '@/lib/portfolio/positionStrategyFilter';
 import type { PendingOrder, PositionIntent } from '@/lib/portfolio-data/types';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ActionType, Position } from '@/lib/portfolio-data/types';
 import { netEdgeLive, netEdgePeak, netEdgeColor, netEdgeDayChangePct, netEdgeDaysTracked, netEdgeRolledOver } from '@/lib/portfolio-data/acquisition';
 import type { THEMES, Theme } from '@/lib/theme';
@@ -144,6 +146,7 @@ function PortfolioView({ groups, th, renderStopControl, onIntentChange }: { grou
   const [chartData, setChartData] = useState<Record<string, number[] | null>>({});
   const [chartLoadingSymbol, setChartLoadingSymbol] = useState<string | null>(null);
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const stickyTop = useStickyTop();
   useEffect(() => { if (selected && !groups.some(group => group.symbol === selected)) setSelected(groups[0]?.symbol ?? null); }, [groups, selected]);
   const group = groups.find(item => item.symbol === selected) ?? null;
   const closeDetail = () => {
@@ -153,8 +156,8 @@ function PortfolioView({ groups, th, renderStopControl, onIntentChange }: { grou
     window.setTimeout(() => selectedRow?.focus(), 0);
   };
   return <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,38%)]">
-    <section aria-label="Portfolio positions" className={`${mobileDetail ? 'hidden lg:block' : ''} overflow-hidden rounded-xl border ${th.border}`}>
-      <div className={`grid grid-cols-[minmax(180px,1.35fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(130px,.8fr)_120px] gap-3 border-b ${th.border} px-4 py-2 text-[10px] uppercase tracking-wider ${th.textFaint}`}><span>Symbol / composition</span><span>Current value</span><span>Opening economics / basis</span><span>Status / freshness</span><span className="text-right">Unrealized P/L (mid)</span></div>
+    <section aria-label="Portfolio positions" className={`${mobileDetail ? 'hidden lg:block' : ''} overflow-clip rounded-xl border ${th.border}`}>
+      <div data-testid="positions-list-header" style={{ top: stickyTop }} className={`sticky z-30 bg-slate-950 grid grid-cols-[minmax(180px,1.35fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(130px,.8fr)_120px] gap-3 border-b ${th.border} px-4 py-2 text-[10px] uppercase tracking-wider ${th.textFaint}`}><span>Symbol / composition</span><span>Current value</span><span>Opening economics / basis</span><span>Status / freshness</span><span className="text-right">Unrealized P/L (mid)</span></div>
       {groups.map(item => { const primaryValue = item.equityMarketValueAggregate.completeness !== 'not-applicable' ? item.equityMarketValueAggregate : item.longOptionValueMid.completeness !== 'not-applicable' ? item.longOptionValueMid : item.optionBuybackMid; const equity = item.equities[0]; const option = item.options[0]; return <div key={item.symbol} onClick={() => { setSelected(item.symbol); setMobileDetail(true); }} className={`grid min-h-[84px] w-full grid-cols-[minmax(180px,1.35fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(130px,.8fr)_120px] items-center gap-3 border-b px-4 py-3 text-left transition cursor-pointer focus-within:ring-2 focus-within:ring-inset focus-within:ring-teal-400 ${th.border} ${item.symbol === selected ? 'border-l-4 border-l-teal-400 bg-teal-400/10' : 'border-l-4 border-l-transparent hover:bg-white/5'}`}>
         <span><button ref={node => { if (node) rowRefs.current.set(item.symbol, node); else rowRefs.current.delete(item.symbol); }} type="button" aria-current={item.symbol === selected ? 'true' : undefined} aria-expanded={item.symbol === selected} aria-controls="symbol-position-detail" onClick={e => { e.stopPropagation(); setSelected(item.symbol); setMobileDetail(true); }} className="block text-left focus:outline-none"><span className="block font-sans text-sm font-bold text-white">{item.symbol} <span aria-hidden="true">{item.symbol === selected ? '●' : ''}</span></span><span className={`block text-[11px] ${th.textFaint}`}>{item.compositionLabel} · {item.instrumentCount} instrument{item.instrumentCount === 1 ? '' : 's'}</span></button><span className="mt-1 block" onClick={e => e.stopPropagation()}><ChartLinkButton symbol={item.symbol} chartSymbol={INDEX_CHART_SYMBOLS[item.symbol.toUpperCase()] ?? item.symbol} instanceKey={`portfolio-${item.symbol}`} th={th} showChart={openChartSymbol === item.symbol} setShowChart={open => setOpenChartSymbol(open ? item.symbol : null)} sparkData={chartData[item.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [item.symbol]: data }))} sparkLoading={chartLoadingSymbol === item.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? item.symbol : null)} /></span></span>
         <span className="text-[11px]"><span className="block text-white">{primaryValue === item.optionBuybackMid && primaryValue.completeness !== 'not-applicable' ? 'Buyback obligation (mid)' : primaryValue === item.longOptionValueMid ? 'Liquidation value (mid)' : 'Equity market value'}</span><AggregateValue aggregate={primaryValue} absent="No applicable value" /></span>
@@ -445,6 +448,13 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
   const columns = preferences.analysisView === 'custom' ? preferences.customColumnIds : columnsForView(preferences.analysisView);
   // The Stock holdings table below takes its column widths from this table, so the two line up.
   const tableRef = useRef<HTMLTableElement>(null);
+  // STICKY-HEADERS-0001: the table scrolls inside its own box, sized to end at the bottom of the window once the box sits under the page bars.
+  const analysisStickyTop = useStickyTop();
+  const wheelCleanup = useRef<(() => void) | null>(null);
+  const attachScrollBox = useCallback((node: HTMLDivElement | null) => {
+    wheelCleanup.current?.();
+    wheelCleanup.current = node ? installWheelHandoff(node, readStickyTop) : null;
+  }, []);
   const [measuredWidths, setMeasuredWidths] = useState<Record<string, number> | null>(null);
   useEffect(() => {
     const table = tableRef.current;
@@ -562,7 +572,7 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
     })()}
     {notesLoadError && <p role="status" className="mb-2 text-xs text-amber-300">Position notes unavailable — {notesLoadError}</p>}
     {priceAlertsLoadError && <p role="status" className="mb-2 text-xs text-amber-300">Price alerts unavailable — {priceAlertsLoadError}</p>}
-    <div className="max-h-[calc(100vh-8rem)] max-w-full overflow-auto rounded-xl border border-white/10" tabIndex={0} aria-label="Position analysis table, horizontally scrollable"><table ref={tableRef} className="min-w-max border-collapse text-left text-[11px]"><thead><tr>{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => {
+    <div ref={attachScrollBox} data-testid="analysis-scroll-box" style={{ maxHeight: `calc(100vh - ${analysisStickyTop}px - 1rem)` }} className="max-w-full overflow-auto rounded-xl border border-white/10 lg:overscroll-y-contain" tabIndex={0} aria-label="Position analysis table, horizontally scrollable"><table ref={tableRef} className="min-w-max border-collapse text-left text-[11px]"><thead><tr>{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => {
   const sortable = SORTABLE_COLUMNS.has(column.id);
   const isActiveSort = sort?.column === column.id;
   const labelContent = column.id === 'strike' ? 'Strike / BE' : column.label;
