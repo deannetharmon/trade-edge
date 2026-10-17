@@ -18,6 +18,8 @@ import {
 export const QUOTE_MAX_AGE_MS = 60_000;
 export const WIDE_MARKET_PCT_OF_MID = 0.25;
 export const WIDE_MARKET_ABS_UNDER_ONE = 0.1;
+/** Bids below this per share are dust (Ian): not a real market, not offered as a wing. */
+export const MIN_WING_BID = 0.05;
 
 export interface ChainQuote {
   right: OptionRight;
@@ -72,7 +74,7 @@ export interface BuildOptions {
 export function buildWingRows(chain: ChainQuote[], o: BuildOptions): WingRow[] {
   const rows: WingRow[] = [];
   for (const q of chain) {
-    if (q.right !== o.long.right || q.bid == null) continue;
+    if (q.right !== o.long.right || q.bid == null || q.bid < MIN_WING_BID) continue;
     const wing = { strike: q.strike, bid: q.bid };
     if (!validateWing(o.long, wing, o.wingQuantity).valid) continue;
     const creditNet = wingCreditCash(wing, o.wingQuantity);

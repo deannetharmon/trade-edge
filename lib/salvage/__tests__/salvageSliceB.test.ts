@@ -116,6 +116,10 @@ describe('buildWingRows (synthetic chain)', () => {
     const v = Object.fromEntries(rows.map((r) => [r.strike, r.objective?.verdict]));
     expect(v).toEqual({ 130: 'partial-only', 120: 'partial-only', 110: 'can-meet', 100: 'can-meet' });
   });
+  it('dust bids below $0.05 are not offered; $0.05 is', () => {
+    const r = buildWingRows([q(110, 0.04, 0.1), q(100, 0.05, 0.1)], { long, wingQuantity: 1, nowMs: NOW });
+    expect(r.map((x) => x.strike)).toEqual([100]);
+  });
   it('stale quote is flagged and not proposable', () => {
     const stale = buildWingRows([q(110, 0.5, 0.55, 90_000)], { long, wingQuantity: 1, nowMs: NOW });
     expect(stale[0].warnings).toContain('STALE_QUOTE');
