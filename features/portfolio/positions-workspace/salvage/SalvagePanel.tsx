@@ -201,8 +201,41 @@ export function SalvageView({
         </section>
 
         {sel && vm.scenarios.length > 0 && (
-          <section className="space-y-2 rounded-xl border border-slate-800 bg-slate-900 p-4" aria-label="Scenarios">
-            <p className="text-sm font-semibold text-white">Dollars from today if {p.symbol} finishes at…</p>
+          <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4" aria-label="Scenarios">
+            <p className="text-sm font-semibold text-white">Three ways it could go (total dollars you end up with from today)</p>
+            {(() => {
+              const sc = vm.scenarios;
+              const idx = [0, sc.findIndex((x) => x.hold > 0), sc.length - 1].filter((v, i, a) => v >= 0 && a.indexOf(v) === i);
+              const picks = idx.map((k) => sc[k]);
+              return (
+                <div className="grid gap-3 sm:grid-cols-3" data-testid="salvage-simple-scenarios">
+                  {picks.map((x, n) => {
+                    const beyond = right === 'P' ? x.price > leg.strikePrice : x.price < leg.strikePrice;
+                    const title = n === 0 ? `${p.symbol} stays about here (${usd(x.price)})` : `${p.symbol} falls to ${usd(x.price)} (${x.label})`;
+                    const vals = [
+                      { name: 'Close now', v: vm.closeNow ?? 0 },
+                      { name: 'Keep it, do nothing', v: x.hold },
+                      { name: `Sell the ${sel.strike} wing`, v: x.wing ?? 0 },
+                    ];
+                    const best = Math.max(...vals.map((e) => e.v));
+                    return (
+                      <div key={x.label} className="rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm">
+                        <p className="font-semibold text-white">{title}</p>
+                        <p className="mb-2 text-xs text-slate-400">{beyond ? `Your ${usd(leg.strikePrice, 0)} ${right === 'P' ? 'put' : 'call'} finishes worthless.` : `Your ${usd(leg.strikePrice, 0)} ${right === 'P' ? 'put' : 'call'} finishes with value.`}</p>
+                        <ul className="space-y-1">
+                          {vals.map((e) => (
+                            <li key={e.name} className="flex justify-between gap-2"><span className="text-slate-300">{e.name}</span><span className={e.v === best ? 'font-bold text-emerald-300' : 'text-slate-200'}>{usd(e.v)}{e.v === best ? ' ✓' : ''}</span></li>
+                          ))}
+                        </ul>
+                        <p className="mt-2 text-xs text-slate-400">{vm.long && best - vm.long.entryDebit < 0 ? `Best case here is still ${usd(Math.abs(Math.round(best - vm.long.entryDebit)), 0)} below the ${usd(vm.long.entryDebit, 0)} you paid.` : 'Best case here is back above what you paid.'}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+            <details className="text-sm">
+              <summary className="min-h-11 cursor-pointer py-3 text-slate-300">Show every price</summary>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] border-collapse text-sm">
                 <thead><tr className="text-right text-[11px] uppercase tracking-wider text-slate-400">
@@ -211,13 +244,14 @@ export function SalvageView({
                 </tr></thead>
                 <tbody>
                   <tr className="border-t border-slate-800 text-right"><td className="px-2 py-2 text-left font-semibold">Close now</td>{vm.scenarios.map((s) => <td key={s.label} className="px-2 py-2">{vm.closeNow != null ? usd(vm.closeNow) : '—'}</td>)}</tr>
-                  <tr className="border-t border-slate-800 text-right"><td className="px-2 py-2 text-left font-semibold">Hold (at expiry)</td>{vm.scenarios.map((s) => <td key={s.label} className="px-2 py-2">{usd(s.hold)}</td>)}</tr>
+                  <tr className="border-t border-slate-800 text-right"><td className="px-2 py-2 text-left font-semibold">Do nothing, keep it to expiry</td>{vm.scenarios.map((s) => <td key={s.label} className="px-2 py-2">{usd(s.hold)}</td>)}</tr>
                   <tr className="border-t border-slate-800 bg-emerald-950/40 text-right"><td className="px-2 py-2 text-left font-bold">Wing {sel.strike}</td>{vm.scenarios.map((s) => <td key={s.label} className="px-2 py-2">{s.wing != null ? usd(s.wing) : '—'}</td>)}</tr>
                   <tr className="border-t border-slate-800 text-right text-slate-400"><td className="px-2 py-2 text-left">Wing {sel.strike} vs the {vm.long ? usd(vm.long.entryDebit, 0) : ''} paid</td>{vm.scenarios.map((s) => <td key={s.label} className="px-2 py-2">{s.wingVsPaid != null ? `${s.wingVsPaid >= 0 ? '+' : '−'}$${Math.abs(Math.round(s.wingVsPaid)).toLocaleString('en-US')}` : '—'}</td>)}</tr>
                 </tbody>
               </table>
             </div>
-            <p className="text-xs text-slate-400">Holding can pay more than the wing if {p.symbol} falls a long way; that is the trade-off.</p>
+            </details>
+            <p className="text-xs text-slate-400">Keeping the option can pay more than the wing if {p.symbol} falls a long way; that is the trade-off.</p>
           </section>
         )}
         <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4" aria-label="Order">

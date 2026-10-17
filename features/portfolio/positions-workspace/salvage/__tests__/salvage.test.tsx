@@ -115,3 +115,20 @@ describe('Salvage panel order button', () => {
     expect(b.textContent).toContain('sell 1 MRNA 110 put');
   });
 });
+
+describe('Salvage plain scenarios', () => {
+  it('shows three ways it could go with the best total ticked and the shortfall against what was paid', () => {
+    const noop = () => {};
+    render(<SalvageView vm={vmFor()} p={pos} objective="most" setObjective={noop} amountText="" setAmountText={noop} rankBy="most" setRankBy={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={110} setSelectedStrike={noop} onRefresh={noop} loading={false} onClose={noop} />);
+    const box = screen.getByTestId('salvage-simple-scenarios');
+    const text = box.textContent ?? '';
+    expect(box.children).toHaveLength(3);
+    expect(text).toContain('stays about here');
+    expect(text).toContain('Keep it, do nothing');
+    expect(text).toContain('finishes worthless');
+    expect(text).toContain('below the $2,574 you paid');
+    // when MRNA stays put, closing now ($207.86) is the best of the three
+    const first = box.children[0].textContent ?? '';
+    expect(first).toContain('$207.86 ✓');
+  });
+});
