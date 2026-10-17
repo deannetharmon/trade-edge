@@ -9,6 +9,12 @@
 
 Last updated: 2026-10-06 (ANALYTICS-0001 go)
 
+## Position Decision Engine fold-in — 2026-10-17
+
+- **Dean's decision (2026-10-17):** the new Position Decision Engine epic is folded into DECIDE-0001; Dean's approved rules win. Stop default = a mark at 2x the credit received (a 1x loss). No 21-DTE rule for CSP and CC (it stays for spreads, iron condors and PMCC short legs). A 2x or 3x leveraged ETF is not covered by the unconfirmed-Acquire "no stop" default unless the user explicitly chooses Acquire or Wheel with a max size (Ian). Bought options and LEAPs stay "Not judged yet"; user price levels on them are alerts, not commands. Ian, Paul, Alan and Quinn returned verdicts the same day; Diane's mocks are still owed for the UI slices.
+- **EXIT-WALK-0001** — slice A IMPLEMENTED 2026-10-17 (`lib/exit-walk/`: pure midpoint-walk math for exits, 45 tests, unwired). Slice B (click-to-walk button) needs Diane's mock and its own approval. Ticket: `docs/tickets/EXIT-WALK-0001-exit-price-walk.md`.
+- **Next:** RSI-TURN-0001 timestamp fix -> S0 -> S1; S2 after Ian's O19 ruling and Alan's fixtures; P2 portfolio layer (beta, sector cap) waits for LEV-0001 Gate 10 findings G10-F1/F2/F3.
+
 ## Trade Lookup — 2026-10-15
 
 - **TRADE-LOOKUP-0001** — slice 1 IMPLEMENTED 2026-10-15 (`lib/tradeLookup/`: pasted-post parser, expiration resolver, 39 tests). Paste a group post (CSP or covered call), see the chain with the posted contract highlighted, compare neighbors, send your pick to the order dialog. Inspection only: no scoring, qualification or order-path change. Ian approved scope and mock v2; Paul approved scope; Diane's mock v2 is on a claude.ai canvas. Entry point: a TRADE LOOKUP launcher in the Screener sidebar opening a `ScanModalShell` modal. Slice 2 IMPLEMENTED 2026-10-15 (lookup service: chain rows, neighbor selection, pricing from positionMetrics, covered-call coverage, load flow, broker wiring; 88 tradeLookup tests total). Slice 2b IMPLEMENTED 2026-10-15 (advisory flags: delta band, wide bid/ask, thin OI, strike below cost basis; 103 tradeLookup tests). Slice 3 IMPLEMENTED 2026-10-15 (TradeLookupModal + POST LOOKUP launcher in the Screener sidebar; CSP rows send to the existing CSP order dialog; covered calls inspection-only until a covered-call order dialog exists). **Next:** Dean's live check on Vercel preview; RSI badge and single-stock earnings flag IMPLEMENTED 2026-10-15 (TRADE-LOOKUP-0001F); the covered-call order dialog shipped as CC-ORDERS-0001. Ticket: `docs/tickets/TRADE-LOOKUP-0001.md`.
