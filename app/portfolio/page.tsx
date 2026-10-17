@@ -252,6 +252,7 @@ import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, type PmccReviewHandoff } from '@/lib/s
 // with assertLiveContextReady -- defense in depth, not reliance on the
 // render-level gate alone (§3.3).
 import { usePortfolioMode } from '@/components/portfolio-mode/PortfolioModeProvider';
+import { ExitWalkLauncher, ExitWalkProvider } from '@/components/portfolio/ExitWalkPanel';
 import { PortfolioModeGateNotice } from '@/components/portfolio-mode/PortfolioModeGateNotice';
 import { assertLiveContextReady } from '@/lib/portfolio-mode/guardrails';
 import { classifyTrendFromCloses } from '@/lib/portfolio/trendClassification';
@@ -9344,6 +9345,8 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
               </span>
             );
           })}
+          {/* EXIT-WALK-0001B: Walk the price (its own panel; never touches the batch close modal) */}
+          <ExitWalkLauncher pos={pos} />
           {/* Extend Profit — only show when profit ≥50% AND DTE ≥ 14 */}
           {(() => {
             const pnlPct = entryPnlPct(pos);
@@ -11395,7 +11398,7 @@ export default function PortfolioPage() {
                 // portfolio) or PendingOrdersSection (orders aren't yet classified
                 // by strategy).
                 return (
-                  <>
+                  <ExitWalkProvider pendingOrders={pendingOrders} dryRun={dryRunMode} onDone={fetchPositions}>
                     {positions.length > 0 && (
                       <PositionStrategyFilterBar selected={strategyFilters} onToggle={toggleStrategyFilter} onClearOrSelectAll={clearOrSelectAllStrategyFilters} th={th} />
                     )}
@@ -11431,7 +11434,7 @@ export default function PortfolioPage() {
                         No open positions match the selected strategy filters.
                       </p>
                     )}
-                  </>
+                  </ExitWalkProvider>
                 );
               })()}
             </div>

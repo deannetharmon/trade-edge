@@ -42,3 +42,5 @@ export {
   runExitWalkGate,
 } from './closeOrder';
 export type { ExitCloseOrderBody, ExitCloseOrderLeg, ExitWalkEligibility, ExitWalkGateInput, ExitWalkIneligible } from './closeOrder';
+export { clock, dollars, outcomeLine, planChips, planRows, refusalText, rowsWithLog, spreadPct, walkTitle } from './panelModel';
+export type { PanelChip, PanelRow } from './panelModel';
