@@ -177,7 +177,7 @@ export function SalvageView({
           </div>
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,11fr)_minmax(0,10fr)]">
           <section className="flex min-h-0 flex-col gap-2 rounded-xl border border-slate-800 bg-slate-900 p-3" aria-label="Wing candidates">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <p className="text-sm font-semibold text-white">Pick a wing: {word}s {right === 'P' ? 'below' : 'above'} {leg.strikePrice}</p>
@@ -229,7 +229,7 @@ export function SalvageView({
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse text-[13px]">
                   <thead><tr className="text-right text-[11px] uppercase tracking-wider text-slate-400">
-                    <th className="px-1 py-1 text-left">If {p.symbol} finishes…</th><th className="px-1 py-1">Close now</th><th className="px-1 py-1">Keep it</th><th className="px-1 py-1">Wing {sel.strike}</th><th className="px-1 py-1">Best vs paid</th>
+                    <th className="px-2 py-1 text-left">If {p.symbol} finishes…</th><th className="px-2 py-1">Close now</th><th className="px-2 py-1">Keep it</th><th className="px-2 py-1">Wing {sel.strike}</th><th className="px-2 py-1">Best vs paid</th>
                   </tr></thead>
                   <tbody data-testid="salvage-simple-scenarios">
                     {scenarioBoxes.map((x) => {
@@ -242,9 +242,9 @@ export function SalvageView({
                       const vsPaid = vm.long ? Math.round(best - vm.long.entryDebit) : 0;
                       return (
                         <tr key={`${x.kind}-${x.price}`} className="border-t border-slate-800 text-right align-top">
-                          <td className="px-1 py-1.5 text-left text-slate-200">{title}</td>
-                          {vals.map((v, k) => <td key={k} className={`px-1 py-1.5 ${v === best ? 'font-bold text-emerald-300' : 'text-slate-300'} whitespace-nowrap`}>{usd(v)}{v === best ? ' ✓' : ''}</td>)}
-                          <td className={`px-1 py-1.5 ${vsPaid < 0 ? 'text-slate-400' : 'text-emerald-300'}`}>{vsPaid >= 0 ? '+' : '−'}${Math.abs(vsPaid).toLocaleString('en-US')}</td>
+                          <td className="px-2 py-1.5 text-left text-slate-200">{title}</td>
+                          {vals.map((v, k) => <td key={k} className={`px-2 py-1.5 ${v === best ? 'font-bold text-emerald-300' : 'text-slate-300'} whitespace-nowrap`}>{usd(v)}{v === best ? ' ✓' : ''}</td>)}
+                          <td className={`px-2 py-1.5 ${vsPaid < 0 ? 'text-slate-400' : 'text-emerald-300'}`}>{vsPaid >= 0 ? '+' : '−'}${Math.abs(vsPaid).toLocaleString('en-US')}</td>
                         </tr>
                       );
                     })}
@@ -367,7 +367,7 @@ function SalvageDialog({ position, onClose }: { position: Position; onClose: () 
   // Portal to <body>: rendered inside a table row, the page's sticky headers (z-30/z-40) stack over the dialog.
   return createPortal(
     <div className="fixed inset-0 z-[200] overflow-y-auto bg-black/80 p-2 sm:p-4" role="dialog" aria-modal="true" aria-label={`Salvage ${position.symbol}`}>
-      <div className="mx-auto max-w-6xl rounded-2xl border border-slate-700 bg-slate-950 p-4">
+      <div className="mx-auto max-w-7xl rounded-2xl border border-slate-700 bg-slate-950 p-4">
         {reviewing && deps && sel && sel.occSymbol ? (
           <SalvageReview
             position={position} eligible={eligibility} row={sel}
