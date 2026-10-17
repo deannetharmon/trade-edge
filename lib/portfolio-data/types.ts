@@ -271,6 +271,8 @@ export interface Position {
   nextEarningsDate?: string | null;
   /** True when the provider marks that date as estimated; null when it does not say. */
   nextEarningsEstimated?: boolean | null;
+  /** Set when nextEarningsDate is the date of the stock a leveraged single-stock fund follows (for example META for METU). */
+  nextEarningsUnderlying?: string | null;
   healthScore?: PositionHealthScore;
   // PI-0014: purely observational mid vs. marketable valuation evidence
   // (slippage cost, liquidity tier). Null when currentValue or closeValue is

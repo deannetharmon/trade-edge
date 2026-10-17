@@ -20,6 +20,7 @@
 // of this module and were not touched -- they remain entirely in
 // app/portfolio/page.tsx.
 
+import { underlyingStockFor } from '@/lib/leveragedEtfs';
 import { readMetricIvPercent } from './metricIv';
 import { confirmRecommendationChange } from './recommendationHysteresis';
 import type {
@@ -1433,7 +1434,8 @@ export async function loadPositions(
   const earningsMap: Record<string, string | null> = {};
   const earningsEstimatedMap: Record<string, boolean | null> = {};
   try {
-    const underlyingSymbols: string[] = (optionPositions as any[]).map((p: any) => String(p['underlying-symbol'])).filter((v: string, i: number, a: string[]) => a.indexOf(v) === i);
+    // Leveraged single-stock funds also ask for the stock they follow, so its earnings date can be shown (display only).
+    const underlyingSymbols: string[] = (optionPositions as any[]).flatMap((p: any) => { const s = String(p['underlying-symbol']); const u = underlyingStockFor(s); return u ? [s, u] : [s]; }).filter((v: string, i: number, a: string[]) => a.indexOf(v) === i);
     const metricsData = await ttFetch(`/market-metrics?symbols=${encodeURIComponent(underlyingSymbols.join(','))}`, token);
     for (const item of metricsData?.data?.items ?? []) {
       const sym = item['symbol'];
@@ -2053,6 +2055,9 @@ export async function loadPositions(
     // Tastytrade market-metrics can return the next earnings date within ~60 days;
     // that is NOT the same as "earnings within expiry."
     const rawEarningsDate = earningsMap[symbol] ?? null;
+    // Display only (never a risk input): a leveraged single-stock fund has no earnings of its own, so show its stock's.
+    const earningsStock = rawEarningsDate ? null : underlyingStockFor(symbol);
+    const displayEarningsDate = rawEarningsDate ?? (earningsStock ? earningsMap[earningsStock] ?? null : null);
     // EARNINGS-DATEBASIS-0001: New York calendar date via the shared helper (was the UTC date,
     // which dropped earnings-day risk from 20:00 ET). Bad data yields null.
     const earningsWithinExpiry =
@@ -2133,8 +2138,9 @@ export async function loadPositions(
       popVsStrike: !entryEconomicsComplete || isNetDebit ? null : calcPositionPopVsStrike(strategy, positionLegs, stockPrices[symbol] ?? null, dte, ivMap[symbol] ?? null),
       earningsDate: earningsWithinExpiry,
       // Display only: the next earnings date whether or not it falls inside this position's life (earningsDate above stays the risk input).
-      nextEarningsDate: rawEarningsDate,
-      nextEarningsEstimated: earningsEstimatedMap[symbol] ?? null,
+      nextEarningsDate: displayEarningsDate,
+      nextEarningsEstimated: (earningsStock && displayEarningsDate ? earningsEstimatedMap[earningsStock] : earningsEstimatedMap[symbol]) ?? null,
+      nextEarningsUnderlying: earningsStock && displayEarningsDate ? earningsStock : null,
       // GTC-SCOPE-0001: all four gtc* fields now derive from ONE
       // position-scoped, profit-target-only match instead of two
       // independent (and differently-scoped) lookups. Previously hasGtc

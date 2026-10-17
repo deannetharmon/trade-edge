@@ -265,7 +265,7 @@ describe('PositionsWorkspace', () => {
     expect(onIntentChange).toHaveBeenLastCalledWith(put.key, 'income');
   });
 
-  it('the Position cell shows the next earnings date under the chart link when it is known, even if it is after expiry', async () => {
+  it('the Dates cell shows the next earnings date in bold under DTE when it is known, even if it is after expiry', async () => {
     const user = userEvent.setup();
     // New York calendar date plus whole calendar days, the same basis the app uses (clock arithmetic is a day off in the evening and across a clock change).
     const future = new Date(Date.parse(`${currentNewYorkDate()}T00:00:00Z`) + 40 * 86400000).toISOString().slice(0, 10);
@@ -274,10 +274,13 @@ describe('PositionsWorkspace', () => {
     render(<PositionsWorkspace model={next} th={THEMES.dark} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     const line = screen.getByTestId('next-earnings');
-    expect(line).toHaveTextContent(/^Earnings [A-Z][a-z]{2} \d{1,2} \(est\.\) · in 40d$/);
-    const chart = screen.getByRole('button', { name: 'Quick chart for AAPL' });
-    expect(line.closest('td')).toBe(chart.closest('td'));
-    expect(chart.closest('td')!.textContent!.indexOf('chart')).toBeLessThan(chart.closest('td')!.textContent!.indexOf('Earnings'));
+    expect(line).toHaveTextContent(/^Earnings [A-Z][a-z]{2} \d{1,2} est\. \(40 days\)$/);
+    const cell = line.closest('td')!;
+    expect(cell).toHaveTextContent(/DTE:/);
+    expect(cell).toHaveTextContent('2099-01-15');
+    expect(cell.textContent!.indexOf('DTE:')).toBeLessThan(cell.textContent!.indexOf('Earnings'));
+    expect(line.tagName).toBe('B');
+    expect(screen.getByRole('button', { name: 'Quick chart for AAPL' }).closest('td')).not.toBe(cell);
   });
 
   it('the sticky Position cell uses the page background (black), not the grey card color', async () => {

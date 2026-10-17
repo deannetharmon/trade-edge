@@ -129,7 +129,7 @@ describe('Stock holdings symbol cell order and earnings', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<StockHoldings {...props(holding({}))} intentEnabled earningsEnabled />);
     const earnings = await screen.findByTestId('stock-next-earnings');
-    expect(earnings).toHaveTextContent(/^Earnings [A-Z][a-z]{2} \d{1,2} \(est\.\) · in 30d$/);
+    expect(earnings).toHaveTextContent(/^Earnings [A-Z][a-z]{2} \d{1,2} est\. \(30 days\)$/);
     const cell = earnings.parentElement!.parentElement!;
     const intent = screen.getByRole('combobox', { name: 'Intent for MRVL shares' });
     const chart = screen.getByRole('button', { name: 'Quick chart for MRVL' });

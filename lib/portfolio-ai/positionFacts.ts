@@ -101,7 +101,7 @@ export function buildPositionFacts(pos: Position, nowMs: number): PositionFacts 
   add('Net edge (theta less gamma drag)', live == null ? NA : `${dollars(live, 0)}/day now${peak != null ? `, peak ${dollars(peak, 0)}/day` : ''}`);
 
   // Events, orders
-  const earn = nextEarningsLine(pos.nextEarningsDate ?? pos.earningsDate, pos.nextEarningsEstimated, pos.expDate);
+  const earn = nextEarningsLine(pos.nextEarningsDate ?? pos.earningsDate, pos.nextEarningsEstimated, pos.expDate, undefined, pos.nextEarningsUnderlying);
   add('Next earnings', earn ? `${earn.text}${earn.beforeExpiry ? ' (before expiration)' : ' (after expiration)'}` : NA);
   add('Profit-target GTC', pos.hasGtc ? `working${finite(pos.gtcOrderPrice) ? ` at ${dollars(pos.gtcOrderPrice)}` : ''}` : 'none');
   add('Stop', `${pos.stopLossClassification ?? NA}${finite(pos.stopLossPrice) ? ` at ${dollars(pos.stopLossPrice)}` : ''}`);

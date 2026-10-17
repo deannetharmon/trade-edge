@@ -20,12 +20,14 @@ export function nextEarningsLine(
   estimated: boolean | null | undefined,
   expiration: string | null | undefined,
   asOf?: unknown,
+  /** The stock whose date this is, for a leveraged single-stock fund (METU shows META's). */
+  underlying?: string | null,
 ): NextEarningsLine | null {
   const daysAway = daysUntilNy(date, asOf);
   if (daysAway == null || daysAway < 0 || typeof date !== 'string') return null;
   const [year, month, day] = date.slice(0, 10).split('-').map(Number);
   if (!year || !month || !day || month < 1 || month > 12) return null;
-  const when = daysAway === 0 ? 'today' : daysAway === 1 ? 'tomorrow' : `in ${daysAway}d`;
+  const when = daysAway === 0 ? 'today' : daysAway === 1 ? '1 day' : `${daysAway} days`;
   const beforeExpiry = typeof expiration === 'string' && expiration.length >= 10 && date.slice(0, 10) <= expiration.slice(0, 10);
-  return { text: `Earnings ${MONTHS[month - 1]} ${day}${estimated ? ' (est.)' : ''} · ${when}`, daysAway, beforeExpiry };
+  return { text: `${underlying ? `${underlying} earnings` : 'Earnings'} ${MONTHS[month - 1]} ${day}${estimated ? ' est.' : ''} (${when})`, daysAway, beforeExpiry };
 }
