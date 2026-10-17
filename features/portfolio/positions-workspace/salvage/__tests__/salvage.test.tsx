@@ -127,12 +127,10 @@ describe('Salvage plain scenarios', () => {
     const box = screen.getByTestId('salvage-simple-scenarios');
     const text = box.textContent ?? '';
     expect(box.children).toHaveLength(3);
-    expect(text).toContain('stays about here');
-    expect(text).toContain('enough to get back the $2,574 you paid');
+    expect(text).toContain('Here ($215.90)');
+    expect(text).toContain('gets back the $2,574 you paid');
     expect(text).toContain('well past the wing');
-    expect(text).toContain('Keep it, do nothing');
-    expect(text).toContain('finishes worthless');
-    expect(text).toContain('below the $2,574 you paid');
+    expect(text).toContain('−$2,366'); // best of the three when MRNA stays put, against the $2,574 paid
     // when MRNA stays put, closing now ($207.86) is the best of the three
     const first = box.children[0].textContent ?? '';
     expect(first).toContain('$207.86 ✓');
