@@ -48,6 +48,7 @@ import type { SellStockDialogDeps } from './SellStockDialog';
 import { buildPnlReconciliation, buildPnlSecondLine, buildPositionPnlBases, describePnlReconciliation, wideMarketNote } from './model/pnlBases';
 import { buildSparklines, cleanHistory } from '@/lib/leaps-position-intelligence/sparklines';
 import { CalloutList, TileGrid } from '@/components/dashboard/DashboardParts';
+import { ExitWalkLauncher } from '@/components/portfolio/ExitWalkPanel';
 
 export function isPositionsWorkspaceV2Enabled(value = process.env.NEXT_PUBLIC_POSITIONS_WORKSPACE_V2_ENABLED): boolean {
   return value === 'true';
@@ -841,6 +842,8 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
             {p.recommendation && canonicalRecommendationToAction(p.recommendation.kind) === action && <span className={`text-[9px] whitespace-nowrap ${th.textFaint}`}>← suggested</span>}
           </span>
         ))}
+        {/* EXIT-WALK-0001B: opt-in Walk the price panel; renders nothing without the page's ExitWalkProvider */}
+        <ExitWalkLauncher pos={p} label={actionsNarrow ? 'Walk' : 'Walk the price'} className="min-h-8 rounded border border-teal-500/50 px-2 text-[10px] text-teal-300 focus:ring-2 focus:ring-teal-400" />
       </span>
     </>,
   };

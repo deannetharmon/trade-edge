@@ -11357,6 +11357,7 @@ export default function PortfolioPage() {
                 <PortfolioGreeksDashboard positions={positions} th={th} />
               </div>
               <SalvageDepsProvider value={salvageDeps}>
+              <ExitWalkProvider pendingOrders={pendingOrders} dryRun={dryRunMode} onDone={fetchPositions}>
               <PositionsWorkspace
                 model={positionsWorkspaceModel}
                 pendingOrders={pendingOrders}
@@ -11377,6 +11378,7 @@ export default function PortfolioPage() {
                 onIntentChange={handleIntentChange}
                 onRefresh={fetchPositions}
               />
+              </ExitWalkProvider>
               </SalvageDepsProvider>
             </>
           ) : (
