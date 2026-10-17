@@ -68,6 +68,19 @@ describe('Salvage UI', () => {
     expect(screen.getByTestId('salvage-row-110').textContent).toContain('Can meet');
     expect(screen.getByTestId('salvage-row-130').textContent).toContain('Partial only');
   });
+  it('SalvageView leads with a plain-words summary and rows are selectable', async () => {
+    const { fireEvent } = await import('@testing-library/react');
+    let picked: number | null = null;
+    const noop = () => {};
+    render(<SalvageView vm={vmFor()} p={pos} objective="debit" setObjective={noop} amountText="" setAmountText={noop} rankBy="most" setRankBy={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={110} setSelectedStrike={(n) => { picked = n; }} onRefresh={noop} loading={false} onClose={noop} />);
+    const text = screen.getByTestId('salvage-bottom-line').textContent ?? '';
+    expect(text).toContain('$207.86');
+    expect(text).toContain('$114.74');
+    expect(text).toContain('the $2,574 you paid');
+    fireEvent.click(screen.getByTestId('salvage-row-120'));
+    expect(picked).toBe(120);
+    expect(screen.getByTestId('salvage-legend')).toBeTruthy();
+  });
   it('SalvageView shows "Salvage unavailable" when the model is unavailable', () => {
     const noop = () => {};
     render(<SalvageView vm={vmFor({ quotes: null })} p={pos} objective="most" setObjective={noop} amountText="" setAmountText={noop} rankBy="most" setRankBy={noop} wingQuantity={1} setWingQuantity={noop} maxWing={1} selectedStrike={null} setSelectedStrike={noop} onRefresh={noop} loading={false} onClose={noop} />);

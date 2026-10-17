@@ -87,6 +87,23 @@ export function SalvageView({
           </div>
         )}
 
+        <section className="space-y-1 rounded-xl border border-emerald-700 bg-emerald-950/30 p-4 text-sm" aria-label="In plain words" data-testid="salvage-bottom-line">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-300">In plain words</p>
+          <p>Closing now puts about <b>{vm.closeNow != null ? usd(vm.closeNow) : '—'}</b> in your pocket. That is the most cash this option can give you today.</p>
+          {sel && <p>Selling the {sel.strike} {right === 'P' ? 'put' : 'call'} against it (a &quot;wing&quot;) would add only about <b>{usd(sel.creditNet)}</b> now, and you would give up everything the option could pay beyond {usd(sel.strike, 0)}.</p>}
+          {(() => {
+            const req = sel?.objective?.required;
+            const label = objective === 'amount' ? usd(vm.target, 0) : `the ${usd(vm.target, 0)} you paid`;
+            if (!sel) return null;
+            if (req && 'price' in req && p.stockPrice) {
+              const pct = Math.round(Math.abs(p.stockPrice - req.price) / p.stockPrice * 100);
+              return <p>To get back {label}, {p.symbol} would have to finish at or {right === 'P' ? 'below' : 'above'} <b>{usd(req.price)}</b> by {p.expDate}, about {pct}% {right === 'P' ? 'below' : 'above'} today&apos;s {usd(p.stockPrice)}.</p>;
+            }
+            if (req && 'already' in req) return <p>The cash from this wing already covers {label}.</p>;
+            return <p>No {right === 'P' ? 'put' : 'call'} on this chain can get back {label}.</p>;
+          })()}
+        </section>
+
         <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4" aria-label="Objective">
           <p className="text-sm font-semibold text-white">What do you want from today?</p>
           <div className="flex flex-wrap gap-2">
@@ -138,7 +155,7 @@ export function SalvageView({
         <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4" aria-label="Wing candidates">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <p className="text-sm font-semibold text-white">Wing candidates (same expiry, strictly {right === 'P' ? 'below' : 'above'} {leg.strikePrice})</p>
-            <p className="text-xs text-slate-400">Credits use the bid. Fees are estimates.</p>
+            <p className="text-xs text-slate-400">Click a row to select it. Credits use the bid. Fees are estimates.</p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] border-collapse text-sm">
@@ -151,8 +168,8 @@ export function SalvageView({
                   const active = sel?.strike === r.strike;
                   const req = r.objective?.required;
                   return (
-                    <tr key={r.strike} className={`border-t ${active ? 'border-emerald-500 bg-emerald-950/40' : 'border-slate-800'} text-right`} data-testid={`salvage-row-${r.strike}`}>
-                      <td className="px-2 py-2 text-left"><button type="button" aria-pressed={active} onClick={() => setSelectedStrike(r.strike)} className="min-h-11 font-semibold text-white underline-offset-2 hover:underline focus:outline-none focus:ring-2 focus:ring-teal-400">{r.strike}</button>{active && <span className="ml-1 text-xs text-emerald-300">selected</span>}</td>
+                    <tr key={r.strike} className={`cursor-pointer border-t ${active ? 'border-emerald-500 bg-emerald-950/40' : 'border-slate-800 hover:bg-slate-800/50'} text-right`} onClick={() => setSelectedStrike(r.strike)} data-testid={`salvage-row-${r.strike}`}>
+                      <td className="px-2 py-2 text-left"><button type="button" aria-pressed={active} aria-label={`${active ? 'Selected' : 'Select'} the ${r.strike} ${right === 'P' ? 'put' : 'call'}`} className={`min-h-11 min-w-20 rounded-lg border px-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-teal-400 ${active ? 'border-emerald-400 bg-emerald-900 text-emerald-50' : 'border-slate-500 bg-slate-950 text-white hover:border-emerald-400'}`}>{r.strike}{active ? ' ✓' : ''}</button></td>
                       <td className="px-2 py-2">{usd(r.creditNet)}</td>
                       <td className="px-2 py-2">{Number.isFinite(r.maxFromToday) ? usd(r.maxFromToday) : 'Unlimited'}</td>
                       <td className="px-2 py-2">{r.delta != null ? r.delta.toFixed(2) : '—'}</td>
@@ -165,6 +182,12 @@ export function SalvageView({
               </tbody>
             </table>
           </div>
+          <dl className="grid gap-x-6 gap-y-1 text-xs text-slate-400 sm:grid-cols-2" data-testid="salvage-legend">
+            <div><dt className="inline font-semibold text-slate-300">Credit now: </dt><dd className="inline">cash you receive today for selling that {right === 'P' ? 'put' : 'call'}, after fees.</dd></div>
+            <div><dt className="inline font-semibold text-slate-300">Most from today: </dt><dd className="inline">the most you could ever get from here (cash now plus the best payoff at expiry).</dd></div>
+            <div><dt className="inline font-semibold text-slate-300">{p.symbol} needed: </dt><dd className="inline">where {p.symbol} must finish at expiry for you to reach the target.</dd></div>
+            <div><dt className="inline font-semibold text-slate-300">Can meet / Partial only: </dt><dd className="inline">whether that is possible at all with this wing.</dd></div>
+          </dl>
           {sel && (
             <div className="space-y-1 border-t border-slate-800 pt-3 text-sm" data-testid="salvage-gives-up">
               <p><b>What the {sel.strike} wing gives up:</b> {right === 'P' ? 'below' : 'above'} {usd(sel.strike, 0)} the long {right === 'P' ? 'put' : 'call'} stops adding value, so it adds at most {usd(Math.abs(leg.strikePrice - sel.strike) * 100 * wingQuantity, 0)}. The short {right === 'P' ? 'put' : 'call'} can be assigned early; your long {right === 'P' ? 'put' : 'call'} covers it.</p>
