@@ -6,6 +6,7 @@
 // cancels an order. The order proposal is slice D.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Position } from '@/lib/portfolio-data/types';
 import { useAutoRefreshPause } from '@/components/portfolio-data/usePortfolioAutoRefresh';
 import { loadSalvageChain, type SalvageChain } from '@/lib/salvage/salvageChainClient';
@@ -249,8 +250,10 @@ function SalvageDialog({ position, onClose }: { position: Position; onClose: () 
     objective, amount: Number.isFinite(amount) ? amount : null, rankBy, wingQuantity, selectedStrike,
   });
   const shown: SalvageViewModel = error ? { ...vm, unavailable: error } : loading && !chain ? { ...vm, unavailable: 'Loading the option chain…' } : vm;
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4" role="dialog" aria-modal="true" aria-label={`Salvage ${position.symbol}`}>
+  if (typeof document === 'undefined') return null;
+  // Portal to <body>: rendered inside a table row, the page's sticky headers (z-30/z-40) stack over the dialog.
+  return createPortal(
+    <div className="fixed inset-0 z-[200] overflow-y-auto bg-black/80 p-4" role="dialog" aria-modal="true" aria-label={`Salvage ${position.symbol}`}>
       <div className="mx-auto max-w-5xl rounded-2xl border border-slate-700 bg-slate-950 p-5">
         <SalvageView
           vm={shown} p={position} objective={objective} setObjective={setObjective}
@@ -260,6 +263,7 @@ function SalvageDialog({ position, onClose }: { position: Position; onClose: () 
           onRefresh={() => void load()} loading={loading} onClose={onClose}
         />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

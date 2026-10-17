@@ -74,3 +74,15 @@ describe('Salvage UI', () => {
     expect(screen.getByTestId('salvage-unavailable').textContent).toContain('Salvage unavailable');
   });
 });
+
+describe('Salvage dialog stacking', () => {
+  it('opens in a portal on document.body, above every sticky header', async () => {
+    const { fireEvent } = await import('@testing-library/react');
+    const { container } = render(<table><tbody><tr><td><SalvageEntry position={pos} /></td></tr></tbody></table>);
+    fireEvent.click(screen.getByTestId('salvage-open'));
+    const dialog = screen.getByRole('dialog');
+    expect(container.contains(dialog)).toBe(false);
+    expect(dialog.parentElement).toBe(document.body);
+    expect(dialog.className).toContain('z-[200]');
+  });
+});
