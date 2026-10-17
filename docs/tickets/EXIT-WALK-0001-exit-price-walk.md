@@ -1,6 +1,6 @@
 # EXIT-WALK-0001: exit-price walk (midpoint walk for Sell to Close / Buy to Close)
 
-Status: slice A IMPLEMENTED 2026-10-17 (`lib/exit-walk/`, 45 tests, unwired: no production caller). Slice B (click-to-walk button) NOT STARTED: needs Diane's mock and its own approval.
+Status: slice A IMPLEMENTED 2026-10-17 (`lib/exit-walk/`, 45 tests, unwired: no production caller). Slice B (click-to-walk) IN PROGRESS: Diane's mocks v4, Ian (C1, C2), Paul, Quinn's list approved 2026-10-17. Steps 1 (`run.ts` step loop), 2 (`browserDeps.ts`, dry-run deps), 3a (`closeOrder.ts`: order body, eligibility, safety gate) and 3b (`panelModel.ts`, `components/portfolio/ExitWalkPanel.tsx`, three additive edits in `app/portfolio/page.tsx`) are BUILT. Remaining: Dean's C2 dry run on the Vercel preview, Quinn's full-suite pass, merge.
 Origin: the Position Decision Engine epic (Dean, 2026-10-17), folded into DECIDE-0001. This ticket is the A17 amendment: start at the mid, step toward the market only as needed, stop at a boundary re-derived from the live quote.
 Approvals: Ian (approved click-to-walk for exits, with conditions below), Paul (new slice, pure math first), Alan (formulas and goldens), Quinn (test list), Dean (fold into DECIDE-0001; stop = mark at 2x credit; no 21-DTE on CSP/CC; leveraged ETFs are not covered by the unconfirmed-Acquire default).
 
@@ -27,3 +27,19 @@ Gap rule, data-validity gate, hard-risk marketable-limit exception, level classe
 
 ## Verification (2026-10-17)
 `npx vitest run lib/exit-walk`: 45 passed. `npx tsc --noEmit -p tsconfig.check.json`: exit 0. Mutation check: floor rounding flipped (4 tests fail), sell direction flipped (11 fail), spread flag switched to the 25% formula (4 fail); restored, 45 pass. Sibling check: no Map/Set iterator spreads, no clock or random, no imports from app/features/components, no importers outside `lib/exit-walk/`.
+
+## Slice B step 1 verification (2026-10-17)
+`npx vitest run lib/exit-walk`: 83 passed (45 slice A + 38 step loop). `npx tsc --noEmit -p tsconfig.check.json`: exit 0. Mutation checks: direction flipped (17 fail), Stop check removed (2 fail), cancel confirmation skipped (1 fail). Sibling check: no Map/Set iterator spreads, no clock/random/timers/network in run.ts (guard test), only importer of `lib/entry-walk/walk` types is run.ts. Not run: full suite (asked first per CLAUDE.md).
+
+## Slice B step 3 (2026-10-17)
+Mount: its own panel launched by a "Walk the price" button on a position's action row (`ExitWalkLauncher`). The batch close modal (`BatchConfirmModal`) and its submit path are untouched. Page edits: one import, the launcher in `PositionCard`'s action row, and `ExitWalkProvider` around the position sections (supplies pending orders, the Dry Run flag and a refresh callback).
+Refuses to start (`checkExitWalkEligibility`): unclear structure, unknown entry, ANY working order on the position's legs (the walk never cancels someone else's order), outside the 9:30-16:00 ET session. Also refuses (`checkWalkStart`): hard-risk exit (confirmed stop breach), quote missing/stale/crossed, opening window, boundary beyond start.
+Every price, including the first, passes `runLiveCloseOrderSafetyGate` (pricing intent CUSTOM) with the live quote; the gate runs on the NEXT price before the cancel, so a refusal leaves the working order alone. Orders are always Day. Start walk re-reads the market at the click and, if the prices changed, shows the new ones and waits for another click. Dry Run ON validates every price at /orders/dry-run and places nothing.
+Known limits (flag to Ian/Paul):
+- The gap rule (A-series, DECIDE-0001 S2) is not built, so `gapBlocked` is false; the walk is user-started and every price is gated, but a gap day is not blocked by rule yet.
+- Hard-risk uses the existing `stopLossBreachState === CONFIRMED_BREACH`, not DECIDE-0001's new stop definition (S2).
+- The safety gate refuses a price more than 30% from the marketable price (MATERIAL_PNL_DEVIATION). On a very wide market the mid itself can exceed that: the walk then refuses to start with the gate's message. The threshold was not changed (Ian's call).
+- Session check ignores holidays and early closes (trading-day calendar is S2).
+- No fill log / audit entry yet beyond the broker's own order history; positions refresh after the walk ends.
+## Verification (step 3)
+Targeted: 151 exit-walk tests plus 10 existing files that read the portfolio page (402 tests in 21 files) pass; tsc (tsconfig.check.json) exit 0. Full suite: CI on push.
