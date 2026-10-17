@@ -293,13 +293,65 @@ describe('PositionsWorkspace', () => {
     expect(card).not.toHaveClass('overflow-hidden');
   });
 
-  it('STICKY-HEADERS-0001: the Analysis table scrolls in a box that ends at the bottom of the window and does not chain to the page', async () => {
+  it('TABLE-FOCUS-0001: the page scrolls as normal; clicking a cell turns table scrolling on, and there are four ways out', async () => {
+    const user = userEvent.setup();
+    const scrollBy = vi.fn();
+    window.scrollBy = scrollBy as unknown as typeof window.scrollBy;
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    const box = screen.getByTestId('analysis-scroll-box');
+    // off by default: no height cap, the page owns the wheel
+    expect(box).toHaveAttribute('data-focused', 'false');
+    expect(box.style.maxHeight).toBe('');
+    expect(screen.queryByTestId('analysis-focus-hint')).toBeNull();
+    // clicking a button inside the table (here the quick chart) does not turn it on
+    await user.click(screen.getByRole('button', { name: 'Quick chart for AAPL' }));
+    expect(box).toHaveAttribute('data-focused', 'false');
+    // clicking a plain cell turns it on: box capped at the bottom of the window, wheel contained, hint shown
+    const turnOn = async () => { await user.click(box.querySelector('tbody td:not(:first-child)') as HTMLElement); };
+    await turnOn();
+    expect(box).toHaveAttribute('data-focused', 'true');
+    expect(box.style.maxHeight).toMatch(/^calc\(100vh - \d+px - 1rem\)$/);
+    expect(box).toHaveClass('overflow-auto', 'overscroll-contain');
+    expect(screen.getByTestId('analysis-focus-hint')).toBeTruthy();
+    // way out 1: Esc
+    await user.keyboard('{Escape}');
+    expect(box).toHaveAttribute('data-focused', 'false');
+    // way out 2: click outside the table
+    await turnOn();
+    await user.click(document.body);
+    expect(box).toHaveAttribute('data-focused', 'false');
+    // way out 3: the Release button
+    await turnOn();
+    await user.click(screen.getByRole('button', { name: 'Release' }));
+    expect(box).toHaveAttribute('data-focused', 'false');
+    // way out 4: scrolling up at the first row hands the wheel back to the page
+    await turnOn();
+    scrollBy.mockReset();
+    const wheel = new WheelEvent('wheel', { deltaY: -80, cancelable: true, bubbles: true });
+    box.scrollTop = 0;
+    box.dispatchEvent(wheel);
+    expect(scrollBy).toHaveBeenCalledWith(0, -80);
+    expect(wheel.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(box).toHaveAttribute('data-focused', 'false'));
+  });
+
+  it('TABLE-FOCUS-0001: touch taps never turn table scrolling on (a finger drag must keep scrolling the page)', async () => {
+    const { act } = await import('@testing-library/react');
     const user = userEvent.setup();
     render(<PositionsWorkspace model={model} th={THEMES.dark} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     const box = screen.getByTestId('analysis-scroll-box');
-    expect(box.style.maxHeight).toMatch(/^calc\(100vh - \d+px - 1rem\)$/);
-    expect(box).toHaveClass('overflow-auto', 'lg:overscroll-y-contain');
+    const cell = box.querySelector('tbody td:not(:first-child)') as HTMLElement;
+    const press = (pointerType: string) => act(() => {
+      const event = new Event('pointerdown', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'pointerType', { value: pointerType });
+      cell.dispatchEvent(event);
+    });
+    press('touch');
+    expect(box).toHaveAttribute('data-focused', 'false');
+    press('mouse'); // the same press with a mouse does turn it on
+    expect(box).toHaveAttribute('data-focused', 'true');
   });
 
   it('the sticky Position cell uses the page background (black), not the grey card color', async () => {

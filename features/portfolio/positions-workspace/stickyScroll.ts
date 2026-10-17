@@ -1,13 +1,12 @@
 // features/portfolio/positions-workspace/stickyScroll.ts
 //
-// STICKY-HEADERS-0001 (Dean, 2026-10-16): the Portfolio positions list had no frozen header, and the Position Analysis table lost its
-// header when the wheel ran past the table's last row (the scroll then carried the whole page up). Two helpers:
+// STICKY-HEADERS-0001 / TABLE-FOCUS-0001 (Dean, 2026-10-16). The Position Analysis table scrolls the page like any other content
+// until you click a cell. A click puts the table in "focus": it becomes a box sized to end at the bottom of the window, its header row
+// stays frozen, and the wheel moves its rows without moving the page. You leave focus by scrolling up from the first row (the wheel
+// goes back to the page), pressing Esc, or clicking outside the table. Helpers:
 //   * readStickyTop: how far from the top of the window the page's own sticky bars (app header plus the Portfolio sub-tab row) reach,
-//     so a table header can freeze just below them.
-//   * installWheelHandoff: keeps the wheel useful on a table that scrolls inside its own box. Until the table's top has reached the
-//     bars, the wheel moves the PAGE (so the whole box comes into view); after that it moves the table's rows, and running off the
-//     last row no longer drags the page away (the CSS overscroll-behavior on the box does that part). At the first row, scrolling up
-//     hands the wheel back to the page.
+//     so the focused table can sit just below them.
+//   * installFocusWheel: the wheel rule while the table is in focus.
 
 const FALLBACK_HEADER_PX = 85;
 const FALLBACK_SUBTABS_PX = 40;
@@ -21,24 +20,21 @@ export function readStickyTop(): number {
   return Math.round(header + (subHeight > 0 ? subHeight : FALLBACK_SUBTABS_PX));
 }
 
-export function installWheelHandoff(el: HTMLElement, getTop: () => number): () => void {
+/** Wheel rule while the table is in focus. Up at the first row: leave focus and let the page scroll. Down at the last row: stay put (never drag the page away). */
+export function installFocusWheel(el: HTMLElement, release: () => void): () => void {
   const onWheel = (e: WheelEvent) => {
     if (e.ctrlKey || e.defaultPrevented) return;
     if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return; // sideways: the table's own horizontal scroll
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerHeight : 1;
     const dy = e.deltaY * unit;
     if (dy === 0) return;
-    const pin = getTop();
-    const top = el.getBoundingClientRect().top;
-    if (dy > 0 && top > pin + 1) {
-      window.scrollBy(0, Math.min(dy, top - pin));
+    if (dy < 0 && el.scrollTop <= 0) {
+      release();
+      window.scrollBy(0, dy);
       e.preventDefault();
       return;
     }
-    if (dy < 0 && el.scrollTop <= 0) {
-      window.scrollBy(0, dy);
-      e.preventDefault();
-    }
+    if (dy > 0 && el.scrollTop + el.clientHeight >= el.scrollHeight - 1) e.preventDefault();
   };
   el.addEventListener('wheel', onWheel, { passive: false });
   return () => el.removeEventListener('wheel', onWheel);

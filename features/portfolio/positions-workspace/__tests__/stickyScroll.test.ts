@@ -2,7 +2,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { installWheelHandoff, readStickyTop } from '../stickyScroll';
+import { installFocusWheel, readStickyTop } from '../stickyScroll';
 
 describe('readStickyTop', () => {
   afterEach(() => { document.documentElement.style.removeProperty('--app-header-h'); document.body.innerHTML = ''; });
@@ -19,13 +19,15 @@ describe('readStickyTop', () => {
   });
 });
 
-describe('installWheelHandoff', () => {
+describe('installFocusWheel', () => {
   let box: HTMLDivElement;
   let cleanup: () => void;
+  const release = vi.fn();
   const scrollBy = vi.fn();
-  const place = (top: number, scrollTop: number) => {
-    box.getBoundingClientRect = () => ({ top }) as DOMRect;
-    box.scrollTop = scrollTop;
+  const metrics = (scrollTop: number) => {
+    Object.defineProperty(box, 'scrollTop', { value: scrollTop, configurable: true, writable: true });
+    Object.defineProperty(box, 'clientHeight', { value: 400, configurable: true });
+    Object.defineProperty(box, 'scrollHeight', { value: 1000, configurable: true });
   };
   const wheel = (init: WheelEventInit) => {
     const e = new WheelEvent('wheel', { cancelable: true, bubbles: true, ...init });
@@ -33,53 +35,50 @@ describe('installWheelHandoff', () => {
     return e;
   };
   beforeEach(() => {
+    release.mockReset();
     scrollBy.mockReset();
     window.scrollBy = scrollBy as unknown as typeof window.scrollBy;
     box = document.createElement('div');
     document.body.appendChild(box);
-    cleanup = installWheelHandoff(box, () => 120);
+    cleanup = installFocusWheel(box, release);
   });
   afterEach(() => { cleanup(); box.remove(); });
 
-  it('scrolling down while the table sits below the page bars moves the page, only as far as the bars', () => {
-    place(400, 0);
-    const e = wheel({ deltaY: 100 });
-    expect(scrollBy).toHaveBeenCalledWith(0, 100);
-    expect(e.defaultPrevented).toBe(true);
-    wheel({ deltaY: 900 });
-    expect(scrollBy).toHaveBeenLastCalledWith(0, 280); // 400 - 120, not 900
-  });
-
-  it('once the table is under the bars, the wheel scrolls the rows and the page stays put', () => {
-    place(120, 50);
-    const e = wheel({ deltaY: 100 });
-    expect(scrollBy).not.toHaveBeenCalled();
-    expect(e.defaultPrevented).toBe(false);
-  });
-
-  it('scrolling up at the first row hands the wheel back to the page; mid-table it does not', () => {
-    place(120, 0);
-    const up = wheel({ deltaY: -80 });
+  it('scrolling up from the first row leaves focus and hands the wheel to the page', () => {
+    metrics(0);
+    const e = wheel({ deltaY: -80 });
+    expect(release).toHaveBeenCalledTimes(1);
     expect(scrollBy).toHaveBeenCalledWith(0, -80);
-    expect(up.defaultPrevented).toBe(true);
-    scrollBy.mockReset();
-    place(120, 300);
-    const mid = wheel({ deltaY: -80 });
+    expect(e.defaultPrevented).toBe(true);
+  });
+
+  it('mid-table the wheel just scrolls the rows (the page stays put, focus stays on)', () => {
+    metrics(300);
+    expect(wheel({ deltaY: -80 }).defaultPrevented).toBe(false);
+    expect(wheel({ deltaY: 80 }).defaultPrevented).toBe(false);
+    expect(release).not.toHaveBeenCalled();
     expect(scrollBy).not.toHaveBeenCalled();
-    expect(mid.defaultPrevented).toBe(false);
+  });
+
+  it('running off the last row does not drag the page away', () => {
+    metrics(600); // 600 + 400 = 1000: at the last row
+    const e = wheel({ deltaY: 120 });
+    expect(e.defaultPrevented).toBe(true);
+    expect(scrollBy).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
   });
 
   it('leaves sideways scrolling and pinch-zoom alone', () => {
-    place(400, 0);
-    expect(wheel({ deltaX: 90, deltaY: 10 }).defaultPrevented).toBe(false);
-    expect(wheel({ deltaY: 50, ctrlKey: true }).defaultPrevented).toBe(false);
-    expect(scrollBy).not.toHaveBeenCalled();
+    metrics(0);
+    expect(wheel({ deltaX: 90, deltaY: -10 }).defaultPrevented).toBe(false);
+    expect(wheel({ deltaY: -50, ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(release).not.toHaveBeenCalled();
   });
 
   it('stops listening after cleanup', () => {
     cleanup();
-    place(400, 0);
-    wheel({ deltaY: 100 });
-    expect(scrollBy).not.toHaveBeenCalled();
+    metrics(0);
+    wheel({ deltaY: -80 });
+    expect(release).not.toHaveBeenCalled();
   });
 });

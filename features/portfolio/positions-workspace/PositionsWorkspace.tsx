@@ -9,8 +9,8 @@ import { buildPortfolioSummary, positionDayChangeDetail, positionInSummaryGroup,
 import { sameWidths } from './model/stockColumnAlignment';
 import { nextEarningsLine } from './model/nextEarnings';
 import { profitTargetOrderPct, stopOrderPct } from './model/orderPercents';
-import { installWheelHandoff, readStickyTop } from './stickyScroll';
 import { useStickyTop } from './useStickyTop';
+import { useTableFocus } from './useTableFocus';
 import { buildValueSplit } from './model/extrinsic';
 import { extrinsicTone, intrinsicTone, ivTone } from './model/valueTone';
 import { intentFamilyFor } from '@/lib/positionIntent/vocabulary';
@@ -449,13 +449,9 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
   const columns = preferences.analysisView === 'custom' ? preferences.customColumnIds : columnsForView(preferences.analysisView);
   // The Stock holdings table below takes its column widths from this table, so the two line up.
   const tableRef = useRef<HTMLTableElement>(null);
-  // STICKY-HEADERS-0001: the table scrolls inside its own box, sized to end at the bottom of the window once the box sits under the page bars.
+  // TABLE-FOCUS-0001: the page scrolls as normal. Clicking a cell turns table scrolling on (frozen header, rows scroll inside a box that ends at the bottom of the window).
   const analysisStickyTop = useStickyTop();
-  const wheelCleanup = useRef<(() => void) | null>(null);
-  const attachScrollBox = useCallback((node: HTMLDivElement | null) => {
-    wheelCleanup.current?.();
-    wheelCleanup.current = node ? installWheelHandoff(node, readStickyTop) : null;
-  }, []);
+  const tableFocus = useTableFocus();
   const [measuredWidths, setMeasuredWidths] = useState<Record<string, number> | null>(null);
   useEffect(() => {
     const table = tableRef.current;
@@ -573,12 +569,12 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
     })()}
     {notesLoadError && <p role="status" className="mb-2 text-xs text-amber-300">Position notes unavailable — {notesLoadError}</p>}
     {priceAlertsLoadError && <p role="status" className="mb-2 text-xs text-amber-300">Price alerts unavailable — {priceAlertsLoadError}</p>}
-    <div ref={attachScrollBox} data-testid="analysis-scroll-box" style={{ maxHeight: `calc(100vh - ${analysisStickyTop}px - 1rem)` }} className="max-w-full overflow-auto rounded-xl border border-white/10 lg:overscroll-y-contain" tabIndex={0} aria-label="Position analysis table, horizontally scrollable"><table ref={tableRef} className="min-w-max border-collapse text-left text-[11px]"><thead><tr>{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => {
+    <div className="relative"><div ref={tableFocus.boxRef} onPointerDownCapture={tableFocus.onPointerDownCapture} data-testid="analysis-scroll-box" data-focused={tableFocus.active ? 'true' : 'false'} style={tableFocus.active ? { maxHeight: `calc(100vh - ${analysisStickyTop}px - 1rem)` } : undefined} className={`max-w-full overflow-auto rounded-xl border ${tableFocus.active ? 'overscroll-contain border-teal-400/60' : 'border-white/10'}`} tabIndex={0} aria-label="Position analysis table, horizontally scrollable"><table ref={tableRef} className="min-w-max border-collapse text-left text-[11px]"><thead><tr>{ANALYSIS_COLUMNS.filter(column => columns.includes(column.id)).map(column => {
   const sortable = SORTABLE_COLUMNS.has(column.id);
   const isActiveSort = sort?.column === column.id;
   const labelContent = column.id === 'strike' ? 'Strike / BE' : column.label;
   return <th key={column.id} data-column-id={column.id} scope="col" title={column.id === 'capital' ? 'Capital / Collateral' : sortable ? `Sort by ${column.label}` : undefined} aria-sort={isActiveSort ? (sort!.direction === 'asc' ? 'ascending' : 'descending') : undefined} onClick={sortable ? () => toggleSort(column.id) : undefined} className={`sticky top-0 border-b border-r border-white/10 bg-slate-950 px-2 py-2 uppercase tracking-wider text-white/50 ${sortable ? 'cursor-pointer select-none hover:text-white/80' : ''} ${column.id === 'identity' ? 'left-0 z-30' : 'z-20'} ${column.id === 'capital' ? 'w-28 max-w-28' : column.id === 'strike' ? 'w-24 max-w-24 whitespace-nowrap' : column.id === 'entry' ? 'whitespace-nowrap' : column.id === 'orders' || column.id === 'notes' ? 'w-40 max-w-40' : 'whitespace-nowrap'}`}>{labelContent}{sortable && <span aria-hidden="true" className={`ml-1 inline-block ${isActiveSort ? 'text-teal-400' : 'text-white/20'}`}>{isActiveSort ? (sort!.direction === 'asc' ? '▲' : '▼') : '⇅'}</span>}</th>;
-})}</tr></thead><tbody>{sortedRows.map(row => <AnalysisRow key={row.id} onIntentChange={onIntentChange} position={row.position} columns={columns} th={th} actions={getManagementActions?.(row.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze ? analyze : undefined} onRefresh={onRefresh} savedNote={notes[noteStorageKey(row.position)] ?? ''} onSaveNote={saveNote} savedAlert={priceAlerts[priceAlertStorageKey(row.position)] ?? null} onSaveAlert={savePriceAlert} chartOpen={openChartKey === row.position.key} setChartOpen={open => setOpenChartKey(open ? row.position.key : null)} sparkData={chartData[row.position.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.position.symbol]: data }))} sparkLoading={chartLoadingSymbol === row.position.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.position.symbol : current => current === row.position.symbol ? null : current)} />)}</tbody></table></div>
+})}</tr></thead><tbody>{sortedRows.map(row => <AnalysisRow key={row.id} onIntentChange={onIntentChange} position={row.position} columns={columns} th={th} actions={getManagementActions?.(row.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze ? analyze : undefined} onRefresh={onRefresh} savedNote={notes[noteStorageKey(row.position)] ?? ''} onSaveNote={saveNote} savedAlert={priceAlerts[priceAlertStorageKey(row.position)] ?? null} onSaveAlert={savePriceAlert} chartOpen={openChartKey === row.position.key} setChartOpen={open => setOpenChartKey(open ? row.position.key : null)} sparkData={chartData[row.position.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.position.symbol]: data }))} sparkLoading={chartLoadingSymbol === row.position.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.position.symbol : current => current === row.position.symbol ? null : current)} />)}</tbody></table></div>{tableFocus.active && <div role="status" data-testid="analysis-focus-hint" className="absolute bottom-2 right-3 z-40 flex items-center gap-2 rounded-full border border-teal-400/50 bg-slate-950/95 px-3 py-1 text-[11px] text-teal-100 shadow-lg"><span>Table scrolling on. Scroll up at the top, press Esc, or click outside to go back.</span><button type="button" onClick={tableFocus.release} className="min-h-8 rounded-full border border-teal-400/60 px-2 font-semibold focus:ring-2 focus:ring-teal-400">Release</button></div>}</div>
     <StockHoldings earningsEnabled intentEnabled={!!onIntentChange} columnWidths={measuredWidths} groups={model.symbolGroups} quoteAsOf={model.quoteAsOf} notes={notes} alerts={priceAlerts} storageKey={storageKeyFor} onSaveNote={saveNoteFor} onSaveAlert={savePriceAlertFor} th={th} sellDeps={sellDeps} />
     {filterOpen && <FilterDialog draft={draftFilters} setDraft={setDraftFilters} onClose={() => setFilterOpen(false)} onApply={() => { setPreferences(current => ({ ...current, filters: draftFilters })); setFilterOpen(false); }} onClear={() => setDraftFilters(DEFAULT_FILTERS)} />}
     {columnsOpen && <ColumnsDialog selected={draftColumns} setSelected={setDraftColumns} preset={preferences.analysisView} onClose={() => setColumnsOpen(false)} onApply={() => { setPreferences(current => ({ ...current, analysisView: 'custom', customColumnIds: draftColumns })); setColumnsOpen(false); }} />}
