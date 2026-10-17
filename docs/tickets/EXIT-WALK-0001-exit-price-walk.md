@@ -1,6 +1,6 @@
 # EXIT-WALK-0001: exit-price walk (midpoint walk for Sell to Close / Buy to Close)
 
-Status: slice A IMPLEMENTED 2026-10-17 (`lib/exit-walk/`, 45 tests, unwired: no production caller). Slice B (click-to-walk button) NOT STARTED: needs Diane's mock and its own approval.
+Status: slice A IMPLEMENTED 2026-10-17 (`lib/exit-walk/`, 45 tests, unwired: no production caller). Slice B (click-to-walk) IN PROGRESS: Diane's mocks v4, Ian (C1, C2), Paul, Quinn's list approved 2026-10-17. Step 1 (`lib/exit-walk/run.ts`, the step loop, unwired) DONE; steps 2-3 (browser deps, portfolio UI) and the C2 dry run remain.
 Origin: the Position Decision Engine epic (Dean, 2026-10-17), folded into DECIDE-0001. This ticket is the A17 amendment: start at the mid, step toward the market only as needed, stop at a boundary re-derived from the live quote.
 Approvals: Ian (approved click-to-walk for exits, with conditions below), Paul (new slice, pure math first), Alan (formulas and goldens), Quinn (test list), Dean (fold into DECIDE-0001; stop = mark at 2x credit; no 21-DTE on CSP/CC; leveraged ETFs are not covered by the unconfirmed-Acquire default).
 
@@ -27,3 +27,6 @@ Gap rule, data-validity gate, hard-risk marketable-limit exception, level classe
 
 ## Verification (2026-10-17)
 `npx vitest run lib/exit-walk`: 45 passed. `npx tsc --noEmit -p tsconfig.check.json`: exit 0. Mutation check: floor rounding flipped (4 tests fail), sell direction flipped (11 fail), spread flag switched to the 25% formula (4 fail); restored, 45 pass. Sibling check: no Map/Set iterator spreads, no clock or random, no imports from app/features/components, no importers outside `lib/exit-walk/`.
+
+## Slice B step 1 verification (2026-10-17)
+`npx vitest run lib/exit-walk`: 83 passed (45 slice A + 38 step loop). `npx tsc --noEmit -p tsconfig.check.json`: exit 0. Mutation checks: direction flipped (17 fail), Stop check removed (2 fail), cancel confirmation skipped (1 fail). Sibling check: no Map/Set iterator spreads, no clock/random/timers/network in run.ts (guard test), only importer of `lib/entry-walk/walk` types is run.ts. Not run: full suite (asked first per CLAUDE.md).
