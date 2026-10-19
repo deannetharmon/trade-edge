@@ -102,6 +102,7 @@ import {
 import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/stopPolicyStore';
 import { creditClosePnlDollars, protectiveStopOutcomeLabel, signedDollar } from '@/lib/portfolio/positionManagementPresentation';
 import { bracketCloseTimeInForce, buildExactOcoBody, cancelExistingGtcForReplacement, DAY_PROMOTED_NOTE, criticalGtcRestorationWarning, liveStopRefusal, PAIRED_LEG_REFUSAL_PREFIX, keptStopPolicy, resolvePairedLeg, restoreOriginalGtcIfNeeded, stopCoverageRefusal, submitAfterBrokerDryRun, type ReconstructablePairedLeg } from '@/lib/portfolio/existingGtcReplacement';
+import { orderErrorForDisplay } from '@/lib/portfolio/orderErrorDisplay';
 import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
 // PM-0001: pure entry-vs-now favorability judgment for Trade Evolution's
 // per-metric coloring -- see computeEntryChangeTone's doc comment.
@@ -4128,11 +4129,7 @@ function BatchConfirmModal({
                     {r.error && (
                       <div className="mt-2 p-2 rounded bg-red-500/10 border border-red-500/20">
                         <p className="text-[10px] text-red-300 leading-relaxed">
-                          {r.error.includes('cannot_close_against_more_than_existing') || r.error.includes('closing order')
-                            ? `TastyTrade blocked this order because an existing closing order is already working on this position. Go to TastyTrade → Activity → Working Orders, cancel the existing GTC on ${r.symbol}, then retry here.`
-                            : r.error.includes('cannot_update_order') || r.error.includes('cancel')
-                            ? `The existing GTC order could not be cancelled automatically. Cancel it manually in TastyTrade first, then retry.`
-                            : r.error}
+                          {orderErrorForDisplay(r.error, r.symbol)}
                         </p>
                       </div>
                     )}
