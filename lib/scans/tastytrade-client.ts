@@ -1,6 +1,7 @@
 // lib/scans/tastytrade-client.ts
 // Mechanically extracted from app/screener/page.tsx (TE-0005A). Verbatim — not rewritten.
 import { BASE, CLIENT_ID, LS_ACCESS_TOKEN, LS_ACCESS_TOKEN_EXPIRY } from './constants';
+import { ivToPercent } from '../ivUnits';
 // TE-0007C fix-forward: covered-call capacity must be fetched the same way
 // every other TastyTrade call in this file is -- browser-side, with the
 // bearer token from getAccessToken() -- not through a Next.js server route.
@@ -119,8 +120,8 @@ export async function getMarketMetrics(symbols: string[], token: string) {
     const expirationIvxMap: Record<string, number> = {};
     for (const e of item['option-expiration-implied-volatilities'] ?? []) {
       if (e['expiration-date'] && e['implied-volatility'] != null) {
-        const raw = parseFloat(e['implied-volatility']);
-        expirationIvxMap[e['expiration-date']] = raw <= 1 ? raw * 100 : raw;
+        const pct = ivToPercent(e['implied-volatility']); // IV-BLANK-0001
+        if (pct != null) expirationIvxMap[e['expiration-date']] = pct;
       }
     }
 
@@ -311,12 +312,7 @@ export async function getChain(
         item['implied-volatility-index'] ??
         item.iv ??
         null;
-      const parsedIv = rawIv != null ? parseFloat(rawIv) : null;
-      const iv = parsedIv == null || Number.isNaN(parsedIv)
-        ? null
-        : parsedIv <= 1
-          ? parsedIv * 100
-          : parsedIv;
+      const iv = ivToPercent(rawIv); // IV-BLANK-0001
       if (!expirations.includes(meta.expDate)) expirations.push(meta.expDate);
       if (!chains[meta.expDate]) chains[meta.expDate] = [];
       chains[meta.expDate].push({
