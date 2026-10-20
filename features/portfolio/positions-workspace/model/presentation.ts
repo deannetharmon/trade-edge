@@ -27,6 +27,9 @@ function relevantLeg(legs: readonly PositionLeg[]): PositionLeg | null {
   return shorts.length === 1 ? shorts[0] : null;
 }
 
+// Yellow buffer: an OTM option closer to its strike than this (as % of the stock price) is a caution.
+export const MONEYNESS_YELLOW_BUFFER_PCT = 5;
+
 export interface MoneynessViewModel { state: MoneynessState; distancePct: number; tone: SemanticTone; leg: PositionLeg }
 
 export interface MoneynessMovementViewModel {
@@ -44,29 +47,26 @@ export function buildMoneynessViewModel(stockPrice: number | null, legs: readonl
   const state: MoneynessState = distancePct < atmDisplayTolerancePct ? 'ATM'
     : leg.optionType === 'C' ? (stockPrice < leg.strikePrice ? 'OTM' : 'ITM')
       : (stockPrice > leg.strikePrice ? 'OTM' : 'ITM');
-  const adverseItm = state === 'ITM' && leg.direction === 'Short';
-  const tone: SemanticTone = state === 'ATM' ? 'warning' : state === 'ITM' ? (adverseItm ? 'negative' : 'positive') : distancePct < 5 ? 'warning' : 'positive';
+  // Tone follows the position's risk: short options want to stay OTM (ITM is red, near-OTM yellow, far-OTM green);
+  // long options want to be ITM (ITM green, near-OTM yellow, far-OTM red).
+  const isShort = leg.direction === 'Short';
+  const tone: SemanticTone = state === 'ATM' ? 'warning'
+    : state === 'ITM' ? (isShort ? 'negative' : 'positive')
+      : distancePct < MONEYNESS_YELLOW_BUFFER_PCT ? 'warning'
+        : (isShort ? 'positive' : 'negative');
   return { state, distancePct, tone, leg };
 }
 
 /**
- * Interprets distance movement from the position's perspective, rather than
- * treating a larger absolute ITM/OTM percentage as universally better. Long
- * options improve deeper ITM; short options improve farther OTM.
+ * Price Change column: shows entry -> current distance from the strike. The
+ * color follows the CURRENT moneyness state from the position's perspective
+ * (see buildMoneynessViewModel), not the direction the price moved.
  */
 export function buildMoneynessMovementViewModel(entryPrice: number | null, currentPrice: number | null, legs: readonly PositionLeg[]): MoneynessMovementViewModel | null {
   const entry = buildMoneynessViewModel(entryPrice, legs);
   const current = buildMoneynessViewModel(currentPrice, legs);
   if (!entry || !current || entry.leg !== current.leg) return null;
-
-  const signedPositionCushion = (price: number, leg: PositionLeg) => {
-    const optionDirection = leg.optionType === 'C' ? price - leg.strikePrice : leg.strikePrice - price;
-    return (leg.direction === 'Long' ? optionDirection : -optionDirection) / price * 100;
-  };
-  const entryCushion = signedPositionCushion(entryPrice!, entry.leg);
-  const currentCushion = signedPositionCushion(currentPrice!, current.leg);
-  const tone = comparisonTone(entryCushion, currentCushion);
-  return { entry, current, changePct: current.distancePct - entry.distancePct, tone };
+  return { entry, current, changePct: current.distancePct - entry.distancePct, tone: current.tone };
 }
 
 export interface CapitalViewModel { label: string; value: number | null; suffix?: string; reason?: string }

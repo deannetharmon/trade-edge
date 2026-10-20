@@ -25,9 +25,41 @@ describe('position analysis presentation', () => {
     expect(buildMoneynessViewModel(110, [short, long])?.leg).toBe(short);
   });
 
-  it('colors moneyness movement by the position risk direction', () => {
-    expect(buildMoneynessMovementViewModel(112.4, 108.2, [leg('C', 100, 'Long')])?.tone).toBe('negative');
-    expect(buildMoneynessMovementViewModel(87.6, 91.8, [leg('P', 100, 'Short')])?.tone).toBe('positive');
+  it('colors moneyness by current state from the position perspective, not price direction', () => {
+    const sp = leg('P', 100, 'Short');
+    expect(buildMoneynessViewModel(110, [sp])?.tone).toBe('positive');
+    expect(buildMoneynessViewModel(103, [sp])?.tone).toBe('warning');
+    expect(buildMoneynessViewModel(100.02, [sp])?.tone).toBe('warning');
+    expect(buildMoneynessViewModel(90, [sp])?.tone).toBe('negative');
+    const sc = leg('C', 100, 'Short');
+    expect(buildMoneynessViewModel(90, [sc])?.tone).toBe('positive');
+    expect(buildMoneynessViewModel(97, [sc])?.tone).toBe('warning');
+    expect(buildMoneynessViewModel(110, [sc])?.tone).toBe('negative');
+    const lc = leg('C', 100, 'Long');
+    expect(buildMoneynessViewModel(110, [lc])?.tone).toBe('positive');
+    expect(buildMoneynessViewModel(97, [lc])?.tone).toBe('warning');
+    expect(buildMoneynessViewModel(80, [lc])?.tone).toBe('negative');
+    const lp = leg('P', 100, 'Long');
+    expect(buildMoneynessViewModel(90, [lp])?.tone).toBe('positive');
+    expect(buildMoneynessViewModel(103, [lp])?.tone).toBe('warning');
+    expect(buildMoneynessViewModel(120, [lp])?.tone).toBe('negative');
+  });
+
+  it('uses the 5% yellow buffer boundary (distance is measured against the stock price, so 5% is about 105.26 for a 100 strike)', () => {
+    expect(buildMoneynessViewModel(105.3, [leg('P', 100, 'Short')])?.tone).toBe('positive');
+    expect(buildMoneynessViewModel(105.2, [leg('P', 100, 'Short')])?.tone).toBe('warning');
+  });
+
+  it('colors the Price Change movement by current moneyness, not by whether the stock rose or fell', () => {
+    // Short put, stock fell but still comfortably OTM: green (was red under the old direction-based rule).
+    expect(buildMoneynessMovementViewModel(120, 110, [leg('P', 100, 'Short')])?.tone).toBe('positive');
+    // Short put that moved from OTM to near-strike: yellow; then ITM: red.
+    expect(buildMoneynessMovementViewModel(120, 103, [leg('P', 100, 'Short')])?.tone).toBe('warning');
+    expect(buildMoneynessMovementViewModel(120, 90, [leg('P', 100, 'Short')])?.tone).toBe('negative');
+    // Short put that recovers but is still ITM stays red.
+    expect(buildMoneynessMovementViewModel(87.6, 91.8, [leg('P', 100, 'Short')])?.tone).toBe('negative');
+    // Long call (LEAPS) ITM stays green even when the stock dipped.
+    expect(buildMoneynessMovementViewModel(112.4, 108.2, [leg('C', 100, 'Long')])?.tone).toBe('positive');
   });
 
   it('classifies interpreted comparisons rather than current signs', () => {
