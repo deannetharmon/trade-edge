@@ -140,6 +140,10 @@ describe('PositionsWorkspace', () => {
     expect(profitTargetPresentation({ entryPriceEffect: 'Debit', entryEconomicsComplete: true, profitTarget: 0.5 })).toBe('Target unavailable');
     expect(profitTargetPresentation({ entryPriceEffect: 'Credit', entryEconomicsComplete: false, profitTarget: 0.5 })).toBe('Target unavailable');
     expect(profitTargetPresentation({ entryPriceEffect: 'Credit', entryEconomicsComplete: true, profitTarget: 50 })).toBe('Target unavailable');
+    // PLTARGET-0002: the dollar target rides along with the percent when known; never for unsupported economics.
+    expect(profitTargetPresentation({ entryPriceEffect: 'Credit', entryEconomicsComplete: true, profitTarget: 0.5, targetPrice: 123.5 })).toBe('Target 50% · $123.50');
+    expect(profitTargetPresentation({ entryPriceEffect: 'Credit', entryEconomicsComplete: true, profitTarget: 0.5, targetPrice: 341 })).toBe('Target 50% · $341.00');
+    expect(profitTargetPresentation({ entryPriceEffect: 'Debit', entryEconomicsComplete: true, profitTarget: 0.5, targetPrice: 123.5 })).toBe('Target unavailable');
   });
 
   // PLTARGET-0001: signed % of target, never floored, gated identically to

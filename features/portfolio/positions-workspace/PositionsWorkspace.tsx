@@ -93,12 +93,14 @@ export interface WorkspaceAiAnalysis {
   generatedAt: string;
 }
 
-export function profitTargetPresentation(position: Pick<Position, 'entryPriceEffect' | 'entryEconomicsComplete' | 'profitTarget'>): string {
+export function profitTargetPresentation(position: Pick<Position, 'entryPriceEffect' | 'entryEconomicsComplete' | 'profitTarget'> & Partial<Pick<Position, 'targetPrice'>>): string {
   const target = position.profitTarget;
   if (position.entryPriceEffect !== 'Credit' || position.entryEconomicsComplete !== true) return 'Target unavailable';
   if (!Number.isFinite(target) || target < 0 || target > 1) return 'Target unavailable';
   const percent = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(target * 100);
-  return `Target ${percent}%`;
+  // PLTARGET-0002: show the target in dollars next to the percent so the P/L's "% of target" can be checked at a glance.
+  const dollars = Number.isFinite(position.targetPrice) && (position.targetPrice as number) > 0 ? ` · ${moneyExact(position.targetPrice as number)}` : '';
+  return `Target ${percent}%${dollars}`;
 }
 
 // PLTARGET-0001: % of target progress, signed and never floored -- a
@@ -752,7 +754,7 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
     // (target reached/exceeded) gets bold + SEMANTIC_TONE_CLASS.positive --
     // the literal moment the take-profit rule says exit -- otherwise follows
     // the sign of the % itself (Ian: signed, never floored to 0).
-    pnl: <><b className={pnl == null || Math.abs(pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative}>{money(pnl)}{pctOfTarget != null && <span className={pctOfTarget >= 100 ? `font-bold ${SEMANTIC_TONE_CLASS.positive}` : pctOfTarget > 0 ? SEMANTIC_TONE_CLASS.positive : pctOfTarget < 0 ? SEMANTIC_TONE_CLASS.negative : SEMANTIC_TONE_CLASS.neutral}> ({pctOfTarget.toFixed(0)}% of target)</span>}</b><span className="block text-[10px] text-white/55">{pnlBases.primary === 'close-now' ? 'close now' : 'mid'}</span>{/* TARGET-LINE-DEBIT-0001: bought options have no profit-target rule, so leave the line off instead of "Target unavailable". Credit positions with missing data keep the label. */}{p.entryPriceEffect !== 'Debit' && <span className="block">{profitTargetPresentation(p)}</span>}{pnlSecond && <span className="block text-[10px] text-white/70" data-testid="pnl-other-basis">{pnlSecond.text}</span>}{pnlWide && <span className="block text-[10px] text-amber-300" data-testid="pnl-wide-market">{pnlWide}</span>}{/* PL-DAY-ROW-0001 */}{dayDetail.value != null ? <span className="block text-[10px]" data-testid="pnl-day"><span className="text-white/50">1D </span><span className={dayDetail.value > 0 ? SEMANTIC_TONE_CLASS.positive : dayDetail.value < 0 ? SEMANTIC_TONE_CLASS.negative : 'text-white/70'}>{dayDetail.value >= 0 ? '+' : '-'}{money(Math.abs(dayDetail.value))}</span>{dayDetail.sinceOpen && <span className="text-white/50"> since open</span>}</span> : <span className="block text-[10px] text-white/50" data-testid="pnl-day">1D unavailable: {dayDetail.reason}</span>}</>,
+    pnl: <><b className={pnl == null || Math.abs(pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative}>{money(pnl)}{pctOfTarget != null && <span className={pctOfTarget >= 100 ? `font-bold ${SEMANTIC_TONE_CLASS.positive}` : pctOfTarget > 0 ? SEMANTIC_TONE_CLASS.positive : pctOfTarget < 0 ? SEMANTIC_TONE_CLASS.negative : SEMANTIC_TONE_CLASS.neutral}> ({pctOfTarget.toFixed(0)}% of {moneyExact(p.targetPrice)} target)</span>}</b><span className="block text-[10px] text-white/55">{pnlBases.primary === 'close-now' ? 'close now' : 'mid'}</span>{/* TARGET-LINE-DEBIT-0001: bought options have no profit-target rule, so leave the line off instead of "Target unavailable". Credit positions with missing data keep the label. */}{p.entryPriceEffect !== 'Debit' && <span className="block">{profitTargetPresentation(p)}</span>}{pnlSecond && <span className="block text-[10px] text-white/70" data-testid="pnl-other-basis">{pnlSecond.text}</span>}{pnlWide && <span className="block text-[10px] text-amber-300" data-testid="pnl-wide-market">{pnlWide}</span>}{/* PL-DAY-ROW-0001 */}{dayDetail.value != null ? <span className="block text-[10px]" data-testid="pnl-day"><span className="text-white/50">1D </span><span className={dayDetail.value > 0 ? SEMANTIC_TONE_CLASS.positive : dayDetail.value < 0 ? SEMANTIC_TONE_CLASS.negative : 'text-white/70'}>{dayDetail.value >= 0 ? '+' : '-'}{money(Math.abs(dayDetail.value))}</span>{dayDetail.sinceOpen && <span className="text-white/50"> since open</span>}</span> : <span className="block text-[10px] text-white/50" data-testid="pnl-day">1D unavailable: {dayDetail.reason}</span>}</>,
     // TELEMETRY-METRIC-DIRECTION-0001: directionalMovementTone previously
     // treated every metric identically (any movement = informational,
     // no movement = neutral) -- didn't implement the team's actual rules.

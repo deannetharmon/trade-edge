@@ -51,7 +51,7 @@ describe('buildPositionPnlBases', () => {
 
 describe('the second line (the other basis, labelled)', () => {
   it('MRVL: primary is close-now, so the line shows the midpoint and how far that is toward the 50% target ($199 of $221)', () => {
-    expect(buildPnlSecondLine(buildPositionPnlBases(MRVL))).toEqual({ label: 'Mid', text: 'Mid +$199 · 90% of target' });
+    expect(buildPnlSecondLine(buildPositionPnlBases(MRVL))).toEqual({ label: 'Mid', text: 'Mid +$199 · 90%' });
   });
 
   it('long options show close-now with the loss on what was paid', () => {

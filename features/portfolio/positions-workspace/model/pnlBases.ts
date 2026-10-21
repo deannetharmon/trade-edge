@@ -51,14 +51,14 @@ const pctOf = (value: number, base: number | null): number | null => (base != nu
 export interface PnlSecondLine { label: string; text: string }
 
 /**
- * The line shown under the primary P/L: the other basis. For a credit position (primary = close-now) it is the midpoint with its % of target;
+ * The line shown under the primary P/L: the other basis. For a credit position (primary = close-now) it is the midpoint with its % of target (the dollar target is stated on the Target line, so the % stands alone here);
  * for a long option (primary = mid) it is the derived close-now. Null when there is nothing different to show.
  */
 export function buildPnlSecondLine(b: PositionPnlBases): PnlSecondLine | null {
   if (b.primary === 'close-now') {
     if (b.mid == null) return null;
     const ofTarget = b.targetProfit != null ? pctOf(b.mid, b.targetProfit) : null;
-    return { label: 'Mid', text: `Mid ${signedMoney(round(b.mid))}${ofTarget != null ? ` · ${ofTarget.toFixed(0)}% of target` : ''}` };
+    return { label: 'Mid', text: `Mid ${signedMoney(round(b.mid))}${ofTarget != null ? ` · ${ofTarget.toFixed(0)}%` : ''}` };
   }
   if (b.closeNow == null) return null;
   if (b.mid != null && Math.abs(b.closeNow - b.mid) < 0.5) return null;
