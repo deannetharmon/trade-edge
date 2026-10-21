@@ -90,6 +90,22 @@ export default function HelpPage() {
           </a>
         </div>
 
+        {/* Candlestick Analysis lesson — entry point */}
+        <div className={`border ${th.border} ${th.card} rounded-xl p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3`}>
+          <div>
+            <p className={`text-xs font-bold ${th.textMuted} uppercase tracking-widest mb-1`}>Lesson — Candlestick Analysis</p>
+            <p className={`text-[11px] ${th.textFaint} leading-relaxed`}>
+              Lesson 1 of 6. Learn to read the battle between buyers and sellers: candle anatomy, bullish and bearish signals, the ten common patterns, and why context and volume matter — with a drawn example for each. Educational only; not a recommendation.
+            </p>
+          </div>
+          <a
+            href="/help/candlesticks"
+            className="shrink-0 text-center text-[11px] font-bold tracking-widest py-2 px-4 rounded-lg border border-blue-500 text-blue-400 hover:bg-blue-500/10 transition-colors"
+          >
+            OPEN CANDLESTICK LESSON →
+          </a>
+        </div>
+
         {/* Overview */}
         <Section title="Overview" th={th}>
           <p className={`text-[11px] ${th.textFaint} leading-relaxed`}>
