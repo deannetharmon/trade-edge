@@ -68,11 +68,28 @@ describe('PositionsWorkspace', () => {
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     await user.click(screen.getByRole('button', { name: 'Filter' }));
     const dialog = screen.getByRole('dialog', { name: 'Filter positions' });
-    await user.type(within(dialog).getByLabelText('Symbol'), 'MSFT');
+    await user.type(within(dialog).getByLabelText('Symbols'), 'MSFT');
     expect(screen.getByText('1 of 1 option positions')).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Apply' }));
     expect(screen.getByRole('button', { name: 'Filter 1' })).toBeInTheDocument();
     expect(screen.getByText('0 of 1 option positions')).toBeInTheDocument();
+  });
+
+  // FILTER-0002
+  it('filters by several tickers and offers the strategies in play as a dropdown', async () => {
+    const user = userEvent.setup();
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Filter' }));
+    const dialog = screen.getByRole('dialog', { name: 'Filter positions' });
+    const strategy = within(dialog).getByLabelText('Strategy') as HTMLSelectElement;
+    expect(strategy.tagName).toBe('SELECT');
+    expect(within(strategy).getByRole('option', { name: 'All' })).toBeInTheDocument();
+    expect(within(strategy).getAllByRole('option').length).toBeGreaterThan(1);
+    await user.type(within(dialog).getByLabelText('Symbols'), 'MSFT, AAPL');
+    await user.click(within(dialog).getByRole('button', { name: 'Apply' }));
+    expect(screen.getByRole('button', { name: 'Filter 1' })).toBeInTheDocument();
+    expect(screen.getByText('1 of 1 option positions')).toBeInTheDocument();
   });
 
   it('renders all sixteen headers in Full Detail without the Greeks column', async () => {
