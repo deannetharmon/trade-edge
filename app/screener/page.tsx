@@ -150,6 +150,7 @@ import { effectiveTickTable, learnedBrokerTick, optionRootOf } from '@/lib/portf
 import { postWithTickHeal, describeHeal, describeLearnedTick } from '@/lib/entry-walk/tickHeal';
 import { invalidateAccessToken, isTokenRejection, sendWithTokenRetry } from '@/lib/auth/tokenRetry';
 import BuyingPowerLine from '@/features/screener/components/BuyingPowerLine';
+import { MARKET_MAP_LABEL, MARKET_MAP_URL } from '@/lib/market/marketMapLink';
 import { buildCspOrderLeg, computeCspMaxLoss } from '@/lib/scans/cspOrderMath';
 import { cspEntryLimitPerShare, cspPerShareToContractDollars, buildCspEntryPayload } from '@/lib/scans/cspEntryUnits';
 import { guardCspOrder } from '@/lib/scans/cspOrderSubmission';
@@ -3076,6 +3077,7 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
       <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-xl max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h2 className={`text-sm font-bold ${th.text} tracking-widest`}>PLACE CSP ORDER — {result.symbol}</h2>
+          <a href={MARKET_MAP_URL} target="_blank" rel="noopener noreferrer" className="ml-auto mr-3 text-[10px] text-sky-400 hover:text-sky-300 underline underline-offset-2" data-testid="market-map-link">{MARKET_MAP_LABEL}</a>
           <button onClick={onClose} disabled={walk.running} className="text-slate-400 hover:text-white text-xl disabled:opacity-30">✕</button>
         </div>
 
@@ -4527,6 +4529,7 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
       <div className={`${th.sidebar} border ${th.border} rounded-2xl p-6 w-full max-w-xl max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h2 className={`text-sm font-bold ${th.text} tracking-widest`}>PLACE ORDER — {result.symbol}</h2>
+          <a href={MARKET_MAP_URL} target="_blank" rel="noopener noreferrer" className="ml-auto mr-3 text-[10px] text-sky-400 hover:text-sky-300 underline underline-offset-2" data-testid="market-map-link">{MARKET_MAP_LABEL}</a>
           <button onClick={onClose} disabled={walk.running} className="text-slate-400 hover:text-white text-xl disabled:opacity-30">✕</button>
         </div>
 
