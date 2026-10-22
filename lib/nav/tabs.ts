@@ -9,6 +9,7 @@ export type TabId =
   | 'home'
   | 'portfolio'
   | 'screener'
+  | 'market'
   | 'engine'
   | 'wheel'
   | 'rinse-repeat'
@@ -35,6 +36,7 @@ export const TABS: TabDef[] = [
   { id: 'home',            label: 'HOME',              href: '/',                desc: 'Overview',                                         hideable: false },
   { id: 'portfolio',       label: 'PORTFOLIO',         href: '/portfolio',       desc: 'Live positions, Greeks, action buttons',           hideable: false },
   { id: 'screener',        label: 'SCREENER',          href: '/screener',        desc: 'Scan tickers for BPS, BCS, IC setups',             hideable: false },
+  { id: 'market',          label: 'MARKET MAP',        href: '/market',          desc: 'Live S&P 500, Dow and Nasdaq map with your positions', hideable: true  },
   { id: 'engine',          label: 'INCOME ENGINE',     href: '/engine',          desc: 'SPX spread suggestions and capital allocation',    hideable: true  },
   { id: 'wheel',           label: 'WHEEL',             href: '/wheel',           desc: 'Wheel candidates and defaults',                    hideable: true  },
   { id: 'rinse-repeat',    label: 'REPEAT', href: '/rinse-repeat',    desc: 'Re-screen past winners and track cycles',          hideable: true  },
