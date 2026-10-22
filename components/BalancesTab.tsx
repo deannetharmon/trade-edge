@@ -35,6 +35,8 @@ interface CurrentBalances {
   netLiquidatingValue: number;
   cashBalance: number;
   netOptionsValue: number;
+  /** BP-CARD-0001: what the broker lets you use for new option trades (same field the order guards use). Null when not reported. */
+  optionBuyingPower?: number | null;
 }
 
 type RangeKey = '1M' | '2M' | '3M' | '4M' | '6M' | '12M' | 'ALL';
@@ -70,6 +72,7 @@ async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; 
     netLiquidatingValue: parseFloat(b['net-liquidating-value'] ?? '0'),
     cashBalance: parseFloat(b['cash-balance'] ?? '0'),
     netOptionsValue: parseFloat(b['long-derivative-value'] ?? '0') - parseFloat(b['short-derivative-value'] ?? '0'),
+    optionBuyingPower: (() => { const v = parseFloat(b['derivative-buying-power'] ?? b['option-buying-power'] ?? 'NaN'); return Number.isFinite(v) ? v : null; })(),
   };
 
   try {
@@ -293,7 +296,7 @@ export default function BalancesTab() {
 
       {!loading && current && (
         <>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="border border-white/10 rounded-xl p-5">
               <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Net Liquidating Value</p>
               <p className="text-2xl font-bold" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{fmtMoney(current.netLiquidatingValue)}</p>
@@ -301,6 +304,12 @@ export default function BalancesTab() {
             <div className="border border-white/10 rounded-xl p-5">
               <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Cash Balance</p>
               <p className="text-2xl font-bold" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{fmtMoney(current.cashBalance)}</p>
+              <p className="mt-1 text-[10px] text-white/40">Not what you can trade with: open positions tie some of it up.</p>
+            </div>
+            <div className="border border-white/10 rounded-xl p-5" data-testid="option-buying-power-card">
+              <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Option Buying Power</p>
+              <p className="text-2xl font-bold text-emerald-400" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{current.optionBuyingPower == null ? 'Not reported' : fmtMoney(current.optionBuyingPower)}</p>
+              <p className="mt-1 text-[10px] text-white/40">What you can use for new option trades.</p>
             </div>
             <div className="border border-white/10 rounded-xl p-5">
               <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Net Options Value</p>
