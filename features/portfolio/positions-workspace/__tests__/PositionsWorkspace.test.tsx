@@ -6,6 +6,7 @@ import type { Position } from '@/lib/portfolio-data/types';
 import type { PositionsWorkspaceModel } from '../model/types';
 import { PositionsWorkspace, profitTargetPresentation, profitTargetPct, recommendationTone } from '../PositionsWorkspace';
 import { currentNewYorkDate } from '@/lib/scans/earningsPrecheck';
+import { ExitWalkProvider } from '@/components/portfolio/ExitWalkPanel';
 
 const { evaluateHeldPmccLiveReadiness } = vi.hoisted(() => ({ evaluateHeldPmccLiveReadiness: vi.fn() }));
 vi.mock('@/lib/scans/pmccHeldReadinessClient', () => ({ evaluateHeldPmccLiveReadiness }));
@@ -770,5 +771,50 @@ describe('P/L summary strip', () => {
     expect(closes).toContain('Liquidation +$480');
     expect(closes).toContain('Buyback Unavailable');
     expect(screen.getAllByTestId('value-mid').map(node => node.textContent)).toContain('Mid \u2212$910');
+  });
+});
+
+// EXIT-WALK-0001B: the Walk the price button lives in the Position Analysis Actions column (the page's main view).
+describe('PositionsWorkspace: Walk the price launcher', () => {
+  const walkable = { ...position, identity: { key: 'AAPL-1' }, entryPriceEffect: 'Credit' } as unknown as Position;
+  const walkModel: PositionsWorkspaceModel = { ...model, analysisRows: [{ ...model.analysisRows[0], position: walkable }] };
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ notes: {} }) }));
+  });
+
+  it('shows the button next to Analyze and Close when the page supplies the walk context', async () => {
+    const user = userEvent.setup();
+    render(
+      <ExitWalkProvider pendingOrders={[]} dryRun onDone={() => {}}>
+        <PositionsWorkspace model={walkModel} th={THEMES.dark} getManagementActions={() => ['CLOSE_ROLL']} onExecute={vi.fn()} />
+      </ExitWalkProvider>,
+    );
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getAllByRole('button', { name: /^Walk( the price)?$/ }).length).toBeGreaterThan(0);
+  });
+
+  it('renders nothing without the walk context (other callers are unchanged)', async () => {
+    const user = userEvent.setup();
+    render(<PositionsWorkspace model={walkModel} th={THEMES.dark} getManagementActions={() => ['CLOSE_ROLL']} onExecute={vi.fn()} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.queryByRole('button', { name: /^Walk( the price)?$/ })).toBeNull();
+  });
+
+  it('is not offered for a position with no clear structure or unknown entry', async () => {
+    const user = userEvent.setup();
+    const unclear = { ...walkable, structureAmbiguous: true } as unknown as Position;
+    const unknown = { ...walkable, entryPriceEffect: 'Unknown' } as unknown as Position;
+    for (const bad of [unclear, unknown]) {
+      const { unmount } = render(
+        <ExitWalkProvider pendingOrders={[]} dryRun={false} onDone={() => {}}>
+          <PositionsWorkspace model={{ ...walkModel, analysisRows: [{ ...walkModel.analysisRows[0], position: bad }] }} th={THEMES.dark} getManagementActions={() => ['CLOSE_ROLL']} onExecute={vi.fn()} />
+        </ExitWalkProvider>,
+      );
+      await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+      expect(screen.queryByRole('button', { name: /^Walk( the price)?$/ })).toBeNull();
+      unmount();
+    }
   });
 });

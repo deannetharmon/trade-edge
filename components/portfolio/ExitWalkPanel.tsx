@@ -53,7 +53,9 @@ export function ExitWalkProvider({ pendingOrders, dryRun, onDone, children }: Ex
 // Launcher: the small button on a position's action row.
 // ---------------------------------------------------------------------------------------------------------------------
 
-export function ExitWalkLauncher({ pos }: { pos: Position }) {
+const LAUNCHER_CLASS = 'text-[9px] px-2.5 py-1 border rounded font-bold whitespace-nowrap transition-colors border-teal-700 text-teal-300 hover:bg-teal-500/10';
+
+export function ExitWalkLauncher({ pos, className = LAUNCHER_CLASS, label = 'Walk the price' }: { pos: Position; className?: string; label?: string }) {
   const ctx = useContext(ExitWalkContext);
   const [open, setOpen] = useState(false);
   if (!ctx || pos.structureAmbiguous || !pos.identity || pos.entryPriceEffect === 'Unknown') return null;
@@ -62,8 +64,8 @@ export function ExitWalkLauncher({ pos }: { pos: Position }) {
       <button
         type="button"
         onClick={e => { e.stopPropagation(); setOpen(true); }}
-        className="text-[9px] px-2.5 py-1 border rounded font-bold whitespace-nowrap transition-colors border-teal-700 text-teal-300 hover:bg-teal-500/10">
-        Walk the price
+        className={className}>
+        {label}
       </button>
       {open ? <ExitWalkDialog pos={pos} ctx={ctx} onClose={() => setOpen(false)} /> : null}
     </>
