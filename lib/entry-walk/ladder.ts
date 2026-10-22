@@ -8,7 +8,7 @@ import { tickSizeFor, type TickTable } from '@/lib/portfolio/tickSize';
 
 export const WALK_STEPS = 5;
 export const WALK_STEP_MS = 3500;
-/** The scan's own per-leg bid-ask limit under the course rules (RULES.BID_ASK_MAX = 0.10), in cents. */
+/** The default per-leg bid-ask limit (the course rule, RULES.BID_ASK_MAX = 0.10), in cents. WALK-WIDTH-0001: callers pass the limit the scan used. */
 export const WALK_MAX_LEG_SPREAD_CENTS = 10;
 
 export type WalkSide = 'credit' | 'debit';
@@ -20,6 +20,11 @@ export interface LadderInput {
   netAsk: number;
   /** Each leg's own bid-ask width, in dollars. */
   legSpreads: number[];
+  /**
+   * WALK-WIDTH-0001: the widest leg bid-ask, in dollars, the scan accepted for this trade (a CSP's relative liquidity rule, a spread's
+   * price-based limit). The walk must not refuse a trade the scan qualified. Omitted: the flat $0.10 default.
+   */
+  maxLegSpread?: number | null;
   /** Credit only: the scan's minimum credit rule (1/3 of width for spreads), in dollars. */
   minCredit?: number | null;
   /** Debit only: the trader's maximum debit, in dollars. */
@@ -85,11 +90,14 @@ export function buildWalkLadder(input: LadderInput): LadderResult {
     return { ok: false, reason: 'invalid_market', message: 'The quote is missing or crossed.' };
   }
   const widest = Math.max(0, ...input.legSpreads.map(s => toCents(s)));
-  if (widest > WALK_MAX_LEG_SPREAD_CENTS) {
+  const limitCents = input.maxLegSpread != null && Number.isFinite(input.maxLegSpread) && input.maxLegSpread > 0
+    ? Math.max(WALK_MAX_LEG_SPREAD_CENTS, Math.floor(input.maxLegSpread * 100 + 1e-6))
+    : WALK_MAX_LEG_SPREAD_CENTS;
+  if (widest > limitCents) {
     return {
       ok: false,
       reason: 'leg_too_wide',
-      message: `One leg is $${(widest / 100).toFixed(2)} wide, over the $${(WALK_MAX_LEG_SPREAD_CENTS / 100).toFixed(2)} limit.`,
+      message: `One leg is $${(widest / 100).toFixed(2)} wide, over the $${(limitCents / 100).toFixed(2)} limit.`,
     };
   }
 

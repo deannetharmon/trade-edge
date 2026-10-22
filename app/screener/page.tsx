@@ -82,7 +82,7 @@ import { calculateCspScore } from '@/lib/scans/cspScore';
 import { scoreBand, capScoreBandByReturn, returnCapNote, type ScoreBandFloors } from '@/lib/scans/scoreBands';
 import { CspScoreBadge, CspScoreBreakdownPanel, SCORE_BAND_BORDER_L } from '@/features/screener/components/CspScoreBreakdown';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
-import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified } from '@/lib/scans/cspQualification';
+import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified, classifyCspLiquidity } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
 import { daysUntilNy, earningsOnOrBeforeExpiration, evaluateEarningsPrecheck, EARNINGS_MIN_DAYS_AFTER_EXPIRY } from '@/lib/scans/earningsPrecheck';
 // TE-0007 — Unified Screener Launcher. One canonical Opportunity Universe
@@ -2943,7 +2943,9 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
       let fetchedTickTable: TickTable | null = null;
       try { fetchedTickTable = tickTableFromNestedChain(await ttFetch(`/option-chains/${encodeURIComponent(result.symbol)}/nested`, token), walkLegs[0].symbol); } catch { fetchedTickTable = null; }
       const tickTable = effectiveTickTable(fetchedTickTable, tickRoot); // TICK-0002: the chain's table with the broker's learned tick as a floor
-      const ladder = buildWalkLadder({ side: 'credit', netBid: quote.netBid, netAsk: quote.netAsk, legSpreads: quote.legSpreads, minCredit: null, tickTable });
+      // WALK-WIDTH-0001: the CSP scan qualifies a put up to 15% of its mid-price wide, so the walk accepts the same width.
+      const cspMid = (quote.netBid + quote.netAsk) / 2;
+      const ladder = buildWalkLadder({ side: 'credit', netBid: quote.netBid, netAsk: quote.netAsk, legSpreads: quote.legSpreads, minCredit: null, tickTable, maxLegSpread: classifyCspLiquidity(quote.legSpreads[0] ?? 0, cspMid).thresholds.poorLimitDollars });
       if (!ladder.ok) throw new Error(`Price walking is off for this order. ${ladder.message} Untick "Walk the price" to place it normally.`);
       const firstPrice = ladder.prices[0];
       const capitalOk = await refreshCapital(cspPerShareToContractDollars(firstPrice));
@@ -4428,7 +4430,8 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
       let fetchedTickTable: TickTable | null = null;
       try { fetchedTickTable = tickTableFromNestedChain(await ttFetch(`/option-chains/${encodeURIComponent(result.symbol)}/nested`, token), walkLegs[0].symbol); } catch { fetchedTickTable = null; }
       const tickTable = effectiveTickTable(fetchedTickTable, tickRoot); // TICK-0002: the chain's table with the broker's learned tick as a floor
-      const ladder = buildWalkLadder({ side: 'credit', netBid: quote.netBid, netAsk: quote.netAsk, legSpreads: quote.legSpreads, minCredit: null, tickTable });
+      // WALK-WIDTH-0001: spreads use the scan's own price-based width limit (a $0.50 limit on $100+ stocks), not a flat $0.10.
+      const ladder = buildWalkLadder({ side: 'credit', netBid: quote.netBid, netAsk: quote.netAsk, legSpreads: quote.legSpreads, minCredit: null, tickTable, maxLegSpread: result.price != null ? getBidAskMax(result.price) : null });
       if (!ladder.ok) throw new Error(`Price walking is off for this order. ${ladder.message} Untick "Walk the price" to place it normally.`);
       const accountNumber = await getAccountNumber();
       const buildPayload = (price: number) => buildCreditEntryOtoco({ ...bracketForPrice(price, gtcPct, stopMultiple, tickTable), quantity, legs });

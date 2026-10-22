@@ -56,6 +56,20 @@ describe('ladder safety', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe('leg_too_wide');
   });
+  it('WALK-WIDTH-0001: the reported NVDL 27P ($0.16 wide, about 12.6% of a $1.27 mid) walks when the scan limit is passed', () => {
+    const r = buildWalkLadder(base({ netBid: 1.19, netAsk: 1.35, legSpreads: [0.16], maxLegSpread: 0.19 }));
+    expect(r.ok).toBe(true);
+    if (r.ok) { expect(r.prices[0]).toBeLessThanOrEqual(1.35); expect(r.prices[r.prices.length - 1]).toBeGreaterThanOrEqual(1.27); }
+  });
+  it('WALK-WIDTH-0001: without the scan limit the flat $0.10 still applies, and the message shows the limit in force', () => {
+    const r = buildWalkLadder(base({ netBid: 1.19, netAsk: 1.35, legSpreads: [0.16] }));
+    expect(r).toMatchObject({ ok: false, reason: 'leg_too_wide', message: 'One leg is $0.16 wide, over the $0.10 limit.' });
+  });
+  it('WALK-WIDTH-0001: a leg wider than the scan limit is still refused, and a limit below $0.10 never tightens the default', () => {
+    expect(buildWalkLadder(base({ legSpreads: [0.25], maxLegSpread: 0.19 })).ok).toBe(false);
+    expect(buildWalkLadder(base({ legSpreads: [0.1], maxLegSpread: 0.05 })).ok).toBe(true);
+    expect(buildWalkLadder(base({ legSpreads: [0.1], maxLegSpread: null })).ok).toBe(true);
+  });
   it('does not start on a missing or crossed quote', () => {
     expect(buildWalkLadder(base({ netBid: 0 })).ok).toBe(false);
     expect(buildWalkLadder(base({ netBid: 1.5, netAsk: 1.4 })).ok).toBe(false);
