@@ -20,6 +20,7 @@ export function describeGate(key: string, check: CheckResult | undefined): strin
     case 'csp-mode':
     case 'csp-delta': return check.value;
     case 'roc': return `ROC ${check.value} below the minimum`;
+    case 'market': return check.value; // QUOTE-GUARD-0001: "wide market (63P 1.45 x 5.00)" / "no valid quote (...)"
     default: return `${key}: ${check.reason}`;
   }
 }

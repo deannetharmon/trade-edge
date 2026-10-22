@@ -10,6 +10,7 @@ import type { RulesType } from './constants';
 import { formatDisplayDate, estimateNextEarningsDate } from './scan-utils';
 import { daysUntilNy, earningsOnOrBeforeExpiration, EARNINGS_MIN_DAYS_AFTER_EXPIRY } from './earningsPrecheck';
 import { assessOiLiquidity } from './oiLiquidity';
+import { buildMarketCheck } from './quoteQuality';
 
 export interface RankEarningsResult {
   check: CheckResult;
@@ -71,7 +72,16 @@ export function buildRankChecks(
     pop: { status: 'pass', value: `${(candidate.pop ?? 0).toFixed(0)}%`, reason: 'No floor — ranked by score' },
     roc: { status: candidate.roc >= rules.ROC_MIN_SPREAD ? 'pass' : 'fail', value: `${candidate.roc.toFixed(0)}%`, reason: `Min ${rules.ROC_MIN_SPREAD}%` },
     oi: buildRankOiCheck(candidate, rules.OI_MIN),
+    // QUOTE-GUARD-0001: a gate only when the candidate carries a market assessment (see rankedGateKeysFor).
+    ...(candidate.marketAssessment ? { market: buildMarketCheck(candidate.marketAssessment) } : {}),
   };
+}
+
+/** failReasons entry for a Ranked row whose quotes are wide or unusable; null when the market is fine or unassessed. */
+export function buildRankMarketFailReason(candidate: SpreadCandidate): string | null {
+  const a = candidate.marketAssessment;
+  if (!a || a.status === 'ok') return null;
+  return `${a.status === 'invalid' ? 'No valid quote' : 'Wide market'}: ${a.reasons.join('; ')}`;
 }
 
 /** failReasons for a Ranked row: the strict run's reasons, minus its generic ones, plus this candidate's own earnings reason. */

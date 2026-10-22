@@ -4,6 +4,7 @@ import type { SpreadCandidate } from './types';
 import type { RulesType } from './constants';
 import { getWidthSteps, getBidAskMax, normalizeIv, calcSpreadPop, daysUntil } from './scan-utils';
 import { calculateIronCondorCapital, STANDARD_EQUITY_OPTION_MULTIPLIER } from './financials';
+import { assessSpreadMarket, type LegQuoteInput } from './quoteQuality';
 
 export function calculateTargetedConservativeCredit(
   shortLeg: any, longLeg: any, width: number, requireValidQuotes: boolean,
@@ -316,4 +317,97 @@ export function findBestTargetedICWithCreditRatioFloor(
     longCallOI: callSpread.longOI, callCredit: callSpread.credit, callWidth: callSpread.width, totalCredit, optimized: false,
     shortOccSymbol: putSpread.shortOccSymbol, longOccSymbol: putSpread.longOccSymbol,
     shortCallOccSymbol: callSpread.shortOccSymbol, longCallOccSymbol: callSpread.longOccSymbol };
+}
+
+// QUOTE-GUARD-0001 — the Ranked scan's iron condor.
+// findBestICUnfiltered prices each wing at mid minus mid. On a wide market that is a credit nobody can trade
+// at (SOXL 63/58 + 175/180 showed $2.99; selling at the bid and buying at the ask blends to $0.63). This
+// finder uses the same executable credit as the Ranked BPS/BCS rows and the order ticket (natural price,
+// blended 25% toward mid). It keeps a candidate whose quotes are wide or unusable, so the row can be shown
+// as Disqualified with the numbers, and it prefers a wing with usable quotes over one without, so a wide
+// inner wing never hides a tight outer one. findBestICUnfiltered (Targeted, checklist) is left unchanged.
+// `creditRatio` stays put-side (now from the executable credit); `totalCredit` is the executable put + call credit.
+export function findBestRankedIC(chain: any[], expDate: string, price: number | null, exactWidth?: number): SpreadCandidate | null {
+  const limit = getBidAskMax(price);
+  const dte = daysUntil(expDate);
+  type RankedWing = {
+    shortStrike: number; longStrike: number; shortDelta: number; width: number;
+    credit: number; creditRatio: number; midCredit: number; naturalCredit: number; roc: number; pop: number;
+    shortOI: number; longOI: number; shortOccSymbol?: string; longOccSymbol?: string;
+    shortBid: number; shortAsk: number; longBid: number; longAsk: number;
+    legQuotes: LegQuoteInput[]; marketRank: number;
+  };
+  const marketRank = (status: string): number => (status === 'invalid' ? 2 : status === 'wide' ? 1 : 0);
+
+  const buildWings = (side: 'put' | 'call'): RankedWing[] => {
+    const suffix = side === 'put' ? 'P' : 'C';
+    const legs = chain.filter((o: any) => o.expirationDate === expDate && o.optionType === suffix);
+    const maxWidth = price == null ? 100 : Math.min(price * 0.15, 500);
+    const wings: RankedWing[] = [];
+    for (const width of exactWidth == null ? getWidthSteps(maxWidth, price) : [exactWidth]) {
+      for (const shortLeg of legs) {
+        const delta = shortLeg.delta;
+        if (delta == null) continue;
+        const absDelta = Math.abs(delta);
+        if (!(absDelta >= 0.05 && absDelta <= 0.60)) continue;
+        const longStrike = side === 'put' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
+        const longLeg = legs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
+        if (!longLeg) continue;
+        // Executable credit. Quote usability is judged separately below and shown, not silently dropped.
+        const quote = calculateTargetedConservativeCredit(shortLeg, longLeg, width, false);
+        if (!quote) continue;
+        const pop = calcSpreadPop(side === 'put' ? 'BPS' : 'BCS', price, shortLeg.strikePrice, quote.credit, dte, normalizeIv(shortLeg.iv));
+        if (pop == null) continue;
+        const maxLoss = width - quote.credit;
+        const legQuotes: LegQuoteInput[] = [
+          { label: `${shortLeg.strikePrice}${suffix}`, role: 'short', bid: shortLeg.bid, ask: shortLeg.ask },
+          { label: `${longLeg.strikePrice}${suffix}`, role: 'long', bid: longLeg.bid, ask: longLeg.ask },
+        ];
+        wings.push({
+          shortStrike: shortLeg.strikePrice, longStrike, shortDelta: absDelta, width,
+          credit: quote.credit, creditRatio: quote.creditRatio, midCredit: quote.midCredit, naturalCredit: quote.naturalCredit,
+          roc: maxLoss > 0 ? (quote.credit / maxLoss) * 100 : 0, pop,
+          shortOI: shortLeg.openInterest ?? 0, longOI: longLeg.openInterest ?? 0,
+          shortOccSymbol: shortLeg.occSymbol, longOccSymbol: longLeg.occSymbol,
+          shortBid: shortLeg.bid, shortAsk: shortLeg.ask, longBid: longLeg.bid, longAsk: longLeg.ask,
+          legQuotes, marketRank: marketRank(assessSpreadMarket(legQuotes, limit).status),
+        });
+      }
+    }
+    return wings.sort((a, b) => {
+      if (a.marketRank !== b.marketRank) return a.marketRank - b.marketRank;
+      const popDiff = b.pop - a.pop;
+      return Math.abs(popDiff) >= 5 ? popDiff : b.roc - a.roc;
+    });
+  };
+
+  const putWing = buildWings('put')[0];
+  if (!putWing) return null;
+  // The short call must sit above the short put, as in findBestIC.
+  const callWing = buildWings('call').find(w => w.shortStrike > putWing.shortStrike);
+  if (!callWing) return null;
+
+  const totalCredit = Number((putWing.credit + callWing.credit).toFixed(2));
+  const midCredit = Number((putWing.midCredit + callWing.midCredit).toFixed(2));
+  const naturalCredit = Number((putWing.naturalCredit + callWing.naturalCredit).toFixed(2));
+  let capital;
+  try {
+    capital = calculateIronCondorCapital({ putWidth: putWing.width, callWidth: callWing.width, totalCredit, creditUnit: 'per_share', contractMultiplier: STANDARD_EQUITY_OPTION_MULTIPLIER, quantity: 1 });
+  } catch { return null; }
+  const maxLossPerShare = capital.theoreticalMaxLoss / STANDARD_EQUITY_OPTION_MULTIPLIER;
+  const roc = maxLossPerShare > 0 ? (totalCredit / maxLossPerShare) * 100 : 0;
+  return {
+    strategy: 'IC', expiration: expDate, dte, shortStrike: putWing.shortStrike, longStrike: putWing.longStrike,
+    shortDelta: putWing.shortDelta, shortOI: putWing.shortOI, longOI: putWing.longOI, credit: putWing.credit,
+    midCredit, naturalCredit, spreadFriction: Number((midCredit - naturalCredit).toFixed(2)),
+    spreadWidth: putWing.width, ...capital, contractMultiplier: STANDARD_EQUITY_OPTION_MULTIPLIER, quantity: 1,
+    creditRatio: putWing.creditRatio, roc, pop: (1 - putWing.shortDelta - callWing.shortDelta) * 100,
+    shortCallStrike: callWing.shortStrike, longCallStrike: callWing.longStrike, shortCallOI: callWing.shortOI,
+    longCallOI: callWing.longOI, callCredit: callWing.credit, callWidth: callWing.width, totalCredit, optimized: false,
+    shortOccSymbol: putWing.shortOccSymbol, longOccSymbol: putWing.longOccSymbol,
+    shortCallOccSymbol: callWing.shortOccSymbol, longCallOccSymbol: callWing.longOccSymbol,
+    shortBid: putWing.shortBid, shortAsk: putWing.shortAsk, longBid: putWing.longBid, longAsk: putWing.longAsk,
+    shortCallBid: callWing.shortBid, shortCallAsk: callWing.shortAsk, longCallBid: callWing.longBid, longCallAsk: callWing.longAsk,
+    marketAssessment: assessSpreadMarket([...putWing.legQuotes, ...callWing.legQuotes], limit),
+  };
 }

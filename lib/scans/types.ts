@@ -47,7 +47,14 @@ export interface SpreadCandidate {
   longBid?: number;
   longAsk?: number;
   quoteFetchedAt?: number;
-  
+  // QUOTE-GUARD-0001 — call-side quotes of an iron condor (shortBid/shortAsk/longBid/longAsk above are the put side).
+  shortCallBid?: number;
+  shortCallAsk?: number;
+  longCallBid?: number;
+  longCallAsk?: number;
+  /** QUOTE-GUARD-0001 — how usable the quotes behind this candidate's credit are (Ranked scan). Undefined = not assessed. */
+  marketAssessment?: import('./quoteQuality').MarketAssessment;
+
   // PMCC-specific
   longExpiration?: string; longDte?: number; longDelta?: number;
   longCost?: number; netDebit?: number; netDebitUnit?: 'per_share'; maxProfit?: number; extrinsicCapture?: number;
@@ -223,7 +230,7 @@ export interface ScreenResult {
   ruleSetApplied?: string;
   publishedOrder?: number;
   publishedRank?: number;
-  checks: { ivr: CheckResult; earnings: CheckResult; oi: CheckResult; delta: CheckResult; credit: CheckResult; roc: CheckResult; pop: CheckResult; iv: CheckResult; emClearance: CheckResult; };
+  checks: { ivr: CheckResult; earnings: CheckResult; oi: CheckResult; delta: CheckResult; credit: CheckResult; roc: CheckResult; pop: CheckResult; iv: CheckResult; emClearance: CheckResult; /** QUOTE-GUARD-0001: Ranked spread rows only; a gate when present (absent on Targeted and on rows saved before this check existed). */ market?: CheckResult; };
   // CSP-WORKFLOW-0001 — one ScreenResult now represents exactly ONE
   // contract for multi-candidate strategies (CSP today). `candidateId`
   // mirrors `bestCandidate.candidateId` at the top level so React keys,

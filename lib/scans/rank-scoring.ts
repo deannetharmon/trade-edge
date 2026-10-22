@@ -3,12 +3,13 @@
 import type { ScreenResult, SpreadCandidate, TrendResult, RankConfig, DimensionScore, CheckResult } from './types';
 import type { RulesType } from './constants';
 import { RANK_SCAN_DTE_MIN, RANK_SCAN_DTE_MAX } from './constants';
-import { daysUntil, calcSpreadPop, normalizeIv } from './scan-utils';
-import { findBestICUnfiltered } from './spread-finder';
+import { daysUntil, calcSpreadPop, normalizeIv, getBidAskMax } from './scan-utils';
+import { findBestRankedIC } from './spread-finder';
 import { computeExpectedMove } from './expectedMove';
 import { runChecklist } from './checklist';
-import { buildRankChecks, buildRankEarningsCheck, buildRankFailReasons } from './rankChecks';
-import { deriveQualificationState, RANKED_SPREAD_GATE_KEYS } from './qualificationState';
+import { buildRankChecks, buildRankEarningsCheck, buildRankFailReasons, buildRankMarketFailReason } from './rankChecks';
+import { deriveQualificationState, rankedGateKeysFor } from './qualificationState';
+import { assessSpreadMarket } from './quoteQuality';
 
 // Shared with the order-entry warning gate (TradeModal) so the hard-block
 // threshold stays in lockstep with the score instead of drifting.
@@ -420,7 +421,8 @@ export function exploreAllCandidatesForRank(
     for (const strat of (['BPS', 'BCS', 'IC'] as const)) {
       try {
         if (strat === 'IC') {
-          const candidate = findBestICUnfiltered(chainItems, exp, price, exactWidth);
+          // QUOTE-GUARD-0001: executable credit and a quote-usability assessment, not mid minus mid.
+          const candidate = findBestRankedIC(chainItems, exp, price, exactWidth);
           if (!candidate) continue;
           const result = runChecklist(symbol, strat, metrics, singleExpChain, price, appliedRules, trendResult, stockPresetLabel, isEtf ? etfRules : undefined, etfPresetLabel, true);
           // TARGETED-IC-OTM-FILTER-0001: always our specific strike from
@@ -434,11 +436,12 @@ export function exploreAllCandidatesForRank(
           const icBestCandidate = candidate;
           const icEarnings = buildRankEarningsCheck(result.earningsDate, icBestCandidate.expiration, isEtf, result.checks.earnings);
           const icChecks = buildRankChecks(result.checks, icBestCandidate, appliedRules, icEarnings.check);
+          const icMarketReason = buildRankMarketFailReason(icBestCandidate);
           results.push({
             ...result,
             bestCandidate: icBestCandidate,
-            qualified: deriveQualificationState(icChecks, RANKED_SPREAD_GATE_KEYS).state === 'qualified',
-            failReasons: buildRankFailReasons(result.failReasons, icEarnings.failReason),
+            qualified: deriveQualificationState(icChecks, rankedGateKeysFor(icChecks)).state === 'qualified',
+            failReasons: [...buildRankFailReasons(result.failReasons, icEarnings.failReason), ...(icMarketReason ? [icMarketReason] : [])],
             checks: icChecks,
           });
           continue;
@@ -459,6 +462,7 @@ export function exploreAllCandidatesForRank(
 
           let bestCandidate: SpreadCandidate | null = null;
           let bestCreditRatio = -1;
+          let bestMarketRank = Number.POSITIVE_INFINITY; // QUOTE-GUARD-0001: prefer a width with usable quotes
           for (const width of exactWidth == null ? Array.from({ length: Math.floor(maxWidth / stepSize) }, (_, i) => (i + 1) * stepSize) : [exactWidth]) {
             const longStrike = strat === 'BPS' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
             const longLeg = putCallLegs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
@@ -482,7 +486,16 @@ export function exploreAllCandidatesForRank(
             const modelPop = calcSpreadPop(strat, price, shortLeg.strikePrice, credit, dte, ivForPop);
             if (modelPop == null) continue;
 
-            if (creditRatio > bestCreditRatio) {
+            // QUOTE-GUARD-0001: how usable are the quotes behind this credit? Shown as a gate; a width whose
+            // markets are tight wins over a wider-market width even when its credit ratio is lower.
+            const marketAssessment = assessSpreadMarket([
+              { label: `${shortLeg.strikePrice}${optType}`, role: 'short', bid: shortLeg.bid, ask: shortLeg.ask },
+              { label: `${longLeg.strikePrice}${optType}`, role: 'long', bid: longLeg.bid, ask: longLeg.ask },
+            ], getBidAskMax(price));
+            const marketRank = marketAssessment.status === 'invalid' ? 2 : marketAssessment.status === 'wide' ? 1 : 0;
+
+            if (marketRank < bestMarketRank || (marketRank === bestMarketRank && creditRatio > bestCreditRatio)) {
+              bestMarketRank = marketRank;
               bestCreditRatio = creditRatio;
               bestCandidate = {
                 strategy: strat, expiration: exp, dte, shortStrike: shortLeg.strikePrice, longStrike,
@@ -500,6 +513,7 @@ export function exploreAllCandidatesForRank(
                 // app/screener/page.tsx's Targeted-mode equivalent.
                 shortBid: shortLeg.bid, shortAsk: shortLeg.ask,
                 longBid: longLeg.bid, longAsk: longLeg.ask,
+                marketAssessment,
               };
             }
           }
@@ -509,11 +523,12 @@ export function exploreAllCandidatesForRank(
           const result = runChecklist(symbol, strat, metrics, syntheticChain, price, appliedRules, trendResult, stockPresetLabel, isEtf ? etfRules : undefined, etfPresetLabel, true);
           const spreadEarnings = buildRankEarningsCheck(result.earningsDate, bestCandidate.expiration, isEtf, result.checks.earnings);
           const spreadChecks = buildRankChecks(result.checks, bestCandidate, appliedRules, spreadEarnings.check);
+          const spreadMarketReason = buildRankMarketFailReason(bestCandidate);
           results.push({
             ...result,
             bestCandidate,
-            qualified: deriveQualificationState(spreadChecks, RANKED_SPREAD_GATE_KEYS).state === 'qualified',
-            failReasons: buildRankFailReasons(result.failReasons, spreadEarnings.failReason),
+            qualified: deriveQualificationState(spreadChecks, rankedGateKeysFor(spreadChecks)).state === 'qualified',
+            failReasons: [...buildRankFailReasons(result.failReasons, spreadEarnings.failReason), ...(spreadMarketReason ? [spreadMarketReason] : [])],
             checks: spreadChecks,
           });
         }

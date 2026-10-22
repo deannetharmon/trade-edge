@@ -21,6 +21,14 @@ export interface QualificationDerivation {
 /** Ranked spread scan: credit, delta and POP have no floor in Ranked (scored, not gated). */
 export const RANKED_SPREAD_GATE_KEYS = ['ivr', 'earnings', 'oi', 'roc'] as const;
 
+/**
+ * QUOTE-GUARD-0001: the Ranked scan adds a `market` check (usable quotes, no wide markets). It is a gate only
+ * when the row has one, so Targeted rows and rows saved before this check existed keep their previous state.
+ */
+export function rankedGateKeysFor(checks: Partial<Record<string, CheckResult | undefined>> | null | undefined): readonly string[] {
+  return checks?.market ? [...RANKED_SPREAD_GATE_KEYS, 'market'] : RANKED_SPREAD_GATE_KEYS;
+}
+
 export function deriveQualificationState(
   checks: Partial<Record<string, CheckResult | undefined>>,
   gateKeys: readonly string[],
@@ -43,7 +51,7 @@ const SPREAD_STRATEGIES = new Set(['BPS', 'BCS', 'IC']);
 export function deriveSpreadQualification(result: ScreenResult): QualificationDerivation | null {
   const strategy = result.bestCandidate?.strategy ?? result.strategy;
   if (!SPREAD_STRATEGIES.has(strategy) || !result.checks) return null;
-  return deriveQualificationState(result.checks, RANKED_SPREAD_GATE_KEYS);
+  return deriveQualificationState(result.checks, rankedGateKeysFor(result.checks));
 }
 
 export interface QualificationStateCounts {
