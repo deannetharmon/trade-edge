@@ -15,6 +15,7 @@ import { fetchStockQuotes, type QuoteReport } from '@/lib/market/marketQuotes';
 import { buildHoldings, type TileHolding } from '@/lib/market/holdings';
 import { colorBucket, holdingLabel, movingAgainst, netExposure, type ColorBucket, type Exposure } from '@/lib/market/marketMapMath';
 import { squarify, type Rect } from '@/lib/market/treemap';
+import { fitTileText, markerSize } from '@/lib/market/fitText';
 
 const W = 1000;
 const H = 620;
@@ -25,17 +26,15 @@ const BUCKET_BG: Record<ColorBucket, string> = {
   dn4: '#c2323c', dn3: '#a3323a', dn2: '#86303a', dn1: '#682d33', flat: '#3a4450',
   up1: '#1f5a42', up2: '#1d7650', up3: '#169468', up4: '#12ad76', none: '#2a2f36',
 };
-// MARKET-MAP-0003: a held stock must stand out on any tile color (a red outline vanishes on a red tile). A white ring with a dark halo
-// shows a holding; amber replaces white when the move is against you. An arrow says which way you gain.
-const RING_HELD = 'inset 0 0 0 3px #ffffff, inset 0 0 0 5px rgba(0,0,0,0.8)';
-const RING_AGAINST = 'inset 0 0 0 3px #ffd23f, inset 0 0 0 5px rgba(0,0,0,0.8)';
-const RING_HELD_THIN = 'inset 0 0 0 2px #ffffff, inset 0 0 0 3px rgba(0,0,0,0.8)';
-const RING_AGAINST_THIN = 'inset 0 0 0 2px #ffd23f, inset 0 0 0 3px rgba(0,0,0,0.8)';
+// MARKET-MAP-0003 (Diane): a held stock gets a gold star in the tile's upper-left; a stock moving 2% or more against the position also
+// gets a warning badge in the upper-right. Shapes read on any tile color; borders did not (a red outline vanishes on a red tile).
+const STAR_STYLE = { color: '#ffd23f', textShadow: '0 0 2px #000, 0 0 2px #000, 0 0 3px #000' } as const;
 const ARROW: Record<Exposure, { glyph: string; hint: string }> = {
   bullish: { glyph: '\u25B2', hint: 'you gain if it rises' },
   bearish: { glyph: '\u25BC', hint: 'you gain if it falls' },
   neutral: { glyph: '\u25C6', hint: 'no net direction' },
 };
+const holdingText = (h: TileHolding): string => `${ARROW[netExposure(h)].glyph} ${h.via ? `${h.via}: ` : ''}${holdingLabel(h)}`;
 const LEGEND: ColorBucket[] = ['dn4', 'dn3', 'dn2', 'dn1', 'flat', 'up1', 'up2', 'up3', 'up4'];
 
 interface Tile { ticker: string; rect: Rect; pct: number | null; bucket: ColorBucket; holding: TileHolding | null; against: boolean }
@@ -158,30 +157,25 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
           </div>
         ))}
         {sectors.flatMap(sector => sector.tiles).map(tile => {
-          const minSide = Math.min(tile.rect.w, tile.rect.h);
-          const showText = minSide > 26;
-          const showPct = minSide > 40;
-          // Small tiles keep the ring and the arrow badge; the label (and the tooltip) carry the detail, so nothing spills past the tile.
-          const showLabel = minSide > 70;
-          const thin = minSide < 45;
-          const base = Math.max(0.8, Math.min(3.2, minSide / 28));
           const holding = tile.holding;
-          const label = holding ? `${holding.via ? `${holding.via}: ` : ''}${holdingLabel(holding)}` : '';
+          const label = holding ? holdingText(holding) : '';
+          const pctText = fmtPct(tile.pct);
+          const fit = fitTileText({ w: tile.rect.w, h: tile.rect.h, ticker: tile.ticker, pct: pctText, label: label || null });
+          const marker = holding ? markerSize(tile.rect.w, tile.rect.h) : null;
+          const cq = (units: number) => `${(units / 10).toFixed(3)}cqw`;
           return (
-            <div key={tile.ticker} title={`${tile.ticker} ${fmtPct(tile.pct)}${label ? ` · ${label}` : ''}`}
+            <div key={tile.ticker} title={`${tile.ticker} ${pctText}${holding ? ` \u00B7 ${label}${tile.against ? ' \u00B7 moving against you' : ''}` : ''}`}
               className="absolute flex flex-col items-center justify-center text-center text-white overflow-hidden"
-              style={{
-                ...pctOf(tile.rect), background: BUCKET_BG[tile.bucket], border: '1px solid rgba(0,0,0,0.45)',
-                boxShadow: tile.against ? (thin ? RING_AGAINST_THIN : RING_AGAINST) : holding ? (thin ? RING_HELD_THIN : RING_HELD) : undefined,
-              }}>
-              {holding && minSide > 30 && (
-                <span className="absolute left-1 top-1 rounded font-bold leading-none"
-                  style={{ background: tile.against ? '#ffd23f' : '#ffffff', color: '#111', fontSize: `${Math.max(0.8, base * 0.5)}cqw`, padding: '0.25cqw 0.5cqw' }}
-                  title={ARROW[netExposure(holding)].hint}>{ARROW[netExposure(holding)].glyph}{tile.against ? ' \u26A0' : ''}</span>
+              style={{ ...pctOf(tile.rect), background: BUCKET_BG[tile.bucket], border: '1px solid rgba(0,0,0,0.45)' }}>
+              {holding && marker != null && (
+                <span aria-label="You hold this" className="absolute leading-none" style={{ left: cq(2), top: cq(1), fontSize: cq(marker), ...STAR_STYLE }}>{'\u2605'}</span>
               )}
-              {showText && <b style={{ fontSize: `${base}cqw`, lineHeight: 1.1 }}>{tile.ticker}</b>}
-              {showPct && <span style={{ fontSize: `${Math.max(0.7, base * 0.7)}cqw` }}>{fmtPct(tile.pct)}</span>}
-              {showLabel && holding && <span className="mt-0.5 max-w-full truncate rounded px-1 font-semibold" style={{ background: tile.against ? '#ffd23f' : '#ffffff', color: '#111', fontSize: `${Math.max(0.65, base * 0.45)}cqw`, lineHeight: 1.3 }}>{label}</span>}
+              {tile.against && marker != null && (
+                <span aria-label="Moving against your position" className="absolute leading-none" style={{ right: cq(2), top: cq(1), fontSize: cq(marker * 0.9), color: '#ffd23f', textShadow: '0 0 2px #000, 0 0 3px #000' }}>{'\u26A0'}</span>
+              )}
+              {fit.ticker != null && <b style={{ fontSize: cq(fit.ticker), lineHeight: 1.1, whiteSpace: 'nowrap' }}>{tile.ticker}</b>}
+              {fit.pct != null && <span style={{ fontSize: cq(fit.pct), lineHeight: 1.1, whiteSpace: 'nowrap' }}>{pctText}</span>}
+              {fit.label != null && <span className="rounded px-1 font-semibold" style={{ background: '#ffffff', color: '#111', fontSize: cq(fit.label), lineHeight: 1.15, whiteSpace: 'nowrap' }}>{label}</span>}
             </div>
           );
         })}
@@ -192,10 +186,11 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
           <div className={`text-[11px] uppercase tracking-wider ${mutedClass}`}>Your other positions (not on this map)</div>
           <div className="flex flex-wrap gap-2">
             {offMap.map(o => (
-              <div key={o.ticker} className="flex items-center gap-2 rounded px-2.5 py-1.5 text-xs text-white"
-                style={{ background: BUCKET_BG[o.bucket], boxShadow: o.against ? RING_AGAINST : RING_HELD }}>
-                <span className="rounded px-1 font-bold" style={{ background: o.against ? '#ffd23f' : '#ffffff', color: '#111' }} title={ARROW[netExposure(o.holding)].hint}>{ARROW[netExposure(o.holding)].glyph}{o.against ? ' \u26A0' : ''}</span>
-                <b>{o.ticker}</b><span>{fmtPct(o.pct)}</span><span className="rounded px-1 text-[10px] font-semibold" style={{ background: o.against ? '#ffd23f' : '#ffffff', color: '#111' }}>{holdingLabel(o.holding)}</span>
+              <div key={o.ticker} className="flex items-center gap-2 rounded px-2.5 py-1.5 text-xs text-white" style={{ background: BUCKET_BG[o.bucket] }}>
+                <span aria-label="You hold this" style={{ ...STAR_STYLE, fontSize: 14, lineHeight: 1 }}>{'\u2605'}</span>
+                <b>{o.ticker}</b><span>{fmtPct(o.pct)}</span>
+                <span className="rounded px-1 text-[10px] font-semibold" style={{ background: '#ffffff', color: '#111' }}>{ARROW[netExposure(o.holding)].glyph} {holdingLabel(o.holding)}</span>
+                {o.against && <span aria-label="Moving against your position" title="Moving against your position" style={{ color: '#ffd23f', textShadow: '0 0 2px #000', fontSize: 14, lineHeight: 1 }}>{'\u26A0'}</span>}
               </div>
             ))}
           </div>
@@ -206,8 +201,7 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
         <span>≤ −3%</span>{LEGEND.map(b => <i key={b} style={{ background: BUCKET_BG[b], display: 'inline-block', width: 30, height: 10 }} />)}<span>≥ +3%</span>
       </div>
       <div className={`text-[11px] ${mutedClass}`}>
-        {index.scope} Tile size is approximate{index.weighting === 'cap' ? ' (rounded market caps, refreshed by hand)' : ''}. White ring: you hold options or shares on it
-        ({heldCount} in all). ▲ you gain if it rises, ▼ you gain if it falls. Amber ring with ⚠: it is moving 2% or more against that position today.
+        {index.scope} Tile size is approximate{index.weighting === 'cap' ? ' (rounded market caps, refreshed by hand)' : ''}. ★ you hold options or shares on it ({heldCount} in all). ▲ you gain if it rises, ▼ you gain if it falls. ⚠ it is moving 2% or more against that position today.
       </div>
     </div>
   );
