@@ -65,6 +65,77 @@ export function isOnTick(price: number, table: TickTable | null): boolean {
   return Number.isFinite(price) && Math.abs(roundToTick(price, table) - price) < 1e-9;
 }
 
+/** Smallest on-tick price at or above `price` (ties and float noise resolved in whole cents). TICK-0002: shared with the entry bracket. */
+export function ceilToTick(price: number, table: TickTable | null): number {
+  const tick = tickSizeFor(price, table);
+  const ticks = Math.ceil(cents(price) / tick - 1e-9);
+  let result = cents(ticks * tick);
+  const tickAtResult = tickSizeFor(result, table);
+  if (tickAtResult !== tick) result = cents(Math.ceil(cents(result) / tickAtResult - 1e-9) * tickAtResult);
+  return result;
+}
+
+/** Largest on-tick price at or below `price`, never below one tick. */
+export function floorToTick(price: number, table: TickTable | null): number {
+  const tick = tickSizeFor(price, table);
+  const ticks = Math.floor(cents(price) / tick + 1e-9);
+  const result = cents(ticks * tick);
+  return Math.max(result, tickSizeFor(0, table));
+}
+
+// TICK-0002 (Ian, Alan, Quinn): the broker is the source of truth for tick size. A chain's published `tick-sizes` can disagree with
+// what the broker accepts for an order (NVDL: the chain said $0.01 below $3, the broker demanded $0.05). Two helpers keep the
+// rule in one place: the broker's own stated tick becomes a floor under every step of the table, and a rejection message is read
+// for that tick. Nothing here guesses: an unreadable message yields null.
+
+/** Ticks the broker is known to use for options; anything else in a message is not trusted as a tick. */
+const MAX_BROKER_TICK = 1;
+
+/**
+ * The tick the broker named in a rejection ("Price must be in increments of $0.05 for this order"), or null when the message does
+ * not name one. Only a positive whole number of cents up to $1.00 is accepted.
+ */
+export function parseBrokerTick(message: unknown): number | null {
+  if (typeof message !== 'string') return null;
+  const match = /increments?\s+of\s+\$?\s*(\d*\.?\d+)/i.exec(message);
+  if (!match) return null;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0 || value > MAX_BROKER_TICK) return null;
+  const inCents = Math.round(value * 100);
+  if (Math.abs(inCents - value * 100) > 1e-6 || inCents < 1) return null;
+  return inCents / 100;
+}
+
+/**
+ * The tick table with the broker's stated tick as a floor under every step: tick = max(brokerTick, table tick at that price).
+ * With no table the broker's tick applies at every price. A missing or invalid broker tick leaves the table as it is.
+ */
+export function applyBrokerTick(table: TickTable | null, brokerTick: number | null | undefined): TickTable | null {
+  if (brokerTick == null || !Number.isFinite(brokerTick) || brokerTick <= 0) return table;
+  if (!table) return [{ threshold: null, value: brokerTick }];
+  return table.map(step => ({ threshold: step.threshold, value: Math.max(step.value, brokerTick) }));
+}
+
+/** An entry credit snapped DOWN to the tick (never asks for more than the trader chose, and is never below one tick). No table: whole cents. */
+export function snapEntryCredit(price: number, table: TickTable | null): number {
+  if (!Number.isFinite(price)) return price;
+  if (!table) return cents(price);
+  return floorToTick(price, table);
+}
+
+/**
+ * One +/- button press. From a price that is on a tick it moves by the larger of `minStep` and the tick at that price; from a price
+ * that is off the tick it moves to the nearest valid tick in that direction. It always lands on a valid tick and never goes below
+ * one tick. With no table it moves by `minStep` in whole cents (the buttons' behaviour before TICK-0002).
+ */
+export function stepByTick(price: number, direction: 1 | -1, table: TickTable | null, minStep = 0.05): number {
+  if (!Number.isFinite(price)) return price;
+  if (!table) return Math.max(cents(price + direction * minStep), 0.01);
+  if (!isOnTick(price, table)) return direction > 0 ? ceilToTick(price, table) : floorToTick(price, table);
+  const raw = cents(price + direction * Math.max(minStep, tickSizeFor(price, table)));
+  return direction > 0 ? ceilToTick(raw, table) : floorToTick(raw, table);
+}
+
 /** OCC root (e.g. "SOXL", "AAPL1") from a space-padded OCC symbol. */
 export function occRoot(occSymbol: string): string {
   return occSymbol.slice(0, 6).trim();

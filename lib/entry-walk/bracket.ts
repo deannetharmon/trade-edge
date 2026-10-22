@@ -6,11 +6,16 @@
 //
 // ORDER-TICK-0001: the exits are sent at prices the exchange accepts. A 2x stop on a $2.48 credit is $4.96, and a
 // price at or above $3.00 must sit on a $0.05 tick, so the broker refused it ("Price must be in increments of
-// $0.05"). When the option root's tick table is known, the profit target and stop trigger are rounded to the
-// nearest tick (the target never reaches the entry credit), and the stop limit is rounded UP so it never falls below
-// its trigger. Without a table the prices are whole cents, exactly as before; the broker still validates.
+// $0.05"). When the option root's tick table is known, the exits are rounded onto it. Without a table the prices are
+// whole cents, exactly as before; the broker still validates.
+//
+// TICK-0002: `entryCredit` is expected to be on the tick already (the entry is snapped first, with snapEntryCredit, and
+// everything here derives from the snapped entry). The exits keep the ORDER-TICK-0001 rounding (target and trigger to the
+// nearest tick, the target kept below the entry credit, the stop limit rounded UP and never below its trigger); the
+// $2.48 -> $4.95 trigger fixture in bracket.test.ts is the approved case. ceilToTick and floorToTick now live in
+// lib/portfolio/tickSize.ts so the entry snap and the +/- buttons share them.
 
-import { tickSizeFor, roundToTick, type TickTable } from '@/lib/portfolio/tickSize';
+import { ceilToTick, floorToTick, roundToTick, type TickTable } from '@/lib/portfolio/tickSize';
 
 export interface EntryBracket {
   entryCredit: number;
@@ -20,24 +25,6 @@ export interface EntryBracket {
 }
 
 const cents = (n: number) => Math.round(n * 100) / 100;
-
-/** Smallest on-tick price at or above `price` (ties and float noise resolved in whole cents). */
-function ceilToTick(price: number, table: TickTable | null): number {
-  const tick = tickSizeFor(price, table);
-  const ticks = Math.ceil(cents(price) / tick - 1e-9);
-  let result = cents(ticks * tick);
-  const tickAtResult = tickSizeFor(result, table);
-  if (tickAtResult !== tick) result = cents(Math.ceil(cents(result) / tickAtResult - 1e-9) * tickAtResult);
-  return result;
-}
-
-/** Largest on-tick price at or below `price`, never below one tick. */
-function floorToTick(price: number, table: TickTable | null): number {
-  const tick = tickSizeFor(price, table);
-  const ticks = Math.floor(cents(price) / tick + 1e-9);
-  const result = cents(ticks * tick);
-  return Math.max(result, tickSizeFor(0, table));
-}
 
 export function bracketForPrice(entryCredit: number, gtcPct: number, stopMultiple: number, tickTable: TickTable | null = null): EntryBracket {
   const exitCredit = entryCredit;

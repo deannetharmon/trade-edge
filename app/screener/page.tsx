@@ -145,7 +145,9 @@ import { buildWalkLadder } from '@/lib/entry-walk/ladder';
 import { bracketForPrice, describeOrderPrices } from '@/lib/entry-walk/bracket';
 import { netQuoteFromLegs } from '@/lib/entry-walk/broker';
 import { buildFillRecord, recordWalkFill } from '@/lib/entry-walk/fillLog';
-import { tickTableFromNestedChain, type TickTable } from '@/lib/portfolio/tickSize';
+import { tickTableFromNestedChain, snapEntryCredit, stepByTick, type TickTable } from '@/lib/portfolio/tickSize';
+import { effectiveTickTable, learnedBrokerTick, optionRootOf } from '@/lib/portfolio/brokerTick';
+import { postWithTickHeal, describeHeal, describeLearnedTick } from '@/lib/entry-walk/tickHeal';
 import { buildCspOrderLeg, computeCspMaxLoss } from '@/lib/scans/cspOrderMath';
 import { cspEntryLimitPerShare, cspPerShareToContractDollars, buildCspEntryPayload } from '@/lib/scans/cspEntryUnits';
 import { guardCspOrder } from '@/lib/scans/cspOrderSubmission';
@@ -2798,21 +2800,37 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
   useEffect(() => { if (phase === 'done') onPlaced?.(); }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
   // ORDER-TICK-0001: the option root's tick table, so the profit target and stop are sent at prices the exchange accepts
   // (a 2x stop on a $2.48 credit is $4.96, and prices at or above $3.00 sit on a $0.05 tick).
-  const [tickTable, setTickTable] = useState<TickTable | null>(null);
+  const [chainTickTable, setChainTickTable] = useState<TickTable | null>(null);
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const token = await getAccessToken();
         const table = tickTableFromNestedChain(await ttFetch(`/option-chains/${encodeURIComponent(result.symbol)}/nested`, token), String(c.shortOccSymbol ?? ''));
-        if (!cancelled) setTickTable(table);
-      } catch { if (!cancelled) setTickTable(null); }
+        if (!cancelled) setChainTickTable(table);
+      } catch { if (!cancelled) setChainTickTable(null); }
     })();
     return () => { cancelled = true; };
   }, [result.symbol, c.shortOccSymbol]);
+  // TICK-0002: the broker is the source of truth for tick size. A tick it names in a rejection is remembered per option root and
+  // becomes a floor under the chain's table (NVDL: chain said $0.01 below $3, broker demanded $0.05). Everything below that
+  // used the tick table now uses this effective table.
+  const tickRoot = optionRootOf(String(c.shortOccSymbol ?? ''));
+  const [learnedTick, setLearnedTick] = useState<number | null>(() => learnedBrokerTick(tickRoot));
+  const tickTable = useMemo(() => effectiveTickTable(chainTickTable, tickRoot), [chainTickTable, tickRoot, learnedTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [tickNote, setTickNote] = useState('');
+  /** A rejected LIVE order is never resent automatically; the broker's tick is only remembered, and the trader is told. */
+  const liveRejection = (data: any, fallback: string): string => {
+    const base = brokerErrorText(data, fallback);
+    const note = describeLearnedTick(tickRoot, base);
+    setLearnedTick(learnedBrokerTick(tickRoot));
+    return note ? `${base} ${note}` : base;
+  };
 
   // CSP-UNITS-0001: entryLimit is PER SHARE (what the broker takes); c.credit is total dollars.
   const [entryLimit, setEntryLimit] = useState(cspEntryLimitPerShare(c));
+  // TICK-0002: the entry shown is the entry sent, so it is snapped (down) to the tick in force whenever that table changes.
+  useEffect(() => { setEntryLimit(v => snapEntryCredit(v, tickTable)); }, [tickTable]);
   const [gtcPct, setGtcPct] = useState(50); // Ian, 2026-09-22: same defaults as spreads -- no CSP-specific default needed.
   const [stopMultiple, setStopMultiple] = useState(2);
 
@@ -2866,18 +2884,34 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
   };
 
   const runDryRun = async () => {
-    setPhase('dryrun'); setError('');
+    setPhase('dryrun'); setError(''); setTickNote('');
     try {
       await refreshExecutionQuote();
+      if (!legBuild.ok) throw new Error(legBuild.reason);
+      const dryRunLeg = legBuild.leg;
       const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
-      const payload = buildOtocoPayload();
-      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders/dry-run`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      // TICK-0002: a dry run the broker rejects for its tick is retried ONCE at the tick it names (lib/entry-walk/tickHeal).
+      // A dry run places nothing, so the retry is safe; a live order is never resent automatically.
+      const healed = await postWithTickHeal({
+        root: tickRoot, chainTable: chainTickTable, entry: entryLimit,
+        build: (entry, table) => buildCspEntryPayload({ entryPerShare: entry, gtcPct, stopMultiple, quantity, leg: dryRunLeg, tickTable: table }),
+        post: async payload => {
+          const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders/dry-run`, {
+            method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          return res.ok ? { ok: true, message: '', data } : { ok: false, message: brokerErrorText(data, `Dry run failed (${res.status})`), data };
+        },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(`${brokerErrorText(data, `Dry run failed (${res.status})`)} ${describeOrderPrices(payload, tickTable)}`);
-      setDryRunResult(data?.data);
+      setLearnedTick(learnedBrokerTick(tickRoot));
+      setEntryLimit(healed.entry);
+      if (!healed.ok) {
+        const detail = healed.firstMessage ? `${healed.firstMessage} Retried once at the broker's tick: ${healed.message}` : healed.message;
+        throw new Error(`${detail} ${describeOrderPrices(healed.payload, healed.table)}`);
+      }
+      setTickNote(describeHeal(tickRoot, healed.healed) ?? '');
+      setDryRunResult((healed.data as any)?.data);
       setPhase('confirm');
     } catch (e: any) {
       setError(e.message); setPhase('error');
@@ -2898,8 +2932,9 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
       const token = await getAccessToken();
       const quote = netQuoteFromLegs(walkLegs, await getExecutableOptionQuotes([walkLegs[0].symbol], token));
       if (!quote || quote.ageSeconds == null || quote.ageSeconds > 15) throw new Error('Live quote is unavailable, crossed, or older than 15 seconds. This order cannot be placed from stale scan data.');
-      let tickTable = null;
-      try { tickTable = tickTableFromNestedChain(await ttFetch(`/option-chains/${encodeURIComponent(result.symbol)}/nested`, token), walkLegs[0].symbol); } catch { tickTable = null; }
+      let fetchedTickTable: TickTable | null = null;
+      try { fetchedTickTable = tickTableFromNestedChain(await ttFetch(`/option-chains/${encodeURIComponent(result.symbol)}/nested`, token), walkLegs[0].symbol); } catch { fetchedTickTable = null; }
+      const tickTable = effectiveTickTable(fetchedTickTable, tickRoot); // TICK-0002: the chain's table with the broker's learned tick as a floor
       const ladder = buildWalkLadder({ side: 'credit', netBid: quote.netBid, netAsk: quote.netAsk, legSpreads: quote.legSpreads, minCredit: null, tickTable });
       if (!ladder.ok) throw new Error(`Price walking is off for this order. ${ladder.message} Untick "Walk the price" to place it normally.`);
       const firstPrice = ladder.prices[0];
@@ -2943,7 +2978,7 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(buildPayload(firstPrice)),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(brokerErrorText(data, `Order failed (${res.status})`));
+      if (!res.ok) throw new Error(liveRejection(data, `Order failed (${res.status})`));
       const firstOrderId = data?.data?.['complex-order']?.id;
       if (firstOrderId == null) throw new Error('The broker did not return an order id. Check Pending orders before trying again.');
       await saveNote(data);
@@ -2985,7 +3020,7 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(brokerErrorText(data, `Order failed (${res.status})`));
+      if (!res.ok) throw new Error(liveRejection(data, `Order failed (${res.status})`));
       const submittedOrderId = data?.data?.['complex-order']?.id ?? data?.data?.order?.id ?? 'submitted';
       setOrderId(submittedOrderId);
       // QUAL-STATES-0001 phase 3: record what the screener said about this put and whether the trader
@@ -3050,11 +3085,12 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
           <div className="flex justify-between text-xs items-center">
             <span className={th.textFaint}>Entry limit / share <span className="text-[10px]">(${cspPerShareToContractDollars(entryLimit).toLocaleString()} / contract)</span></span>
             <div className="flex items-center gap-1">
-              <button onClick={() => setEntryLimit(v => parseFloat(Math.max(0.01, v - 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs`}>−</button>
+              <button onClick={() => setEntryLimit(v => stepByTick(v, -1, tickTable))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs`}>−</button>
               <span className="text-emerald-400 font-bold text-xs w-12 text-center">${entryLimit.toFixed(2)}</span>
-              <button onClick={() => setEntryLimit(v => parseFloat((v + 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs`}>+</button>
+              <button onClick={() => setEntryLimit(v => stepByTick(v, 1, tickTable))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs`}>+</button>
             </div>
           </div>
+          {tickNote && <div className="text-[10px] text-amber-300" data-testid="tick-note">{tickNote}</div>}
           <div className="flex justify-between text-xs">
             <span className={th.textFaint}>Order type</span>
             <span className={th.text}>Net Credit Limit · GTC</span>
@@ -4092,7 +4128,7 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
   const [walkOn, setWalkOn] = useState(false);
   const walk = useEntryWalk();
   // ORDER-TICK-0001: the option root's tick table, so the profit target and stop are sent at prices the exchange accepts.
-  const [tickTable, setTickTable] = useState<TickTable | null>(null);
+  const [chainTickTable, setChainTickTable] = useState<TickTable | null>(null);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -4100,17 +4136,32 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
         const token = await getAccessToken();
         const firstLegSymbol = String(buildOrderLegs(result, c)[0]?.symbol ?? '');
         const table = tickTableFromNestedChain(await ttFetch(`/option-chains/${encodeURIComponent(result.symbol)}/nested`, token), firstLegSymbol);
-        if (!cancelled) setTickTable(table);
-      } catch { if (!cancelled) setTickTable(null); }
+        if (!cancelled) setChainTickTable(table);
+      } catch { if (!cancelled) setChainTickTable(null); }
     })();
     return () => { cancelled = true; };
   }, [result.symbol, c.shortOccSymbol]);
+  // TICK-0002: the broker's stated tick is remembered per option root and is a floor under the chain's table. PMCC (a debit) is
+  // left exactly as it was.
+  const tickRoot = optionRootOf(String(buildOrderLegs(result, c)[0]?.symbol ?? ''));
+  const [learnedTick, setLearnedTick] = useState<number | null>(() => learnedBrokerTick(tickRoot));
+  const tickTable = useMemo(() => effectiveTickTable(chainTickTable, tickRoot), [chainTickTable, tickRoot, learnedTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [tickNote, setTickNote] = useState('');
+  /** A rejected LIVE order is never resent automatically; the broker's tick is only remembered, and the trader is told. */
+  const liveRejection = (data: any, fallback: string): string => {
+    const base = data?.error?.message ?? data?.errors?.[0]?.message ?? fallback;
+    const note = describeLearnedTick(tickRoot, base);
+    setLearnedTick(learnedBrokerTick(tickRoot));
+    return note ? `${base} ${note}` : base;
+  };
   const [quoteValidation, setQuoteValidation] = useState<{ at: number; executableCredit: number; maxAgeSeconds: number } | null>(null);
   const [validationNow, setValidationNow] = useState(Date.now());
   const isPMCC = c.strategy === 'PMCC';
 
   const defaultEntryPrice = isPMCC ? (c.netDebit ?? 0) : (c.totalCredit ?? c.credit);
   const [entryLimit, setEntryLimit] = useState(parseFloat(defaultEntryPrice.toFixed(2)));
+  // TICK-0002: a credit entry shown is the entry sent, so it is snapped (down) to the tick in force when that table changes.
+  useEffect(() => { if (!isPMCC) setEntryLimit(v => snapEntryCredit(v, tickTable)); }, [tickTable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!quoteValidation) return;
@@ -4162,12 +4213,13 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
     ? tradeCostOrCredit * 100 
     : (c.spreadWidth - (c.totalCredit ?? c.credit)) * quantity * 100;
 
-  const buildOtocoPayload = (qty: number) => {
+  const buildOtocoPayload = (qty: number, entry: number = entryLimit, table: TickTable | null = tickTable) => {
+    const bracket = entry === entryLimit && table === tickTable ? { profitBuyback: gtcBuyback, stopTrigger, stopLimit } : bracketForPrice(entry, gtcPct, stopMultiple, table);
     return buildCreditEntryOtoco({
-      entryCredit: entryLimit,
-      profitBuyback: gtcBuyback,
-      stopTrigger,
-      stopLimit,
+      entryCredit: entry,
+      profitBuyback: bracket.profitBuyback,
+      stopTrigger: bracket.stopTrigger,
+      stopLimit: bracket.stopLimit,
       quantity: qty,
       legs: buildOrderLegs(result, c),
     });
@@ -4299,20 +4351,43 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
   };
 
   const runDryRun = async () => {
-    setPhase('dryrun'); setError('');
+    setPhase('dryrun'); setError(''); setTickNote('');
     try {
       await refreshExecutionQuotes();
       const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
-      const payload = buildOtocoPayload(quantity);
-      const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders/dry-run`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      const dryRunUrl = `https://api.tastytrade.com/accounts/${accountNumber}/complex-orders/dry-run`;
+      const dryRunInit = (payload: unknown) => ({
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(`${brokerErrorText(data, `Dry run failed (${res.status})`)} ${describeOrderPrices(payload, tickTable)}`);
-      setDryRunResult(data?.data);
+      if (isPMCC) {
+        const payload = buildOtocoPayload(quantity);
+        const res = await fetch(dryRunUrl, dryRunInit(payload));
+        const data = await res.json();
+        if (!res.ok) throw new Error(`${brokerErrorText(data, `Dry run failed (${res.status})`)} ${describeOrderPrices(payload, tickTable)}`);
+        setDryRunResult(data?.data);
+        setPhase('confirm');
+        return;
+      }
+      // TICK-0002: a dry run the broker rejects for its tick is retried ONCE at the tick it names. A dry run places nothing, so the
+      // retry is safe; a live order is never resent automatically.
+      const healed = await postWithTickHeal({
+        root: tickRoot, chainTable: chainTickTable, entry: entryLimit,
+        build: (entry, table) => buildOtocoPayload(quantity, entry, table),
+        post: async payload => {
+          const res = await fetch(dryRunUrl, dryRunInit(payload));
+          const data = await res.json();
+          return res.ok ? { ok: true, message: '', data } : { ok: false, message: brokerErrorText(data, `Dry run failed (${res.status})`), data };
+        },
+      });
+      setLearnedTick(learnedBrokerTick(tickRoot));
+      setEntryLimit(healed.entry);
+      if (!healed.ok) {
+        const detail = healed.firstMessage ? `${healed.firstMessage} Retried once at the broker's tick: ${healed.message}` : healed.message;
+        throw new Error(`${detail} ${describeOrderPrices(healed.payload, healed.table)}`);
+      }
+      setTickNote(describeHeal(tickRoot, healed.healed) ?? '');
+      setDryRunResult((healed.data as any)?.data);
       setPhase('confirm');
     } catch (e: any) {
       setError(e.message); setPhase('error');
@@ -4335,8 +4410,9 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
       const token = await getAccessToken();
       const quote = netQuoteFromLegs(walkLegs, await getExecutableOptionQuotes(walkLegs.map(leg => leg.symbol), token));
       if (!quote || quote.ageSeconds == null || quote.ageSeconds > 15) throw new Error('Live quotes are unavailable, crossed, or older than 15 seconds. This order cannot be placed from stale scan data.');
-      let tickTable = null;
-      try { tickTable = tickTableFromNestedChain(await ttFetch(`/option-chains/${encodeURIComponent(result.symbol)}/nested`, token), walkLegs[0].symbol); } catch { tickTable = null; }
+      let fetchedTickTable: TickTable | null = null;
+      try { fetchedTickTable = tickTableFromNestedChain(await ttFetch(`/option-chains/${encodeURIComponent(result.symbol)}/nested`, token), walkLegs[0].symbol); } catch { fetchedTickTable = null; }
+      const tickTable = effectiveTickTable(fetchedTickTable, tickRoot); // TICK-0002: the chain's table with the broker's learned tick as a floor
       const ladder = buildWalkLadder({ side: 'credit', netBid: quote.netBid, netAsk: quote.netAsk, legSpreads: quote.legSpreads, minCredit: null, tickTable });
       if (!ladder.ok) throw new Error(`Price walking is off for this order. ${ladder.message} Untick "Walk the price" to place it normally.`);
       const accountNumber = await getAccountNumber();
@@ -4361,7 +4437,7 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
         body: JSON.stringify(buildPayload(firstPrice)),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
+      if (!res.ok) throw new Error(liveRejection(data, `Order failed (${res.status})`));
       const firstOrderId = data?.data?.['complex-order']?.id;
       if (firstOrderId == null) throw new Error('The broker did not return an order id. Check Pending orders before trying again.');
       await persist(data, firstPrice);
@@ -4401,7 +4477,7 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Order failed (${res.status})`);
+      if (!res.ok) throw new Error(liveRejection(data, `Order failed (${res.status})`));
       const submittedOrderId = data?.data?.['complex-order']?.id ?? data?.data?.order?.id ?? 'submitted';
       const acknowledgedComplexOrder = data?.data?.['complex-order'];
       // OTO's trigger order is the entry; `orders` are contingent exits and
@@ -4458,11 +4534,12 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
           <div className="flex justify-between text-xs items-center">
             <span className={th.textFaint}>Entry limit / contract</span>
             <div className="flex items-center gap-1">
-              <button onClick={() => setEntryLimit(v => parseFloat(Math.max(0.01, v - 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs ac-hover-border`}>−</button>
+              <button onClick={() => setEntryLimit(v => isPMCC ? parseFloat(Math.max(0.01, v - 0.05).toFixed(2)) : stepByTick(v, -1, tickTable))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs ac-hover-border`}>−</button>
               <span className={`${isPMCC ? 'text-red-400' : 'text-emerald-400'} font-bold text-xs w-12 text-center`}>${entryLimit.toFixed(2)}</span>
-              <button onClick={() => setEntryLimit(v => parseFloat((v + 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs ac-hover-border`}>+</button>
+              <button onClick={() => setEntryLimit(v => isPMCC ? parseFloat((v + 0.05).toFixed(2)) : stepByTick(v, 1, tickTable))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs ac-hover-border`}>+</button>
             </div>
           </div>
+          {tickNote && <div className="text-[10px] text-amber-300" data-testid="tick-note">{tickNote}</div>}
           <div className="flex justify-between text-xs">
             <span className={th.textFaint}>Order type</span>
             <span className={th.text}>{isPMCC ? 'Net Debit' : 'Net Credit'} Limit · GTC</span>
