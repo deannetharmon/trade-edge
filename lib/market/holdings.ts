@@ -7,7 +7,9 @@
 import { parseOcc, type UnderlyingHolding } from './marketMapMath';
 
 /** Fund underlying -> the stock tile it shows on. */
-export const LINKED_UNDERLYINGS: Record<string, string> = { NVDL: 'NVDA' };
+// 2x single-stock funds move with their stock, so a put on the fund shows on the stock's tile. Index and sector funds (TQQQ, SOXL) have no
+// single tile and are listed under the map instead.
+export const LINKED_UNDERLYINGS: Record<string, string> = { NVDL: 'NVDA', MULL: 'MU', METU: 'META' };
 
 export interface TileHolding extends UnderlyingHolding {
   /** The fund or symbol the position is actually in, when it differs from the tile ("NVDL"). */

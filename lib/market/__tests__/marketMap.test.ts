@@ -69,6 +69,13 @@ describe('positions on a tile', () => {
     expect(holdingLabel(h.get('NVDA')!)).toBe('Short 27P');
     expect(holdingLabel(h.get('MRNA')!)).toBe('Long 140P');
   });
+  it('2x single-stock funds link to their stock (NVDL, MULL, METU); index funds like TQQQ stay on their own', () => {
+    const put = (sym: string, root: string, dir: string) => ({ 'instrument-type': 'Equity Option', symbol: `${root.padEnd(6)}261120P00030000`, 'underlying-symbol': sym, quantity: 1, 'quantity-direction': dir });
+    const h = buildHoldings([put('MULL', 'MULL', 'Short'), put('METU', 'METU', 'Short'), put('TQQQ', 'TQQQ', 'Short')]);
+    expect(Array.from(h.keys()).sort()).toEqual(['META', 'MU', 'TQQQ']);
+    expect(h.get('MU')?.via).toBe('MULL');
+    expect(h.get('TQQQ')?.via).toBeNull();
+  });
   it('moving against you: a big drop hurts the short put (NVDA -4.73%), a big rise hurts the long put, small moves flag nothing', () => {
     expect(movingAgainst('bullish', -4.73)).toBe(true);
     expect(movingAgainst('bullish', -1.9)).toBe(false);
@@ -125,6 +132,9 @@ describe('quotes', () => {
 describe('universe', () => {
   it('every ticker in every index has a sector and a cap', () => {
     for (const index of INDEXES) for (const t of index.tickers) expect(STOCKS[t], `${index.key} ${t}`).toBeDefined();
+  });
+  it('UBER (held) is on the S&P 500 map', () => {
+    expect(INDEXES.find(i => i.key === 'spx')!.tickers).toContain('UBER');
   });
   it('the Dow has 30 names, each ticker appears once per index', () => {
     expect(INDEXES.find(i => i.key === 'dji')!.tickers).toHaveLength(30);

@@ -3,7 +3,7 @@
 // MARKET-MAP-0001: which stocks the Market Map draws, their sector, and an APPROXIMATE market cap in $ billions. Caps set only the
 // relative tile size: they are rounded estimates, not live figures, and drift over time (refresh this list by hand each quarter).
 // The Dow 30 is price-weighted, so its tiles are sized by live share price instead. This is the largest names, not the whole index:
-// the S&P 500 view covers 93 stocks, the Nasdaq view the largest 31. Russell 2000 has no list yet.
+// the S&P 500 view covers 94 stocks, the Nasdaq view the largest 31. Russell 2000 has no list yet.
 
 export type SectorName =
   | 'Technology' | 'Communication Services' | 'Consumer Cyclical' | 'Financial Services' | 'Healthcare'
@@ -97,6 +97,7 @@ export const STOCKS: Record<string, StockInfo> = {
   'LMT': { sector: 'Industrials', cap: 110 },
   'DE': { sector: 'Industrials', cap: 130 },
   'UPS': { sector: 'Industrials', cap: 90 },
+  'UBER': { sector: 'Industrials', cap: 190 },
   'MMM': { sector: 'Industrials', cap: 90 },
   'NEE': { sector: 'Utilities', cap: 150 },
   'SO': { sector: 'Utilities', cap: 100 },
@@ -120,7 +121,7 @@ export interface IndexDef {
 }
 
 export const INDEXES: IndexDef[] = [
-  { key: 'spx', label: 'S&P 500', weighting: 'cap', tickers: ['NVDA', 'AAPL', 'MSFT', 'AVGO', 'ORCL', 'PLTR', 'AMD', 'MU', 'CRM', 'CSCO', 'IBM', 'INTC', 'QCOM', 'TXN', 'AMAT', 'NOW', 'ADBE', 'INTU', 'LRCX', 'KLAC', 'ANET', 'PANW', 'CRWD', 'ACN', 'GOOGL', 'GOOG', 'META', 'NFLX', 'TMUS', 'DIS', 'VZ', 'T', 'AMZN', 'TSLA', 'HD', 'MCD', 'LOW', 'BKNG', 'TJX', 'NKE', 'SBUX', 'BRK-B', 'JPM', 'V', 'MA', 'BAC', 'WFC', 'GS', 'MS', 'AXP', 'C', 'BLK', 'SCHW', 'TRV', 'LLY', 'JNJ', 'UNH', 'ABBV', 'MRK', 'PFE', 'TMO', 'ABT', 'AMGN', 'ISRG', 'GILD', 'MRNA', 'WMT', 'COST', 'PG', 'KO', 'PEP', 'PM', 'MO', 'XOM', 'CVX', 'COP', 'GE', 'CAT', 'RTX', 'HON', 'UNP', 'BA', 'LMT', 'DE', 'UPS', 'MMM', 'NEE', 'SO', 'DUK', 'PLD', 'AMT', 'LIN', 'SHW'], scope: 'Largest 93 stocks in the S&P 500 (not all 500).' },
+  { key: 'spx', label: 'S&P 500', weighting: 'cap', tickers: ['NVDA', 'AAPL', 'MSFT', 'AVGO', 'ORCL', 'PLTR', 'AMD', 'MU', 'CRM', 'CSCO', 'IBM', 'INTC', 'QCOM', 'TXN', 'AMAT', 'NOW', 'ADBE', 'INTU', 'LRCX', 'KLAC', 'ANET', 'PANW', 'CRWD', 'ACN', 'GOOGL', 'GOOG', 'META', 'NFLX', 'TMUS', 'DIS', 'VZ', 'T', 'AMZN', 'TSLA', 'HD', 'MCD', 'LOW', 'BKNG', 'TJX', 'NKE', 'SBUX', 'BRK-B', 'JPM', 'V', 'MA', 'BAC', 'WFC', 'GS', 'MS', 'AXP', 'C', 'BLK', 'SCHW', 'TRV', 'LLY', 'JNJ', 'UNH', 'ABBV', 'MRK', 'PFE', 'TMO', 'ABT', 'AMGN', 'ISRG', 'GILD', 'MRNA', 'WMT', 'COST', 'PG', 'KO', 'PEP', 'PM', 'MO', 'XOM', 'CVX', 'COP', 'GE', 'CAT', 'RTX', 'HON', 'UNP', 'BA', 'LMT', 'DE', 'UPS', 'MMM', 'NEE', 'SO', 'DUK', 'PLD', 'AMT', 'LIN', 'SHW', 'UBER'], scope: 'Largest 94 stocks in the S&P 500 (not all 500).' },
   { key: 'dji', label: 'Dow 30', weighting: 'price', tickers: ['AAPL', 'AMGN', 'AMZN', 'AXP', 'BA', 'CAT', 'CRM', 'CSCO', 'CVX', 'DIS', 'GS', 'HD', 'HON', 'IBM', 'JNJ', 'JPM', 'KO', 'MCD', 'MMM', 'MRK', 'MSFT', 'NKE', 'NVDA', 'PG', 'SHW', 'TRV', 'UNH', 'V', 'VZ', 'WMT'], scope: 'All 30 Dow stocks, sized by share price like the index.' },
   { key: 'ixic', label: 'Nasdaq', weighting: 'cap', tickers: ['NVDA', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL', 'GOOG', 'AVGO', 'TSLA', 'COST', 'NFLX', 'AMD', 'PLTR', 'CSCO', 'TMUS', 'INTU', 'QCOM', 'TXN', 'AMGN', 'ADBE', 'AMAT', 'ISRG', 'BKNG', 'PANW', 'LRCX', 'MU', 'KLAC', 'ANET', 'CRWD', 'GILD', 'SBUX'], scope: 'Largest 31 Nasdaq-100 stocks.' },
 ];

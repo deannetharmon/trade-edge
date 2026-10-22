@@ -47,20 +47,25 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
-    try {
-      const token = await getAccessToken();
-      const next = await fetchStockQuotes(index.tickers, path => ttFetch(path, token));
-      setReport(next); setUpdatedAt(Date.now());
-      if (next.received === 0) setError('TastyTrade returned no quotes. Check that you are signed in, then refresh.');
-    } catch (e: any) { setError(e?.message ?? 'Could not load quotes.'); }
+    let held = new Map<string, TileHolding>();
     try {
       const token = await getAccessToken();
       const account = await requireActiveBrokerAccount(token, ttFetch);
       if (account) {
         const data = await ttFetch(`/accounts/${account}/positions`, token);
-        setHoldings(buildHoldings(data?.data?.items)); setHoldingsNote('');
+        held = buildHoldings(data?.data?.items);
+        setHoldings(held); setHoldingsNote('');
       }
     } catch { setHoldings(new Map()); setHoldingsNote('Your positions could not be loaded, so none are outlined.'); }
+    try {
+      const token = await getAccessToken();
+      // Held symbols that have no tile on this map (funds, stocks outside the list, other indexes) are quoted too, so they can be listed below.
+      const onMap = new Set(index.tickers);
+      const extras = Array.from(held.keys()).filter(t => !onMap.has(t));
+      const next = await fetchStockQuotes([...index.tickers, ...extras], path => ttFetch(path, token));
+      setReport(next); setUpdatedAt(Date.now());
+      if (next.received === 0) setError('TastyTrade returned no quotes. Check that you are signed in, then refresh.');
+    } catch (e: any) { setError(e?.message ?? 'Could not load quotes.'); }
     setLoading(false);
   }, [index]);
 
@@ -95,7 +100,16 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
     });
   }, [report, index, mineOnly, holdings]);
 
-  const missing = report ? report.requested - report.withChange : 0;
+  // Holdings with no tile on this map: shown under the map so no position is hidden.
+  const offMap = useMemo(() => {
+    const onMap = new Set(index.tickers.filter(t => STOCKS[t]));
+    return Array.from(holdings.entries()).filter(([t]) => !onMap.has(t)).map(([ticker, holding]) => {
+      const pct = report?.quotes.get(ticker)?.pct ?? null;
+      return { ticker, holding, pct, bucket: colorBucket(pct), against: movingAgainst(netExposure(holding), pct) };
+    });
+  }, [holdings, report, index]);
+
+  const missing = report ? Math.max(0, report.requested - report.withChange - offMap.filter(o => report.quotes.get(o.ticker)?.pct == null).length) : 0;
   const heldCount = holdings.size;
 
   return (
@@ -153,6 +167,20 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
           );
         })}
       </div>
+
+      {offMap.length > 0 && (
+        <div className="flex flex-col gap-1.5" data-testid="market-map-offmap">
+          <div className={`text-[11px] uppercase tracking-wider ${mutedClass}`}>Your other positions (not on this map)</div>
+          <div className="flex flex-wrap gap-2">
+            {offMap.map(o => (
+              <div key={o.ticker} className="flex items-center gap-2 rounded px-2.5 py-1.5 text-xs text-white"
+                style={{ background: BUCKET_BG[o.bucket], boxShadow: o.against ? 'inset 0 0 0 3px #ff4d4d' : 'inset 0 0 0 2px #3b9eff' }}>
+                <b>{o.ticker}</b><span>{fmtPct(o.pct)}</span><span className="rounded bg-black/55 px-1 text-[10px]">{holdingLabel(o.holding)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className={`flex flex-wrap items-center gap-1 text-[11px] ${mutedClass}`} aria-label="Color scale">
         <span>≤ −3%</span>{LEGEND.map(b => <i key={b} style={{ background: BUCKET_BG[b], display: 'inline-block', width: 30, height: 10 }} />)}<span>≥ +3%</span>
