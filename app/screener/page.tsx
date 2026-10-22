@@ -149,6 +149,7 @@ import { tickTableFromNestedChain, snapEntryCredit, stepByTick, type TickTable }
 import { effectiveTickTable, learnedBrokerTick, optionRootOf } from '@/lib/portfolio/brokerTick';
 import { postWithTickHeal, describeHeal, describeLearnedTick } from '@/lib/entry-walk/tickHeal';
 import { invalidateAccessToken, isTokenRejection, sendWithTokenRetry } from '@/lib/auth/tokenRetry';
+import BuyingPowerLine from '@/features/screener/components/BuyingPowerLine';
 import { buildCspOrderLeg, computeCspMaxLoss } from '@/lib/scans/cspOrderMath';
 import { cspEntryLimitPerShare, cspPerShareToContractDollars, buildCspEntryPayload } from '@/lib/scans/cspEntryUnits';
 import { guardCspOrder } from '@/lib/scans/cspOrderSubmission';
@@ -3115,6 +3116,7 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
             <span className={th.textFaint}>Cash Required</span>
             <span className={th.text}>${requiredCash.toLocaleString()}</span>
           </div>
+          <BuyingPowerLine required={requiredCash} labelClass={th.textFaint} valueClass={th.text} />
           <div className="flex justify-between text-xs">
             <span className={th.textFaint}>Max Loss if assigned</span>
             <span className="text-amber-300">${maxLoss.toLocaleString()}</span>
@@ -4598,6 +4600,8 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
             <p className={`text-[10px] ${th.textFaint}`}>Max loss ~${maxLoss.toFixed(0)}</p>
           </div>
         </div>
+        {/* OBP-LINE-0001: a defined-risk spread ties up about its max loss; a PMCC debit costs the debit. */}
+        <BuyingPowerLine required={maxLoss} labelClass={th.textFaint} valueClass={th.text} />
 
         {/* GTC Profit Target */}
         <div className={`${th.card} border ${th.border} rounded-xl p-4 mb-3`}>
