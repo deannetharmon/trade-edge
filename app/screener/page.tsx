@@ -148,6 +148,7 @@ import { buildFillRecord, recordWalkFill } from '@/lib/entry-walk/fillLog';
 import { tickTableFromNestedChain, snapEntryCredit, stepByTick, type TickTable } from '@/lib/portfolio/tickSize';
 import { effectiveTickTable, learnedBrokerTick, optionRootOf } from '@/lib/portfolio/brokerTick';
 import { postWithTickHeal, describeHeal, describeLearnedTick } from '@/lib/entry-walk/tickHeal';
+import { invalidateAccessToken, isTokenRejection, sendWithTokenRetry } from '@/lib/auth/tokenRetry';
 import { buildCspOrderLeg, computeCspMaxLoss } from '@/lib/scans/cspOrderMath';
 import { cspEntryLimitPerShare, cspPerShareToContractDollars, buildCspEntryPayload } from '@/lib/scans/cspEntryUnits';
 import { guardCspOrder } from '@/lib/scans/cspOrderSubmission';
@@ -2822,6 +2823,7 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
   /** A rejected LIVE order is never resent automatically; the broker's tick is only remembered, and the trader is told. */
   const liveRejection = (data: any, fallback: string): string => {
     const base = brokerErrorText(data, fallback);
+    if (isTokenRejection(null, base)) { invalidateAccessToken(); return `${base} Your session was refreshed; nothing was resent. Review the order and place it again.`; }
     const note = describeLearnedTick(tickRoot, base);
     setLearnedTick(learnedBrokerTick(tickRoot));
     return note ? `${base} ${note}` : base;
@@ -2897,11 +2899,16 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
         root: tickRoot, chainTable: chainTickTable, entry: entryLimit,
         build: (entry, table) => buildCspEntryPayload({ entryPerShare: entry, gtcPct, stopMultiple, quantity, leg: dryRunLeg, tickTable: table }),
         post: async payload => {
-          const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders/dry-run`, {
-            method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-          });
-          const data = await res.json();
-          return res.ok ? { ok: true, message: '', data } : { ok: false, message: brokerErrorText(data, `Dry run failed (${res.status})`), data };
+          // TOKEN-0001: a token the broker refuses is replaced and this dry run is sent once more (a dry run places nothing).
+          const { response } = await sendWithTokenRetry(async tk => {
+            const res = await fetch(`https://api.tastytrade.com/accounts/${accountNumber}/complex-orders/dry-run`, {
+              method: 'POST', headers: { Authorization: `Bearer ${tk}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            const message = res.ok ? '' : brokerErrorText(data, `Dry run failed (${res.status})`);
+            return { response: { ok: res.ok, message, data }, tokenRejected: !res.ok && isTokenRejection(res.status, message) };
+          }, { getToken: getAccessToken });
+          return response;
         },
       });
       setLearnedTick(learnedBrokerTick(tickRoot));
@@ -4150,6 +4157,7 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
   /** A rejected LIVE order is never resent automatically; the broker's tick is only remembered, and the trader is told. */
   const liveRejection = (data: any, fallback: string): string => {
     const base = data?.error?.message ?? data?.errors?.[0]?.message ?? fallback;
+    if (isTokenRejection(null, base)) { invalidateAccessToken(); return `${base} Your session was refreshed; nothing was resent. Review the order and place it again.`; }
     const note = describeLearnedTick(tickRoot, base);
     setLearnedTick(learnedBrokerTick(tickRoot));
     return note ? `${base} ${note}` : base;
@@ -4357,8 +4365,8 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
       const token = await getAccessToken();
       const accountNumber = await getAccountNumber();
       const dryRunUrl = `https://api.tastytrade.com/accounts/${accountNumber}/complex-orders/dry-run`;
-      const dryRunInit = (payload: unknown) => ({
-        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      const dryRunInit = (payload: unknown, accessToken: string = token) => ({
+        method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
       if (isPMCC) {
         const payload = buildOtocoPayload(quantity);
@@ -4375,9 +4383,14 @@ function TradeModal({ result, th, onClose, qualification, scanCompletedAt }: {
         root: tickRoot, chainTable: chainTickTable, entry: entryLimit,
         build: (entry, table) => buildOtocoPayload(quantity, entry, table),
         post: async payload => {
-          const res = await fetch(dryRunUrl, dryRunInit(payload));
-          const data = await res.json();
-          return res.ok ? { ok: true, message: '', data } : { ok: false, message: brokerErrorText(data, `Dry run failed (${res.status})`), data };
+          // TOKEN-0001: a token the broker refuses is replaced and this dry run is sent once more (a dry run places nothing).
+          const { response } = await sendWithTokenRetry(async tk => {
+            const res = await fetch(dryRunUrl, dryRunInit(payload, tk));
+            const data = await res.json();
+            const message = res.ok ? '' : brokerErrorText(data, `Dry run failed (${res.status})`);
+            return { response: { ok: res.ok, message, data }, tokenRejected: !res.ok && isTokenRejection(res.status, message) };
+          }, { getToken: getAccessToken });
+          return response;
         },
       });
       setLearnedTick(learnedBrokerTick(tickRoot));
