@@ -7,7 +7,9 @@
 
 export type SectorName =
   | 'Technology' | 'Communication Services' | 'Consumer Cyclical' | 'Financial Services' | 'Healthcare'
-  | 'Consumer Defensive' | 'Energy' | 'Industrials' | 'Utilities' | 'Real Estate' | 'Basic Materials';
+  | 'Consumer Defensive' | 'Energy' | 'Industrials' | 'Utilities' | 'Real Estate' | 'Basic Materials'
+  /** Held symbols with no sector in the list (funds, stocks outside it); used by the "My positions" view only. */
+  | 'Funds & other';
 
 export interface StockInfo { sector: SectorName; /** Approximate market cap, $ billions. */ cap: number }
 

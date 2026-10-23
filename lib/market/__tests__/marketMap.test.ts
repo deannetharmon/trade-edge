@@ -141,3 +141,31 @@ describe('universe', () => {
     for (const index of INDEXES) expect(new Set(index.tickers).size).toBe(index.tickers.length);
   });
 });
+
+// MARKET-MAP-0004: capital tied up
+import { capitalTiedUp, compactMoney } from '../marketMapMath';
+describe('capitalTiedUp', () => {
+  const opt = (kind: 'put' | 'call', side: 'long' | 'short', strike: number, quantity = 1, cost: number | null = null) => ({ kind, side, strike, quantity, cost });
+  it('short put is strike x 100 x contracts', () => expect(capitalTiedUp({ legs: [opt('put', 'short', 28)], shares: 0 })).toBe(2800));
+  it('two short puts', () => expect(capitalTiedUp({ legs: [opt('put', 'short', 28, 2)], shares: 0 })).toBe(5600));
+  it('put spread is width', () => expect(capitalTiedUp({ legs: [opt('put', 'short', 60), opt('put', 'long', 55, 1, 80)], shares: 0 })).toBe(500));
+  it('call spread is width', () => expect(capitalTiedUp({ legs: [opt('call', 'short', 100), opt('call', 'long', 105, 1, 60)], shares: 0 })).toBe(500));
+  it('long option is premium paid', () => expect(capitalTiedUp({ legs: [opt('put', 'long', 140, 1, 2574)], shares: 0 })).toBe(2574));
+  it('shares are cost', () => expect(capitalTiedUp({ legs: [], shares: 100, shareCost: 5000 })).toBe(5000));
+  it('covered call adds nothing beyond shares', () => expect(capitalTiedUp({ legs: [opt('call', 'short', 55)], shares: 100, shareCost: 5000 })).toBe(5000));
+  it('naked short call counts strike', () => expect(capitalTiedUp({ legs: [opt('call', 'short', 55)], shares: 0 })).toBe(5500));
+  it('long put below short put is not paired the wrong way', () => expect(capitalTiedUp({ legs: [opt('put', 'short', 50), opt('put', 'long', 60, 1, 700)], shares: 0 })).toBe(5700));
+});
+describe('compactMoney', () => {
+  it('formats', () => { expect(compactMoney(2800)).toBe('$2.8k'); expect(compactMoney(17100)).toBe('$17k'); expect(compactMoney(950)).toBe('$950'); });
+});
+describe('buildHoldings cost capture', () => {
+  it('reads premium paid and share cost', () => {
+    const h = buildHoldings([
+      { 'instrument-type': 'Equity Option', symbol: 'MRNA  261120P00140000', 'underlying-symbol': 'MRNA', quantity: 1, 'quantity-direction': 'Long', 'average-open-price': '25.74', multiplier: 100 },
+      { 'instrument-type': 'Equity', symbol: 'UBER', 'underlying-symbol': 'UBER', quantity: 100, 'quantity-direction': 'Long', 'average-open-price': '50' },
+    ]);
+    expect(capitalTiedUp(h.get('MRNA')!)).toBe(2574);
+    expect(capitalTiedUp(h.get('UBER')!)).toBe(5000);
+  });
+});

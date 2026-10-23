@@ -37,9 +37,15 @@ export function buildHoldings(rawPositions: any[] | null | undefined): Map<strin
     if (type === 'Equity Option') {
       const occ = parseOcc(String(p?.symbol ?? ''));
       if (!occ) continue;
-      touch(underlying).legs.push({ kind: occ.kind, side: short ? 'short' : 'long', strike: occ.strike, quantity: qty });
+      const avg = Number(p?.['average-open-price']);
+      const multiplier = Number(p?.multiplier ?? 100);
+      const cost = !short && Number.isFinite(avg) && avg > 0 ? avg * qty * (Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 100) : null;
+      touch(underlying).legs.push({ kind: occ.kind, side: short ? 'short' : 'long', strike: occ.strike, quantity: qty, cost });
     } else if (type === 'Equity' && !short) {
-      touch(underlying).shares += qty;
+      const h = touch(underlying);
+      h.shares += qty;
+      const avg = Number(p?.['average-open-price']);
+      if (Number.isFinite(avg) && avg > 0) h.shareCost = (h.shareCost ?? 0) + avg * qty;
     }
   }
   return out;

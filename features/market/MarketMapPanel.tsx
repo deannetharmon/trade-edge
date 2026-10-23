@@ -13,7 +13,7 @@ import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import { INDEXES, STOCKS, type IndexKey, type SectorName } from '@/lib/market/universe';
 import { fetchStockQuotes, type QuoteReport } from '@/lib/market/marketQuotes';
 import { buildHoldings, type TileHolding } from '@/lib/market/holdings';
-import { colorBucket, holdingLabel, movingAgainst, netExposure, type ColorBucket, type Exposure } from '@/lib/market/marketMapMath';
+import { capitalTiedUp, colorBucket, compactMoney, holdingLabel, movingAgainst, netExposure, type ColorBucket, type Exposure } from '@/lib/market/marketMapMath';
 import { squarify, type Rect } from '@/lib/market/treemap';
 import { fitTileText, markerSize } from '@/lib/market/fitText';
 
@@ -88,10 +88,18 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
   const sectors = useMemo<SectorBlock[]>(() => {
     const quotes = report?.quotes;
     const bySector = new Map<SectorName, { ticker: string; weight: number }[]>();
-    for (const ticker of index.tickers) {
+    if (mineOnly) {
+      // MARKET-MAP-0004: every holding is a tile, sized by the capital it ties up, whatever index it belongs to.
+      const caps = Array.from(holdings.entries()).map(([ticker, h]) => ({ ticker, capital: capitalTiedUp(h) }));
+      const smallest = Math.min(...caps.filter(c => c.capital > 0).map(c => c.capital), 1000);
+      for (const { ticker, capital } of caps) {
+        const sector: SectorName = STOCKS[ticker]?.sector ?? 'Funds & other';
+        const list = bySector.get(sector) ?? [];
+        list.push({ ticker, weight: capital > 0 ? capital : smallest }); bySector.set(sector, list);
+      }
+    } else for (const ticker of index.tickers) {
       const info = STOCKS[ticker];
       if (!info) continue;
-      if (mineOnly && !holdings.has(ticker)) continue;
       const weight = index.weighting === 'price' ? (quotes?.get(ticker)?.last ?? 0) : info.cap;
       if (!(weight > 0)) continue;
       const list = bySector.get(info.sector) ?? [];
@@ -112,12 +120,13 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
 
   // Holdings with no tile on this map: shown under the map so no position is hidden.
   const offMap = useMemo(() => {
+    if (mineOnly) return [];
     const onMap = new Set(index.tickers.filter(t => STOCKS[t]));
     return Array.from(holdings.entries()).filter(([t]) => !onMap.has(t)).map(([ticker, holding]) => {
       const pct = report?.quotes.get(ticker)?.pct ?? null;
       return { ticker, holding, pct, bucket: colorBucket(pct), against: movingAgainst(netExposure(holding), pct) };
     });
-  }, [holdings, report, index]);
+  }, [holdings, report, index, mineOnly]);
 
   const missing = report ? Math.max(0, report.requested - report.withChange - offMap.filter(o => report.quotes.get(o.ticker)?.pct == null).length) : 0;
   const heldCount = holdings.size;
@@ -149,7 +158,7 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
 
       <div className={`relative w-full ${cardClass} border ${borderClass} rounded overflow-hidden`} style={{ aspectRatio: `${W} / ${H}`, containerType: 'inline-size' }} data-testid="market-map">
         {sectors.length === 0 && !loading && (
-          <div className={`absolute inset-0 flex items-center justify-center text-sm ${mutedClass}`}>{mineOnly ? 'None of your positions are in this index.' : 'Nothing to draw yet.'}</div>
+          <div className={`absolute inset-0 flex items-center justify-center text-sm ${mutedClass}`}>{mineOnly ? 'No open positions found.' : 'Nothing to draw yet.'}</div>
         )}
         {sectors.map(sector => (
           <div key={sector.name} className="absolute" style={pctOf(sector.rect)}>
@@ -158,7 +167,7 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
         ))}
         {sectors.flatMap(sector => sector.tiles).map(tile => {
           const holding = tile.holding;
-          const label = holding ? holdingText(holding) : '';
+          const label = holding ? `${holdingText(holding)}${mineOnly ? ` \u00B7 ${compactMoney(capitalTiedUp(holding))}` : ''}` : '';
           const pctText = fmtPct(tile.pct);
           const fit = fitTileText({ w: tile.rect.w, h: tile.rect.h, ticker: tile.ticker, pct: pctText, label: label || null });
           const marker = holding ? markerSize(tile.rect.w, tile.rect.h) : null;
@@ -201,7 +210,7 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
         <span>≤ −3%</span>{LEGEND.map(b => <i key={b} style={{ background: BUCKET_BG[b], display: 'inline-block', width: 30, height: 10 }} />)}<span>≥ +3%</span>
       </div>
       <div className={`text-[11px] ${mutedClass}`}>
-        {index.scope} Tile size is approximate{index.weighting === 'cap' ? ' (rounded market caps, refreshed by hand)' : ''}. ★ you hold options or shares on it ({heldCount} in all). ▲ you gain if it rises, ▼ you gain if it falls. ⚠ it is moving 2% or more against that position today.
+        {mineOnly ? 'Tile size is the capital each position ties up (short put: strike x 100 x contracts; spread: width; long option: premium paid; shares: cost), approximate and before credits received.' : `${index.scope} Tile size is approximate${index.weighting === 'cap' ? ' (rounded market caps, refreshed by hand)' : ''}.`} ★ you hold options or shares on it ({heldCount} in all). ▲ you gain if it rises, ▼ you gain if it falls. ⚠ it is moving 2% or more against that position today.
       </div>
     </div>
   );

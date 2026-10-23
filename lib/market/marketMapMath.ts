@@ -32,12 +32,16 @@ export interface OptionLeg {
   side: 'long' | 'short';
   strike: number;
   quantity: number;
+  /** Long legs: dollars paid for these contracts (average open price x quantity x multiplier); null when the broker did not say. */
+  cost?: number | null;
 }
 
 export interface UnderlyingHolding {
   /** Option legs plus the share count (signed; shares count as bullish). */
   legs: OptionLeg[];
   shares: number;
+  /** Dollars paid for the shares (average open price x shares); null when the broker did not say. */
+  shareCost?: number | null;
 }
 
 /** OCC option symbol (root padded to 6) -> type and strike, or null. "NVDL  261120P00028000" -> put, 28. */
@@ -85,4 +89,58 @@ export function holdingLabel(h: UnderlyingHolding): string {
   if (legs.length === 4 && kinds.size === 2 && hasLong && hasShort) return `Iron condor${suffix}`;
   if (kinds.size === 1 && hasLong && hasShort) return `${legs[0].kind === 'put' ? 'Put' : 'Call'} spread${suffix}`;
   return `${legs.length} option legs${suffix}`;
+}
+
+/**
+ * MARKET-MAP-0004: capital the holding ties up, in dollars, used to size tiles in the "My positions" view. Approximate and gross of
+ * credits received:
+ *   - a short option matched with a long one of the same kind is a spread: its width x 100 x contracts
+ *   - an unmatched short put: strike x 100 x contracts (the cash that secures it)
+ *   - an unmatched short call: nothing extra when shares cover it, else strike x 100 x contracts
+ *   - an unmatched long option: what was paid for it
+ *   - shares: what was paid for them
+ */
+export function capitalTiedUp(h: UnderlyingHolding): number {
+  let total = h.shareCost != null && Number.isFinite(h.shareCost) ? Math.max(0, h.shareCost) : 0;
+  let sharesToCover = h.shares;
+  for (const kind of ['put', 'call'] as const) {
+    const shorts = h.legs.filter(l => l.kind === kind && l.side === 'short').map(l => ({ ...l, left: l.quantity }));
+    const longs = h.legs.filter(l => l.kind === kind && l.side === 'long').map(l => ({ ...l, left: l.quantity }));
+    // Pair each short with the nearest long on the protective side: a put spread's long strike is lower, a call spread's is higher.
+    shorts.sort((a, b) => (kind === 'put' ? b.strike - a.strike : a.strike - b.strike));
+    for (const s of shorts) {
+      const candidates = longs
+        .filter(l => l.left > 0 && (kind === 'put' ? l.strike < s.strike : l.strike > s.strike))
+        .sort((a, b) => (kind === 'put' ? b.strike - a.strike : a.strike - b.strike));
+      for (const l of candidates) {
+        if (s.left <= 0) break;
+        const q = Math.min(s.left, l.left);
+        total += Math.abs(s.strike - l.strike) * 100 * q;
+        s.left -= q; l.left -= q;
+      }
+      if (s.left > 0) {
+        if (kind === 'call') {
+          const covered = Math.min(s.left, Math.floor(sharesToCover / 100));
+          sharesToCover -= covered * 100;
+          s.left -= covered;
+        }
+        total += s.strike * 100 * s.left;
+      }
+    }
+    for (const l of longs) {
+      if (l.left <= 0) continue;
+      const paid = l.cost != null && Number.isFinite(l.cost) ? Math.max(0, l.cost) : 0;
+      total += paid * (l.left / l.quantity);
+    }
+  }
+  return Math.round(total);
+}
+
+/** "$2.8k", "$17.1k", "$950". */
+export function compactMoney(n: number): string {
+  if (!Number.isFinite(n)) return '';
+  const abs = Math.abs(n);
+  if (abs >= 10_000) return `$${(n / 1000).toFixed(0)}k`;
+  if (abs >= 1_000) return `$${(n / 1000).toFixed(1)}k`;
+  return `$${Math.round(n)}`;
 }
