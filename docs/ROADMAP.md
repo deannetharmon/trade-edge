@@ -9,6 +9,9 @@
 
 Last updated: 2026-10-06 (ANALYTICS-0001 go)
 
+## Found 2026-10-23: DTE-CSP-CC-0001 (draft)
+The live engine still shows "roll-soon" for an Income CSP and a covered call at 21 DTE or below, against Dean's 2026-10-17 decision (no 21-DTE rule for CSP and CC). Ticket: docs/tickets/DTE-CSP-CC-0001-no-21-dte-roll-for-csp-and-cc.md. Not built; needs Ian's sign-off (risk logic). Golden test has an `it.todo` waiting for it.
+
 ## Position Decision Engine fold-in — 2026-10-17
 
 - **Dean's decision (2026-10-17):** the new Position Decision Engine epic is folded into DECIDE-0001; Dean's approved rules win. Stop default = a mark at 2x the credit received (a 1x loss). No 21-DTE rule for CSP and CC (it stays for spreads, iron condors and PMCC short legs). A 2x or 3x leveraged ETF is not covered by the unconfirmed-Acquire "no stop" default unless the user explicitly chooses Acquire or Wheel with a max size (Ian). Bought options and LEAPs stay "Not judged yet"; user price levels on them are alerts, not commands. Ian, Paul, Alan and Quinn returned verdicts the same day; Diane's mocks are still owed for the UI slices.
