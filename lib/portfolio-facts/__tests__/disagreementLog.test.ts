@@ -63,12 +63,12 @@ describe('appendDisagreement', () => {
 
 describe('backfillOutcome', () => {
   it('fills the outcome on the closed position\'s open entries only', () => {
-    const outcome = { closedAt: '2026-10-30T00:00:00.000Z', realizedPnl: 120 };
-    const list = [entry({ id: 'a' }), entry({ id: 'b', positionKey: 'OTHER' }), entry({ id: 'c', outcome: { closedAt: '2026-10-01T00:00:00.000Z', realizedPnl: 5 } })];
+    const outcome = { closedAt: '2026-10-30T00:00:00.000Z', lastSeenPnl: 120 };
+    const list = [entry({ id: 'a' }), entry({ id: 'b', positionKey: 'OTHER' }), entry({ id: 'c', outcome: { closedAt: '2026-10-01T00:00:00.000Z', lastSeenPnl: 5 } })];
     const next = backfillOutcome(list, 'NVDA::2026-09-18', outcome);
     expect(next[0].outcome).toEqual(outcome);
     expect(next[1].outcome).toBeNull();
-    expect(next[2].outcome?.realizedPnl).toBe(5);
+    expect(next[2].outcome?.lastSeenPnl).toBe(5);
   });
 });
 

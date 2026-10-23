@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
   } catch (e: any) { return NextResponse.json({ error: e.message }, { status: 500 }); }
 }
 
-// PATCH { positionKey, closedAt, realizedPnl } -> { ok: true }: the position closed; fill the outcome on its open entries.
+// PATCH { positionKey, closedAt, lastSeenPnl } -> { ok: true }: the position closed; fill the outcome on its open entries.
 export async function PATCH(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -51,9 +51,9 @@ export async function PATCH(req: NextRequest) {
     if (typeof body?.positionKey !== 'string' || !body.positionKey || typeof body?.closedAt !== 'string' || !Number.isFinite(Date.parse(body.closedAt))) {
       return NextResponse.json({ error: 'positionKey and closedAt required' }, { status: 400 });
     }
-    const realizedPnl = typeof body.realizedPnl === 'number' && Number.isFinite(body.realizedPnl) ? body.realizedPnl : null;
+    const lastSeenPnl = typeof body.lastSeenPnl === 'number' && Number.isFinite(body.lastSeenPnl) ? body.lastSeenPnl : null;
     const userId = (session.user as any).id;
-    const next = backfillOutcome(await load(userId), body.positionKey, { closedAt: body.closedAt, realizedPnl });
+    const next = backfillOutcome(await load(userId), body.positionKey, { closedAt: body.closedAt, lastSeenPnl });
     await redis.set(redisKey(userId), JSON.stringify(next), 'EX', TTL_SECONDS);
     return NextResponse.json({ ok: true });
   } catch (e: any) { return NextResponse.json({ error: e.message }, { status: 500 }); }

@@ -14,7 +14,7 @@ import type { Verdict } from './verdict';
 export const MAX_ENTRIES = 500;
 export const KEEP_DAYS = 180;
 
-export interface DisagreementOutcome { closedAt: string; realizedPnl: number | null }
+export interface DisagreementOutcome { closedAt: string; lastSeenPnl: number | null }
 
 export interface DisagreementEntry {
   /** positionKey + snapshotId: one entry per position per snapshot. */

@@ -237,6 +237,7 @@ import type { StockSellOrder } from '@/lib/portfolio/stockOrderBuilder';
 import { buildPositionFacts, type PositionFacts } from '@/lib/portfolio-facts/positionFacts';
 import { buildSecondLook, SECOND_LOOK_PROMPT_SUFFIX, type SecondLook } from '@/lib/portfolio-facts/secondLook';
 import { buildDisagreementEntry } from '@/lib/portfolio-facts/disagreementLog';
+import { updateClosedTracker, type ClosedTracker } from '@/lib/portfolio-facts/closedPositions';
 import { computeVerdict, type Verdict } from '@/lib/portfolio-facts/verdict';
 import { buildVerdictPromptBlock } from '@/lib/portfolio-facts/verdictPrompt';
 import { buildStockAnalysisPrompt, parseStockAnalysis, type StockAiAnalysis, type StockAnalysisContext } from '@/lib/portfolio/stockAnalysis';
@@ -10717,6 +10718,22 @@ export default function PortfolioPage() {
   // reproduces the original on-every-visit refresh behavior: this page
   // re-fetches fresh data each time it mounts, exactly as it did before this
   // refactor, via the same shared refresh() the Refresh button also calls.
+  // RECO-UNIFY-0001C: when a position leaves the live list (2 consecutive refreshes), fill its outcome in the
+  // disagreement log. Empty lists are skipped so a logout or failed load can't look like everything closed.
+  const closedTrackerRef = useRef<ClosedTracker>({});
+  useEffect(() => {
+    if (positions.length === 0) return;
+    const { tracker, closed } = updateClosedTracker(closedTrackerRef.current, positions);
+    closedTrackerRef.current = tracker;
+    for (const c of closed) {
+      void fetch('/api/portfolio/disagreement-log', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ positionKey: c.positionKey, closedAt: new Date().toISOString(), lastSeenPnl: c.lastSeenPnl }),
+      }).catch(() => {});
+    }
+  }, [positions]);
+
   const fetchPositions = useCallback(() => {
     setChecked(new Set());
     return refreshPortfolioData({
