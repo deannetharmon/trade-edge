@@ -96,6 +96,9 @@ export interface Position {
   // everywhere) so existing test fixtures/Position literals that predate
   // this ticket keep compiling unchanged -- treat absent the same as null.
   pairedShortCallKey?: string | null;
+  // DTE-CSP-CC-0001: true on a short call that a held long call pairs with as a PMCC short leg (the inverse of pairedShortCallKey).
+  // Absent/false on a covered call, which the 21-DTE roll rule does not apply to.
+  isPmccShortLeg?: boolean;
   // PM-0001 corrective round: `creditReceived` below floors a net debit to
   // $0.00 for backward-compatible display (calculateSpreadCredit) -- that
   // $0.00 must never be read as a genuine zero-credit entry.

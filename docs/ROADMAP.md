@@ -9,7 +9,7 @@
 
 Last updated: 2026-10-06 (ANALYTICS-0001 go)
 
-## Found 2026-10-23: DTE-CSP-CC-0001 (draft)
+## Found and built 2026-10-23: DTE-CSP-CC-0001
 The live engine still shows "roll-soon" for an Income CSP and a covered call at 21 DTE or below, against Dean's 2026-10-17 decision (no 21-DTE rule for CSP and CC). Ticket: docs/tickets/DTE-CSP-CC-0001-no-21-dte-roll-for-csp-and-cc.md. Not built; needs Ian's sign-off (risk logic). Golden test has an `it.todo` waiting for it.
 
 ## Position Decision Engine fold-in — 2026-10-17

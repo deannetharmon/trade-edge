@@ -203,6 +203,9 @@ export interface PositionObjectiveInput {
   // Assignment is the plan, so a paper loss and the 21-DTE window must not produce a loss exit or a roll suggestion.
   // Every other position leaves this null and behaves exactly as before.
   assignmentPlanned?: 'acquisition' | 'wheel' | null;
+  // DTE-CSP-CC-0001 (Dean, DECIDE-0001 2026-10-17): true for a cash-secured put or covered call. No 21-DTE roll-soon for these,
+  // whatever the intent; every other rule (profit target, loss stop, earnings, assignment risk) still applies.
+  noDteRoll?: boolean;
   // PI-0006B: optional evidence for intent selection (see
   // ../managementIntent.ts's doc comment for why each is optional and what
   // "absent" means for each). None of these are read by the trigger-
@@ -1030,7 +1033,7 @@ export function evaluatePositionObjective(
       'Take profit or confirm the GTC target order is working.',
       supportingReasons, now, intentResult,
     );
-  } else if (dte != null && dte <= DEFAULT_POSITION_MANAGEMENT_POLICY.dteReviewThreshold && dte > 7 && shortPremium && !assignmentPlanned) {
+  } else if (dte != null && dte <= DEFAULT_POSITION_MANAGEMENT_POLICY.dteReviewThreshold && dte > 7 && shortPremium && !assignmentPlanned && !input.noDteRoll) {
     legacy = makeLegacyRecommendation(
       input, 'roll-soon', 'medium', 80,
       `${dte} DTE is inside the standard management window.`,

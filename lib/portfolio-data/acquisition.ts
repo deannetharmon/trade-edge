@@ -209,6 +209,14 @@ export function computeRawPositionValuation(pos: Position) {
 // evaluatePositionObjective() itself (PI-0014 follow-up, Product Owner
 // review: this is a decision-engine property, not a valuation property).
 /** A single short put leg (a cash-secured put). A bought put or a spread is not one. */
+/** DTE-CSP-CC-0001: a lone short put (CSP) or a lone short call that is not a PMCC short leg (covered call). Assignment is acceptable, so no 21-DTE roll. */
+export function isCspOrCoveredCall(pos: Position): boolean {
+  if ((pos.legs ?? []).length !== 1 || pos.legs[0]?.direction !== 'Short') return false;
+  if (pos.strategy === 'PUT') return pos.legs[0]?.optionType === 'P';
+  if (pos.strategy === 'CALL') return pos.legs[0]?.optionType === 'C' && !pos.isPmccShortLeg;
+  return false;
+}
+
 function isLoneShortPut(pos: Position): boolean {
   return pos.strategy === 'PUT' && pos.legs.length === 1 && pos.legs[0]?.direction === 'Short' && pos.legs[0]?.optionType === 'P';
 }
@@ -302,6 +310,7 @@ export function buildPositionObjectiveInput(
     priorPricingVerificationUnresolved,
     technicalAlignment,
     // POSITION-INTENT-0001: a lone short put set to Acquire or Wheel is meant to be assigned, so a paper loss is not a loss exit.
+    noDteRoll: isCspOrCoveredCall(pos),
     assignmentPlanned: isLoneShortPut(pos) && (pos.intent === 'acquisition' || pos.intent === 'wheel') ? pos.intent : null,
   };
 
@@ -2220,9 +2229,12 @@ export async function loadPositions(
   // finalized (not mid-loop) -- Quinn's note: a long call must not be
   // matched against a short call that hasn't been constructed yet depending
   // on iteration order. See pmccPairDetection.ts for the matching logic.
-  positions = positions.map(position => ({
+  const pairedKeys = positions.map(position => findPairedShortCall(position, positions)?.key ?? null);
+  const pmccShortKeys = new Set(pairedKeys.filter((k): k is string => k != null));
+  positions = positions.map((position, i) => ({
     ...position,
-    pairedShortCallKey: findPairedShortCall(position, positions)?.key ?? null,
+    pairedShortCallKey: pairedKeys[i],
+    isPmccShortLeg: pmccShortKeys.has(position.key),
   }));
 
   positions.sort((a, b) => {

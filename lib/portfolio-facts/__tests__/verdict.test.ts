@@ -64,9 +64,32 @@ const GOLDEN: Golden[] = [
   { name: 'wheel put at 21 DTE gets no roll suggestion', pos: csp({ intent: 'wheel', dte: 21 }), intent: 'HOLD_POSITION', bucket: 'Hold', hardRule: null },
 ];
 
-// KNOWN ENGINE GAP, deliberately not fixed here (no threshold changes in RECO-UNIFY-0001): today an Income CSP or CC at 21 DTE still gets
-// roll-soon, which contradicts Dean's 2026-10-17 decision that the 21-DTE rule does not apply to CSP and CC. Fix belongs to DECIDE-0001.
-it.todo('an Income CSP or CC at 21 DTE is not a Roll (DECIDE-0001: no 21-DTE rule for CSP and CC)');
+// DTE-CSP-CC-0001 (Dean, DECIDE-0001 2026-10-17): no 21-DTE roll for a CSP or covered call; spreads and PMCC short legs keep it.
+const shortCall: PositionLeg = { ...shortPut, symbol: 'NVDA 260918C00230000', optionType: 'C', strikePrice: 230 } as PositionLeg;
+const cc = (o: Partial<Position> = {}) => csp({ strategy: 'CALL', intent: 'income', legs: [shortCall], ...o });
+describe('DTE-CSP-CC-0001: no 21-DTE roll for CSP and covered call', () => {
+  it.each([22, 21, 8, 7])('Income CSP at %i DTE is never roll-soon', dte => {
+    const v = verdictOf(income({ dte }));
+    expect(v.hardRule?.kind).not.toBe('roll-soon');
+    if (dte >= 8) expect(v.bucket).toBe('Hold');
+  });
+  it.each([22, 21, 8])('covered call at %i DTE is never roll-soon', dte => {
+    const v = verdictOf(cc({ dte }));
+    expect(v.hardRule?.kind).not.toBe('roll-soon');
+    expect(v.bucket).toBe('Hold');
+  });
+  it('a PMCC short call at 21 DTE still gets roll-soon', () => {
+    const v = verdictOf(cc({ dte: 21, isPmccShortLeg: true }));
+    expect(v.hardRule?.kind).toBe('roll-soon');
+    expect(v.bucket).toBe('Roll');
+  });
+  it('hard rules still apply to CSP and CC at 21 DTE', () => {
+    expect(verdictOf(income({ dte: 21, pnl: 100, pnlPct: 50, currentValue: 100, closeValue: 100, hitTarget: true })).bucket).toBe('Close');
+    expect(verdictOf(income({ dte: 21, pnl: -200, pnlPct: -100, currentValue: 400, closeValue: 400 })).bucket).toBe('Close');
+    const ccLoss = { pnl: -200, pnlPct: -100, currentValue: 400, closeValue: 400 };
+    expect(verdictOf(cc({ dte: 21, ...ccLoss })).bucket).toBe(verdictOf(cc({ dte: 40, ...ccLoss })).bucket);
+  });
+});
 
 describe('golden verdicts at the hard-rule boundaries', () => {
   for (const g of GOLDEN) {

@@ -67,10 +67,10 @@ describe('an Acquire or Wheel lone short put in a deep paper loss', () => {
 });
 
 describe('the 21-DTE window', () => {
-  it('an Acquire put at 20 DTE gets no roll-soon suggestion; an Income put at 20 DTE still does', () => {
+  it('no put gets a roll-soon suggestion at 20 DTE, whatever the intent (DTE-CSP-CC-0001, DECIDE-0001)', () => {
     expect(label(csp({ intent: 'acquisition', dte: 20 })).kind).not.toBe('roll-soon');
     expect(label(csp({ intent: 'wheel', dte: 20 })).kind).not.toBe('roll-soon');
-    expect(label(csp({ intent: 'income', dte: 20 })).kind).toBe('roll-soon');
+    expect(label(csp({ intent: 'income', dte: 20 })).kind).not.toBe('roll-soon');
   });
 });
 

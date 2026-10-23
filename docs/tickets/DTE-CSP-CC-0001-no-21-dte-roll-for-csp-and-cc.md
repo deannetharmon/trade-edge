@@ -1,6 +1,6 @@
 # DTE-CSP-CC-0001: No 21-DTE roll for CSP and CC
 
-Status: DRAFT, found 2026-10-23 in the independent review of RECO-UNIFY-0001B. Not built.
+Status: BUILT 2026-10-23 (Ian signed off). Found in the independent review of RECO-UNIFY-0001B.
 Owner: Paul (scope), Ian (sign-off, risk logic), Alan (fixtures), Quinn (regression). Part of DECIDE-0001.
 
 ## Problem
