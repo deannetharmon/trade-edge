@@ -531,6 +531,26 @@ describe('PositionsWorkspace', () => {
     expect(screen.getByText(/No brokerage order is prepared or submitted/)).toBeInTheDocument();
   });
 
+  it('shows the rules verdict first and an "AI differs" chip with its data point only when the AI disagrees', async () => {
+    const user = userEvent.setup();
+    const base = { positionKey: position.key, symbol: position.symbol, recommendation: 'CLOSE', confidence: 'MEDIUM', summary: 'AI summary', reasoning: 'r', risks: [], catalysts: [], generatedAt: '2026-08-25T14:30:00Z' };
+    const differs = { ...base, officialVerdict: { bucket: 'Hold', label: 'Hold Position', confidence: 'HIGH' }, secondLook: { chip: 'AI differs: ivr', note: 'IVR 50 is rich enough to take now.' } };
+    const { unmount } = render(<PositionsWorkspace model={model} th={THEMES.dark} onAnalyze={vi.fn(async () => differs)} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Analyze with AI' }));
+    expect(await screen.findByTestId('official-verdict')).toHaveTextContent('Rules');
+    expect(screen.getByTestId('official-verdict')).toHaveTextContent('Hold · Hold Position');
+    expect(screen.getByTestId('ai-differs-chip')).toHaveTextContent('AI differs: ivr');
+    expect(screen.getByText('IVR 50 is rich enough to take now.')).toBeInTheDocument();
+    unmount();
+
+    render(<PositionsWorkspace model={model} th={THEMES.dark} onAnalyze={vi.fn(async () => ({ ...differs, secondLook: { chip: null, note: null } }))} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.click(screen.getByRole('button', { name: 'Analyze with AI' }));
+    expect(await screen.findByTestId('official-verdict')).toBeInTheDocument();
+    expect(screen.queryByTestId('ai-differs-chip')).not.toBeInTheDocument();
+  });
+
   it('locks follow-ups to the analyzed position snapshot and exposes the retained context', async () => {
     const user = userEvent.setup();
     const generatedAt = '2026-08-25T14:30:00Z';

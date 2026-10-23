@@ -234,8 +234,10 @@ import { buildSnapshotCapacityReport } from '@/lib/portfolio-snapshot/capacity';
 import { SalvageDepsProvider, type SalvageDeps } from '@/features/portfolio/positions-workspace/salvage/SalvageDeps';
 import { parseSalvageDryRun } from '@/lib/salvage/salvageDryRun';
 import type { StockSellOrder } from '@/lib/portfolio/stockOrderBuilder';
-import { buildPositionFacts } from '@/lib/portfolio-facts/positionFacts';
-import { computeVerdict } from '@/lib/portfolio-facts/verdict';
+import { buildPositionFacts, type PositionFacts } from '@/lib/portfolio-facts/positionFacts';
+import { buildSecondLook, SECOND_LOOK_PROMPT_SUFFIX, type SecondLook } from '@/lib/portfolio-facts/secondLook';
+import { buildDisagreementEntry } from '@/lib/portfolio-facts/disagreementLog';
+import { computeVerdict, type Verdict } from '@/lib/portfolio-facts/verdict';
 import { buildVerdictPromptBlock } from '@/lib/portfolio-facts/verdictPrompt';
 import { buildStockAnalysisPrompt, parseStockAnalysis, type StockAiAnalysis, type StockAnalysisContext } from '@/lib/portfolio/stockAnalysis';
 import type { StockHoldingRow } from '@/features/portfolio/positions-workspace/model/stockHoldings';
@@ -457,6 +459,9 @@ interface PositionAnalysis {
   deviatesFromRules: boolean;
   deviationNote: string | null; // when AI recommends outside standard rules, explain why
   flipIf?: string | null; // AI-BREVITY-0001: one line, what would change the call
+  // RECO-UNIFY-0001C: the app's official verdict, and the AI's open second look at it (chip is null when the AI agrees).
+  officialVerdict?: { bucket: string; label: string; confidence: string } | null;
+  secondLook?: { chip: string | null; note: string | null } | null;
   generatedAt: string;
 }
 
@@ -2712,17 +2717,32 @@ async function analyzePosition(pos: Position, trend: TrendResult | null, traderN
   // The facts come from the same position and the same refresh state the screen used; the label on screen wins if the two ever differ.
   // The technicals, concentration and intent source are not supplied here, so they are not reported as "not available". Never blocks Analyze.
   let verdictBlock = '';
+  let facts: PositionFacts | null = null;
+  let verdict: Verdict | null = null;
   try {
-    const facts = buildPositionFacts(pos, { trendDirection: trend ? trend.trend : undefined, priorPricingVerificationUnresolved: pos.pricingDecisionEvidence?.verificationUnresolved === true });
-    verdictBlock = buildVerdictPromptBlock(computeVerdict(facts), facts, { onScreenLabel: pos.recommendation?.label ?? null, notSupplied: ['technicals', 'risk', 'identity'] });
-  } catch { verdictBlock = ''; }
+    // One snapshot per refresh: the quote capture time identifies it, so re-clicking Analyze on the same data is the same snapshot.
+    facts = buildPositionFacts(pos, { trendDirection: trend ? trend.trend : undefined, priorPricingVerificationUnresolved: pos.pricingDecisionEvidence?.verificationUnresolved === true }, pos.quoteCapturedAt ?? undefined);
+    verdict = computeVerdict(facts);
+    verdictBlock = buildVerdictPromptBlock(verdict, facts, { onScreenLabel: pos.recommendation?.label ?? null, notSupplied: ['technicals', 'risk', 'identity'] }) + (verdict ? SECOND_LOOK_PROMPT_SUFFIX : '');
+  } catch { verdictBlock = ''; facts = null; verdict = null; }
   const raw = await callAI(`${buildPositionPrompt(pos, trend)}${noteContext}${verdictBlock}`, 600);
   const parsed = JSON.parse(raw);
+  // RECO-UNIFY-0001C: the AI's second look. The app decides whether it differs; it can never change the verdict. A difference is logged for review.
+  let secondLook: SecondLook | null = null;
+  if (facts && verdict) {
+    try {
+      secondLook = buildSecondLook(parsed, verdict, facts);
+      const entry = buildDisagreementEntry(facts, verdict, secondLook);
+      if (entry && typeof fetch === 'function') void fetch('/api/portfolio/disagreement-log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entry }) }).catch(() => {});
+    } catch { secondLook = null; }
+  }
   return {
     positionKey: pos.key,
     symbol: pos.symbol,
     loading: false,
     error: null,
+    officialVerdict: verdict ? { bucket: verdict.bucket, label: pos.recommendation?.label ?? verdict.label, confidence: verdict.confidence.level } : null,
+    secondLook: secondLook ? { chip: secondLook.chip, note: secondLook.note } : null,
     recommendation: parsed.recommendation ?? canonicalGrounding?.recommendation ?? 'WATCH',
     confidence: parsed.confidence ?? canonicalGrounding?.confidence ?? 'LOW',
     summary: parsed.summary ?? canonicalGrounding?.summary ?? 'Analysis unavailable.',
