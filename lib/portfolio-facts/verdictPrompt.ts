@@ -1,0 +1,28 @@
+// lib/portfolio-facts/verdictPrompt.ts
+//
+// RECO-UNIFY-0001B: the text block that tells the AI what the app's official verdict is, so the Analyze panel (and later the Advisor report)
+// start from the same verdict and reasons the Position Analysis screen shows. The AI may disagree, but only openly and by naming the data
+// point; it never restates a different verdict as official.
+
+import type { PositionFacts, FactGroup } from './positionFacts';
+import type { Verdict } from './verdict';
+
+const GROUP_LABEL: Record<FactGroup, string> = {
+  identity: 'identity', economics: 'economics (entry credit, P/L, close value)', time: 'time', greeks: 'Greeks', volatility: 'volatility (IV, IVR, HV)',
+  technicals: 'technicals (RSI, trend)', events: 'events (earnings)', risk: 'risk (price, buffer, POP, concentration)', orders: 'orders',
+};
+
+export function buildVerdictPromptBlock(verdict: Verdict | null, facts: PositionFacts): string {
+  const missing = (Object.keys(facts.complete) as FactGroup[]).filter(g => !facts.complete[g]).map(g => GROUP_LABEL[g]);
+  const lines = [
+    '',
+    'OFFICIAL VERDICT (set by the app\'s rules, identical on every screen; you cannot change it):',
+    verdict
+      ? `${verdict.bucket} — ${verdict.label}${verdict.hardRule ? ` (hard rule: ${verdict.hardRule.label})` : ''}. App confidence: ${verdict.confidence.level} (${verdict.confidence.basis.join('; ')}).`
+      : 'No position verdict is available for this position.',
+    ...(verdict && verdict.reasons.length > 0 ? ['Rules that fired:', ...verdict.reasons.map(r => `- ${r.ruleId}: ${r.text}${r.dataPoint ? ` [${r.dataPoint}${r.value != null ? ` = ${r.value}` : ''}]` : ''}`)] : []),
+    missing.length > 0 ? `Data not available to the rules: ${missing.join('; ')}. Say so rather than guessing these.` : 'All fact groups are complete.',
+    'If your own read differs from the official verdict, say so openly and name the data point behind it. Never present a different verdict as the official one.',
+  ];
+  return lines.join('\n');
+}
