@@ -49,7 +49,7 @@ import {
   DEFAULT_POSITION_MANAGEMENT_POLICY,
   type RemainingOpportunityLifecycle,
 } from '@/lib/portfolio-intelligence';
-import type { PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext, PortfolioPricingDecisionEvidence, PortfolioPricingFreshness } from '@/lib/portfolio-intelligence';
+import type { PositionObjectiveInput, PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext, PortfolioPricingDecisionEvidence, PortfolioPricingFreshness } from '@/lib/portfolio-intelligence';
 import { computePositionValuation, type PositionValuation } from '@/lib/positionValuation';
 import { classifyPositionLifecycle } from '@/lib/portfolio/positionLifecycle';
 import { canonicalRecommendationPriority } from '@/lib/portfolio/canonicalRecommendationPresentation';
@@ -213,7 +213,9 @@ function isLoneShortPut(pos: Position): boolean {
   return pos.strategy === 'PUT' && pos.legs.length === 1 && pos.legs[0]?.direction === 'Short' && pos.legs[0]?.optionType === 'P';
 }
 
-export function scorePortfolioPositionObjective(
+// RECO-UNIFY-0001A: the verdict inputs are now assembled by this one exported builder, so PositionFacts (lib/portfolio-facts) and the live
+// recommendation read the very same object. scorePortfolioPositionObjective below only calls it and then the evaluator: no behavior change.
+export function buildPositionObjectiveInput(
   pos: Position,
   now: Date = new Date(),
   priorPricingVerificationUnresolved = false,
@@ -226,7 +228,7 @@ export function scorePortfolioPositionObjective(
   // is equivalent to the old always-unwired behavior, not a silent
   // behavior change.
   trendDirection?: TrendDirection,
-): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean; pricingDecisionEvidence: PortfolioPricingDecisionEvidence } {
+): { input: PositionObjectiveInput; valuation: PositionValuation | null } {
   const supportedCreditEntry = hasSupportedCreditEntryEconomics(pos);
   const decisionPosition: Position = supportedCreditEntry ? pos : {
     ...pos,
@@ -278,7 +280,7 @@ export function scorePortfolioPositionObjective(
   const marketablePnlPct = supportedCreditEntry ? computeMarketablePnlPct(pos) : null;
   const valuation = computeRawPositionValuation(decisionPosition);
 
-  const { objective, legacyRecommendation, liquidityTrapTriggered, pricingDecisionEvidence } = evaluatePositionObjective({
+  const input: PositionObjectiveInput = {
     ...decisionPosition,
     creditReceived: supportedCreditEntry ? pos.entryCredit! : null,
     positionId: pos.key,
@@ -301,8 +303,19 @@ export function scorePortfolioPositionObjective(
     technicalAlignment,
     // POSITION-INTENT-0001: a lone short put set to Acquire or Wheel is meant to be assigned, so a paper loss is not a loss exit.
     assignmentPlanned: isLoneShortPut(pos) && (pos.intent === 'acquisition' || pos.intent === 'wheel') ? pos.intent : null,
-  }, now);
+  };
 
+  return { input, valuation };
+}
+
+export function scorePortfolioPositionObjective(
+  pos: Position,
+  now: Date = new Date(),
+  priorPricingVerificationUnresolved = false,
+  trendDirection?: TrendDirection,
+): { recommendation: PortfolioRecommendation; objective: PortfolioObjective | null; valuation: PositionValuation | null; liquidityTrapTriggered: boolean; pricingDecisionEvidence: PortfolioPricingDecisionEvidence } {
+  const { input, valuation } = buildPositionObjectiveInput(pos, now, priorPricingVerificationUnresolved, trendDirection);
+  const { objective, legacyRecommendation, liquidityTrapTriggered, pricingDecisionEvidence } = evaluatePositionObjective(input, now);
   return { recommendation: legacyRecommendation, objective, valuation, liquidityTrapTriggered, pricingDecisionEvidence };
 }
 
