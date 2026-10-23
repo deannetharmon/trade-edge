@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSessionUserId } from '@/lib/ai/requireSession';
-import { fetchYahooPriceHistory } from '@/lib/fundamentals/handler';
+import { fetchYahooPriceHistoryCached } from '@/lib/fundamentals/cachedPriceHistory';
 import { handleQvFeasibility } from '@/lib/fundamentals/qvFeasibility';
 import { getSecClient } from '@/lib/fundamentals/sec/client';
 
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   const { status, body } = await handleQvFeasibility(req.nextUrl.searchParams.get('symbols'), {
     userId,
     client: getSecClient(),
-    fetchPriceHistory: (symbol) => fetchYahooPriceHistory(symbol),
+    fetchPriceHistory: (symbol) => fetchYahooPriceHistoryCached(symbol),
     nowIso: () => new Date().toISOString(),
   });
   return NextResponse.json(body, { status });

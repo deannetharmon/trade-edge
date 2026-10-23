@@ -4,12 +4,13 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { createMemoryCacheStore, setSharedCacheStoreForTests } from '@/lib/cache/sharedCache';
 
 const h = vi.hoisted(() => ({ userId: 'user-a' as string | null }));
 vi.mock('@/lib/ai/requireSession', () => ({ requireSessionUserId: async () => h.userId }));
 
-beforeEach(() => { h.userId = 'user-a'; });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+beforeEach(() => { h.userId = 'user-a'; setSharedCacheStoreForTests(createMemoryCacheStore()); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); setSharedCacheStoreForTests(null); });
 
 function req(query: string) {
   return new NextRequest(`http://localhost/api/chart-history${query}`);
@@ -95,6 +96,21 @@ describe('GET /api/chart-history', () => {
     const { GET } = await import('../route');
     const res = await GET(req('?symbol=BADSYM'));
     expect(res.status).toBe(404);
+  });
+
+  it('serves a repeat request from the shared cache, and never caches an error', async () => {
+    const fetchMock = vi.fn(async () => yahooOk([1, 2], [100, 101]));
+    vi.stubGlobal('fetch', fetchMock);
+    const { GET } = await import('../route');
+    expect((await GET(req('?symbol=AAPL&years=5'))).status).toBe(200);
+    expect((await GET(req('?symbol=aapl&years=5'))).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const failing = vi.fn(async () => ({ ok: false, status: 429, json: async () => ({}) } as Response));
+    vi.stubGlobal('fetch', failing);
+    expect((await GET(req('?symbol=MSFT'))).status).toBe(429);
+    expect((await GET(req('?symbol=MSFT'))).status).toBe(429);
+    expect(failing).toHaveBeenCalledTimes(2);
   });
 
   it('500s and reports the message when the fetch itself throws', async () => {

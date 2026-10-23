@@ -5,7 +5,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSessionUserId } from '@/lib/ai/requireSession';
-import { fetchYahooPriceHistory, handleFundamentalsRequest } from '@/lib/fundamentals/handler';
+import { handleFundamentalsRequest } from '@/lib/fundamentals/handler';
+import { fetchYahooPriceHistoryCached } from '@/lib/fundamentals/cachedPriceHistory';
 import { getSecClient } from '@/lib/fundamentals/sec/client';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,7 @@ export async function GET(req: NextRequest) {
   const { status, body } = await handleFundamentalsRequest(req.nextUrl.searchParams.get('symbol'), {
     userId,
     client: getSecClient(),
-    fetchPriceHistory: (symbol) => fetchYahooPriceHistory(symbol),
+    fetchPriceHistory: (symbol) => fetchYahooPriceHistoryCached(symbol),
     nowIso: () => new Date().toISOString(),
   });
   return NextResponse.json(body, { status });
