@@ -19,6 +19,7 @@ import { IntentSelectControl } from './IntentSelect';
 import { marketMetricsPath, parseMarketMetricsEarnings, type StockEarnings } from './model/stockEarnings';
 import { nextEarningsLine } from './model/nextEarnings';
 import type { PositionIntent } from '@/lib/portfolio-data/types';
+import type { StockAiAnalysis, StockAnalysisContext } from '@/lib/portfolio/stockAnalysis';
 
 /** Matches the notes route's limit (app/api/position-notes/route.ts). */
 export const STOCK_NOTE_MAX_LENGTH = 150;
@@ -102,8 +103,8 @@ function StockAlertEditor({ id, symbol, price, savedAlert, onSave }: { id: strin
 type SaveNote = (accountNumber: string, key: string, note: string) => Promise<void>;
 type SaveAlert = (accountNumber: string, key: string, targetPrice: number | null, direction: 'above' | 'below') => Promise<void>;
 
-function Row({ row, th, chart, intentControl, earnings, gridStyle, savedNote, onSaveNote, savedAlert, onSaveAlert, onSell }: {
-  row: StockHoldingRow; chart: ReactNode; intentControl: ReactNode; earnings: ReactNode; gridStyle?: { gridTemplateColumns: string }; th: Theme; savedNote: string; onSaveNote: SaveNote; savedAlert: SavedAlert | null; onSaveAlert: SaveAlert; onSell: (row: StockHoldingRow) => void;
+function Row({ row, th, chart, intentControl, earnings, gridStyle, savedNote, onSaveNote, savedAlert, onSaveAlert, onSell, onAnalyze }: {
+  row: StockHoldingRow; chart: ReactNode; intentControl: ReactNode; earnings: ReactNode; gridStyle?: { gridTemplateColumns: string }; th: Theme; savedNote: string; onSaveNote: SaveNote; savedAlert: SavedAlert | null; onSaveAlert: SaveAlert; onSell: (row: StockHoldingRow) => void; onAnalyze?: (row: StockHoldingRow) => void;
 }) {
   const pnlTone = row.pnl == null ? 'text-white/40' : row.pnl >= 0 ? 'text-emerald-400' : 'text-red-400';
   const canSellCovered = row.covered.kind === 'available';
@@ -127,7 +128,13 @@ function Row({ row, th, chart, intentControl, earnings, gridStyle, savedNote, on
       </div>
       <div className="p-3"><StockNoteEditor label={`Note for ${row.symbol} stock holding`} savedNote={savedNote} onSave={note => onSaveNote(row.accountNumber, row.key, note)} /></div>
       <div className="p-3"><StockAlertEditor id={row.key} symbol={row.symbol} price={row.price} savedAlert={savedAlert} onSave={(target, direction) => onSaveAlert(row.accountNumber, row.key, target, direction)} /></div>
-      <div className="p-3">
+      <div className="flex flex-col items-start gap-2 p-3">
+        {onAnalyze && (
+          <button type="button" data-testid={`analyze-button-${row.key}`} onClick={() => onAnalyze(row)}
+            className="inline-flex min-h-8 items-center gap-1 rounded border border-indigo-500/60 px-2 text-[10px] font-bold text-indigo-300 hover:bg-indigo-500/10 focus:outline-none focus:ring-2 focus:ring-indigo-400">
+            <span aria-hidden>✦</span> Analyze
+          </button>
+        )}
         {row.direction === 'Long' ? (
           row.sellable.maxSellableShares > 0 ? (
             <button type="button" data-testid={`sell-button-${row.key}`} onClick={() => onSell(row)}
@@ -146,7 +153,7 @@ function Row({ row, th, chart, intentControl, earnings, gridStyle, savedNote, on
   );
 }
 
-export function StockHoldings({ earningsEnabled = false, intentEnabled = false, columnWidths, groups, quoteAsOf, th, storageKey, notes, onSaveNote, alerts, onSaveAlert, sellDeps }: {
+export function StockHoldings({ earningsEnabled = false, intentEnabled = false, columnWidths, groups, quoteAsOf, th, storageKey, notes, onSaveNote, alerts, onSaveAlert, sellDeps, onAnalyze }: {
   /** Show each holding's next earnings date under its chart link (looked up from the broker's market metrics). */
   earningsEnabled?: boolean;
   /** POSITION-INTENT-0001: show the Hold / Wheel / Undecided control on each holding (saved in the same store as option intents). */
@@ -164,6 +171,8 @@ export function StockHoldings({ earningsEnabled = false, intentEnabled = false, 
   onSaveAlert: SaveAlert;
   /** STOCKS-ORDERS-0001. Omit to leave the Sell action disabled everywhere (e.g. a read-only view). */
   sellDeps?: SellStockDialogDeps;
+  /** STOCK-ANALYZE-0001. Omit to hide the Analyze button. */
+  onAnalyze?: (row: StockHoldingRow, context: StockAnalysisContext) => Promise<StockAiAnalysis>;
 }) {
   const rows = buildStockHoldingRows(groups);
   // Shares are not option positions, so their intent is saved under the account and holding key in the same store.
@@ -193,6 +202,26 @@ export function StockHoldings({ earningsEnabled = false, intentEnabled = false, 
   const aligned = alignedStockColumns(columnWidths);
   const gridStyle = aligned ? { gridTemplateColumns: aligned.template } : undefined;
   const [sellRow, setSellRow] = useState<StockHoldingRow | null>(null);
+  const [analyzeRow, setAnalyzeRow] = useState<StockHoldingRow | null>(null);
+  const [analysis, setAnalysis] = useState<StockAiAnalysis | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const runAnalysis = async (row: StockHoldingRow) => {
+    if (!onAnalyze) return;
+    setAnalyzeRow(row); setAnalysis(null); setAnalysisError(null); setAnalysisLoading(true);
+    const earnings = earningsBySymbol[row.symbol.toUpperCase()];
+    const idKey = `${row.accountNumber}::${row.key}`;
+    try {
+      const result = await onAnalyze(row, {
+        note: notes[storageKey(row.accountNumber, row.key)] ?? '',
+        intent: intents[idKey] ?? null,
+        nextEarnings: earnings?.date ? `${earnings.date}${earnings.estimated ? ' (estimated)' : ''}` : null,
+      });
+      if (result.rowKey !== row.key) throw new Error('Analysis did not match this holding. Try again.');
+      setAnalysis(result);
+    } catch (e) { setAnalysisError(e instanceof Error ? e.message : 'Analysis failed'); }
+    finally { setAnalysisLoading(false); }
+  };
   // The same quick chart the option rows use: one open at a time, closes cached per symbol.
   const [openChartKey, setOpenChartKey] = useState<string | null>(null);
   const [chartData, setChartData] = useState<Record<string, number[] | null>>({});
@@ -216,7 +245,7 @@ export function StockHoldings({ earningsEnabled = false, intentEnabled = false, 
       <div className={`max-w-full overflow-x-auto rounded-xl border ${th.border}`} tabIndex={0} aria-label="Stock holdings, horizontally scrollable">
         <div role="table" className={aligned ? 'text-[11px]' : 'min-w-[1180px] text-[11px]'} style={aligned ? { width: aligned.total } : undefined}>
           <div role="row" style={gridStyle} className={`grid ${COLUMNS} bg-white/5 text-[10px] uppercase tracking-wider ${th.textFaint}`}>
-            {['Holding', 'Shares', 'Price', 'Avg cost', totals.valueLabel, 'Unrealized P/L', 'Covered calls', 'Notes', 'Price alert', 'Sell'].map(name => <div key={name} role="columnheader" className="p-3">{name}</div>)}
+            {['Holding', 'Shares', 'Price', 'Avg cost', totals.valueLabel, 'Unrealized P/L', 'Covered calls', 'Notes', 'Price alert', 'Actions'].map(name => <div key={name} role="columnheader" className="p-3">{name}</div>)}
           </div>
           {rows.map(row => (
             <Row key={row.key} row={row} th={th} gridStyle={gridStyle}
@@ -228,7 +257,7 @@ export function StockHoldings({ earningsEnabled = false, intentEnabled = false, 
                 sparkLoading={chartLoadingSymbol === row.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.symbol : null)} />}
               savedNote={notes[storageKey(row.accountNumber, row.key)] ?? ''} onSaveNote={onSaveNote}
               savedAlert={alerts[storageKey(row.accountNumber, row.key)] ?? null} onSaveAlert={onSaveAlert}
-              onSell={sellDeps ? setSellRow : () => {}} />
+              onSell={sellDeps ? setSellRow : () => {}} onAnalyze={onAnalyze ? row => void runAnalysis(row) : undefined} />
           ))}
           <div role="row" style={gridStyle} className={`grid ${COLUMNS} items-center border-t ${th.border} bg-white/5`} data-testid="stock-totals">
             <div className={`p-3 text-[11px] font-semibold tracking-wider ${th.textFaint}`}>STOCKS TOTAL{!totals.complete && <span className="block text-[10px] font-normal text-amber-300">partial</span>}</div>
@@ -250,6 +279,30 @@ export function StockHoldings({ earningsEnabled = false, intentEnabled = false, 
         {noneReach100 && <li className="rounded-lg border border-neutral-500/30 bg-neutral-500/10 px-3 py-2 text-neutral-200">{longRows.length === 1 ? 'This holding does not reach' : 'No holding reaches'} 100 shares, so covered calls are not available on {longRows.length === 1 ? 'it' : 'them'}.</li>}
         <li className="rounded-lg border border-neutral-500/30 bg-neutral-500/10 px-3 py-2 text-neutral-300">No suggested action for stocks here: the recommendation engine covers options only.</li>
       </ul>
+      {analyzeRow && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !analysisLoading) setAnalyzeRow(null); }}>
+          <section role="dialog" aria-modal="true" aria-label={`AI analysis of ${analyzeRow.symbol} shares`} className="max-h-[90vh] w-full max-w-xl overflow-auto rounded-xl border border-white/20 bg-slate-950 p-5 text-white shadow-2xl" onKeyDown={event => { if (event.key === 'Escape' && !analysisLoading) setAnalyzeRow(null); }}>
+            <header className="mb-3 flex items-center justify-between"><h2 className="text-base font-semibold">AI analysis — {analyzeRow.symbol} shares</h2><button type="button" onClick={() => { if (!analysisLoading) setAnalyzeRow(null); }} aria-label="Close analysis" className="min-h-11 min-w-11 rounded border border-white/20 focus:outline-none focus:ring-2 focus:ring-teal-400">×</button></header>
+            <div aria-live="polite" className="text-sm">
+              {analysisLoading ? <p>Analyzing {analyzeRow.symbol}…</p>
+                : analysisError ? <div><p role="alert" className="text-red-400">{analysisError}</p><button type="button" onClick={() => void runAnalysis(analyzeRow)} className="mt-3 min-h-8 rounded border border-white/20 px-3 text-xs focus:ring-2 focus:ring-teal-400">Retry analysis</button></div>
+                : analysis ? (
+                  <div className="space-y-3">
+                    <p><b>{analysis.recommendation.replace(/_/g, ' ')}</b> · {analysis.confidence} confidence</p>
+                    <p>{analysis.summary}</p>
+                    {analysis.flipIf && <p className="text-xs text-white/70"><b>Would change the call:</b> {analysis.flipIf}</p>}
+                    <details className="rounded border border-white/10 p-3 text-xs"><summary className="cursor-pointer font-semibold text-white/70">Show reasoning and risks</summary>
+                      <p className="mt-3 text-white/70">{analysis.reasoning}</p>
+                      {analysis.risks.length > 0 && <div className="mt-3"><b>Risks</b><ul className="list-disc pl-5">{analysis.risks.map(r => <li key={r}>{r}</li>)}</ul></div>}
+                      {analysis.catalysts.length > 0 && <div className="mt-3"><b>In favor</b><ul className="list-disc pl-5">{analysis.catalysts.map(c => <li key={c}>{c}</li>)}</ul></div>}
+                    </details>
+                    <p className="text-xs text-white/50">Advisory only. No order is prepared or submitted. Generated {new Date(analysis.generatedAt).toLocaleString()}.</p>
+                  </div>
+                ) : null}
+            </div>
+          </section>
+        </div>
+      )}
       {sellRow && sellDeps && <SellStockDialog row={sellRow} deps={sellDeps} onClose={() => setSellRow(null)} />}
     </section>
   );

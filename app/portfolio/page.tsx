@@ -234,6 +234,8 @@ import { buildSnapshotCapacityReport } from '@/lib/portfolio-snapshot/capacity';
 import { SalvageDepsProvider, type SalvageDeps } from '@/features/portfolio/positions-workspace/salvage/SalvageDeps';
 import { parseSalvageDryRun } from '@/lib/salvage/salvageDryRun';
 import type { StockSellOrder } from '@/lib/portfolio/stockOrderBuilder';
+import { buildStockAnalysisPrompt, parseStockAnalysis, type StockAiAnalysis, type StockAnalysisContext } from '@/lib/portfolio/stockAnalysis';
+import type { StockHoldingRow } from '@/features/portfolio/positions-workspace/model/stockHoldings';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { PercentPriceInputs, formatPct } from '@/features/portfolio/components/PercentPriceInputs';
 import { keptPct, roundToTick, sentPriceNote, stopPctOfCredit as stopPctOfCreditExact, tickTableFromNestedChain, type TickTable } from '@/lib/portfolio/tickSize';
@@ -2721,6 +2723,12 @@ async function analyzePosition(pos: Position, trend: TrendResult | null, traderN
     flipIf: typeof parsed.flipIf === 'string' && parsed.flipIf.trim() ? parsed.flipIf.trim() : null,
     generatedAt: new Date().toISOString(),
   };
+}
+
+// STOCK-ANALYZE-0001: advisory AI read of one stock holding; figures come from the holding row only.
+async function analyzeStock(row: StockHoldingRow, context: StockAnalysisContext): Promise<StockAiAnalysis> {
+  const raw = await callAI(buildStockAnalysisPrompt(row, context), 600);
+  return parseStockAnalysis(raw, row);
 }
 
 async function analyzePortfolio(positions: Position[]): Promise<PortfolioAnalysis> {
@@ -11368,6 +11376,7 @@ export default function PortfolioPage() {
                   ))}
                 onExecute={(position, action, initialRollMode) => openBatch([{ pos: position, action, initialRollMode }])}
                 onAnalyze={(position, traderNote) => analyzePosition(position, null, traderNote)}
+                onAnalyzeStock={(row, context) => analyzeStock(row, context)}
                 renderAnalysisConversation={(position, analysis) => <PositionAnalysisConversation analysis={analysis as PositionAnalysis} pos={position} th={th} />}
                 renderStopControl={position => <PortfolioStopControl pos={position} th={th} onRetry={fetchPositions} />}
                 onFindPmccShortCall={findPmccShortCall}
