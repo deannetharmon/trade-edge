@@ -12,13 +12,22 @@ const GROUP_LABEL: Record<FactGroup, string> = {
   technicals: 'technicals (RSI, trend)', events: 'events (earnings)', risk: 'risk (price, buffer, POP, concentration)', orders: 'orders',
 };
 
-export function buildVerdictPromptBlock(verdict: Verdict | null, facts: PositionFacts): string {
-  const missing = (Object.keys(facts.complete) as FactGroup[]).filter(g => !facts.complete[g]).map(g => GROUP_LABEL[g]);
+export interface VerdictPromptOptions {
+  /** The label the Portfolio screen shows for this position, which wins over a recomputed label (the screen carries state this builder cannot see). */
+  onScreenLabel?: string | null;
+  /** Fact groups the caller did not supply data for (not the same as missing from the broker); they are left out of the "not available" line. */
+  notSupplied?: FactGroup[];
+}
+
+export function buildVerdictPromptBlock(verdict: Verdict | null, facts: PositionFacts, options: VerdictPromptOptions = {}): string {
+  const skip = new Set(options.notSupplied ?? []);
+  const missing = (Object.keys(facts.complete) as FactGroup[]).filter(g => !facts.complete[g] && !skip.has(g)).map(g => GROUP_LABEL[g]);
+  const label = options.onScreenLabel && verdict && options.onScreenLabel !== verdict.label ? options.onScreenLabel : verdict?.label;
   const lines = [
     '',
-    'OFFICIAL VERDICT (set by the app\'s rules, identical on every screen; you cannot change it):',
+    'OFFICIAL VERDICT (set by the app\'s rules; you cannot change it):',
     verdict
-      ? `${verdict.bucket} — ${verdict.label}${verdict.hardRule ? ` (hard rule: ${verdict.hardRule.label})` : ''}. App confidence: ${verdict.confidence.level} (${verdict.confidence.basis.join('; ')}).`
+      ? `${verdict.bucket} — ${label}${verdict.hardRule ? ` (hard rule: ${verdict.hardRule.label})` : ''}. App confidence: ${verdict.confidence.level} (${verdict.confidence.basis.join('; ')}).`
       : 'No position verdict is available for this position.',
     ...(verdict && verdict.reasons.length > 0 ? ['Rules that fired:', ...verdict.reasons.map(r => `- ${r.ruleId}: ${r.text}${r.dataPoint ? ` [${r.dataPoint}${r.value != null ? ` = ${r.value}` : ''}]` : ''}`)] : []),
     missing.length > 0 ? `Data not available to the rules: ${missing.join('; ')}. Say so rather than guessing these.` : 'All fact groups are complete.',

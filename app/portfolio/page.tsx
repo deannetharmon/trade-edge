@@ -2709,8 +2709,13 @@ async function analyzePosition(pos: Position, trend: TrendResult | null, traderN
     : '\n\nTRADER NOTE: none.\n';
   // AI-BREVITY-0001: short structured answer; 600 tokens is a backstop, not the target.
   // RECO-UNIFY-0001B: the AI starts from the same official verdict and reasons the Position Analysis screen shows.
-  const facts = buildPositionFacts(pos, { trendDirection: trend ? trend.trend : undefined });
-  const verdictBlock = buildVerdictPromptBlock(computeVerdict(facts), facts);
+  // The facts come from the same position and the same refresh state the screen used; the label on screen wins if the two ever differ.
+  // The technicals, concentration and intent source are not supplied here, so they are not reported as "not available". Never blocks Analyze.
+  let verdictBlock = '';
+  try {
+    const facts = buildPositionFacts(pos, { trendDirection: trend ? trend.trend : undefined, priorPricingVerificationUnresolved: pos.pricingDecisionEvidence?.verificationUnresolved === true });
+    verdictBlock = buildVerdictPromptBlock(computeVerdict(facts), facts, { onScreenLabel: pos.recommendation?.label ?? null, notSupplied: ['technicals', 'risk', 'identity'] });
+  } catch { verdictBlock = ''; }
   const raw = await callAI(`${buildPositionPrompt(pos, trend)}${noteContext}${verdictBlock}`, 600);
   const parsed = JSON.parse(raw);
   return {

@@ -115,3 +115,23 @@ describe('PositionFacts content', () => {
     expect(JSON.stringify(pos)).toBe(before);
   });
 });
+
+describe('PositionFacts on thin real-world positions', () => {
+  it('does not throw when there are no legs and entry DTE and earnings are missing', () => {
+    const thin = csp({ legs: [], entryDte: undefined as any, earningsDate: null, nextEarningsDate: null });
+    const f = buildPositionFacts(thin, { now: NOW });
+    expect(f.identity.legs).toEqual([]);
+    expect(f.time.entryDte).toBeNull();
+    expect(f.events.earningsZone).toBe('no-date');
+    expect(f.complete.identity).toBe(false);
+  });
+
+  it('building facts and a verdict leaves the position untouched (no shared-reference edits)', async () => {
+    const { computeVerdict } = await import('../verdict');
+    const pos = csp();
+    const before = JSON.stringify(pos);
+    const facts = buildPositionFacts(pos, { now: NOW });
+    computeVerdict(facts);
+    expect(JSON.stringify(pos)).toBe(before);
+  });
+});

@@ -30,3 +30,16 @@ describe('buildVerdictPromptBlock', () => {
     expect(buildVerdictPromptBlock({ ...verdict, bucket: 'Roll', intent: 'HOLD_POSITION', label: 'roll-soon', hardRule: { kind: 'roll-soon', label: 'roll-soon' } }, facts())).toContain('hard rule: roll-soon');
   });
 });
+
+describe('buildVerdictPromptBlock options', () => {
+  it('the label on screen wins over a recomputed one', () => {
+    const text = buildVerdictPromptBlock(verdict, facts(), { onScreenLabel: 'Roll Soon' });
+    expect(text).toContain('Close — Roll Soon');
+    expect(text).not.toContain('Close — Take Profit');
+  });
+  it('groups the caller did not supply are not reported as unavailable', () => {
+    const text = buildVerdictPromptBlock(verdict, facts({ technicals: false, risk: false, volatility: false }), { notSupplied: ['technicals', 'risk'] });
+    expect(text).toContain('Data not available to the rules: volatility (IV, IVR, HV).');
+    expect(text).not.toContain('technicals');
+  });
+});

@@ -73,12 +73,13 @@ export function buildPositionFacts(pos: Position, ctx: PositionFactsContext = {}
     positionKey: pos.key,
     identity: {
       symbol: pos.symbol, strategy: pos.strategy,
-      legs: pos.legs.map(l => ({ symbol: l.symbol, direction: l.direction, optionType: l.optionType ?? null, strike: l.strikePrice })),
+      legs: (pos.legs ?? []).map(l => ({ symbol: l.symbol, direction: l.direction, optionType: l.optionType ?? null, strike: l.strikePrice })),
       quantity: pos.quantity, intent: pos.intent, intentWasSet: ctx.intentWasSet ?? null,
       note: ctx.note?.text?.trim() ? ctx.note.text.trim() : null, noteSavedAt: ctx.note?.savedAt ?? null,
     },
     economics: {
       entryCredit, entryPriceEffect: pos.entryPriceEffect, pnl, pnlPct: fin(pos.pnlPct), closeNowPnl: fin(pos.closeNowPnl),
+      // Close-now basis when the position has one, otherwise mid (the engine's own pnlPct is on the mid basis).
       pctOfCreditCaptured: entryCredit != null && entryCredit > 0 && pnl != null ? (pnl / entryCredit) * 100 : null,
       profitTargetFraction: targetOk ? fin(pos.profitTarget) : null, targetProfitDollars: targetOk ? pos.targetPrice : null,
       currentValue: fin(pos.currentValue), closeValue: fin(pos.closeValue), quoteCapturedAt: pos.quoteCapturedAt ?? null,

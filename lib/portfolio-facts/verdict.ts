@@ -25,9 +25,13 @@ export const INTENT_BUCKET: Record<VerdictIntent, VerdictBucket> = {
  * Hard rules the scoring layer does not own. When the intent scoring concludes Hold but the engine's rule layer fired a more specific kind
  * (the 21-DTE roll window, earnings, assignment risk, pricing to verify), the app has always shown that rule, and the rule must never be hidden
  * (RECO-UNIFY-0001: hard rules are never overridden). The verdict keeps intent HOLD_POSITION and carries the rule here, with the bucket it
- * belongs in. Kinds not listed (hold, let-expire, watch) stay in Hold.
+ * belongs in. Only hold, watch and let-expire stay in Hold; any other kind that is not in the map is treated as a hard rule in Manage, so
+ * a rule can never be silently shown as Hold.
  */
+const HOLD_KINDS = new Set(['hold', 'watch', 'let-expire']);
 export const HARD_RULE_BUCKET: Record<string, VerdictBucket> = {
+  'close-winner': 'Close',
+  'close-loser': 'Close',
   'roll-soon': 'Roll',
   'earnings-risk': 'Manage',
   'assignment-risk': 'Manage',
@@ -41,7 +45,7 @@ export interface VerdictReason {
   text: string;
   /** The engine's evidence field this reacted to, when there is one. */
   dataPoint: string | null;
-  /** That data point's value in the facts, or null when it is not available. */
+  /** The value the engine read for that data point, or null when the point has no single value (a flag) or the value is not available. */
   value: number | string | boolean | null;
   points: number;
 }
@@ -64,13 +68,19 @@ export interface Verdict {
   confidence: { level: VerdictConfidence; basis: string[] };
 }
 
+/** The value the engine itself read for a data point (from engineInput, so it matches what decided the verdict). Null when the point has no single value. */
 function factValue(facts: PositionFacts, dataPoint: string | undefined): number | string | boolean | null {
+  const i = facts.engineInput;
   switch (dataPoint) {
-    case 'dte': return facts.time.dte;
-    case 'materialLoss': case 'weakHealthLoss': case 'profitTargetReached': case 'meaningfulUnprotectedProfit': return facts.economics.pnlPct;
-    case 'itmOrCriticalBuffer': return facts.risk.bufferPct;
-    case 'earningsActionable': return facts.events.earningsBeforeExpiry;
-    case 'technicalAlignment': return facts.technicals.trend;
+    case 'dte': return i.dte ?? null;
+    case 'materialLoss': case 'profitTargetReached': case 'meaningfulUnprotectedProfit': return i.pnlPct ?? null;
+    case 'weakHealthLoss': return i.healthScore?.score ?? null;
+    case 'itmOrCriticalBuffer': return i.buffer ?? null;
+    case 'earningsActionable': return i.earningsDate ?? null;
+    case 'technicalAlignment': return i.technicalAlignment ?? null;
+    case 'remainingOpportunityPct': return i.remainingOpportunityPct ?? null;
+    case 'netEdgeDeclinePct': return i.netEdgeDeclinePct ?? null;
+    case 'netEdgeNegative': return i.netEdgeNegative ?? null;
     default: return null;
   }
 }
@@ -78,10 +88,15 @@ function factValue(facts: PositionFacts, dataPoint: string | undefined): number 
 const LEVELS: VerdictConfidence[] = ['LOW', 'MEDIUM', 'HIGH'];
 const TIER: Record<string, VerdictConfidence> = { High: 'HIGH', Medium: 'MEDIUM', Low: 'LOW' };
 
-function computeConfidence(facts: PositionFacts, engineTier: string | undefined): Verdict['confidence'] {
+/**
+ * App-computed confidence: the engine's score margin, lowered one level when the entry credit or P/L the decision rests on is missing, and one
+ * more when the intent was defaulted rather than chosen. Only these two data gaps count (the other fact groups are shown to the reader as
+ * "not available" but do not move the level in this phase). Never reported by the AI.
+ */
+export function computeConfidence(facts: Pick<PositionFacts, 'engineInput' | 'identity'>, engineTier: string | undefined): Verdict['confidence'] {
   let idx = LEVELS.indexOf(TIER[engineTier ?? ''] ?? 'LOW');
   const basis: string[] = [`engine margin: ${engineTier ?? 'unknown'}`];
-  if (!facts.complete.economics) { idx -= 1; basis.push('economics incomplete (entry credit, P/L or close value missing)'); }
+  if (facts.engineInput.creditReceived == null || facts.engineInput.pnlPct == null) { idx -= 1; basis.push('economics incomplete (entry credit or P/L missing)'); }
   if (facts.identity.intentWasSet === false) { idx -= 1; basis.push('intent defaulted, not chosen'); }
   else if (facts.identity.intentWasSet === null) basis.push('intent source unknown');
   return { level: LEVELS[Math.max(0, idx)], basis };
@@ -97,7 +112,7 @@ export function computeVerdict(facts: PositionFacts): Verdict | null {
     .filter(c => c.points !== 0)
     .map(c => ({ ruleId: c.id, text: c.explanation, dataPoint: c.evidenceField ?? null, value: factValue(facts, c.evidenceField), points: c.points }));
   const kind = result.legacyRecommendation.kind;
-  const hardBucket = mi.intent === 'HOLD_POSITION' ? HARD_RULE_BUCKET[kind] : undefined;
+  const hardBucket = mi.intent === 'HOLD_POSITION' && !HOLD_KINDS.has(kind) ? (HARD_RULE_BUCKET[kind] ?? 'Manage') : undefined;
   return {
     snapshotId: facts.snapshotId,
     positionKey: facts.positionKey,
