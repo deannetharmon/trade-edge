@@ -8,9 +8,13 @@ export type AnalysisColumnId =
   | 'value' | 'pnl' | 'evolution' | 'netEdge' | 'pop' | 'volatility'
   | 'orders' | 'notes' | 'priceAlert' | 'recommendation';
 
+export type StrategyChipId = 'all' | 'csp' | 'cc' | 'long' | 'spreads' | 'wheel';
+
 export interface PositionAnalysisFilters {
   symbol: string;
+  /** Retired by PORTFOLIO-CHIPS-0001 (the chips replaced the dropdown); kept empty so old saved preferences still decode. */
   strategy: string;
+  chip: StrategyChipId;
   attention: 'all' | 'attention' | 'monitoring';
   pnl: 'all' | 'positive' | 'negative' | 'unavailable';
 }

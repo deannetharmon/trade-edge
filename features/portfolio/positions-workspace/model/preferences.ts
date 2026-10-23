@@ -1,5 +1,6 @@
 import { columnsForView, sanitizeColumns } from './columns';
 import { DEFAULT_FILTERS } from './filters';
+import { chipFromLegacyStrategy, isStrategyChipId } from './strategyChips';
 import type { AnalysisViewId, PositionAnalysisFilters, PositionsWorkspaceView } from './types';
 
 export const POSITIONS_WORKSPACE_PREFERENCES_KEY = 'tradeedge:positions-workspace:preferences:v1';
@@ -30,7 +31,8 @@ export function decodePreferences(raw: string | null): PositionsWorkspacePrefere
     const source = value.filters && typeof value.filters === 'object' ? value.filters as Record<string, unknown> : {};
     const filters: PositionAnalysisFilters = {
       symbol: typeof source.symbol === 'string' ? source.symbol : '',
-      strategy: typeof source.strategy === 'string' ? source.strategy : '',
+      strategy: '',
+      chip: isStrategyChipId(source.chip) ? source.chip : chipFromLegacyStrategy(typeof source.strategy === 'string' ? source.strategy : ''),
       attention: source.attention === 'attention' || source.attention === 'monitoring' ? source.attention : 'all',
       pnl: source.pnl === 'positive' || source.pnl === 'negative' || source.pnl === 'unavailable' ? source.pnl : 'all',
     };

@@ -3,7 +3,7 @@ import type { Position } from '@/lib/portfolio-data/types';
 import type { PortfolioSnapshot, SnapshotDataQuality } from '@/lib/portfolio-snapshot/types';
 import { buildPositionsWorkspaceModel } from '../model/buildPositionsWorkspaceModel';
 import { ANALYSIS_COLUMNS, columnsForView, sanitizeColumns } from '../model/columns';
-import { activeFilterCount, matchesAnalysisFilters, parseSymbolList, strategyOptions } from '../model/filters';
+import { activeFilterCount, matchesAnalysisFilters, parseSymbolList } from '../model/filters';
 import { decodePreferences } from '../model/preferences';
 
 const quality: SnapshotDataQuality = { status: 'ok', staleQuotes: false, warnings: [] };
@@ -151,7 +151,7 @@ describe('analysis controls', () => {
   });
 
   it('counts and applies filters without changing the row model', () => {
-    const filters = { symbol: 'aapl', strategy: 'csp', attention: 'monitoring' as const, pnl: 'positive' as const };
+    const filters = { symbol: 'aapl', strategy: 'csp', chip: 'all' as const, attention: 'monitoring' as const, pnl: 'positive' as const };
     expect(activeFilterCount(filters)).toBe(4);
     expect(matchesAnalysisFilters({ id: '1', position: position(), symbol: 'AAPL', strategy: 'CSP', needsAttention: false }, filters)).toBe(true);
   });
@@ -165,7 +165,7 @@ describe('analysis controls', () => {
 
   it('matches any listed symbol exactly, and strategy exactly', () => {
     const row = (symbol: string, strategy: string) => ({ id: symbol, position: position({ symbol, strategy }), symbol, strategy, needsAttention: false });
-    const base = { symbol: '', strategy: '', attention: 'all' as const, pnl: 'all' as const };
+    const base = { symbol: '', strategy: '', chip: 'all' as const, attention: 'all' as const, pnl: 'all' as const };
     expect(matchesAnalysisFilters(row('TQQQ', 'PUT'), { ...base, symbol: 'soxl, tqqq' })).toBe(true);
     expect(matchesAnalysisFilters(row('SOXL', 'PUT'), { ...base, symbol: 'SO' })).toBe(false);
     expect(matchesAnalysisFilters(row('NFLX', 'PUT'), { ...base, symbol: 'TQQQ SOXL' })).toBe(false);
@@ -173,13 +173,6 @@ describe('analysis controls', () => {
     expect(matchesAnalysisFilters(row('NFLX', 'PMCC'), { ...base, strategy: 'pmcc' })).toBe(true);
     expect(activeFilterCount({ ...base, symbol: ' , ' })).toBe(0);
     expect(activeFilterCount({ ...base, symbol: 'TQQQ SOXL' })).toBe(1);
-  });
-
-  it('lists the strategies currently in play, plus a saved one that has no positions left', () => {
-    const rows = [{ strategy: 'PUT' }, { strategy: 'LEAPS' }, { strategy: 'put' }, { strategy: 'CSP' }];
-    expect(strategyOptions(rows)).toEqual(['CSP', 'LEAPS', 'PUT']);
-    expect(strategyOptions(rows, 'BCS')).toEqual(['BCS', 'CSP', 'LEAPS', 'PUT']);
-    expect(strategyOptions(rows, 'csp')).toEqual(['CSP', 'LEAPS', 'PUT']);
   });
 
   it('rejects malformed and future preference payloads', () => {

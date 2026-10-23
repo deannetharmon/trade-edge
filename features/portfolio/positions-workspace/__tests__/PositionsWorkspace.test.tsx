@@ -76,16 +76,16 @@ describe('PositionsWorkspace', () => {
   });
 
   // FILTER-0002
-  it('filters by several tickers and offers the strategies in play as a dropdown', async () => {
+  it('filters by several tickers; strategy is chips with counts, not a dropdown (PORTFOLIO-CHIPS-0001)', async () => {
     const user = userEvent.setup();
     render(<PositionsWorkspace model={model} th={THEMES.dark} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    const chips = screen.getByRole('group', { name: 'Strategy' });
+    expect(within(chips).getByRole('button', { name: /^All/ })).toHaveAttribute('aria-pressed', 'true');
+    for (const name of [/^CSP/, /^CC/, /^Long Options/, /^Spreads/, /^Wheel/]) expect(within(chips).getByRole('button', { name })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Filter' }));
     const dialog = screen.getByRole('dialog', { name: 'Filter positions' });
-    const strategy = within(dialog).getByLabelText('Strategy') as HTMLSelectElement;
-    expect(strategy.tagName).toBe('SELECT');
-    expect(within(strategy).getByRole('option', { name: 'All' })).toBeInTheDocument();
-    expect(within(strategy).getAllByRole('option').length).toBeGreaterThan(1);
+    expect(within(dialog).queryByLabelText('Strategy')).toBeNull();
     await user.type(within(dialog).getByLabelText('Symbols'), 'MSFT, AAPL');
     await user.click(within(dialog).getByRole('button', { name: 'Apply' }));
     expect(screen.getByRole('button', { name: 'Filter 1' })).toBeInTheDocument();
