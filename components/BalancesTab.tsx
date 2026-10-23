@@ -2,6 +2,7 @@
 
 'use client';
 
+import { buildReserveStatus } from '@/lib/portfolio/reserveStatus';
 import { useEffect, useState, useMemo } from 'react';
 import { getAccessToken } from '@/lib/auth/tastytradeToken';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
@@ -309,7 +310,17 @@ export default function BalancesTab() {
             <div className="border border-white/10 rounded-xl p-5" data-testid="option-buying-power-card">
               <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Option Buying Power</p>
               <p className="text-2xl font-bold text-emerald-400" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>{current.optionBuyingPower == null ? 'Not reported' : fmtMoney(current.optionBuyingPower)}</p>
-              <p className="mt-1 text-[10px] text-white/40">What you can use for new option trades.</p>
+              {(() => {
+                const reserve = buildReserveStatus(current.optionBuyingPower, current.netLiquidatingValue);
+                if (!reserve) return <p className="mt-1 text-[10px] text-white/40">What you can use for new option trades.</p>;
+                const tone = reserve.tone === 'good' ? 'text-emerald-400' : reserve.tone === 'watch' ? 'text-amber-300' : 'text-red-400';
+                return (
+                  <p className="mt-1 text-[11px]" data-testid="reserve-status">
+                    <b className={tone}>{reserve.pct.toFixed(1)}% of account</b>
+                    <span className="block text-[10px] text-white/50">{reserve.label}{reserve.shortfallToFloor > 0 ? ` · free ${fmtMoney(reserve.shortfallToFloor)} to reach 10%` : ''}</span>
+                  </p>
+                );
+              })()}
             </div>
             <div className="border border-white/10 rounded-xl p-5">
               <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Net Options Value</p>
