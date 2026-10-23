@@ -47,7 +47,7 @@ import { StockHoldings } from './StockHoldings';
 import type { StockAiAnalysis, StockAnalysisContext } from '@/lib/portfolio/stockAnalysis';
 import type { StockHoldingRow } from './model/stockHoldings';
 import type { SellStockDialogDeps } from './SellStockDialog';
-import { buildPnlReconciliation, buildPnlSecondLine, buildPositionPnlBases, describePnlReconciliation, wideMarketNote } from './model/pnlBases';
+import { buildPnlReconciliation, buildPositionPnlBases, describePnlReconciliation, wideMarketNote } from './model/pnlBases';
 import { buildSparklines, cleanHistory } from '@/lib/leaps-position-intelligence/sparklines';
 import { CalloutList, TileGrid } from '@/components/dashboard/DashboardParts';
 
@@ -716,11 +716,12 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
   const moneynessMovement = buildMoneynessMovementViewModel(p.stockPriceAtEntry ?? null, p.stockPrice, p.legs);
   const capital = buildCapitalViewModel(p);
   const recovery = buildLongOptionRecovery(p);
-  const pnl = p.closeNowPnl ?? p.pnl;
+  // PNL-DECLUTTER-0001: one P/L figure, always what closing now would realize (derived for a long option); the mid lives in the Close Value column only.
+  const pnlBases = buildPositionPnlBases(p);
+  const closeNowBasis = p.closeNowPnl ?? pnlBases.closeNow;
+  const pnl = closeNowBasis ?? p.pnl;
   const pctOfTarget = profitTargetPct(p, pnl);
   // PNL-BASIS-0001: say which basis the P/L above is on, and show the other one (display only; the rules' own inputs are unchanged).
-  const pnlBases = buildPositionPnlBases(p);
-  const pnlSecond = buildPnlSecondLine(pnlBases);
   const pnlWide = wideMarketNote(pnlBases, p.currentValue);
   const stop = stopPresentationForPosition(p);
   const targetOrderPct = profitTargetOrderPct(p);
@@ -758,7 +759,7 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
     // (target reached/exceeded) gets bold + SEMANTIC_TONE_CLASS.positive --
     // the literal moment the take-profit rule says exit -- otherwise follows
     // the sign of the % itself (Ian: signed, never floored to 0).
-    pnl: <><b className={pnl == null || Math.abs(pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative}>{money(pnl)}{pctOfTarget != null && <span className={pctOfTarget >= 100 ? `font-bold ${SEMANTIC_TONE_CLASS.positive}` : pctOfTarget > 0 ? SEMANTIC_TONE_CLASS.positive : pctOfTarget < 0 ? SEMANTIC_TONE_CLASS.negative : SEMANTIC_TONE_CLASS.neutral}> ({pctOfTarget.toFixed(0)}% of target)</span>}</b><span className="block text-[10px] text-white/55">{pnlBases.primary === 'close-now' ? 'if closed now' : 'at mid'}</span>{/* TARGET-LINE-DEBIT-0001: bought options have no profit-target rule, so leave the line off instead of "Target unavailable". Credit positions with missing data keep the label. */}{p.entryPriceEffect !== 'Debit' && <span className="block">{profitTargetPresentation(p)}</span>}{pnlSecond && <span className="block text-[10px] text-white/70" data-testid="pnl-other-basis">{pnlSecond.text}</span>}{pnlWide && <span className="block text-[10px] text-amber-300" data-testid="pnl-wide-market">{pnlWide}</span>}{/* PL-DAY-ROW-0001 */}{dayDetail.value != null ? <span className="block text-[10px]" data-testid="pnl-day"><span className="text-white/50">1D </span><span className={dayDetail.value > 0 ? SEMANTIC_TONE_CLASS.positive : dayDetail.value < 0 ? SEMANTIC_TONE_CLASS.negative : 'text-white/70'}>{dayDetail.value >= 0 ? '+' : '-'}{money(Math.abs(dayDetail.value))}</span>{dayDetail.sinceOpen && <span className="text-white/50"> since open</span>}</span> : <span className="block text-[10px] text-white/50" data-testid="pnl-day">1D unavailable: {dayDetail.reason}</span>}</>,
+    pnl: <><b className={pnl == null || Math.abs(pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative}>{money(pnl)}{pctOfTarget != null && <span className={pctOfTarget >= 100 ? `font-bold ${SEMANTIC_TONE_CLASS.positive}` : pctOfTarget > 0 ? SEMANTIC_TONE_CLASS.positive : pctOfTarget < 0 ? SEMANTIC_TONE_CLASS.negative : SEMANTIC_TONE_CLASS.neutral}> ({pctOfTarget.toFixed(0)}% of target)</span>}</b><span className="block text-[10px] text-white/55">{closeNowBasis != null ? 'if closed now' : 'at mid'}{pnlWide && <span className="ml-1 text-amber-300" title={pnlWide} data-testid="pnl-wide-market">⚠ wide market</span>}</span>{/* TARGET-LINE-DEBIT-0001: bought options have no profit-target rule, so leave the line off instead of "Target unavailable". Credit positions with missing data keep the label. */}{p.entryPriceEffect !== 'Debit' && <span className="block">{profitTargetPresentation(p)}</span>}{/* PL-DAY-ROW-0001 */}{dayDetail.value != null ? <span className="block text-[10px]" data-testid="pnl-day"><span className="text-white/50">1D </span><span className={dayDetail.value > 0 ? SEMANTIC_TONE_CLASS.positive : dayDetail.value < 0 ? SEMANTIC_TONE_CLASS.negative : 'text-white/70'}>{dayDetail.value >= 0 ? '+' : '-'}{money(Math.abs(dayDetail.value))}</span>{dayDetail.sinceOpen && <span className="text-white/50"> since open</span>}</span> : <span className="block text-[10px] text-white/50" data-testid="pnl-day">1D unavailable: {dayDetail.reason}</span>}</>,
     // TELEMETRY-METRIC-DIRECTION-0001: directionalMovementTone previously
     // treated every metric identically (any movement = informational,
     // no movement = neutral) -- didn't implement the team's actual rules.
