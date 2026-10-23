@@ -136,6 +136,25 @@ export function capitalTiedUp(h: UnderlyingHolding): number {
   return Math.round(total);
 }
 
+/** Share of the portfolio (net liquidation) a dollar amount represents, in percent; null when net liquidation is unknown or not positive. */
+export function portfolioPct(capital: number, netLiq: number | null | undefined): number | null {
+  if (netLiq == null || !Number.isFinite(netLiq) || netLiq <= 0 || !Number.isFinite(capital)) return null;
+  return (capital / netLiq) * 100;
+}
+
+/** "62%", "3.1%", "<0.1%"; empty when the share is unknown. */
+export function formatPortfolioPct(p: number | null): string {
+  if (p == null || !Number.isFinite(p)) return '';
+  if (p > 0 && p < 0.05) return '<0.1%';
+  return p >= 10 ? `${Math.round(p)}%` : `${p.toFixed(1)}%`;
+}
+
+/** Account value not tied up by any position (net liquidation minus committed capital); 0 when unknown or over-committed. */
+export function uncommittedCapital(committed: number, netLiq: number | null | undefined): number {
+  if (netLiq == null || !Number.isFinite(netLiq) || netLiq <= 0) return 0;
+  return Math.max(0, netLiq - committed);
+}
+
 /** "$2.8k", "$17.1k", "$950". */
 export function compactMoney(n: number): string {
   if (!Number.isFinite(n)) return '';

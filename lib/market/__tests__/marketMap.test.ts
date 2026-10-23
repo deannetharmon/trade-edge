@@ -169,3 +169,25 @@ describe('buildHoldings cost capture', () => {
     expect(capitalTiedUp(h.get('UBER')!)).toBe(5000);
   });
 });
+
+// MARKET-MAP-0005: share of portfolio and the uncommitted remainder
+import { formatPortfolioPct, portfolioPct, uncommittedCapital } from '../marketMapMath';
+describe('portfolio share', () => {
+  it('is capital over net liquidation, and unknown when net liquidation is missing or not positive', () => {
+    expect(portfolioPct(22000, 100000)).toBe(22);
+    expect(portfolioPct(100, null)).toBeNull();
+    expect(portfolioPct(100, 0)).toBeNull();
+    expect(portfolioPct(100, -5)).toBeNull();
+  });
+  it('formats: whole percent from 10, one decimal below, <0.1% for crumbs, empty when unknown', () => {
+    expect(formatPortfolioPct(22)).toBe('22%');
+    expect(formatPortfolioPct(3.14)).toBe('3.1%');
+    expect(formatPortfolioPct(0.02)).toBe('<0.1%');
+    expect(formatPortfolioPct(null)).toBe('');
+  });
+  it('uncommitted is what is left of net liquidation, never negative, zero when unknown', () => {
+    expect(uncommittedCapital(40000, 100000)).toBe(60000);
+    expect(uncommittedCapital(120000, 100000)).toBe(0);
+    expect(uncommittedCapital(40000, null)).toBe(0);
+  });
+});

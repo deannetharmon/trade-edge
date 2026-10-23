@@ -13,7 +13,8 @@ import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import { INDEXES, STOCKS, type IndexKey, type SectorName } from '@/lib/market/universe';
 import { fetchStockQuotes, type QuoteReport } from '@/lib/market/marketQuotes';
 import { buildHoldings, type TileHolding } from '@/lib/market/holdings';
-import { capitalTiedUp, colorBucket, compactMoney, holdingLabel, movingAgainst, netExposure, type ColorBucket, type Exposure } from '@/lib/market/marketMapMath';
+import { capitalTiedUp, colorBucket, compactMoney, formatPortfolioPct, holdingLabel, movingAgainst, netExposure, portfolioPct, uncommittedCapital, type ColorBucket, type Exposure } from '@/lib/market/marketMapMath';
+import { toFiniteNumber } from '@/lib/portfolio-intelligence/adapters/balancesNormalization';
 import { squarify, type Rect } from '@/lib/market/treemap';
 import { fitTileText, markerSize } from '@/lib/market/fitText';
 
@@ -37,7 +38,8 @@ const ARROW: Record<Exposure, { glyph: string; hint: string }> = {
 const holdingText = (h: TileHolding): string => `${ARROW[netExposure(h)].glyph} ${h.via ? `${h.via}: ` : ''}${holdingLabel(h)}`;
 const LEGEND: ColorBucket[] = ['dn4', 'dn3', 'dn2', 'dn1', 'flat', 'up1', 'up2', 'up3', 'up4'];
 
-interface Tile { ticker: string; rect: Rect; pct: number | null; bucket: ColorBucket; holding: TileHolding | null; against: boolean }
+// capital is set only in the "My positions" view; uncommitted marks the gray tile for the part of the account no position ties up.
+interface Tile { ticker: string; rect: Rect; pct: number | null; bucket: ColorBucket; holding: TileHolding | null; against: boolean; capital?: number; uncommitted?: boolean }
 interface SectorBlock { name: SectorName; rect: Rect; tiles: Tile[] }
 
 const fmtPct = (p: number | null) => (p == null ? 'n/a' : `${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p).toFixed(2)}%`);
@@ -48,6 +50,7 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
   const [mineOnly, setMineOnly] = useState(false);
   const [report, setReport] = useState<QuoteReport | null>(null);
   const [holdings, setHoldings] = useState<Map<string, TileHolding>>(new Map());
+  const [netLiq, setNetLiq] = useState<number | null>(null);
   const [holdingsNote, setHoldingsNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -65,6 +68,11 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
         const data = await ttFetch(`/accounts/${account}/positions`, token);
         held = buildHoldings(data?.data?.items);
         setHoldings(held); setHoldingsNote('');
+        // Net liquidation is the base for "% of portfolio" in the My positions view; unknown stays unknown, never zero.
+        try {
+          const bal = await ttFetch(`/accounts/${account}/balances`, token);
+          setNetLiq(toFiniteNumber(bal?.data?.['net-liquidating-value']) ?? null);
+        } catch { setNetLiq(null); }
       }
     } catch { setHoldings(new Map()); setHoldingsNote('Your positions could not be loaded, so none are outlined.'); }
     try {
@@ -88,16 +96,9 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
   const sectors = useMemo<SectorBlock[]>(() => {
     const quotes = report?.quotes;
     const bySector = new Map<SectorName, { ticker: string; weight: number }[]>();
-    if (mineOnly) {
-      // MARKET-MAP-0004: every holding is a tile, sized by the capital it ties up, whatever index it belongs to.
-      const caps = Array.from(holdings.entries()).map(([ticker, h]) => ({ ticker, capital: capitalTiedUp(h) }));
-      const smallest = Math.min(...caps.filter(c => c.capital > 0).map(c => c.capital), 1000);
-      for (const { ticker, capital } of caps) {
-        const sector: SectorName = STOCKS[ticker]?.sector ?? 'Funds & other';
-        const list = bySector.get(sector) ?? [];
-        list.push({ ticker, weight: capital > 0 ? capital : smallest }); bySector.set(sector, list);
-      }
-    } else for (const ticker of index.tickers) {
+    // The My positions view is drawn by myTiles below, not by sector blocks.
+    if (mineOnly) return [];
+    for (const ticker of index.tickers) {
       const info = STOCKS[ticker];
       if (!info) continue;
       const weight = index.weighting === 'price' ? (quotes?.get(ticker)?.last ?? 0) : info.cap;
@@ -118,11 +119,30 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
     });
   }, [report, index, mineOnly, holdings]);
 
-  // Holdings with no tile on this map: shown under the map so no position is hidden.
+  // MARKET-MAP-0005: "My positions" is one flat map, tile area = capital committed (exactly proportional: no sector headers eat area).
+  // The account's remaining value (net liquidation minus committed capital) is a gray tile, so tile area is each position's true share of
+  // the portfolio. When commitments exceed net liquidation (short puts count at full strike value) there is no gray tile.
+  const myMap = useMemo(() => {
+    const committed = Array.from(holdings.entries()).map(([ticker, h]) => ({ ticker, h, capital: capitalTiedUp(h) })).filter(c => c.capital > 0);
+    const total = committed.reduce((s, c) => s + c.capital, 0);
+    const free = uncommittedCapital(total, netLiq);
+    const items = committed.map(c => ({ value: c.capital, data: c as typeof c | null }));
+    if (free > 0) items.push({ value: free, data: null });
+    const quotes = report?.quotes;
+    const tiles: Tile[] = squarify(items, { x: 0, y: 0, w: W, h: H }).map(({ item, rect }) => {
+      if (!item.data) return { ticker: 'Uncommitted', rect, pct: null, bucket: 'none' as ColorBucket, holding: null, against: false, capital: free, uncommitted: true };
+      const pct = quotes?.get(item.data.ticker)?.pct ?? null;
+      return { ticker: item.data.ticker, rect, pct, bucket: colorBucket(pct), holding: item.data.h, against: movingAgainst(netExposure(item.data.h), pct), capital: item.data.capital };
+    });
+    return { tiles, total, free, overCommitted: netLiq != null && netLiq > 0 && total > netLiq };
+  }, [holdings, netLiq, report]);
+
+  // Holdings with no tile on this map: shown under the map so no position is hidden. In My positions these are the ones that tie up no
+  // capital (for example a covered call with no share cost on file).
   const offMap = useMemo(() => {
-    if (mineOnly) return [];
     const onMap = new Set(index.tickers.filter(t => STOCKS[t]));
-    return Array.from(holdings.entries()).filter(([t]) => !onMap.has(t)).map(([ticker, holding]) => {
+    const isOff = ([t, h]: [string, TileHolding]) => (mineOnly ? capitalTiedUp(h) <= 0 : !onMap.has(t));
+    return Array.from(holdings.entries()).filter(isOff).map(([ticker, holding]) => {
       const pct = report?.quotes.get(ticker)?.pct ?? null;
       return { ticker, holding, pct, bucket: colorBucket(pct), against: movingAgainst(netExposure(holding), pct) };
     });
@@ -157,23 +177,33 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
       )}
 
       <div className={`relative w-full ${cardClass} border ${borderClass} rounded overflow-hidden`} style={{ aspectRatio: `${W} / ${H}`, containerType: 'inline-size' }} data-testid="market-map">
-        {sectors.length === 0 && !loading && (
+        {(mineOnly ? myMap.tiles.length === 0 : sectors.length === 0) && !loading && (
           <div className={`absolute inset-0 flex items-center justify-center text-sm ${mutedClass}`}>{mineOnly ? 'No open positions found.' : 'Nothing to draw yet.'}</div>
         )}
-        {sectors.map(sector => (
+        {!mineOnly && sectors.map(sector => (
           <div key={sector.name} className="absolute" style={pctOf(sector.rect)}>
             <div className={`absolute left-1 top-0.5 uppercase tracking-wider ${mutedClass}`} style={{ fontSize: '1cqw', lineHeight: 1.2 }}>{sector.name}</div>
           </div>
         ))}
-        {sectors.flatMap(sector => sector.tiles).map(tile => {
+        {(mineOnly ? myMap.tiles : sectors.flatMap(sector => sector.tiles)).map(tile => {
           const holding = tile.holding;
-          const label = holding ? `${holdingText(holding)}${mineOnly ? ` \u00B7 ${compactMoney(capitalTiedUp(holding))}` : ''}` : '';
-          const pctText = fmtPct(tile.pct);
-          const fit = fitTileText({ w: tile.rect.w, h: tile.rect.h, ticker: tile.ticker, pct: pctText, label: label || null });
+          // My positions: the chip carries the capital committed and its share of net liquidation; when the full chip does not fit, the
+          // short "$ \u00B7 %" chip is tried before the chip is dropped.
+          const share = tile.capital != null ? formatPortfolioPct(portfolioPct(tile.capital, netLiq)) : '';
+          const money = tile.capital != null ? `${compactMoney(tile.capital)}${share ? ` \u00B7 ${share}` : ''}` : '';
+          const fullLabel = tile.uncommitted ? money : holding ? `${holdingText(holding)}${mineOnly ? ` \u00B7 ${money}` : ''}` : '';
+          const pctText = tile.uncommitted ? share : fmtPct(tile.pct);
+          let label = fullLabel;
+          let fit = fitTileText({ w: tile.rect.w, h: tile.rect.h, ticker: tile.ticker, pct: pctText, label: label || null });
+          if (mineOnly && !tile.uncommitted && money && fit.label == null) {
+            const shortFit = fitTileText({ w: tile.rect.w, h: tile.rect.h, ticker: tile.ticker, pct: pctText, label: money });
+            if (shortFit.label != null) { fit = shortFit; label = money; }
+          }
           const marker = holding ? markerSize(tile.rect.w, tile.rect.h) : null;
           const cq = (units: number) => `${(units / 10).toFixed(3)}cqw`;
+          const detail = tile.uncommitted ? `${compactMoney(tile.capital ?? 0)} of the account is not tied up by any position` : holding ? `${holdingText(holding)}${mineOnly && money ? ` \u00B7 ${money} of portfolio` : ''}` : '';
           return (
-            <div key={tile.ticker} title={`${tile.ticker} ${pctText}${holding ? ` \u00B7 ${label}${tile.against ? ' \u00B7 moving against you' : ''}` : ''}`}
+            <div key={tile.ticker} title={`${tile.ticker} ${pctText}${detail ? ` \u00B7 ${detail}${tile.against ? ' \u00B7 moving against you' : ''}` : ''}`}
               className="absolute flex flex-col items-center justify-center text-center text-white overflow-hidden"
               style={{ ...pctOf(tile.rect), background: BUCKET_BG[tile.bucket], border: '1px solid rgba(0,0,0,0.45)' }}>
               {holding && marker != null && (
@@ -192,7 +222,7 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
 
       {offMap.length > 0 && (
         <div className="flex flex-col gap-1.5" data-testid="market-map-offmap">
-          <div className={`text-[11px] uppercase tracking-wider ${mutedClass}`}>Your other positions (not on this map)</div>
+          <div className={`text-[11px] uppercase tracking-wider ${mutedClass}`}>{mineOnly ? 'Positions that tie up no capital (not drawn)' : 'Your other positions (not on this map)'}</div>
           <div className="flex flex-wrap gap-2">
             {offMap.map(o => (
               <div key={o.ticker} className="flex items-center gap-2 rounded px-2.5 py-1.5 text-xs text-white" style={{ background: BUCKET_BG[o.bucket] }}>
@@ -210,7 +240,7 @@ export default function MarketMapPanel({ textClass, mutedClass, borderClass, car
         <span>≤ −3%</span>{LEGEND.map(b => <i key={b} style={{ background: BUCKET_BG[b], display: 'inline-block', width: 30, height: 10 }} />)}<span>≥ +3%</span>
       </div>
       <div className={`text-[11px] ${mutedClass}`}>
-        {mineOnly ? 'Tile size is the capital each position ties up (short put: strike x 100 x contracts; spread: width; long option: premium paid; shares: cost), approximate and before credits received.' : `${index.scope} Tile size is approximate${index.weighting === 'cap' ? ' (rounded market caps, refreshed by hand)' : ''}.`} ★ you hold options or shares on it ({heldCount} in all). ▲ you gain if it rises, ▼ you gain if it falls. ⚠ it is moving 2% or more against that position today.
+        {mineOnly ? `Tile size is the capital each position ties up (short put: strike x 100 x contracts; spread: width; long option: premium paid; shares: cost), approximate and before credits received. ${netLiq == null ? 'Net liquidation could not be loaded, so % of portfolio is not shown.' : myMap.overCommitted ? `Capital committed (${compactMoney(myMap.total)}) is more than net liquidation (${compactMoney(netLiq)}), because short puts count at full strike value, so the percents add to more than 100% and there is no gray tile.` : `Percents are of net liquidation (${compactMoney(netLiq)}); the gray tile is the rest of the account.`}` :`${index.scope} Tile size is approximate${index.weighting === 'cap' ? ' (rounded market caps, refreshed by hand)' : ''}.`} ★ you hold options or shares on it ({heldCount} in all). ▲ you gain if it rises, ▼ you gain if it falls. ⚠ it is moving 2% or more against that position today.
       </div>
     </div>
   );
