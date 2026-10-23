@@ -11423,7 +11423,12 @@ export default function PortfolioPage() {
                     position.recommendation ? canonicalRecommendationToAction(position.recommendation.kind) : null,
                   ))}
                 onExecute={(position, action, initialRollMode) => openBatch([{ pos: position, action, initialRollMode }])}
-                onAnalyze={(position, traderNote) => analyzePosition(position, null, traderNote)}
+                onAnalyze={async (position, traderNote) => {
+                  // Same trend the card Analyze uses, so RSI/trend reach the facts and the AI. A chart failure never blocks Analyze.
+                  const shortPutStrike = position.legs.find(l => l.direction === 'Short' && l.optionType === 'P')?.strikePrice ?? null;
+                  const trend = await getTrend(position.symbol, shortPutStrike).catch(() => null);
+                  return analyzePosition(position, trend, traderNote);
+                }}
                 onAnalyzeStock={(row, context) => analyzeStock(row, context)}
                 renderAnalysisConversation={(position, analysis) => <PositionAnalysisConversation analysis={analysis as PositionAnalysis} pos={position} th={th} />}
                 renderStopControl={position => <PortfolioStopControl pos={position} th={th} onRetry={fetchPositions} />}

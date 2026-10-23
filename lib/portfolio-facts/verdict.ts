@@ -93,11 +93,15 @@ const TIER: Record<string, VerdictConfidence> = { High: 'HIGH', Medium: 'MEDIUM'
  * more when the intent was defaulted rather than chosen. Only these two data gaps count (the other fact groups are shown to the reader as
  * "not available" but do not move the level in this phase). Never reported by the AI.
  */
-export function computeConfidence(facts: Pick<PositionFacts, 'engineInput' | 'identity'>, engineTier: string | undefined): Verdict['confidence'] {
+export function computeConfidence(facts: Pick<PositionFacts, 'engineInput' | 'identity'>, engineTier: string | undefined, calmHold = false): Verdict['confidence'] {
   let idx = LEVELS.indexOf(TIER[engineTier ?? ''] ?? 'LOW');
   const basis: string[] = [`engine margin: ${engineTier ?? 'unknown'}`];
+  // Calm hold (Ian/Alan, 2026-10-23): nothing is firing, so the engine's margin is only the baseline and always reads Low. That is a clear
+  // all-clear, not a weak call: Medium, never High (no trigger is not strong evidence), and a defaulted intent cannot change a Hold.
+  if (calmHold) { idx = Math.max(idx, LEVELS.indexOf('MEDIUM')); basis.push('calm hold: no rule is firing'); }
   if (facts.engineInput.creditReceived == null || facts.engineInput.pnlPct == null) { idx -= 1; basis.push('economics incomplete (entry credit or P/L missing)'); }
-  if (facts.identity.intentWasSet === false) { idx -= 1; basis.push('intent defaulted, not chosen'); }
+  if (facts.identity.intentWasSet === false && calmHold) basis.push('intent defaulted (does not change a calm Hold)');
+  else if (facts.identity.intentWasSet === false) { idx -= 1; basis.push('intent defaulted, not chosen'); }
   else if (facts.identity.intentWasSet === null) basis.push('intent source unknown');
   return { level: LEVELS[Math.max(0, idx)], basis };
 }
@@ -124,6 +128,6 @@ export function computeVerdict(facts: PositionFacts): Verdict | null {
     legacyKind: kind,
     quietConfirmation: mi.quietConfirmation === true,
     reasons,
-    confidence: computeConfidence(facts, mi.confidenceTier),
+    confidence: computeConfidence(facts, mi.confidenceTier, mi.intent === 'HOLD_POSITION' && !hardBucket && (winner?.contributions ?? []).every(c => c.id.startsWith('baseline'))),
   };
 }

@@ -202,4 +202,15 @@ describe('confidence is computed by the app from the engine margin, completeness
     expect(computeConfidence(facts({ credit: null, intentWasSet: false }), 'High').level).toBe('LOW');
     expect(computeConfidence(facts({ credit: null, intentWasSet: false }), 'Low').level).toBe('LOW');
   });
+  it('a calm hold reads MEDIUM, not LOW, and a defaulted intent does not lower it (never HIGH)', () => {
+    const c = computeConfidence(facts({ intentWasSet: false }), 'Low', true);
+    expect(c.level).toBe('MEDIUM');
+    expect(c.basis.join(' ')).toMatch(/calm hold/);
+    expect(computeConfidence(facts(), 'High', true).level).toBe('HIGH');
+    expect(computeConfidence(facts({ credit: null }), 'Low', true).level).toBe('LOW');
+  });
+});
+describe('a calm CSP hold shows MEDIUM; a firing rule keeps the engine margin', () => {
+  it('calm Income put: Hold, MEDIUM', () => { const v = verdictOf(income()); expect(v.bucket).toBe('Hold'); expect(v.confidence.level).toBe('MEDIUM'); });
+  it('a hard rule is not calm', () => { expect(verdictOf(income({ earningsDate: '2026-09-01' })).confidence.basis.join(' ')).not.toMatch(/calm hold/); });
 });
