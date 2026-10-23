@@ -100,10 +100,10 @@ Settled by the team (Dean may override):
 - Wash-sale is a flag only.
 - Decision journal is review-only, no auto-tuning.
 
-Needs Dean:
-- **D1. Calls below cost basis.** Ian recommends: never recommend a strike below cost basis unless Dean opts in per position. Dean confirms or states his policy.
-- **D2. Web research cost and use.** Ian and Paul recommend on-demand only, held tickers only, labelled unverified, inside the soft spend limit. Dean confirms.
-- **D3. Research route.** Policy question for Alan: a separate research step outside the gateway feeding text in, or a gateway exception for web search. Team recommends the separate step. Dean confirms with the provider switch.
+Decided by Dean (2026-10-23, "yes to all"):
+- **D1. Calls below cost basis.** Never recommend a strike below cost basis unless Dean opts in per position.
+- **D2. Web research cost and use.** On demand only, held tickers only, labelled unverified, inside the soft spend limit.
+- **D3. Research route.** A separate research step feeds text into the gateway (no gateway exception for web search), and AI-POLICY D3 is reopened to move to Claude models (provider switch proposed as AI-POLICY-0002).
 
 ## 6. Out of scope (v1)
 
