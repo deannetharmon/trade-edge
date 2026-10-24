@@ -153,7 +153,64 @@ function Row({ row, th, chart, intentControl, earnings, gridStyle, savedNote, on
   );
 }
 
-export function StockHoldings({ earningsEnabled = false, intentEnabled = false, columnWidths, groups, quoteAsOf, th, storageKey, notes, onSaveNote, alerts, onSaveAlert, sellDeps, onAnalyze, renderConversation }: {
+/** POSITIONS-CARDS-0001: the stock holding as a card, same shell as the option cards (header, big P/L, chips, action row, Show detail). */
+function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveNote, savedAlert, onSaveAlert, onSell, onAnalyze }: {
+  row: StockHoldingRow; chart: ReactNode; intentControl: ReactNode; earnings: ReactNode; th: Theme; savedNote: string; onSaveNote: SaveNote; savedAlert: SavedAlert | null; onSaveAlert: SaveAlert; onSell: (row: StockHoldingRow) => void; onAnalyze?: (row: StockHoldingRow) => void;
+}) {
+  const [detailOpen, setDetailOpen] = useState(false);
+  const pnlTone = row.pnl == null ? 'text-white/40' : row.pnl >= 0 ? 'text-emerald-400' : 'text-red-400';
+  const canSellCovered = row.covered.kind === 'available';
+  const stats: Array<[string, string]> = [
+    ['Shares', String(row.shares)],
+    ['Price', row.price != null ? money(row.price) : '—'],
+    ['Avg cost', row.avgCost != null ? money(row.avgCost) : '—'],
+    ['Value', row.value != null ? (row.value < 0 ? `-${money(Math.abs(row.value))}` : money(row.value)) : '—'],
+    ['Cost basis', row.costBasis != null ? money(row.costBasis) : '—'],
+  ];
+  return (
+    <article aria-label={`${row.symbol} stock holding`} data-testid={`stock-card-${row.key}`} className={`rounded-xl border border-l-4 border-l-white/20 ${th.border} bg-white/[0.02] p-4`}>
+      <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
+        <div className="min-w-0">
+          <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-white">{row.symbol}<span className="rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">STOCK</span></h3>
+          <p className={`mt-0.5 text-xs ${th.textFaint}`}>{Math.abs(row.shares)} sh · {row.direction.toLowerCase()}{row.price != null ? ` · ${money(row.price)}` : ''}{row.sharesNote ? ` · ${row.sharesNote}` : ''}</p>
+        </div>
+        <div className="text-right">
+          <b className={`block text-xl ${pnlTone}`}>{row.pnl != null ? signedMoney(Math.round(row.pnl * 100) / 100) : 'Unavailable'}</b>
+          <span className={`block text-[11px] ${row.pnl == null ? 'text-amber-300' : th.textFaint}`}>{row.pnl != null ? (row.pnlPct != null ? `${row.pnlPct >= 0 ? '+' : ''}${row.pnlPct.toFixed(1)}% vs cost` : 'unrealized') : !row.basisComplete ? 'needs a complete cost basis' : 'price unavailable'}</span>
+        </div>
+      </div>
+      <ul aria-label="Signals" className="mt-3 flex flex-wrap items-center gap-1.5">
+        <li className={`rounded-full border px-2.5 py-0.5 text-[11px] ${PILL[row.covered.tone]}`}>{row.covered.headline}</li>
+        {row.stale && <li className="rounded-full border border-amber-400/50 bg-amber-400/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">Stale price</li>}
+        {earnings && <li className="text-[11px]">{earnings}</li>}
+      </ul>
+      {row.covered.detail && <p className={`mt-1 text-[11px] ${th.textFaint}`}>{row.covered.detail}</p>}
+      {detailOpen && (
+        <div data-testid="stock-card-detail" className="mt-3 space-y-3">
+          <dl className="grid grid-cols-2 gap-2 sm:grid-cols-5">{stats.map(([label, value]) => <div key={label} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"><dt className={`text-[10px] uppercase tracking-wider ${th.textFaint}`}>{label}</dt><dd className="text-sm font-bold text-white">{value}</dd></div>)}</dl>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <StockNoteEditor label={`Note for ${row.symbol} stock holding`} savedNote={savedNote} onSave={note => onSaveNote(row.accountNumber, row.key, note)} />
+            <StockAlertEditor id={row.key} symbol={row.symbol} price={row.price} savedAlert={savedAlert} onSave={(target, direction) => onSaveAlert(row.accountNumber, row.key, target, direction)} />
+          </div>
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {onAnalyze && <button type="button" data-testid={`analyze-button-${row.key}`} onClick={() => onAnalyze(row)} className="min-h-9 rounded-xl border border-blue-500/50 px-3 text-xs text-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-400">Analyze</button>}
+        {row.direction === 'Long' && (row.sellable.maxSellableShares > 0
+          ? <button type="button" data-testid={`sell-button-${row.key}`} onClick={() => onSell(row)} className="min-h-9 rounded-xl border border-red-500/50 px-3 text-xs text-red-300 focus:outline-none focus:ring-2 focus:ring-red-400">Sell</button>
+          : <span data-testid={`sell-button-${row.key}`} className={`inline-flex min-h-9 items-center rounded-xl border border-white/10 px-3 text-xs ${th.textFaint}`} aria-disabled="true" title={row.sellable.blockedByDataQuality ? 'Share commitment could not be verified. Selling is blocked until it can be.' : `All ${row.shares} shares are committed to an open call.`}>Sell</span>)}
+        {row.direction === 'Long' && canSellCovered && <Link href={`/screener?strategy=covered-call&symbol=${encodeURIComponent(row.symbol)}`} className="inline-flex min-h-9 items-center rounded-xl border border-teal-500/50 px-3 text-xs text-teal-300 focus:ring-2 focus:ring-teal-400">Sell covered call</Link>}
+        {chart}
+        <button type="button" aria-expanded={detailOpen} onClick={() => setDetailOpen(open => !open)} className="ml-auto text-xs text-white/70 underline decoration-dotted underline-offset-2 hover:text-white">{detailOpen ? 'Hide detail' : 'Show detail'}</button>
+        {intentControl && <span>{intentControl}</span>}
+      </div>
+    </article>
+  );
+}
+
+export function StockHoldings({ cards = false, earningsEnabled = false, intentEnabled = false, columnWidths, groups, quoteAsOf, th, storageKey, notes, onSaveNote, alerts, onSaveAlert, sellDeps, onAnalyze, renderConversation }: {
+  /** POSITIONS-CARDS-0001: show holdings as cards (the Cards view) instead of the table. */
+  cards?: boolean;
   /** Show each holding's next earnings date under its chart link (looked up from the broker's market metrics). */
   earningsEnabled?: boolean;
   /** POSITION-INTENT-0001: show the Hold / Wheel / Undecided control on each holding (saved in the same store as option intents). */
@@ -245,6 +302,25 @@ export function StockHoldings({ earningsEnabled = false, intentEnabled = false, 
         <div className={`h-px flex-1 ${th.border} border-t`} />
         {asOf && <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-[11px] text-amber-300" data-testid="stock-prices-as-of">{asOf.text}</span>}
       </div>
+      {cards ? (
+        <>
+          <div data-testid="stock-cards" className="grid gap-3 lg:grid-cols-2">
+            {rows.map(row => (
+            <StockCard key={row.key} row={row} th={th}
+              earnings={(() => { const e = earningsEnabled ? earningsBySymbol[row.symbol.toUpperCase()] : undefined; const line = e ? nextEarningsLine(e.date, e.estimated, null) : null; return line ? <span className={th.textFaint} data-testid="stock-next-earnings">{line.text}</span> : null; })()}
+              intentControl={intentEnabled ? <IntentSelectControl family="STOCK" stored={intents[`${row.accountNumber}::${row.key}`]} ariaLabel={`Intent for ${row.symbol} shares`} onChange={intent => saveIntent(`${row.accountNumber}::${row.key}`, intent)} /> : null}
+              chart={<ChartLinkButton symbol={row.symbol} chartSymbol={INDEX_CHART_SYMBOLS[row.symbol.toUpperCase()] ?? row.symbol} instanceKey={`stock-${row.key}`} th={th}
+                showChart={openChartKey === row.key} setShowChart={open => setOpenChartKey(open ? row.key : null)}
+                sparkData={chartData[row.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.symbol]: data }))}
+                sparkLoading={chartLoadingSymbol === row.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.symbol : null)} />}
+              savedNote={notes[storageKey(row.accountNumber, row.key)] ?? ''} onSaveNote={onSaveNote}
+              savedAlert={alerts[storageKey(row.accountNumber, row.key)] ?? null} onSaveAlert={onSaveAlert}
+              onSell={sellDeps ? setSellRow : () => {}} onAnalyze={onAnalyze ? row => void runAnalysis(row) : undefined} />
+            ))}
+          </div>
+          <p data-testid="stock-totals" className={`mt-3 text-xs ${th.textFaint}`}><b>Stocks total</b> · Value {totals.value != null ? (totals.value < 0 ? `-${money(Math.abs(totals.value))}` : money(totals.value)) : '—'} · P/L <span className={totals.pnl == null ? '' : totals.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>{totals.pnl != null ? signedMoney(totals.pnl) : '—'}{totals.pnlPct != null ? ` (${totals.pnlPct >= 0 ? '+' : ''}${totals.pnlPct.toFixed(1)}%)` : ''}</span>{!totals.complete && <span className="text-amber-300"> · P/L covers {totals.pnlIncluded} of {totals.holdings} holdings</span>}</p>
+        </>
+      ) : (
       <div className={`max-w-full overflow-x-auto rounded-xl border ${th.border}`} tabIndex={0} aria-label="Stock holdings, horizontally scrollable">
         <div role="table" className={aligned ? 'text-[11px]' : 'min-w-[1180px] text-[11px]'} style={aligned ? { width: aligned.total } : undefined}>
           <div role="row" style={gridStyle} className={`grid ${COLUMNS} bg-white/5 text-[10px] uppercase tracking-wider ${th.textFaint}`}>
@@ -276,6 +352,7 @@ export function StockHoldings({ earningsEnabled = false, intentEnabled = false, 
           </div>
         </div>
       </div>
+      )}
       <ul className="mt-3 space-y-2 text-xs">
         {asOf && asOf.staleCount > 0 && <li className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-amber-200">{asOf.staleCount} price{asOf.staleCount === 1 ? ' is' : 's are'} marked stale by the broker feed.</li>}
         {incomplete.length > 0 && <li className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-amber-200">{incomplete.map(r => r.symbol).join(', ')} {incomplete.length === 1 ? 'has' : 'have'} no complete cost basis (several lots), so cost and P/L are not shown.</li>}

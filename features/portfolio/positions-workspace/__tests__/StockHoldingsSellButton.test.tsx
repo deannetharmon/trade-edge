@@ -147,4 +147,18 @@ describe('Stock holdings symbol cell order and earnings', () => {
     expect(screen.queryByTestId('stock-next-earnings')).not.toBeInTheDocument();
     vi.unstubAllGlobals();
   });
+  it('POSITIONS-CARDS-0001: in Cards mode a holding is a card with P/L, Sell, Analyze and Show detail, not a table row', async () => {
+    const onAnalyze = vi.fn();
+    render(<StockHoldings {...props(holding({}))} cards onAnalyze={onAnalyze as never} />);
+    expect(screen.getByTestId('stock-cards')).toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    const card = screen.getByTestId('stock-card-equity:MRVL:long');
+    expect(card).toHaveTextContent('MRVL');
+    expect(card).toHaveTextContent('+$2,900');
+    expect(screen.getByTestId('sell-button-equity:MRVL:long')).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Analyze' })).toBeInTheDocument();
+    expect(screen.queryByTestId('stock-card-detail')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Show detail' }));
+    expect(screen.getByTestId('stock-card-detail')).toHaveTextContent('Cost basis');
+  });
 });
