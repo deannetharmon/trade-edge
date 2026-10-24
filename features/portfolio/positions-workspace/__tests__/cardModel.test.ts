@@ -70,6 +70,14 @@ describe('card content', () => {
     expect(chip?.label).toBe(`Earnings ${shortDate(next)} < Exp ${shortDate(exp)}`);
     expect(chip?.tone).toBe('warn');
   });
+  it('a LEAP shows earnings only inside 30 days; a short-dated option keeps it for the whole life', () => {
+    const day = (n: number) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+    const leap = (e: number) => pos({ strategy: 'CALL', legs: [leg('Long', 'C')], entryPriceEffect: 'Debit', dte: 329, entryDte: 400, nextEarningsDate: day(e), expDate: day(329) } as Partial<Position>);
+    expect(buildPositionCard(leap(60), { pctOfTarget: null }).chips.some(x => x.id === 'earnings')).toBe(false);
+    expect(buildPositionCard(leap(12), { pctOfTarget: null }).chips.some(x => x.id === 'earnings')).toBe(true);
+    const near = pos({ nextEarningsDate: day(60), expDate: day(90), dte: 90 } as Partial<Position>);
+    expect(buildPositionCard(near, { pctOfTarget: null }).chips.some(x => x.id === 'earnings')).toBe(true);
+  });
   it('a verify-pricing recommendation sets the unverified-quote flag and its chip', () => {
     const c = buildPositionCard(pos({ recommendation: rec('verify-pricing', 'HOLD_POSITION') }), { pctOfTarget: null });
     expect(c.unverifiedQuote).toBe(true);

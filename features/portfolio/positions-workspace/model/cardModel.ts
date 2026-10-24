@@ -17,6 +17,9 @@ import { structuralChipOf } from './strategyChips';
 import { netEdgeLive } from '@/lib/portfolio-data/acquisition';
 import { parseSymbolList } from './filters';
 
+export const LEAP_EARNINGS_WINDOW_DAYS = 30;
+const isLeapPosition = (p: Position) => structuralChipOf(p) === 'leap';
+
 export type CardBucket = VerdictBucket | 'Unjudged';
 export type CardChipTone = 'bad' | 'warn' | 'ok' | 'info';
 export interface CardChip { id: string; label: string; tone: CardChipTone }
@@ -120,7 +123,8 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
   if (wide != null) chips.push({ id: 'wide', label: 'Wide market', tone: 'warn' });
   if (verifyPricing) chips.push({ id: 'verify', label: 'Verify price', tone: 'warn' });
   const earnings = nextEarningsLine(p.nextEarningsDate, p.nextEarningsEstimated, p.expDate, undefined, p.nextEarningsUnderlying);
-  if (earnings?.beforeExpiry && p.nextEarningsDate) {
+  // A LEAP is held for months, so earnings only matter when they are close (LEAP_EARNINGS_WINDOW_DAYS).
+  if (earnings?.beforeExpiry && p.nextEarningsDate && !(isLeapPosition(p) && earnings.daysAway > LEAP_EARNINGS_WINDOW_DAYS)) {
     const horizon = standaloneLongOptionLabel(p);
     const leap = horizon === 'LEAP' || horizon === 'LEAP PUT';
     chips.push({ id: 'earnings', label: `Earnings ${shortDate(p.nextEarningsDate)} < Exp ${shortDate(p.expDate)}`, tone: leap ? 'info' : 'warn' });

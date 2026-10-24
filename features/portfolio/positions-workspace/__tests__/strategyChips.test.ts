@@ -16,19 +16,30 @@ describe('structuralChipOf', () => {
   });
   it('short call is CC unless it is a PMCC short leg', () => {
     expect(structuralChipOf(pos({ strategy: 'CALL', legs: [leg('Short', 'C')] }))).toBe('cc');
-    expect(structuralChipOf(pos({ strategy: 'CALL', legs: [leg('Short', 'C')], isPmccShortLeg: true }))).toBe('spreads');
+    expect(structuralChipOf(pos({ strategy: 'CALL', legs: [leg('Short', 'C')], isPmccShortLeg: true }))).toBe('pmcc');
   });
   it('a single long leg is Long Options (LEAP, long put)', () => {
     expect(structuralChipOf(pos({ strategy: 'CALL', legs: [leg('Long', 'C')] }))).toBe('long');
     expect(structuralChipOf(pos({ strategy: 'PUT', legs: [leg('Long', 'P')] }))).toBe('long');
   });
-  it('BPS, BCS, IC, PMCC and any multi-leg structure are Spreads', () => {
-    for (const strategy of ['BPS', 'BCS', 'IC', 'PMCC']) expect(structuralChipOf(pos({ strategy }))).toBe('spreads');
+  it('BPS, BCS, IC and any multi-leg structure are Spreads; PMCC has its own chip', () => {
+    for (const strategy of ['BPS', 'BCS', 'IC']) expect(structuralChipOf(pos({ strategy }))).toBe('spreads');
+    expect(structuralChipOf(pos({ strategy: 'PMCC' }))).toBe('pmcc');
     expect(structuralChipOf(pos({ strategy: 'UNKNOWN', legs: [leg('Short', 'P'), leg('Long', 'P')] }))).toBe('spreads');
   });
   it('a position with no legs and an unknown strategy is in All only', () => {
     expect(structuralChipOf(pos({ strategy: 'UNKNOWN', legs: [] }))).toBe('other');
   });
+});
+
+describe('LEAP vs Long Options', () => {
+  it('a long call or put far out is a LEAP; a short-dated one stays in Long Options, never both', () => {
+    expect(structuralChipOf(pos({ strategy: 'CALL', legs: [leg('Long', 'C')], dte: 329, entryDte: 400 } as Partial<Position>))).toBe('leap');
+    expect(structuralChipOf(pos({ strategy: 'PUT', legs: [leg('Long', 'P')], dte: 28, entryDte: 45 } as Partial<Position>))).toBe('long');
+    const counts = strategyChipCounts([pos({ strategy: 'CALL', legs: [leg('Long', 'C')], dte: 329, entryDte: 400 } as Partial<Position>)]);
+    expect(counts.leap).toBe(1); expect(counts.long).toBe(0);
+  });
+  it('a saved PMCC filter migrates to the PMCC chip', () => { expect(chipFromLegacyStrategy('PMCC')).toBe('pmcc'); });
 });
 
 describe('chips match, count, and migrate', () => {
@@ -39,7 +50,7 @@ describe('chips match, count, and migrate', () => {
     pos({ strategy: 'BPS', legs: [leg('Short', 'P'), leg('Long', 'P')] }),
   ];
   it('Wheel overlays the intent setting, so a Wheel put counts under CSP and Wheel', () => {
-    expect(strategyChipCounts(book)).toEqual({ all: 4, csp: 2, cc: 0, long: 1, spreads: 1, wheel: 1 });
+    expect(strategyChipCounts(book)).toEqual({ all: 4, csp: 2, cc: 0, long: 1, leap: 0, spreads: 1, pmcc: 0, wheel: 1 });
     expect(matchesStrategyChip(book[0], 'csp')).toBe(true);
     expect(matchesStrategyChip(book[0], 'wheel')).toBe(true);
     expect(matchesStrategyChip(book[1], 'wheel')).toBe(false);
