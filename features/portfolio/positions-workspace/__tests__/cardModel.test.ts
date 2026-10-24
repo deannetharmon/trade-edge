@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
-import { assignmentStrip, buildPositionCard, cardBucketOf, compareCards, matchesSymbolSearch, shortDate, sortCards, updatedLabel, type PositionCard } from '../model/cardModel';
+import { assignmentStrip, buildPositionCard, cardBucketOf, compareCards, matchesSymbolSearch, shortDate, sortCards, updatedLabel, type PositionCard, pickReason } from '../model/cardModel';
 import { decodePositionsViewStored, DEFAULT_POSITIONS_VIEW_STORED, isCardsDisabled, resolvePositionsView } from '../model/positionsViewSetting';
 
 const leg = (direction: 'Long' | 'Short', optionType: 'C' | 'P', strikePrice = 50) => ({ symbol: 'x', optionType, strikePrice, direction, quantity: 1, avgOpenPrice: 1, currentPrice: 1 }) as unknown as PositionLeg;
@@ -158,5 +158,17 @@ describe('opt-in: a fresh browser lands on Table', () => {
     for (const x of c.chips) if (x.id === 'net-edge' || x.id === 'earnings') expect(x.row).toBe(2);
     for (const x of c.chips) if (x.id === 'no-stop' || x.id === 'moneyness' || x.id === 'target' || x.id === 'buffer') expect(x.row).toBe(1);
     expect(Math.max(...c.chips.map(x => x.row))).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('pickReason: a reason a chip already shows is not repeated as text', () => {
+  const rec = (reasons: string[], primary = '') => ({ recommendation: { primaryReason: primary, managementIntent: { reasons } } } as unknown as Pick<Position, 'recommendation'>);
+  it('drops the earnings sentence when the earnings chip is present', () => {
+    expect(pickReason(rec(['Upcoming earnings before expiration (2026-11-06).']), [{ id: 'earnings' }])).toBeNull();
+    expect(pickReason(rec(['Upcoming earnings before expiration (2026-11-06).']), [])).toBe('Upcoming earnings before expiration (2026-11-06).');
+  });
+  it('drops the net edge sentence only with the net edge chip, and falls through to the next reason', () => {
+    expect(pickReason(rec(['Net edge is negative -- x.', 'Health score is 53.']), [{ id: 'net-edge' }])).toBe('Health score is 53.');
+    expect(pickReason(rec(['Net edge is negative -- x.']), [])).toBe('Net edge is negative -- x.');
   });
 });

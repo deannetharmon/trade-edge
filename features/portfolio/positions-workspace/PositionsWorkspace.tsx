@@ -644,7 +644,7 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
   </>;
 }
 
-const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take Profit Now', CLOSE_ROLL: 'Close Position / Roll', PLACE_GTC: 'Set/Edit Profit Target', CUT_LOSSES: 'Cut Losses' };
+const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take Profit Now', CLOSE_ROLL: 'Close or Roll Position', PLACE_GTC: 'Set Profit Target', CUT_LOSSES: 'Cut Losses' };
 
 function SemanticComparison({ label, prior, current, tone, digits = 1, suffix = '' }: { label: string; prior: number | null | undefined; current: number | null | undefined; tone: SemanticTone; digits?: number; suffix?: string }) {
   const material = tone !== 'neutral';

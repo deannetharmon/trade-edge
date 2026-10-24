@@ -15,7 +15,7 @@ import { canonicalRecommendationToAction } from '@/lib/portfolio/canonicalRecomm
 import { CONTROL_RADIUS } from './ui/chipStyle';
 import type { ActionType, Position, PositionIntent } from '@/lib/portfolio-data/types';
 
-const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take Profit Now', PLACE_GTC: 'Set/Edit Profit Target', CUT_LOSSES: 'Cut Losses' };
+const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take Profit Now', PLACE_GTC: 'Set Profit Target', CUT_LOSSES: 'Cut Losses' };
 
 const usd = (v: number | null) => v == null || !Number.isFinite(v) ? 'Unavailable' : `${v < 0 ? '-' : ''}$${Math.abs(Math.round(v)).toLocaleString('en-US')}`;
 const usd2 = (v: number) => `$${v.toFixed(2)}`;

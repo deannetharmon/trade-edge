@@ -3011,16 +3011,16 @@ function pnlColor(pnl: number | null) { return pnl == null ? 'text-slate-400' : 
 function dteColor(dte: number) { if (dte <= 7) return 'text-amber-400 font-bold'; if (dte <= 21) return 'text-yellow-400 font-bold'; return 'text-slate-400'; }
 
 const ACTION_META: Record<ActionType, { label: string; color: string; btnClass: string }> = {
-  HOLD:        { label: '● Hold',         color: 'text-slate-400',   btnClass: 'border-slate-600 text-slate-400' },
-  WATCH:       { label: '⚠ Watch',        color: 'text-yellow-400',  btnClass: 'border-yellow-700 text-yellow-400' },
-  MANAGE:      { label: '⚡ Manage',       color: 'text-orange-400',  btnClass: 'border-orange-600 text-orange-400' },
-  TAKE_PROFIT: { label: '✓ Take Profit',  color: 'text-emerald-400', btnClass: 'border-emerald-600 text-emerald-400 hover:bg-emerald-600/20' },
+  HOLD:        { label: '● Hold Position', color: 'text-slate-400',   btnClass: 'border-slate-600 text-slate-400' },
+  WATCH:       { label: '⚠ Watch Position', color: 'text-yellow-400',  btnClass: 'border-yellow-700 text-yellow-400' },
+  MANAGE:      { label: '⚡ Manage Position', color: 'text-orange-400',  btnClass: 'border-orange-600 text-orange-400' },
+  TAKE_PROFIT: { label: '✓ Take Profit', color: 'text-emerald-400', btnClass: 'border-emerald-600 text-emerald-400 hover:bg-emerald-600/20' },
   // DECIDE-0001 S3-0c: red removed (Paul: "no red on position recommendations
   // and their surfaces"); the label rename to "Close at a loss" is a separate
   // copy change, not done here.
   CUT_LOSSES:  { label: '✕ Cut Losses',   color: 'text-amber-400',   btnClass: 'border-amber-600 text-amber-400 hover:bg-amber-600/20' },
-  CLOSE_ROLL:  { label: '↻ Close/Roll',   color: 'text-purple-400',  btnClass: 'border-purple-600 text-purple-400 hover:bg-purple-600/20' },
-  PLACE_GTC:   { label: '⏱ Place GTC',   color: 'text-blue-400',    btnClass: 'ac-btn hover:ac-bg-20' },
+  CLOSE_ROLL:  { label: '↻ Close or Roll Position', color: 'text-purple-400',  btnClass: 'border-purple-600 text-purple-400 hover:bg-purple-600/20' },
+  PLACE_GTC:   { label: '⏱ Set Profit Target', color: 'text-blue-400',    btnClass: 'ac-btn hover:ac-bg-20' },
 };
 
 function ThemeToggle({ theme, setTheme, accent, setAccent }: {

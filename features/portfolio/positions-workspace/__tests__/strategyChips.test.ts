@@ -46,6 +46,16 @@ describe('LEAP, PMCC and Long Options', () => {
   it('a LEAP with a short call against it is a PMCC, and the short call alone is flagged as a PMCC leg', () => {
     expect(structuralChipOf(pos({ strategy: 'PMCC', legs: [occ('UBER', far, 'C', 67.5, 'Long'), occ('UBER', near, 'C', 90, 'Short')] }))).toBe('pmcc');
   });
+  it('a held PMCC counts as a pair: the long LEAP with a paired short call is PMCC, not LEAP; unpaired stays LEAP', () => {
+    const longLeg = pos({ strategy: 'CALL', legs: [occ('UBER', far, 'C', 67.5, 'Long')], pairedShortCallKey: 'uber-short' });
+    const short = pos({ strategy: 'CALL', legs: [occ('UBER', near, 'C', 90, 'Short')], isPmccShortLeg: true });
+    const alone = pos({ strategy: 'CALL', legs: [occ('NFLX', far, 'C', 70, 'Long')] });
+    expect(structuralChipOf(longLeg)).toBe('pmcc');
+    expect(structuralChipOf(short)).toBe('pmcc');
+    expect(structuralChipOf(alone)).toBe('leap');
+    const counts = strategyChipCounts([longLeg, short, alone]);
+    expect(counts.pmcc).toBe(2); expect(counts.leap).toBe(1);
+  });
   it('a saved PMCC filter migrates to the PMCC chip', () => { expect(chipFromLegacyStrategy('PMCC')).toBe('pmcc'); });
 });
 

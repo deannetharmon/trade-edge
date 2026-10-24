@@ -77,6 +77,19 @@ export function cardBucketOf(position: Pick<Position, 'recommendation'>): CardBu
   return intentBucket ?? 'Hold';
 }
 
+const REDUNDANT_WITH_CHIP: Array<{ chip: string; text: RegExp }> = [
+  { chip: 'net-edge', text: /^net edge is negative/i },
+  { chip: 'earnings', text: /^upcoming earnings before expiration/i },
+];
+/** The first reason that is not just a chip's own sentence; null when every reason is already shown as a chip. */
+export function pickReason(p: Pick<Position, 'recommendation'>, chips: ReadonlyArray<{ id: string }>): string | null {
+  const shown = new Set(chips.map(c => c.id));
+  const repeats = (reason: string) => REDUNDANT_WITH_CHIP.some(r => shown.has(r.chip) && r.text.test(reason));
+  const rec = p.recommendation;
+  const all = [...(rec?.managementIntent?.reasons ?? []), ...(rec?.primaryReason ? [rec.primaryReason] : [])];
+  return all.find(r => !repeats(r)) ?? null;
+}
+
 /** Dollars at risk for sorting; null when the capital figure is a share count or unavailable. */
 function dollarsAtRiskOf(p: Position): number | null {
   const capital = buildCapitalViewModel(p);
@@ -169,8 +182,8 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
     position: p,
     bucket: cardBucketOf(p),
     verdictLabel: p.recommendation?.label ?? 'No recommendation',
-    // The Net Edge (−) chip already says this, so a net-edge reason is not repeated as text.
-    reason: (p.recommendation?.managementIntent?.reasons ?? []).find(r => !/^net edge is negative/i.test(r)) ?? (/^net edge is negative/i.test(p.recommendation?.primaryReason ?? '') ? null : p.recommendation?.primaryReason) ?? null,
+    // A reason a chip already says is not repeated as text: Net Edge (−) and Earnings before Exp.
+    reason: pickReason(p, chips),
     pnl,
     pnlNote,
     dollarsAtRisk: dollarsAtRiskOf(p),

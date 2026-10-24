@@ -118,7 +118,7 @@ describe('PM-0002 Recommendation Explanation page boundary', () => {
     expect(screen.getByText(/Current broker leg quotes are stale/i)).toBeInTheDocument();
   });
 
-  it('keeps debit Close/Roll available but hides credit-derived target, stop and loss actions', async () => {
+  it('keeps debit Close or Roll available but hides credit-derived target, stop and loss actions', async () => {
     positionFixture.entryPriceEffect = 'Debit';
     positionFixture.entryCredit = 500;
     positionFixture.creditReceived = 0;
@@ -128,14 +128,14 @@ describe('PM-0002 Recommendation Explanation page boundary', () => {
     positionFixture.recommendation = { ...positionFixture.recommendation, kind: 'watch', label: 'Manage' };
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled')));
     render(<PortfolioModeProvider><PortfolioDataProvider><PortfolioPage /></PortfolioDataProvider></PortfolioModeProvider>);
-    expect(await screen.findByRole('button', { name: /Close\/Roll/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Close or Roll Position/i })).toBeInTheDocument();
     expect(screen.getByText('Debit (unsupported)')).toBeInTheDocument();
     expect(screen.queryByText('Derived marketable P/L')).not.toBeInTheDocument();
     const maxRisk = screen.getByText(/Max Risk/i).closest('div');
     expect(maxRisk).not.toBeNull();
     expect(within(maxRisk!).getByText('Unavailable')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Take Profit/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Place GTC/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Set Profit Target/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Cut Losses/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Set Stop/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/50% unlikely|~by/i)).not.toBeInTheDocument();

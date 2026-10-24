@@ -46,7 +46,8 @@ export function summaryGroupForPosition(position: Position): SummaryGroupKey {
   if (key === 'CSP') return 'SHORT_PUTS';
   if (key === 'CC') return 'SHORT_CALLS';
   if (key === 'BPS' || key === 'BCS' || key === 'IC') return 'SPREADS';
-  if (key === 'LEAP') return 'LEAPS';
+  // A PMCC is the pair: the long LEAP that has a paired short call counts as PMCC with that short call, not as a standalone LEAP.
+  if (key === 'LEAP') return position.pairedShortCallKey != null ? 'PMCC' : 'LEAPS';
   if (key === 'PMCC') return 'PMCC';
   if (key === 'PUT') return 'LONG_OPTIONS';
   const { shortPuts, shortCalls, longPuts, longCalls } = splitOptionLegs(position.legs);
