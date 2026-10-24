@@ -80,7 +80,7 @@ export function buildSparklines(input: { history: HistoryRow[]; quantity: number
   const value = rows.filter(r => finite(r.currentValue)).map(r => ({ date: r.date, v: Math.abs(r.currentValue as number) }));
   const delta = contracts > 0 ? rows.filter(r => finite(r.netDelta)).map(r => ({ date: r.date, v: Math.abs(r.netDelta as number) / contracts })) : [];
   const stock = rows.filter(r => finite(r.stockPrice) && (r.stockPrice as number) > 0).map(r => ({ date: r.date, v: r.stockPrice as number }));
-  const built = [series('value', 'Value', value, 'money'), series('delta', 'Delta', delta, 'delta'), series('stock', 'Stock', stock, 'money')].filter((s): s is SparkSeries => s != null);
+  const built = [series('value', 'Mark value', value, 'money'), series('delta', 'Delta', delta, 'delta'), series('stock', 'Stock', stock, 'money')].filter((s): s is SparkSeries => s != null);
   if (built.length === 0) return null;
   return { series: built, days: rows.length, firstDate: rows[0].date, lastDate: rows[rows.length - 1].date, liveIncluded: live != null && rows[rows.length - 1].date === live.date };
 }

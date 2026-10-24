@@ -44,7 +44,7 @@ export function HistoryStrip({ sparklines, daysRecorded, th }: { sparklines: Spa
           </div>
         ))}
       </div>
-      <p className="mt-1 text-[9px] text-neutral-500">Each earlier day is its closing reading when the app recorded one, otherwise the first reading it took that day.</p>
+      <p className="mt-1 text-[9px] text-neutral-500">Each earlier day is its closing reading when the app recorded one, otherwise the first reading it took that day. Changes are over this window, not against what you paid.</p>
     </div>
   );
 }
