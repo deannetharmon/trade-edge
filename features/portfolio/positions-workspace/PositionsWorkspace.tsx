@@ -333,7 +333,12 @@ function PmccReadinessCard({ opportunity, th, onFind }: { opportunity: ExistingI
     entry: { ...sinceEntry, entryPricePerShare: held.entryDebitPerShare ?? null },
   }) : null;
   // LEAPS-SPARK-0001: value, delta and stock over the days the app has recorded this position.
-  const sparklines = held?.history ? buildSparklines({ history: held.history, quantity: held.quantity }) : null;
+  // The last point is the live reading (the same mark, delta and stock price as the tiles above), so the lines end where the tiles say you are.
+  const todayNy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const liveRow = held && held.markPerShare != null
+    ? { date: todayNy, currentValue: held.markPerShare * 100 * Math.abs(held.quantity), netDelta: held.delta != null ? held.delta * Math.abs(held.quantity) : null, stockPrice: held.stockPrice ?? null }
+    : null;
+  const sparklines = held?.history ? buildSparklines({ history: held.history, quantity: held.quantity, live: liveRow }) : null;
   const historyStrip = held ? <HistoryStrip sparklines={sparklines} daysRecorded={cleanHistory(held.history ?? []).length} th={th} /> : null;
   // LEAPS-CYCLES-0001: the short calls sold on this stock since the LEAPS was opened (loaded from the Trade Log only when asked for).
   const extrinsicLostDollars = held && sinceOpen?.extrinsicLostPerShare != null ? sinceOpen.extrinsicLostPerShare * 100 * Math.abs(held.quantity) : null;

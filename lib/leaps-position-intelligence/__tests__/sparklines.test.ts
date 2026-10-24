@@ -117,3 +117,31 @@ describe('sparkPath geometry', () => {
     expect(sparkPath([], 100, 30)).toBe('');
   });
 });
+
+
+describe('live last point', () => {
+  const history = [
+    { date: '2026-10-21', currentValue: 1300, netDelta: 0.62, stockPrice: 70 },
+    { date: '2026-10-22', currentValue: 1250, netDelta: 0.6, stockPrice: 69 },
+    { date: '2026-10-23', currentValue: 1227.5, netDelta: 0.6, stockPrice: 68.64 },
+  ];
+  it('replaces the stored reading for the same date so the right edge matches the tiles', () => {
+    const result = buildSparklines({ history, quantity: 1, live: { date: '2026-10-23', currentValue: 1097.5, netDelta: 0.58, stockPrice: 67.05 } });
+    const value = result!.series.find(s => s.id === 'value')!;
+    expect(value.last).toBe(1097.5);
+    expect(value.points).toHaveLength(3);
+    expect(result!.series.find(s => s.id === 'stock')!.last).toBe(67.05);
+    expect(result!.series.find(s => s.id === 'delta')!.last).toBeCloseTo(0.58, 5);
+    expect(result!.liveIncluded).toBe(true);
+  });
+  it('adds a new last point when today has no stored reading yet', () => {
+    const result = buildSparklines({ history: history.slice(0, 2), quantity: 1, live: { date: '2026-10-23', currentValue: 1097.5, netDelta: 0.58, stockPrice: 67.05 } });
+    expect(result!.days).toBe(3);
+    expect(result!.lastDate).toBe('2026-10-23');
+  });
+  it('leaves a series alone when the live reading lacks that number, and works without a live reading', () => {
+    const result = buildSparklines({ history, quantity: 1, live: { date: '2026-10-23', currentValue: 1097.5, netDelta: null, stockPrice: null } });
+    expect(result!.series.find(s => s.id === 'stock')!.last).toBe(68.64);
+    expect(buildSparklines({ history, quantity: 1 })!.liveIncluded).toBe(false);
+  });
+});

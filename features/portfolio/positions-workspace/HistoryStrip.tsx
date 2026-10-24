@@ -31,7 +31,7 @@ export function HistoryStrip({ sparklines, daysRecorded, th }: { sparklines: Spa
   }
   return (
     <div data-testid="history-strip">
-      <p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">History · {sparklines.days} recorded days, {sparklines.firstDate} to {sparklines.lastDate}</p>
+      <p className="mb-1 text-[9px] uppercase tracking-wider text-neutral-400">History · {sparklines.days} days, {sparklines.firstDate} to {sparklines.lastDate}{sparklines.liveIncluded ? ' (last point is now)' : ''}</p>
       <div className="grid grid-cols-3 gap-2">
         {sparklines.series.map(series => (
           <div key={series.id} className="rounded-lg border border-neutral-700 bg-neutral-900/60 p-2">
@@ -44,6 +44,7 @@ export function HistoryStrip({ sparklines, daysRecorded, th }: { sparklines: Spa
           </div>
         ))}
       </div>
+      <p className="mt-1 text-[9px] text-neutral-500">Each earlier day is the first reading the app took that day, not the close.</p>
     </div>
   );
 }

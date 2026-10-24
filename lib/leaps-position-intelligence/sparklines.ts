@@ -29,7 +29,7 @@ export interface SparkSeries {
   description: string;
 }
 
-export interface Sparklines { series: SparkSeries[]; days: number; firstDate: string; lastDate: string }
+export interface Sparklines { series: SparkSeries[]; days: number; firstDate: string; lastDate: string; /** True when the last point is the live reading rather than a recorded day. */ liveIncluded: boolean }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -63,8 +63,18 @@ function series(id: SparkSeries['id'], label: string, points: SparkPoint[], kind
 }
 
 /** The three series for a held long, or null when no series has at least two recorded days. */
-export function buildSparklines(input: { history: HistoryRow[]; quantity: number; max?: number }): Sparklines | null {
-  const rows = cleanHistory(input.history ?? [], input.max ?? SPARK_MAX_POINTS);
+export function buildSparklines(input: { history: HistoryRow[]; quantity: number; max?: number; live?: HistoryRow | null }): Sparklines | null {
+  // The stored day is the first reading of that day, so the right edge would lag the live tiles. A live reading, when given, is the last point
+  // and replaces a stored point for the same date. Numbers the live reading lacks are left out of that series, never filled in.
+  const live = input.live && ISO_DATE.test(input.live.date) ? input.live : null;
+  const stored = input.history ?? [];
+  const merged = live
+    ? [...stored.filter(r => r.date !== live.date), { ...(stored.find(r => r.date === live.date) ?? {}), date: live.date,
+        currentValue: live.currentValue ?? stored.find(r => r.date === live.date)?.currentValue ?? null,
+        netDelta: live.netDelta ?? stored.find(r => r.date === live.date)?.netDelta ?? null,
+        stockPrice: live.stockPrice ?? stored.find(r => r.date === live.date)?.stockPrice ?? null } as HistoryRow]
+    : stored;
+  const rows = cleanHistory(merged, input.max ?? SPARK_MAX_POINTS);
   if (rows.length < 2) return null;
   const contracts = Math.abs(input.quantity);
   const value = rows.filter(r => finite(r.currentValue)).map(r => ({ date: r.date, v: Math.abs(r.currentValue as number) }));
@@ -72,7 +82,7 @@ export function buildSparklines(input: { history: HistoryRow[]; quantity: number
   const stock = rows.filter(r => finite(r.stockPrice) && (r.stockPrice as number) > 0).map(r => ({ date: r.date, v: r.stockPrice as number }));
   const built = [series('value', 'Value', value, 'money'), series('delta', 'Delta', delta, 'delta'), series('stock', 'Stock', stock, 'money')].filter((s): s is SparkSeries => s != null);
   if (built.length === 0) return null;
-  return { series: built, days: rows.length, firstDate: rows[0].date, lastDate: rows[rows.length - 1].date };
+  return { series: built, days: rows.length, firstDate: rows[0].date, lastDate: rows[rows.length - 1].date, liveIncluded: live != null && rows[rows.length - 1].date === live.date };
 }
 
 /**
