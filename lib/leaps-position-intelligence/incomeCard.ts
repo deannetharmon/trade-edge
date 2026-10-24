@@ -17,6 +17,8 @@ export interface IncomeCardLongCall {
   entryDebitPerShare: number | null;
   /** Current mark per share. */
   markPerShare: number | null;
+  /** Marketable close value for the whole position in dollars (the bid side: what closing now would bring in). Null when the bid is unavailable, e.g. market closed. */
+  closeValue?: number | null;
   delta: number | null;
   /** Underlying price from the portfolio snapshot. */
   stockPrice: number | null;
@@ -29,18 +31,23 @@ const SHARES = 100;
 const tile = (id: string, label: string, value: string, tone: DashboardTone, parts: Array<{ text: string; tone: DashboardTone }> = []): DashboardTile => ({ id, label, value, tone, parts });
 export const signedMoney = (value: number) => `${value < 0 ? '-' : '+'}${money(Math.abs(Math.round(value * 100) / 100))}`;
 
-/** "Value (mark)" for the held LEAPS: current mark against what was paid. Shared by the income card and the cycle card. */
+/**
+ * The held LEAPS' value against what was paid. Close value (the bid side, what closing now would bring in) when the broker has a bid;
+ * otherwise the mark, labelled as such. Shared by the income card and the cycle card.
+ */
 export function longValueTile(l: IncomeCardLongCall): DashboardTile {
   const mark = l.markPerShare;
   const entry = l.entryDebitPerShare;
-  if (mark != null && entry != null) {
-    const value = mark * SHARES * l.quantity;
+  const close = l.closeValue != null && Number.isFinite(l.closeValue) && l.closeValue > 0 ? l.closeValue : null;
+  const label = close != null ? 'Close value' : 'Value (mark)';
+  const value = close ?? (mark != null ? mark * SHARES * l.quantity : null);
+  if (value != null && entry != null) {
     const paid = entry * SHARES * l.quantity;
     const change = value - paid;
     const tone: DashboardTone = change >= 0 ? 'good' : 'watch';
-    return tile('value', 'Value (mark)', money(Math.round(value * 100) / 100), 'neutral', [{ text: `${signedMoney(change)}${paid > 0 ? ` · ${change >= 0 ? '+' : '-'}${pct(Math.abs(change / paid) * 100)}` : ''} vs paid`, tone }]);
+    return tile('value', label, money(Math.round(value * 100) / 100), 'neutral', [{ text: `${signedMoney(change)}${paid > 0 ? ` · ${change >= 0 ? '+' : '-'}${pct(Math.abs(change / paid) * 100)}` : ''} vs paid`, tone }]);
   }
-  return tile('value', 'Value (mark)', mark != null ? money(Math.round(mark * SHARES * l.quantity * 100) / 100) : '—', 'neutral', [{ text: 'entry cost unavailable', tone: 'neutral' }]);
+  return tile('value', label, value != null ? money(Math.round(value * 100) / 100) : '—', 'neutral', [{ text: 'entry cost unavailable', tone: 'neutral' }]);
 }
 
 /** "Breakeven at expiry": LEAPS strike plus entry cost, against the stock. */

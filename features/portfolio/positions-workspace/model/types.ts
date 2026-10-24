@@ -123,7 +123,7 @@ export interface ExistingIncomeOpportunity {
     expiration: string; dte: number; strike: number; quantity: number;
     // LEAPS-POS-0001: portfolio-snapshot facts for the income-readiness card. Optional and null when the broker did not
     // supply them; the card shows dashes rather than guessing.
-    entryDebitPerShare?: number | null; markPerShare?: number | null; delta?: number | null; stockPrice?: number | null;
+    entryDebitPerShare?: number | null; markPerShare?: number | null; /** Marketable close value for the position, dollars (bid side); null when no bid. */ closeValue?: number | null; delta?: number | null; stockPrice?: number | null;
     /** LEAPS-SINCE-0001: current IVR, and the position's entry baseline (the existing position-entry-snapshot store). */
     nowIvr?: number | null;
     atEntry?: { capturedAt: string | null; entryDate: string | null; stockPrice: number | null; deltaPerShare: number | null; ivr: number | null };
