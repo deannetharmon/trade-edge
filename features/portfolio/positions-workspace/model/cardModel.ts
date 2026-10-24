@@ -20,6 +20,9 @@ import { parseSymbolList } from './filters';
 export const LEAP_EARNINGS_WINDOW_DAYS = 30;
 const isLeapPosition = (p: Position) => structuralChipOf(p) === 'leap';
 
+/** Dean's per-position sizing limit, as a percent of net liquidating value (Ian, 2026-10-23). */
+export const SIZING_LIMIT_PCT = 10;
+
 export type CardBucket = VerdictBucket | 'Unjudged';
 export type CardChipTone = 'bad' | 'warn' | 'ok' | 'info';
 export interface CardChip { id: string; label: string; tone: CardChipTone }
@@ -41,6 +44,11 @@ export interface PositionCard {
   chips: CardChip[];
   assignment: { shares: number; netPrice: number | null; underwaterNow: number | null } | null;
   itmShortPut: boolean;
+  /** Capital at risk as a percent of net liquidating value; null when either is unknown. */
+  pctOfAccount: number | null;
+  overSizing: boolean;
+  /** The expanded detail: label/value pairs, same figures the table shows. */
+  stats: Array<{ label: string; value: string }>;
   /** An unverified or wide quote: the P/L above is not trustworthy. Same signal as the Wide market and Verify price chips. */
   unverifiedQuote: boolean;
 }
@@ -85,7 +93,7 @@ export function stopNotExpected(p: Position): boolean {
   return structuralChipOf(p) === 'csp' && (p.intent === 'wheel' || p.intent === 'acquisition');
 }
 
-export function buildPositionCard(p: Position, opts: { pctOfTarget: number | null }): PositionCard {
+export function buildPositionCard(p: Position, opts: { pctOfTarget: number | null; netLiquidity?: number | null }): PositionCard {
   const bases = buildPositionPnlBases(p);
   const closeNow = p.closeNowPnl ?? bases.closeNow;
   const pnl = closeNow ?? p.pnl ?? null;
@@ -140,8 +148,24 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
     assignment = { shares, netPrice: net, underwaterNow };
   }
 
+  const risk = dollarsAtRiskOf(p);
+  const net = opts.netLiquidity;
+  const pctOfAccount = risk != null && finite(net) && net > 0 ? (risk / net) * 100 : null;
+  const dollars = (v: number | null | undefined) => (finite(v) ? `$${Math.round(v).toLocaleString('en-US')}` : 'Unavailable');
+  const debit = p.entryPriceEffect === 'Debit';
+  const stats: PositionCard['stats'] = [
+    debit ? { label: 'Paid', value: dollars(risk) } : { label: 'Credit', value: dollars(p.entryCredit ?? p.creditReceived) },
+    debit ? { label: 'Close now', value: dollars(p.closeValue) } : { label: 'Max risk', value: dollars(risk) },
+    { label: 'Break-even', value: breakeven.values.length ? breakeven.values.map(v => `$${v.toFixed(2)}`).join(' / ') : 'Unavailable' },
+    { label: 'Opened', value: p.entryDate ? shortDate(p.entryDate) + (p.entryDate.slice(0, 4) !== String(new Date().getFullYear()) ? `, ${p.entryDate.slice(0, 4)}` : '') : 'Unavailable' },
+  ];
+  if (pctOfAccount != null) stats.push({ label: '% of account', value: `${pctOfAccount.toFixed(1)}%` });
+
   return {
     key: p.key,
+    pctOfAccount,
+    overSizing: pctOfAccount != null && pctOfAccount > SIZING_LIMIT_PCT,
+    stats,
     position: p,
     bucket: cardBucketOf(p),
     verdictLabel: p.recommendation?.label ?? 'No recommendation',

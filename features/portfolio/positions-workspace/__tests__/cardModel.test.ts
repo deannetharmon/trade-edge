@@ -8,7 +8,7 @@ import { decodePositionsViewStored, DEFAULT_POSITIONS_VIEW_STORED, isCardsDisabl
 const leg = (direction: 'Long' | 'Short', optionType: 'C' | 'P', strikePrice = 50) => ({ symbol: 'x', optionType, strikePrice, direction, quantity: 1, avgOpenPrice: 1, currentPrice: 1 }) as unknown as PositionLeg;
 const rec = (kind: string, intent: string | undefined, label = 'Label') => ({ kind, label, primaryReason: 'because', managementIntent: intent ? { intent, reasons: [] } : undefined }) as unknown as Position['recommendation'];
 const pos = (o: Partial<Position>) => ({ key: 'k', symbol: 'AAA', strategy: 'PUT', legs: [leg('Short', 'P')], intent: 'income', quantity: 1, dte: 30, stockPrice: 60, entryPriceEffect: 'Credit', ...o }) as unknown as Position;
-const card = (bucket: PositionCard['bucket'], dollarsAtRisk: number | null, dte: number, symbol = 'AAA'): PositionCard => ({ key: symbol + dte, position: { symbol, dte } as unknown as Position, bucket, verdictLabel: '', reason: null, pnl: null, pnlNote: '', dollarsAtRisk, chips: [], assignment: null, itmShortPut: false, unverifiedQuote: false });
+const card = (bucket: PositionCard['bucket'], dollarsAtRisk: number | null, dte: number, symbol = 'AAA'): PositionCard => ({ key: symbol + dte, position: { symbol, dte } as unknown as Position, bucket, verdictLabel: '', reason: null, pnl: null, pnlNote: '', dollarsAtRisk, chips: [], assignment: null, itmShortPut: false, unverifiedQuote: false, pctOfAccount: null, overSizing: false, stats: [] });
 
 describe('verdict bucket', () => {
   it('no recommendation is Unjudged, never Hold', () => {
@@ -86,6 +86,22 @@ describe('card content', () => {
   });
   it('a normal credit position shows the target percent under P/L', () => {
     expect(buildPositionCard(pos({ closeNowPnl: 40 } as Partial<Position>), { pctOfTarget: 80 }).pnlNote).toBe('if closed now · 80% of target');
+  });
+});
+
+describe('% of account', () => {
+  const csp = (maxRisk: number) => pos({ strategy: 'CSP', maxRisk, maxRiskReliable: true, identity: { quantity: 1 } } as unknown as Partial<Position>);
+  it('is capital at risk over net liquidating value, amber only above 10%', () => {
+    const over = buildPositionCard(csp(18500), { pctOfTarget: null, netLiquidity: 100000 });
+    expect(over.pctOfAccount).toBeCloseTo(18.5, 5);
+    expect(over.overSizing).toBe(true);
+    expect(over.stats.find(x => x.label === '% of account')?.value).toBe('18.5%');
+    const ok = buildPositionCard(csp(10000), { pctOfTarget: null, netLiquidity: 100000 });
+    expect(ok.overSizing).toBe(false);
+  });
+  it('is absent when net liquidating value or the risk figure is unknown', () => {
+    expect(buildPositionCard(csp(5000), { pctOfTarget: null, netLiquidity: null }).pctOfAccount).toBeNull();
+    expect(buildPositionCard(csp(5000), { pctOfTarget: null }).stats.some(x => x.label === '% of account')).toBe(false);
   });
 });
 

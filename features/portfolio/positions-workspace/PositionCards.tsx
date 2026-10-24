@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { IntentSelect } from './IntentSelect';
 import { SalvageEntry } from './salvage/SalvagePanel';
 import { buildPositionCard, shortDate, stopNotExpected, type CardBucket, type CardChipTone, type PositionCard } from './model/cardModel';
@@ -20,6 +20,7 @@ const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take 
 const usd = (v: number | null) => v == null || !Number.isFinite(v) ? 'Unavailable' : `${v < 0 ? '-' : ''}$${Math.abs(Math.round(v)).toLocaleString('en-US')}`;
 const usd2 = (v: number) => `$${v.toFixed(2)}`;
 
+const EDGE_CLASS: Record<CardBucket, string> = { Close: 'border-l-red-400', Roll: 'border-l-purple-400', Manage: 'border-l-amber-400', Hold: 'border-l-white/20', Unjudged: 'border-l-white/10' };
 const BUCKET_CLASS: Record<CardBucket, string> = {
   Close: 'border-red-400/60 bg-red-400/10 text-red-200',
   Roll: 'border-purple-400/60 bg-purple-400/10 text-purple-200',
@@ -47,6 +48,7 @@ export interface PositionCardsProps {
   /** Already sorted by the caller (the sort menu lives in the toolbar). */
   order: (cards: PositionCard[]) => PositionCard[];
   pctOfTarget: (p: Position) => number | null;
+  netLiquidity?: number | null;
   getManagementActions?: (position: Position) => ActionType[];
   onExecute?: (position: Position, action: ActionType, initialRollMode?: 'close' | 'roll') => void;
   renderStopControl?: (position: Position) => ReactNode;
@@ -57,19 +59,20 @@ export interface PositionCardsProps {
   emptyText: string;
 }
 
-export function PositionCards({ positions, order, pctOfTarget, getManagementActions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, th, emptyText }: PositionCardsProps) {
-  const cards = useMemo(() => order(positions.map(p => buildPositionCard(p, { pctOfTarget: pctOfTarget(p) }))), [positions, order, pctOfTarget]);
+export function PositionCards({ positions, order, pctOfTarget, netLiquidity, getManagementActions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, th, emptyText }: PositionCardsProps) {
+  const cards = useMemo(() => order(positions.map(p => buildPositionCard(p, { pctOfTarget: pctOfTarget(p), netLiquidity }))), [positions, order, pctOfTarget, netLiquidity]);
   if (cards.length === 0) return <p role="status" className={`rounded-xl border ${th.border} p-6 text-center text-sm ${th.textFaint}`}>{emptyText}</p>;
   return <div data-testid="position-cards" className="grid gap-3 lg:grid-cols-2">{cards.map(card => <CardItem key={card.key} card={card} th={th} actions={getManagementActions?.(card.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} onIntentChange={onIntentChange} onRefresh={onRefresh} />)}</div>;
 }
 
 function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh }: { card: PositionCard; th: PositionCardsProps['th']; actions: ActionType[]; onExecute?: PositionCardsProps['onExecute']; renderStopControl?: PositionCardsProps['renderStopControl']; onAnalyze?: PositionCardsProps['onAnalyze']; onIntentChange?: PositionCardsProps['onIntentChange']; onRefresh?: () => void }) {
   const p = card.position;
+  const [detailOpen, setDetailOpen] = useState(false);
   const horizon = standaloneLongOptionLabel(p);
   const suggested = p.recommendation ? canonicalRecommendationToAction(p.recommendation.kind) : null;
   const pnlTone = card.pnl == null || Math.abs(card.pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : card.pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative;
   return (
-    <article aria-label={`${p.symbol} ${horizon ?? p.strategy} position`} className={`rounded-xl border ${th.border} bg-white/[0.02] p-4`}>
+    <article aria-label={`${p.symbol} ${horizon ?? p.strategy} position`} className={`rounded-xl border border-l-4 ${th.border} ${EDGE_CLASS[card.bucket]} bg-white/[0.02] p-4`}>
       <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
         <div className="min-w-0">
           <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-white">{p.symbol}<span className="rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">{horizon ?? p.strategy}</span></h3>
@@ -92,6 +95,10 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
         </p>
       )}
       {card.chips.length > 0 && <ul aria-label="Signals" className="mt-3 flex flex-wrap gap-1.5">{card.chips.map(chip => <li key={chip.id} className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${CHIP_CLASS[chip.tone]}`}>{chip.label}</li>)}</ul>}
+      {detailOpen && <dl data-testid="card-detail" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">{card.stats.map(stat => {
+        const warn = stat.label === '% of account' && card.overSizing;
+        return <div key={stat.label} className={`rounded-lg border px-3 py-2 ${warn ? 'border-amber-400/60 bg-amber-400/10' : 'border-white/10 bg-white/[0.03]'}`}><dt className={`text-[10px] uppercase tracking-wider ${th.textFaint}`}>{stat.label}</dt><dd className={`text-sm font-bold ${warn ? 'text-amber-200' : 'text-white'}`}>{stat.value}</dd></div>;
+      })}</dl>}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button type="button" onClick={() => onAnalyze?.(p)} disabled={!onAnalyze} title={!onAnalyze ? 'Canonical analysis is unavailable' : undefined} className={`min-h-9 ${CONTROL_RADIUS} border border-blue-500/50 px-3 text-xs text-blue-300 focus:ring-2 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40`}>Analyze with AI</button>
         {actions.map(action => {
@@ -106,7 +113,8 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
         })}
         {!stopNotExpected(p) && renderStopControl?.(p)}
         <SalvageEntry position={p} />
-        <span className="ml-auto"><IntentSelect position={p} onIntentChange={onIntentChange} /></span>
+        <button type="button" aria-expanded={detailOpen} onClick={() => setDetailOpen(open => !open)} className="ml-auto text-xs text-white/70 underline decoration-dotted underline-offset-2 hover:text-white">{detailOpen ? 'Hide detail' : 'Show detail'}</button>
+        <span><IntentSelect position={p} onIntentChange={onIntentChange} /></span>
       </div>
     </article>
   );
