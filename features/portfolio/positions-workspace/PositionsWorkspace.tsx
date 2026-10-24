@@ -884,7 +884,7 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
           Ian). Cut Losses / Roll Position keep distinct color even here. */}
       <p className={`text-[9px] uppercase tracking-wider ${th.textFaint}`}>Actions</p>
       <span ref={actionsRef} className="mt-1 flex max-w-64 flex-wrap items-center gap-1">
-        <button type="button" onClick={() => onAnalyze?.(p)} disabled={!onAnalyze} title={!onAnalyze ? 'Canonical analysis is unavailable' : undefined} className="min-h-8 rounded border border-blue-500/50 px-2 text-[10px] text-blue-300 focus:ring-2 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40">{actionsNarrow ? 'Analyze' : 'Analyze with AI'}</button>
+        <button type="button" onClick={() => onAnalyze?.(p)} disabled={!onAnalyze} title={!onAnalyze ? 'Canonical analysis is unavailable' : undefined} className="min-h-8 rounded border border-blue-500/50 px-2 text-[10px] text-blue-300 focus:ring-2 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40">Analyze</button>
         {actions.map(action => action === 'CLOSE_ROLL' ? (
           <span key={action} className="contents">
             <span className="flex items-center gap-1">

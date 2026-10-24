@@ -523,7 +523,7 @@ describe('PositionsWorkspace', () => {
     const next = { ...model, analysisRows: [model.analysisRows[0], { id: second.key, position: second, symbol: second.symbol, strategy: second.strategy, needsAttention: false }] };
     render(<PositionsWorkspace model={next} th={THEMES.dark} onAnalyze={onAnalyze} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
-    const buttons = screen.getAllByRole('button', { name: 'Analyze with AI' });
+    const buttons = screen.getAllByRole('button', { name: 'Analyze' });
     expect(buttons).toHaveLength(2);
     await user.click(buttons[1]);
     expect(await screen.findByText('Summary MSFT')).toBeInTheDocument();
@@ -537,7 +537,7 @@ describe('PositionsWorkspace', () => {
     const differs = { ...base, officialVerdict: { bucket: 'Hold', label: 'Hold Position', confidence: 'HIGH' }, secondLook: { chip: 'AI differs: ivr', note: 'IVR 50 is rich enough to take now.' } };
     const { unmount } = render(<PositionsWorkspace model={model} th={THEMES.dark} onAnalyze={vi.fn(async () => differs)} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
-    await user.click(screen.getByRole('button', { name: 'Analyze with AI' }));
+    await user.click(screen.getByRole('button', { name: 'Analyze' }));
     expect(await screen.findByTestId('official-verdict')).toHaveTextContent('Rules');
     expect(screen.getByTestId('official-verdict')).toHaveTextContent('Hold · Hold Position');
     expect(screen.getByTestId('ai-differs-chip')).toHaveTextContent('AI differs: ivr');
@@ -546,7 +546,7 @@ describe('PositionsWorkspace', () => {
 
     render(<PositionsWorkspace model={model} th={THEMES.dark} onAnalyze={vi.fn(async () => ({ ...differs, secondLook: { chip: null, note: null } }))} />);
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
-    await user.click(screen.getByRole('button', { name: 'Analyze with AI' }));
+    await user.click(screen.getByRole('button', { name: 'Analyze' }));
     expect(await screen.findByTestId('official-verdict')).toBeInTheDocument();
     expect(screen.queryByTestId('ai-differs-chip')).not.toBeInTheDocument();
   });
@@ -560,7 +560,7 @@ describe('PositionsWorkspace', () => {
     render(<PositionsWorkspace model={model} th={THEMES.dark} onAnalyze={onAnalyze} renderAnalysisConversation={renderAnalysisConversation} />);
 
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
-    await user.click(screen.getByRole('button', { name: 'Analyze with AI' }));
+    await user.click(screen.getByRole('button', { name: 'Analyze' }));
 
     expect(await screen.findByRole('textbox', { name: 'Ask a follow-up about AAPL' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'AI follow-up conversation for AAPL' })).toHaveTextContent('Continue with AI');

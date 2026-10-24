@@ -649,7 +649,7 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     const fetchSpy = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
     vi.stubGlobal('fetch', fetchSpy);
     renderScreenerPage();
-    const analyze = await screen.findByRole('button', { name: 'Analyze with AI' });
+    const analyze = await screen.findByRole('button', { name: 'Analyze' });
     expect(analyze).toBeEnabled();
     fireEvent.click(analyze);
     const group = await screen.findByRole('radiogroup', { name: 'Intent for this LEAP' });

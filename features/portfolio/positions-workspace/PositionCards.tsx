@@ -100,7 +100,7 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
         return <div key={stat.label} className={`rounded-lg border px-3 py-2 ${warn ? 'border-amber-400/60 bg-amber-400/10' : 'border-white/10 bg-white/[0.03]'}`}><dt className={`text-[10px] uppercase tracking-wider ${th.textFaint}`}>{stat.label}</dt><dd className={`text-sm font-bold ${warn ? 'text-amber-200' : 'text-white'}`}>{stat.value}</dd></div>;
       })}</dl>}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => onAnalyze?.(p)} disabled={!onAnalyze} title={!onAnalyze ? 'Canonical analysis is unavailable' : undefined} className={`min-h-9 ${CONTROL_RADIUS} border border-blue-500/50 px-3 text-xs text-blue-300 focus:ring-2 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40`}>Analyze with AI</button>
+        <button type="button" onClick={() => onAnalyze?.(p)} disabled={!onAnalyze} title={!onAnalyze ? 'Canonical analysis is unavailable' : undefined} className={`min-h-9 ${CONTROL_RADIUS} border border-blue-500/50 px-3 text-xs text-blue-300 focus:ring-2 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40`}>Analyze</button>
         {actions.map(action => {
           const isSuggested = action === suggested;
           const mark = isSuggested ? 'border-teal-400/60 bg-teal-400/10 font-semibold' : '';

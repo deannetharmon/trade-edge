@@ -3877,7 +3877,7 @@ function LeapsResultRow({ candidate, th, deltaMin, deltaMax, dteMin, dteMax, oiM
             disabled={!analysisEnabled || !candidate.occSymbol}
             title={!analysisEnabled ? 'LEAPS AI analysis is disabled.' : !candidate.occSymbol ? 'A valid OCC identity is required for a current provider lookup.' : 'Review this contract using a new server-side evidence snapshot.'}
             className="rounded-lg border border-violet-500 bg-violet-500/10 px-3 py-1.5 text-[11px] font-bold text-violet-300 disabled:cursor-not-allowed disabled:opacity-40">
-            Analyze with AI
+            Analyze
           </button>
           <button onClick={onTrade} disabled={!candidate.occSymbol || reviewTradeDisabledReason != null}
             title={!candidate.occSymbol ? 'A valid OCC identity is required.' : reviewTradeDisabledReason ?? undefined}
