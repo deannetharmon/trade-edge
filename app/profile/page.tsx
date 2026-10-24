@@ -5,11 +5,12 @@
 // show. Everything is visible by default; changes save immediately and apply
 // to every page. Hiding a tab never removes its code.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { AppHeader } from '@/components/nav/AppHeader';
 import { useNavConfig } from '@/components/nav/NavConfigProvider';
 import { TABS, TabId } from '@/lib/nav/tabs';
+import { isCardsDisabled, loadPositionsViewStored, savePositionsViewStored, type PositionsViewSetting } from '@/features/portfolio/positions-workspace/model/positionsViewSetting';
 
 export default function ProfilePage() {
   const { data: session } = useSession();
@@ -17,6 +18,15 @@ export default function ProfilePage() {
   const [status, setStatus] = useState<'idle' | 'saved' | 'error'>('idle');
 
   const hideable = TABS.filter((t) => t.hideable);
+
+  // POSITIONS-CARDS-0001: which layout Position Analysis opens with. Table is the default; per-browser, like the table's other preferences.
+  const cardsDisabled = isCardsDisabled();
+  const [viewSetting, setViewSetting] = useState<PositionsViewSetting>('table');
+  useEffect(() => { setViewSetting(loadPositionsViewStored().setting); }, []);
+  const chooseViewSetting = (next: PositionsViewSetting) => {
+    setViewSetting(next);
+    savePositionsViewStored({ ...loadPositionsViewStored(), setting: next });
+  };
 
   const toggle = async (id: TabId) => {
     const next = hiddenTabs.indexOf(id) === -1 ? hiddenTabs.concat(id) : hiddenTabs.filter((h) => h !== id);
@@ -82,6 +92,24 @@ export default function ProfilePage() {
             </button>
           </div>
         </div>
+
+        {!cardsDisabled && (
+          <div className="border border-white/10 bg-white/[0.03] rounded-xl p-6 space-y-3">
+            <h2 className="text-xs font-bold tracking-widest text-white/80 uppercase border-b border-white/10 pb-2">Positions view</h2>
+            <p className="text-[11px] text-white/50">Which layout Position Analysis opens with. Saved in this browser. You can switch any time on the page itself.</p>
+            <div role="radiogroup" aria-label="Positions view" className="space-y-1">
+              {([['table', 'Table', 'The full table (default).'], ['cards', 'Cards', 'One card per position.'], ['last', 'Last used', 'Open with whichever you used last.']] as const).map(([id, label, desc]) => (
+                <label key={id} className="flex items-center justify-between py-2 cursor-pointer">
+                  <span>
+                    <span className="block text-xs font-bold tracking-wider">{label}</span>
+                    <span className="block text-[10px] text-white/50">{desc}</span>
+                  </span>
+                  <input type="radio" name="positions-view" checked={viewSetting === id} onChange={() => chooseViewSetting(id)} aria-label={label} className="h-4 w-4 accent-[#00d4aa]" />
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
 
         <button
           onClick={() => signOut({ callbackUrl: '/login' })}

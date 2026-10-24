@@ -22,8 +22,11 @@ import { netEdgeLive, netEdgePeak, netEdgeColor, netEdgeDayChangePct, netEdgeDay
 import type { THEMES, Theme } from '@/lib/theme';
 import { ANALYSIS_COLUMNS, columnsForView } from './model/columns';
 import { activeFilterCount, DEFAULT_FILTERS, matchesAnalysisFilters } from './model/filters';
-import { STRATEGY_CHIPS, strategyChipCounts } from './model/strategyChips';
+import { matchesStrategyChip, STRATEGY_CHIPS, strategyChipCounts } from './model/strategyChips';
 import { chipClass, chipCountClass, CONTROL_RADIUS } from './ui/chipStyle';
+import { PositionCards } from './PositionCards';
+import { assignmentStrip, CARD_SORTS, matchesSymbolSearch, sortCards, updatedLabel, type CardSort, type PositionCard } from './model/cardModel';
+import { isCardsDisabled, loadPositionsViewStored, resolvePositionsView, savePositionsViewStored, type PositionsView } from './model/positionsViewSetting';
 import { DEFAULT_PREFERENCES, loadPreferences, savePreferences } from './model/preferences';
 import { buildCapitalViewModel, buildMoneynessMovementViewModel, buildMoneynessViewModel, comparisonTone, SEMANTIC_TONE_CLASS, stopPresentation, stopPresentationForPosition, type SemanticTone } from './model/presentation';
 import { buildBreakevenViewModel, buildLongOptionOutlook, priceBufferFor, type LongOptionOutlook } from './model/breakeven';
@@ -390,6 +393,16 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
   const [chartLoadingSymbol, setChartLoadingSymbol] = useState<string | null>(null);
   const [incomeSectionOpen, setIncomeSectionOpen] = useState(false);
   useEffect(() => { const loaded = loadPreferences(); setPreferences(loaded); setDraftFilters(loaded.filters); setDraftColumns(loaded.customColumnIds); setHydrated(true); }, []);
+  // POSITIONS-CARDS-0001: opt-in. Always starts on Table; the Profile setting (or the last view) can open Cards, and the kill switch hides it.
+  const cardsDisabled = isCardsDisabled();
+  const [positionsView, setPositionsView] = useState<PositionsView>('table');
+  const [cardSort, setCardSort] = useState<CardSort>('attention');
+  const [cardSearch, setCardSearch] = useState('');
+  useEffect(() => { setPositionsView(resolvePositionsView(loadPositionsViewStored(), cardsDisabled)); }, [cardsDisabled]);
+  const choosePositionsView = (next: PositionsView) => { setPositionsView(next); savePositionsViewStored({ ...loadPositionsViewStored(), last: next }); };
+  const cardsActive = positionsView === 'cards' && !cardsDisabled;
+  const cardOrder = useCallback((cards: PositionCard[]) => sortCards(cards, cardSort), [cardSort]);
+  const cardPctOfTarget = useCallback((position: Position) => profitTargetPct(position, position.closeNowPnl ?? buildPositionPnlBases(position).closeNow ?? position.pnl), []);
   useEffect(() => { if (hydrated) savePreferences(preferences); }, [preferences, hydrated]);
   useEffect(() => {
     if (typeof fetch !== 'function') return;
@@ -543,7 +556,7 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
     </section>
     {(() => {
       // PORTFOLIO-CHIPS-0001: strategy chips with counts. Counts respect the other filters (symbol, attention, P/L) so a chip never promises rows the table will hide.
-      const counts = strategyChipCounts(model.analysisRows.filter(row => matchesAnalysisFilters(row, { ...preferences.filters, chip: 'all' })).map(row => row.position));
+      const counts = strategyChipCounts(model.analysisRows.filter(row => cardsActive ? matchesSymbolSearch(row.symbol, cardSearch) : matchesAnalysisFilters(row, { ...preferences.filters, chip: 'all' })).map(row => row.position));
       return <div role="group" aria-label="Strategy" className="mb-3 flex flex-wrap gap-2">
         {STRATEGY_CHIPS.map(chip => {
           const active = preferences.filters.chip === chip.id;
@@ -551,6 +564,22 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
         })}
       </div>;
     })()}
+    {!cardsDisabled && <div role="tablist" aria-label="Positions layout" className="mb-3 inline-flex gap-1">{(['table', 'cards'] as const).map(item => <button key={item} type="button" role="tab" aria-selected={positionsView === item} onClick={() => choosePositionsView(item)} className={`min-h-11 ${CONTROL_RADIUS} border px-4 text-xs font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-teal-400 ${positionsView === item ? 'border-teal-400 bg-teal-400/10 text-white' : `border-white/20 ${th.textFaint} hover:text-white`}`}>{item === 'table' ? 'Table' : 'Cards'}</button>)}</div>}
+    {cardsActive ? (() => {
+      const cardRows = model.analysisRows.filter(row => matchesSymbolSearch(row.symbol, cardSearch) && matchesStrategyChip(row.position, preferences.filters.chip ?? 'all'));
+      const strip = assignmentStrip(model.analysisRows.map(row => row.position));
+      const updated = updatedLabel(model.quoteAsOf, Date.now());
+      return <>
+        <div className={`mb-3 flex flex-wrap items-center gap-2 rounded-xl border ${th.border} p-3`}>
+          <label className="sr-only" htmlFor="cards-symbol-search">Search symbol</label>
+          <input id="cards-symbol-search" type="search" value={cardSearch} placeholder="Search symbol" onChange={event => setCardSearch(event.target.value)} className={`min-h-11 w-44 ${CONTROL_RADIUS} border border-white/20 bg-transparent px-3 text-xs text-white focus:outline-none focus:ring-2 focus:ring-teal-400`} />
+          <label className="sr-only" htmlFor="cards-sort">Sort cards</label>
+          <select id="cards-sort" value={cardSort} onChange={event => setCardSort(event.target.value as CardSort)} className={`min-h-11 ${CONTROL_RADIUS} border border-white/20 bg-slate-900 px-3 text-xs text-white focus:outline-none focus:ring-2 focus:ring-teal-400`}>{CARD_SORTS.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select>
+          <span className={`ml-auto text-right text-xs ${th.textFaint}`}>{cardRows.length} of {model.analysisRows.length} option positions{updated && <span data-testid="cards-updated" className={`block ${updated.stale ? 'text-amber-300' : ''}`}>{updated.text}</span>}</span>
+        </div>
+        {strip && <p role="status" data-testid="assignment-strip" className="mb-3 rounded-xl border border-red-400/40 bg-red-400/10 px-3 py-2 text-xs text-red-200"><b>{strip.count} Wheel put{strip.count === 1 ? '' : 's'} in the money</b> · {strip.shares} shares would be assigned ({strip.symbols.join(', ')})</p>}
+      </>;
+    })() : <>
     <div className={`mb-3 flex flex-wrap items-center gap-2 rounded-xl border ${th.border} p-3`}>
       {/* PW-0001: segmented buttons replace the View dropdown -- fixed 4-option
           set, one click instead of open-then-pick. Styled to match the existing
@@ -596,6 +625,8 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
   const labelContent = column.id === 'strike' ? 'Strike / BE' : column.label;
   return <th key={column.id} data-column-id={column.id} scope="col" title={column.id === 'capital' ? 'Capital / Collateral' : sortable ? `Sort by ${column.label}` : undefined} aria-sort={isActiveSort ? (sort!.direction === 'asc' ? 'ascending' : 'descending') : undefined} onClick={sortable ? () => toggleSort(column.id) : undefined} className={`sticky top-0 border-b border-r border-white/10 bg-slate-950 px-2 py-2 uppercase tracking-wider text-white/50 ${sortable ? 'cursor-pointer select-none hover:text-white/80' : ''} ${column.id === 'identity' ? 'left-0 z-30' : 'z-20'} ${column.id === 'capital' ? 'w-28 max-w-28' : column.id === 'strike' ? 'w-24 max-w-24 whitespace-nowrap' : column.id === 'entry' ? 'whitespace-nowrap' : column.id === 'orders' || column.id === 'notes' ? 'w-40 max-w-40' : 'whitespace-nowrap'}`}>{labelContent}{sortable && <span aria-hidden="true" className={`ml-1 inline-block ${isActiveSort ? 'text-teal-400' : 'text-white/20'}`}>{isActiveSort ? (sort!.direction === 'asc' ? '▲' : '▼') : '⇅'}</span>}</th>;
 })}</tr></thead><tbody>{sortedRows.map(row => <AnalysisRow key={row.id} onIntentChange={onIntentChange} position={row.position} columns={columns} th={th} actions={getManagementActions?.(row.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze ? analyze : undefined} onRefresh={onRefresh} savedNote={notes[noteStorageKey(row.position)] ?? ''} onSaveNote={saveNote} savedAlert={priceAlerts[priceAlertStorageKey(row.position)] ?? null} onSaveAlert={savePriceAlert} chartOpen={openChartKey === row.position.key} setChartOpen={open => setOpenChartKey(open ? row.position.key : null)} sparkData={chartData[row.position.symbol] ?? null} setSparkData={data => setChartData(current => ({ ...current, [row.position.symbol]: data }))} sparkLoading={chartLoadingSymbol === row.position.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.position.symbol : current => current === row.position.symbol ? null : current)} />)}</tbody></table></div>{tableFocus.active && <div role="status" data-testid="analysis-focus-hint" className="absolute bottom-2 right-3 z-40 flex items-center gap-2 rounded-full border border-teal-400/50 bg-slate-950/95 px-3 py-1 text-[11px] text-teal-100 shadow-lg"><span>Table scrolling on. Scroll up at the top, press Esc, or click outside to go back.</span><button type="button" onClick={tableFocus.release} className="min-h-8 rounded-full border border-teal-400/60 px-2 font-semibold focus:ring-2 focus:ring-teal-400">Release</button></div>}</div>
+    </>}
+    {cardsActive && <PositionCards positions={model.analysisRows.filter(row => matchesSymbolSearch(row.symbol, cardSearch) && matchesStrategyChip(row.position, preferences.filters.chip ?? 'all')).map(row => row.position)} order={cardOrder} pctOfTarget={cardPctOfTarget} getManagementActions={getManagementActions} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze ? analyze : undefined} onIntentChange={onIntentChange} onRefresh={onRefresh} th={th} emptyText={cardSearch.trim() || preferences.filters.chip !== 'all' ? 'No positions match this chip or search.' : 'No option positions.'} />}
     <StockHoldings earningsEnabled intentEnabled={!!onIntentChange} columnWidths={measuredWidths} groups={model.symbolGroups} quoteAsOf={model.quoteAsOf} notes={notes} alerts={priceAlerts} storageKey={storageKeyFor} onSaveNote={saveNoteFor} onSaveAlert={savePriceAlertFor} th={th} sellDeps={sellDeps} onAnalyze={onAnalyzeStock} />
     {filterOpen && <FilterDialog draft={draftFilters} setDraft={setDraftFilters} onClose={() => setFilterOpen(false)} onApply={() => { setPreferences(current => ({ ...current, filters: draftFilters })); setFilterOpen(false); }} onClear={() => setDraftFilters(DEFAULT_FILTERS)} />}
     {columnsOpen && <ColumnsDialog selected={draftColumns} setSelected={setDraftColumns} preset={preferences.analysisView} onClose={() => setColumnsOpen(false)} onApply={() => { setPreferences(current => ({ ...current, analysisView: 'custom', customColumnIds: draftColumns })); setColumnsOpen(false); }} />}

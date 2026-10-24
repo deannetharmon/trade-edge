@@ -791,4 +791,33 @@ describe('P/L summary strip', () => {
     expect(closes).toContain('Buyback Unavailable');
     expect(screen.getAllByTestId('value-mid').map(node => node.textContent)).toContain('Mid \u2212$910');
   });
+  it('POSITIONS-CARDS-0001: a fresh browser lands on the Table, not Cards', async () => {
+    const user = userEvent.setup();
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getByRole('tab', { name: 'Table' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByTestId('position-cards')).not.toBeInTheDocument();
+    expect(screen.getByRole('table')).toBeInTheDocument();
+  });
+
+  it('POSITIONS-CARDS-0001: the Cards setting opens Cards, and switching back to Table works and is remembered as last used', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem('tradeedge:positions-view:v1', JSON.stringify({ setting: 'cards', last: 'table' }));
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(screen.getByTestId('position-cards')).toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: 'Table' }));
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem('tradeedge:positions-view:v1') as string)).toMatchObject({ setting: 'cards', last: 'table' });
+  });
+
+  it('POSITIONS-CARDS-0001: cards search narrows by symbol and the count line follows', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem('tradeedge:positions-view:v1', JSON.stringify({ setting: 'cards', last: 'cards' }));
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    await user.type(screen.getByLabelText('Search symbol'), 'ZZZZ');
+    expect(screen.getByText('No positions match this chip or search.')).toBeInTheDocument();
+  });
 });
