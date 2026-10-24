@@ -1,5 +1,6 @@
 'use client';
 
+import { summarizeLeapsClose } from './model/leapsCloseSummary';
 import Link from 'next/link';
 import { ChartLinkButton } from '@/components/ChartLinkButton';
 import { IntentSelect } from './IntentSelect';
@@ -552,6 +553,25 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
   return <>
     <section aria-label="Existing-position income eligibility" className={`mb-3 rounded-xl border ${th.border} p-3`}>
       <div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="text-xs font-bold tracking-wider text-white">Existing-position income</h2><p className={`mt-1 text-[10px] ${th.textFaint}`}>Launches the Screener only when the held position is safe to evaluate.</p></div><div className="flex items-center gap-3"><span className={`text-[10px] ${th.textFaint}`}>{(model.incomeOpportunities ?? []).length} candidate{(model.incomeOpportunities ?? []).length === 1 ? '' : 's'} found</span><button type="button" aria-expanded={incomeSectionOpen} aria-controls="existing-position-income-content" onClick={() => setIncomeSectionOpen(open => !open)} className="min-h-8 rounded border border-white/20 px-2 text-[10px] text-white focus:ring-2 focus:ring-teal-400">{incomeSectionOpen ? 'Collapse' : 'Expand'}</button></div></div>
+      {incomeSectionOpen && (() => {
+        const closeAll = summarizeLeapsClose(model.incomeOpportunities ?? []);
+        if (!closeAll) return null;
+        const usd0 = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(Math.round(n)).toLocaleString('en-US')}`;
+        const loss = closeAll.result < 0;
+        const backPct = Math.max(0, Math.min(100, closeAll.paid > 0 ? (closeAll.back / closeAll.paid) * 100 : 0));
+        return <div data-testid="leaps-close-summary" aria-label={`Closing all ${closeAll.count} LEAPS now: ${usd0(closeAll.result)}`} className={`mt-3 flex flex-wrap items-center gap-4 rounded border ${th.border} px-3 py-2`}>
+          <div className="min-w-[8rem]">
+            <div className={`text-xl font-bold ${loss ? SEMANTIC_TONE_CLASS.negative : SEMANTIC_TONE_CLASS.positive}`}>{usd0(closeAll.result)}</div>
+            <div className={`text-[10px] ${th.textFaint}`}>Close all {closeAll.count}{closeAll.resultPct != null ? ` · ${closeAll.resultPct.toFixed(0)}%` : ''}</div>
+          </div>
+          <div className="min-w-[14rem] flex-1">
+            <div className="flex h-3 overflow-hidden rounded-full bg-red-500/70" role="img" aria-label={`${usd0(closeAll.back)} back of ${usd0(closeAll.paid)} paid`}>
+              <div className="h-full bg-emerald-400/80" style={{ width: `${backPct}%` }} />
+            </div>
+            <div className={`mt-1 flex justify-between text-[10px] ${th.textFaint}`}><span>{usd0(closeAll.back)} back</span><span>{usd0(closeAll.paid)} paid</span></div>
+          </div>
+        </div>;
+      })()}
       {incomeSectionOpen && <div id="existing-position-income-content"><div className="mt-3 grid gap-2 lg:grid-cols-2">{(model.incomeOpportunities ?? []).map(opportunity => opportunity.kind === 'pmcc-short-call'
         ? <PmccReadinessCard key={opportunity.id} opportunity={opportunity} th={th} onFind={onFindPmccShortCall} />
         : <div key={opportunity.id} className="rounded border border-white/10 p-3 text-xs"><div className="flex items-start justify-between gap-2"><div><b className="text-white">{opportunity.symbol} · {opportunity.title}</b><p className={`mt-1 ${opportunity.status === 'eligible' ? 'text-emerald-300' : opportunity.status === 'no-capacity' ? 'text-amber-300' : opportunity.status === 'unavailable' ? 'text-red-300' : th.textMuted}`}>{opportunity.status === 'eligible' ? 'Ready — find short call' : opportunity.status === 'no-capacity' ? 'Short-call capacity unavailable' : opportunity.status === 'unavailable' ? 'Broker data unavailable' : 'Not eligible'}</p></div></div><p className={`mt-2 ${th.textFaint}`}>{opportunity.reason}</p><p className="mt-1 text-[10px] text-cyan-200"><b>Next:</b> {opportunity.nextStep}</p><p className={`mt-2 ${th.textFaint}`}>Shares {opportunity.sharesOwned ?? '—'} · Allocated {opportunity.allocatedContracts ?? '—'} · Reserved {opportunity.reservedContracts ?? '—'} · Available {opportunity.availableContracts ?? '—'}</p><p className={`mt-2 text-[10px] ${th.textFaint}`}>Freshness: {opportunity.freshness}</p></div>)}</div>
