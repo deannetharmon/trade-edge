@@ -87,7 +87,7 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
           {card.reason && <p className={`mt-1 text-xs ${th.textFaint}`}>{card.reason}</p>}
           {card.assignment && (
             <p data-testid="card-assignment" className={`mt-1 text-xs ${th.textMuted}`}>
-              Assigned: {card.assignment.shares} sh{card.assignment.netPrice != null ? ` @ ${usd2(card.assignment.netPrice)} net` : ''}{card.assignment.underwaterNow != null ? <span className={SEMANTIC_TONE_CLASS.negative}>, {usd(card.assignment.underwaterNow)} now</span> : null}
+              Potential Assignment: {card.assignment.shares} sh{card.assignment.netPrice != null ? ` @ ${usd2(card.assignment.netPrice)} net` : ''}{card.assignment.underwaterNow != null ? <span className={SEMANTIC_TONE_CLASS.negative}>, {usd(card.assignment.underwaterNow)} now</span> : null}
             </p>
           )}
         </div>
