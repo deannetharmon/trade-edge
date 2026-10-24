@@ -16,6 +16,7 @@ export const STRATEGY_CHIPS: ReadonlyArray<{ id: StrategyChipId; label: string }
   { id: 'leap', label: 'LEAP' },
   { id: 'spreads', label: 'Spreads' },
   { id: 'pmcc', label: 'PMCC' },
+  { id: 'stock', label: 'Stock' },
   { id: 'wheel', label: 'Wheel' },
 ];
 
@@ -40,13 +41,15 @@ export function structuralChipOf(position: Position): 'csp' | 'cc' | 'long' | 'l
 
 export function matchesStrategyChip(position: Position, chip: StrategyChipId): boolean {
   if (chip === 'all') return true;
+  // Stock holdings are not option positions, so no option matches the Stock chip; the workspace shows the stock holdings for it instead.
+  if (chip === 'stock') return false;
   if (chip === 'wheel') return position.intent === 'wheel';
   return structuralChipOf(position) === chip;
 }
 
 /** Count per chip over the given positions (the caller passes the rows that already pass the other filters). */
 export function strategyChipCounts(positions: ReadonlyArray<Position>): Record<StrategyChipId, number> {
-  const counts: Record<StrategyChipId, number> = { all: positions.length, csp: 0, cc: 0, long: 0, leap: 0, spreads: 0, pmcc: 0, wheel: 0 };
+  const counts: Record<StrategyChipId, number> = { all: positions.length, csp: 0, cc: 0, long: 0, leap: 0, spreads: 0, pmcc: 0, stock: 0, wheel: 0 };
   for (const position of positions) {
     const structural = structuralChipOf(position);
     if (structural !== 'other') counts[structural] += 1;

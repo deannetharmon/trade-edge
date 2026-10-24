@@ -827,4 +827,20 @@ describe('P/L summary strip', () => {
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     expect(within(screen.getByTestId('position-cards')).getAllByRole('button', { name: /Quick chart for/ }).length).toBeGreaterThan(0);
   });
+  it('STOCK-CHIP: stock holdings count under All and their own Stock chip, and the chip shows only the stocks', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem('tradeedge:positions-view:v1', JSON.stringify({ setting: 'cards', last: 'cards' }));
+    const equity = { accountNumber: 'ACC-1', symbol: 'AAPL', direction: 'Long', quantity: 100, settledQuantity: null, basis: 150, basisComplete: true, currentPrice: 200, marketValue: 20000, unrealizedPnl: 5000, quoteAsOf: null, staleQuote: false, deliverable: 'standard', dataQualityWarnings: [] };
+    const withStock = { ...model, symbolGroups: [{ ...model.symbolGroups[0], equities: [equity] }] } as unknown as PositionsWorkspaceModel;
+    render(<PositionsWorkspace model={withStock} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    const chips = screen.getByRole('group', { name: 'Strategy' });
+    expect(within(chips).getByRole('button', { name: /^All\s*2$/ })).toBeInTheDocument();
+    expect(within(chips).getByRole('button', { name: /^Stock\s*1$/ })).toBeInTheDocument();
+    await user.click(within(chips).getByRole('button', { name: /^Stock/ }));
+    expect(screen.queryByTestId('position-cards')).not.toBeInTheDocument();
+    expect(screen.getByTestId('stock-cards')).toBeInTheDocument();
+    await user.click(within(chips).getByRole('button', { name: /^CSP/ }));
+    expect(screen.queryByTestId('stock-cards')).not.toBeInTheDocument();
+  });
 });

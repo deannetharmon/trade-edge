@@ -80,7 +80,7 @@ describe('chips match, count, and migrate', () => {
     pos({ strategy: 'BPS', legs: [leg('Short', 'P'), leg('Long', 'P')] }),
   ];
   it('Wheel overlays the intent setting, so a Wheel put counts under CSP and Wheel', () => {
-    expect(strategyChipCounts(book)).toEqual({ all: 4, csp: 2, cc: 0, long: 1, leap: 0, spreads: 1, pmcc: 0, wheel: 1 });
+    expect(strategyChipCounts(book)).toEqual({ all: 4, csp: 2, cc: 0, long: 1, leap: 0, spreads: 1, pmcc: 0, stock: 0, wheel: 1 });
     expect(matchesStrategyChip(book[0], 'csp')).toBe(true);
     expect(matchesStrategyChip(book[0], 'wheel')).toBe(true);
     expect(matchesStrategyChip(book[1], 'wheel')).toBe(false);

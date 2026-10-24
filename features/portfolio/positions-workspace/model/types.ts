@@ -8,7 +8,7 @@ export type AnalysisColumnId =
   | 'value' | 'pnl' | 'evolution' | 'netEdge' | 'pop' | 'volatility'
   | 'orders' | 'notes' | 'priceAlert' | 'recommendation';
 
-export type StrategyChipId = 'all' | 'csp' | 'cc' | 'long' | 'leap' | 'spreads' | 'pmcc' | 'wheel';
+export type StrategyChipId = 'all' | 'csp' | 'cc' | 'long' | 'leap' | 'spreads' | 'pmcc' | 'stock' | 'wheel';
 
 export interface PositionAnalysisFilters {
   symbol: string;
