@@ -7,7 +7,10 @@ const base: any = { entryPriceEffect: 'Debit', entryEconomicsComplete: true, ent
 describe('standalone long-call stop policy', () => {
   it('accepts only a complete standalone long call', () => expect(evaluateStandaloneLeapsStopEligibility(base)).toBe('ELIGIBLE'));
   it('STOP-SLIDER-0001: a shorter-dated standalone long call is eligible too', () => expect(evaluateStandaloneLeapsStopEligibility({ ...base, dte: 45 })).toBe('ELIGIBLE'));
-  it('still rejects a long put', () => expect(evaluateStandaloneLeapsStopEligibility({ ...base, legs: [{ direction: 'Long', optionType: 'P' }] })).toBe('UNAVAILABLE'));
+  it('accepts a complete standalone long put', () => expect(evaluateStandaloneLeapsStopEligibility({ ...base, legs: [{ direction: 'Long', optionType: 'P' }] })).toBe('ELIGIBLE'));
+  it('rejects a long put with an unverified debit', () => expect(evaluateStandaloneLeapsStopEligibility({ ...base, entryEconomicsComplete: false, legs: [{ direction: 'Long', optionType: 'P' }] })).toBe('UNAVAILABLE'));
+  it('rejects a long put that is part of a spread', () => expect(evaluateStandaloneLeapsStopEligibility({ ...base, identity: { structureType: 'VERTICAL' }, legs: [{ direction: 'Long', optionType: 'P' }, { direction: 'Short', optionType: 'P' }] })).toBe('UNAVAILABLE'));
+  it('rejects a short put', () => expect(evaluateStandaloneLeapsStopEligibility({ ...base, legs: [{ direction: 'Short', optionType: 'P' }] })).toBe('UNAVAILABLE'));
   it('keeps PMCC long legs out of the standalone workflow', () => expect(evaluateStandaloneLeapsStopEligibility({ ...base, pairedShortCallKey: 'short-call' })).toBe('PMCC_MANAGED'));
   it.each([[25, 15], [35, 13], [50, 10], [5, 19], [95, 1]] as const)('calculates %s%% loss from a $20 debit as $%s', (loss, trigger) => expect(standaloneLeapsStopProposal(20, loss).triggerPrice).toBe(trigger));
   it.each([0, 4, 100, 150, NaN])('rejects a %s%% maximum loss', loss => expect(() => standaloneLeapsStopProposal(20, loss)).toThrow());

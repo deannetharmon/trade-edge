@@ -11,7 +11,7 @@ export type StandaloneLeapsStopEligibility = 'ELIGIBLE' | 'PMCC_MANAGED' | 'UNAV
 export function evaluateStandaloneLeapsStopEligibility(position: Pick<Position, 'entryPriceEffect' | 'entryEconomicsComplete' | 'entryCredit' | 'quantity' | 'identity' | 'structureAmbiguous' | 'legs' | 'pairedShortCallKey' | 'dte'>): StandaloneLeapsStopEligibility {
   if (position.pairedShortCallKey != null) return 'PMCC_MANAGED';
   const leg = position.legs.length === 1 ? position.legs[0] : null;
-  if (position.structureAmbiguous || !position.identity || position.identity.structureType !== 'NAKED' || position.entryPriceEffect !== 'Debit' || position.entryEconomicsComplete !== true || position.entryCredit == null || position.entryCredit <= 0 || position.quantity <= 0 || !leg || leg.direction !== 'Long' || leg.optionType !== 'C') return 'UNAVAILABLE';
+  if (position.structureAmbiguous || !position.identity || position.identity.structureType !== 'NAKED' || position.entryPriceEffect !== 'Debit' || position.entryEconomicsComplete !== true || position.entryCredit == null || position.entryCredit <= 0 || position.quantity <= 0 || !leg || leg.direction !== 'Long' || (leg.optionType !== 'C' && leg.optionType !== 'P')) return 'UNAVAILABLE';
   return 'ELIGIBLE';
 }
 

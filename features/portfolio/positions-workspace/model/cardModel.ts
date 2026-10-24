@@ -25,7 +25,9 @@ export const SIZING_LIMIT_PCT = 10;
 
 export type CardBucket = VerdictBucket | 'Unjudged';
 export type CardChipTone = 'bad' | 'warn' | 'ok' | 'info';
-export interface CardChip { id: string; label: string; tone: CardChipTone }
+/** row: chips always sit on the same line when present — 1 position status, 2 risk flags, 3 quote quality. */
+export interface CardChip { id: string; label: string; tone: CardChipTone; row: 1 | 2 | 3 }
+const CHIP_ORDER = ['moneyness', 'buffer', 'target', 'no-stop', 'earnings', 'net-edge', 'wide', 'verify'];
 
 /** Most urgent first. Unjudged (no recommendation) sorts last: it is unknown, not calm. */
 const BUCKET_RANK: Record<CardBucket, number> = { Close: 0, Roll: 1, Manage: 2, Hold: 3, Unjudged: 4 };
@@ -116,29 +118,27 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
   // Every option shows where it sits against its strike (long options too); the tone follows the position's own risk.
   if (moneyness) {
     const tone: CardChipTone = moneyness.tone === 'negative' ? 'bad' : moneyness.tone === 'warning' ? 'warn' : moneyness.tone === 'positive' ? 'ok' : 'info';
-    chips.push({ id: 'moneyness', label: moneyness.state === 'ATM' ? 'ATM' : `${moneyness.state} ${moneyness.distancePct.toFixed(1)}%`, tone });
+    chips.push({ id: 'moneyness', label: moneyness.state === 'ATM' ? 'ATM' : `${moneyness.state} ${moneyness.distancePct.toFixed(1)}%`, tone, row: 1 });
   }
   if (shortSingle && moneyness && moneyness.state !== 'ITM' && structure === 'csp') {
     const buffer = priceBufferFor(breakeven, p.stockPrice);
-    if (buffer?.pct != null) chips.push({ id: 'buffer', label: `Buffer ${buffer.pct.toFixed(1)}%`, tone: 'ok' });
+    if (buffer?.pct != null) chips.push({ id: 'buffer', label: `Buffer ${buffer.pct.toFixed(1)}%`, tone: 'ok', row: 1 });
   }
   if (p.gtcOrderId != null) {
     const pct = profitTargetOrderPct(p);
-    chips.push({ id: 'target', label: `Target ${pct != null ? `${pct}% ` : ''}live`, tone: 'ok' });
+    chips.push({ id: 'target', label: `Target ${pct != null ? `${pct}% ` : ''}live`, tone: 'ok', row: 1 });
   }
   const stop = stopPresentationForPosition(p);
-  if (p.stopLossClassification === 'NO_STOP' && stop.label === 'No stop' && !stopNotExpected(p)) chips.push({ id: 'no-stop', label: 'No stop', tone: 'warn' });
-  if (wide != null) chips.push({ id: 'wide', label: 'Wide market', tone: 'warn' });
-  if (verifyPricing) chips.push({ id: 'verify', label: 'Verify price', tone: 'warn' });
+  if (p.stopLossClassification === 'NO_STOP' && stop.label === 'No stop' && !stopNotExpected(p)) chips.push({ id: 'no-stop', label: 'No stop', tone: 'warn', row: 2 });
+  if (wide != null) chips.push({ id: 'wide', label: 'Wide market', tone: 'warn', row: 3 });
+  if (verifyPricing) chips.push({ id: 'verify', label: 'Verify price', tone: 'warn', row: 3 });
   const earnings = nextEarningsLine(p.nextEarningsDate, p.nextEarningsEstimated, p.expDate, undefined, p.nextEarningsUnderlying);
   // A LEAP is held for months, so earnings only matter when they are close (LEAP_EARNINGS_WINDOW_DAYS).
   if (earnings?.beforeExpiry && p.nextEarningsDate && !(isLeapPosition(p) && earnings.daysAway > LEAP_EARNINGS_WINDOW_DAYS)) {
-    const horizon = standaloneLongOptionLabel(p);
-    const leap = horizon === 'LEAP' || horizon === 'LEAP PUT';
-    chips.push({ id: 'earnings', label: `Earnings ${shortDate(p.nextEarningsDate)} < Exp ${shortDate(p.expDate)}`, tone: leap ? 'info' : 'warn' });
+    chips.push({ id: 'earnings', label: `Earnings before Exp (${shortDate(p.nextEarningsDate)})`, tone: 'warn', row: 2 });
   }
   const edge = netEdgeLive(p);
-  if (edge != null && edge < 0) chips.push({ id: 'net-edge', label: 'Net Edge (−)', tone: 'warn' });
+  if (edge != null && edge < 0) chips.push({ id: 'net-edge', label: 'Net Edge (−)', tone: 'warn', row: 2 });
 
   let assignment: PositionCard['assignment'] = null;
   if (structure === 'csp' && p.legs?.length === 1 && p.legs[0].direction === 'Short') {
@@ -169,11 +169,12 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
     position: p,
     bucket: cardBucketOf(p),
     verdictLabel: p.recommendation?.label ?? 'No recommendation',
-    reason: p.recommendation?.managementIntent?.reasons?.[0] ?? p.recommendation?.primaryReason ?? null,
+    // The Net Edge (−) chip already says this, so a net-edge reason is not repeated as text.
+    reason: (p.recommendation?.managementIntent?.reasons ?? []).find(r => !/^net edge is negative/i.test(r)) ?? (/^net edge is negative/i.test(p.recommendation?.primaryReason ?? '') ? null : p.recommendation?.primaryReason) ?? null,
     pnl,
     pnlNote,
     dollarsAtRisk: dollarsAtRiskOf(p),
-    chips,
+    chips: [...chips].sort((a, b) => a.row - b.row || CHIP_ORDER.indexOf(a.id) - CHIP_ORDER.indexOf(b.id)),
     assignment,
     itmShortPut: itmShortPutOf(p),
     unverifiedQuote,

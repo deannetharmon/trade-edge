@@ -62,12 +62,13 @@ describe('card content', () => {
     expect(buildPositionCard(pos({ ...base, intent: 'acquisition' }), { pctOfTarget: null }).chips.some(x => x.id === 'no-stop')).toBe(false);
     expect(buildPositionCard(pos({ ...base, intent: 'income' }), { pctOfTarget: null }).chips.some(x => x.id === 'no-stop')).toBe(true);
   });
-  it('earnings before expiry reads "Earnings (date) < Exp (date)"', () => {
+  it('earnings before expiry reads "Earnings before Exp (date)" in amber', () => {
     const next = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
     const exp = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
     const c = buildPositionCard(pos({ nextEarningsDate: next, expDate: exp } as Partial<Position>), { pctOfTarget: null });
     const chip = c.chips.find(x => x.id === 'earnings');
-    expect(chip?.label).toBe(`Earnings ${shortDate(next)} < Exp ${shortDate(exp)}`);
+    expect(chip?.label).toBe(`Earnings before Exp (${shortDate(next)})`);
+    expect(chip?.tone).toBe('warn');
     expect(chip?.tone).toBe('warn');
   });
   it('a LEAP shows earnings only inside 30 days; a short-dated option keeps it for the whole life', () => {
@@ -147,5 +148,13 @@ describe('opt-in: a fresh browser lands on Table', () => {
     expect(isCardsDisabled('true')).toBe(true);
     expect(isCardsDisabled(undefined)).toBe(false);
     expect(isCardsDisabled('1')).toBe(false);
+  });
+  it('chips keep fixed rows and order: Wide market is always row 3, after risk flags', () => {
+    const d = (n: number) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+    const c = buildPositionCard(pos({ nextEarningsDate: d(5), expDate: d(30), dte: 30 } as Partial<Position>), { pctOfTarget: 60 });
+    const rows = c.chips.map(x => x.row);
+    expect([...rows].sort()).toEqual(rows);
+    for (const x of c.chips) if (x.id === 'wide' || x.id === 'verify') expect(x.row).toBe(3);
+    for (const x of c.chips) if (x.id === 'net-edge' || x.id === 'earnings' || x.id === 'no-stop') expect(x.row).toBe(2);
   });
 });

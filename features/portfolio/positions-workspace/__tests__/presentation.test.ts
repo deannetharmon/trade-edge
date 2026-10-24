@@ -89,7 +89,7 @@ describe('position analysis presentation', () => {
     const longCall = { stopLossClassification: 'UNSUPPORTED', entryPriceEffect: 'Debit', entryEconomicsComplete: true, entryCredit: 2000, quantity: 1, identity: { structureType: 'NAKED' }, structureAmbiguous: false, legs: [{ direction: 'Long', optionType: 'C' }], pairedShortCallKey: null, dte: 365, stopAssessment: { matchedOrderId: null } } as unknown as Position;
     expect(stopPresentationForPosition(longCall).label).toBe('No stop');
     expect(stopPresentationForPosition({ ...longCall, stopAssessment: { matchedOrderId: '123' } } as unknown as Position).label).toBe('Unsupported');
-    expect(stopPresentationForPosition({ ...longCall, legs: [{ direction: 'Long', optionType: 'P' }] } as unknown as Position).label).toBe('Unsupported');
+    expect(stopPresentationForPosition({ ...longCall, legs: [{ direction: 'Long', optionType: 'P' }] } as unknown as Position).label).toBe('No stop');
     expect(stopPresentationForPosition({ ...longCall, stopLossClassification: 'TOO_TIGHT' } as unknown as Position).label).toBe('Too tight');
   });
 });
