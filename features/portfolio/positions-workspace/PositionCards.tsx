@@ -8,7 +8,7 @@
 import { useMemo, type ReactNode } from 'react';
 import { IntentSelect } from './IntentSelect';
 import { SalvageEntry } from './salvage/SalvagePanel';
-import { buildPositionCard, type CardBucket, type CardChipTone, type PositionCard } from './model/cardModel';
+import { buildPositionCard, shortDate, stopNotExpected, type CardBucket, type CardChipTone, type PositionCard } from './model/cardModel';
 import { SEMANTIC_TONE_CLASS } from './model/presentation';
 import { standaloneLongOptionLabel } from '@/lib/portfolio/positionStrategyFilter';
 import { canonicalRecommendationToAction } from '@/lib/portfolio/canonicalRecommendationPresentation';
@@ -39,7 +39,7 @@ function detailLine(p: Position): string {
   const what = legs.length === 1 ? `${legs[0].strikePrice} ${legs[0].optionType === 'P' ? 'Put' : 'Call'}`
     : legs.length > 1 ? `${legs.map(l => `${l.strikePrice}${l.optionType}`).join('/')}` : p.strategy;
   const qty = `${p.quantity}x`;
-  return `${what} · ${qty} · Exp ${p.expDate} · ${p.dte} DTE`;
+  return `${what} · ${qty} · Exp ${shortDate(p.expDate)} · ${p.dte} DTE`;
 }
 
 export interface PositionCardsProps {
@@ -104,7 +104,7 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
             </span>
           ) : <button key={action} type="button" onClick={() => onExecute?.(p, action)} className={`min-h-9 ${CONTROL_RADIUS} border px-3 text-xs focus:ring-2 focus:ring-teal-400 ${isSuggested ? `${mark} text-white` : action === 'CUT_LOSSES' ? 'border-amber-500/50 text-amber-300' : 'border-white/20 text-white'}`}>{ACTION_LABELS[action] ?? action}</button>;
         })}
-        {renderStopControl?.(p)}
+        {!stopNotExpected(p) && renderStopControl?.(p)}
         <SalvageEntry position={p} />
         <span className="ml-auto"><IntentSelect position={p} onIntentChange={onIntentChange} /></span>
       </div>

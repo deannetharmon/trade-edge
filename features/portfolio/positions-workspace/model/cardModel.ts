@@ -78,7 +78,7 @@ function itmShortPutOf(p: Position): boolean {
 }
 
 /** Where a stop is not expected: Wheel and Acquire puts are meant to be assigned. */
-function stopNotExpected(p: Position): boolean {
+export function stopNotExpected(p: Position): boolean {
   return structuralChipOf(p) === 'csp' && (p.intent === 'wheel' || p.intent === 'acquisition');
 }
 
