@@ -1,443 +1,443 @@
 {
- "calm position|none": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
-  "intent": "HOLD_POSITION"
- },
- "calm position|uptrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
-  "intent": "HOLD_POSITION"
- },
- "calm position|downtrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
-  "intent": "HOLD_POSITION"
- },
- "49% of credit captured|none": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "Health score is 100; no primary action rule triggered.",
-  "intent": "HOLD_POSITION"
- },
- "49% of credit captured|uptrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "Health score is 100; no primary action rule triggered.",
-  "intent": "HOLD_POSITION"
- },
- "49% of credit captured|downtrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "Health score is 100; no primary action rule triggered.",
-  "intent": "HOLD_POSITION"
- },
- "exactly 50% captured|none": {
-  "kind": "close-winner",
-  "label": "Take Profit",
-  "urgency": "high",
-  "primary": "Profit target has been reached.",
-  "intent": "TAKE_PROFIT"
- },
- "exactly 50% captured|uptrend": {
-  "kind": "close-winner",
-  "label": "Take Profit",
-  "urgency": "high",
-  "primary": "Profit target has been reached.",
-  "intent": "TAKE_PROFIT"
- },
- "exactly 50% captured|downtrend": {
-  "kind": "close-winner",
-  "label": "Take Profit",
-  "urgency": "high",
-  "primary": "Profit target has been reached.",
-  "intent": "TAKE_PROFIT"
- },
- "50% captured, no GTC working|none": {
-  "kind": "close-winner",
-  "label": "Take Profit",
-  "urgency": "high",
-  "primary": "Profit target has been reached.",
-  "intent": "TAKE_PROFIT"
- },
- "50% captured, no GTC working|uptrend": {
-  "kind": "close-winner",
-  "label": "Take Profit",
-  "urgency": "high",
-  "primary": "Profit target has been reached.",
-  "intent": "TAKE_PROFIT"
- },
- "50% captured, no GTC working|downtrend": {
-  "kind": "close-winner",
-  "label": "Take Profit",
-  "urgency": "high",
-  "primary": "Profit target has been reached.",
-  "intent": "TAKE_PROFIT"
- },
- "spread: 49% captured|none": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "Health score is 100; no primary action rule triggered.",
-  "intent": "HOLD_POSITION"
- },
- "spread: 49% captured|uptrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "Recent technical trend confirms the position.",
-  "intent": "HOLD_POSITION"
- },
- "spread: 49% captured|downtrend": {
-  "kind": "hold",
-  "label": "Cut Losses",
-  "urgency": "low",
-  "primary": "Recent technical trend is running against the position.",
-  "intent": "CUT_LOSSES"
- },
- "spread: exactly 50% captured|none": {
-  "kind": "close-winner",
-  "label": "Take Profit",
-  "urgency": "high",
-  "primary": "Profit target has been reached.",
-  "intent": "TAKE_PROFIT"
- },
- "spread: exactly 50% captured|uptrend": {
-  "kind": "close-winner",
-  "label": "Take Profit",
-  "urgency": "high",
-  "primary": "Profit target has been reached.",
-  "intent": "TAKE_PROFIT"
- },
- "spread: exactly 50% captured|downtrend": {
-  "kind": "close-winner",
-  "label": "Take Profit",
-  "urgency": "high",
-  "primary": "Profit target has been reached.",
-  "intent": "TAKE_PROFIT"
- },
- "spread: 22 DTE|none": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
-  "intent": "HOLD_POSITION"
- },
- "spread: 22 DTE|uptrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "Recent technical trend confirms the position.",
-  "intent": "HOLD_POSITION"
- },
- "spread: 22 DTE|downtrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
-  "intent": "HOLD_POSITION"
- },
- "spread: exactly 21 DTE|none": {
-  "kind": "roll-soon",
-  "label": "roll-soon",
-  "urgency": "medium",
-  "primary": "21 DTE is inside the standard management window.",
-  "intent": "HOLD_POSITION"
- },
- "spread: exactly 21 DTE|uptrend": {
-  "kind": "roll-soon",
-  "label": "roll-soon",
-  "urgency": "medium",
-  "primary": "21 DTE is inside the standard management window.",
-  "intent": "HOLD_POSITION"
- },
- "spread: exactly 21 DTE|downtrend": {
-  "kind": "roll-soon",
-  "label": "Cut Losses",
-  "urgency": "medium",
-  "primary": "Recent technical trend is running against the position.",
-  "intent": "CUT_LOSSES"
- },
- "spread: 8 DTE (last day of the window)|none": {
-  "kind": "roll-soon",
-  "label": "roll-soon",
-  "urgency": "medium",
-  "primary": "8 DTE is inside the standard management window.",
-  "intent": "HOLD_POSITION"
- },
- "spread: 8 DTE (last day of the window)|uptrend": {
-  "kind": "roll-soon",
-  "label": "roll-soon",
-  "urgency": "medium",
-  "primary": "8 DTE is inside the standard management window.",
-  "intent": "HOLD_POSITION"
- },
- "spread: 8 DTE (last day of the window)|downtrend": {
-  "kind": "roll-soon",
-  "label": "Cut Losses",
-  "urgency": "medium",
-  "primary": "Recent technical trend is running against the position.",
-  "intent": "CUT_LOSSES"
- },
- "spread: 7 DTE (window over, scoring takes it)|none": {
-  "kind": "watch",
-  "label": "Reduce Risk",
-  "urgency": "medium",
-  "primary": "Gamma risk increases as DTE (7) approaches expiration.",
-  "intent": "REDUCE_RISK"
- },
- "spread: 7 DTE (window over, scoring takes it)|uptrend": {
-  "kind": "watch",
-  "label": "watch",
-  "urgency": "medium",
-  "primary": "Health score is 69.",
-  "intent": "HOLD_POSITION"
- },
- "spread: 7 DTE (window over, scoring takes it)|downtrend": {
-  "kind": "watch",
-  "label": "Cut Losses",
-  "urgency": "medium",
-  "primary": "Recent technical trend is running against the position.",
-  "intent": "CUT_LOSSES"
- },
- "loss just under the 2x-credit stop|none": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "Health score is 78; no primary action rule triggered.",
-  "intent": "HOLD_POSITION"
- },
- "loss just under the 2x-credit stop|uptrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "Health score is 78; no primary action rule triggered.",
-  "intent": "HOLD_POSITION"
- },
- "loss just under the 2x-credit stop|downtrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "Health score is 78; no primary action rule triggered.",
-  "intent": "HOLD_POSITION"
- },
- "loss exactly at the 2x-credit stop|none": {
-  "kind": "close-loser",
-  "label": "Cut Losses",
-  "urgency": "critical",
-  "primary": "Loss has reached the policy loss-stop threshold.",
-  "intent": "CUT_LOSSES"
- },
- "loss exactly at the 2x-credit stop|uptrend": {
-  "kind": "close-loser",
-  "label": "Cut Losses",
-  "urgency": "critical",
-  "primary": "Loss has reached the policy loss-stop threshold.",
-  "intent": "CUT_LOSSES"
- },
- "loss exactly at the 2x-credit stop|downtrend": {
-  "kind": "close-loser",
-  "label": "Cut Losses",
-  "urgency": "critical",
-  "primary": "Loss has reached the policy loss-stop threshold.",
-  "intent": "CUT_LOSSES"
- },
- "loss past the stop|none": {
-  "kind": "close-loser",
-  "label": "Cut Losses",
-  "urgency": "critical",
-  "primary": "Loss has reached the policy loss-stop threshold.",
-  "intent": "CUT_LOSSES"
- },
- "loss past the stop|uptrend": {
-  "kind": "close-loser",
-  "label": "Cut Losses",
-  "urgency": "critical",
-  "primary": "Loss has reached the policy loss-stop threshold.",
-  "intent": "CUT_LOSSES"
- },
- "loss past the stop|downtrend": {
-  "kind": "close-loser",
-  "label": "Cut Losses",
-  "urgency": "critical",
-  "primary": "Loss has reached the policy loss-stop threshold.",
-  "intent": "CUT_LOSSES"
- },
- "spread: loss just under the stop|none": {
-  "kind": "hold",
-  "label": "Reduce Risk",
-  "urgency": "low",
-  "primary": "Only 1% of risk-adjusted opportunity remains -- little recoverable upside justifies the current exposure.",
-  "intent": "REDUCE_RISK"
- },
- "spread: loss just under the stop|uptrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "Recent technical trend confirms the position.",
-  "intent": "HOLD_POSITION"
- },
- "spread: loss just under the stop|downtrend": {
-  "kind": "hold",
-  "label": "Reduce Risk",
-  "urgency": "low",
-  "primary": "Only 1% of risk-adjusted opportunity remains -- little recoverable upside justifies the current exposure.",
-  "intent": "REDUCE_RISK"
- },
- "spread: loss exactly at the stop|none": {
-  "kind": "close-loser",
-  "label": "Cut Losses",
-  "urgency": "critical",
-  "primary": "Loss has reached the policy loss-stop threshold.",
-  "intent": "CUT_LOSSES"
- },
- "spread: loss exactly at the stop|uptrend": {
-  "kind": "close-loser",
-  "label": "Cut Losses",
-  "urgency": "critical",
-  "primary": "Loss has reached the policy loss-stop threshold.",
-  "intent": "CUT_LOSSES"
- },
- "spread: loss exactly at the stop|downtrend": {
-  "kind": "close-loser",
-  "label": "Cut Losses",
-  "urgency": "critical",
-  "primary": "Loss has reached the policy loss-stop threshold.",
-  "intent": "CUT_LOSSES"
- },
- "spread: earnings on the expiry date|none": {
-  "kind": "earnings-risk",
-  "label": "earnings-risk",
-  "urgency": "high",
-  "primary": "Upcoming earnings before expiration (2026-09-18).",
-  "intent": "HOLD_POSITION"
- },
- "spread: earnings on the expiry date|uptrend": {
-  "kind": "earnings-risk",
-  "label": "earnings-risk",
-  "urgency": "high",
-  "primary": "Upcoming earnings before expiration (2026-09-18).",
-  "intent": "HOLD_POSITION"
- },
- "spread: earnings on the expiry date|downtrend": {
-  "kind": "earnings-risk",
-  "label": "earnings-risk",
-  "urgency": "high",
-  "primary": "Upcoming earnings before expiration (2026-09-18).",
-  "intent": "HOLD_POSITION"
- },
- "spread: earnings the day after expiry|none": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
-  "intent": "HOLD_POSITION"
- },
- "spread: earnings the day after expiry|uptrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "Recent technical trend confirms the position.",
-  "intent": "HOLD_POSITION"
- },
- "spread: earnings the day after expiry|downtrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
-  "intent": "HOLD_POSITION"
- },
- "spread: earnings already past|none": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
-  "intent": "HOLD_POSITION"
- },
- "spread: earnings already past|uptrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "Recent technical trend confirms the position.",
-  "intent": "HOLD_POSITION"
- },
- "spread: earnings already past|downtrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
-  "intent": "HOLD_POSITION"
- },
- "earnings before expiry (CSP)|none": {
-  "kind": "earnings-risk",
-  "label": "earnings-risk",
-  "urgency": "high",
-  "primary": "Upcoming earnings before expiration (2026-09-01).",
-  "intent": "HOLD_POSITION"
- },
- "earnings before expiry (CSP)|uptrend": {
-  "kind": "earnings-risk",
-  "label": "earnings-risk",
-  "urgency": "high",
-  "primary": "Upcoming earnings before expiration (2026-09-01).",
-  "intent": "HOLD_POSITION"
- },
- "earnings before expiry (CSP)|downtrend": {
-  "kind": "earnings-risk",
-  "label": "earnings-risk",
-  "urgency": "high",
-  "primary": "Upcoming earnings before expiration (2026-09-01).",
-  "intent": "HOLD_POSITION"
- },
- "acquire put in a deep paper loss is never a loss exit|none": {
-  "kind": "watch",
-  "label": "watch",
-  "urgency": "medium",
-  "primary": "Health score is 67.",
-  "intent": "HOLD_POSITION"
- },
- "acquire put in a deep paper loss is never a loss exit|uptrend": {
-  "kind": "watch",
-  "label": "watch",
-  "urgency": "medium",
-  "primary": "Health score is 67.",
-  "intent": "HOLD_POSITION"
- },
- "acquire put in a deep paper loss is never a loss exit|downtrend": {
-  "kind": "watch",
-  "label": "watch",
-  "urgency": "medium",
-  "primary": "Health score is 67.",
-  "intent": "HOLD_POSITION"
- },
- "wheel put at 21 DTE gets no roll suggestion|none": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "81% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
-  "intent": "HOLD_POSITION"
- },
- "wheel put at 21 DTE gets no roll suggestion|uptrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "81% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
-  "intent": "HOLD_POSITION"
- },
- "wheel put at 21 DTE gets no roll suggestion|downtrend": {
-  "kind": "hold",
-  "label": "Hold Position",
-  "urgency": "low",
-  "primary": "81% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
-  "intent": "HOLD_POSITION"
- }
+  "calm position|none": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
+    "intent": "HOLD_POSITION"
+  },
+  "calm position|uptrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
+    "intent": "HOLD_POSITION"
+  },
+  "calm position|downtrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
+    "intent": "HOLD_POSITION"
+  },
+  "49% of credit captured|none": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "Health score is 100; no primary action rule triggered.",
+    "intent": "HOLD_POSITION"
+  },
+  "49% of credit captured|uptrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "Health score is 100; no primary action rule triggered.",
+    "intent": "HOLD_POSITION"
+  },
+  "49% of credit captured|downtrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "Health score is 100; no primary action rule triggered.",
+    "intent": "HOLD_POSITION"
+  },
+  "exactly 50% captured|none": {
+    "kind": "close-winner",
+    "label": "Take Profit",
+    "urgency": "high",
+    "primary": "Profit target has been reached.",
+    "intent": "TAKE_PROFIT"
+  },
+  "exactly 50% captured|uptrend": {
+    "kind": "close-winner",
+    "label": "Take Profit",
+    "urgency": "high",
+    "primary": "Profit target has been reached.",
+    "intent": "TAKE_PROFIT"
+  },
+  "exactly 50% captured|downtrend": {
+    "kind": "close-winner",
+    "label": "Take Profit",
+    "urgency": "high",
+    "primary": "Profit target has been reached.",
+    "intent": "TAKE_PROFIT"
+  },
+  "50% captured, no GTC working|none": {
+    "kind": "close-winner",
+    "label": "Take Profit",
+    "urgency": "high",
+    "primary": "Profit target has been reached.",
+    "intent": "TAKE_PROFIT"
+  },
+  "50% captured, no GTC working|uptrend": {
+    "kind": "close-winner",
+    "label": "Take Profit",
+    "urgency": "high",
+    "primary": "Profit target has been reached.",
+    "intent": "TAKE_PROFIT"
+  },
+  "50% captured, no GTC working|downtrend": {
+    "kind": "close-winner",
+    "label": "Take Profit",
+    "urgency": "high",
+    "primary": "Profit target has been reached.",
+    "intent": "TAKE_PROFIT"
+  },
+  "spread: 49% captured|none": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "Health score is 100; no primary action rule triggered.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: 49% captured|uptrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "Recent technical trend confirms the position.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: 49% captured|downtrend": {
+    "kind": "hold",
+    "label": "Cut Losses",
+    "urgency": "low",
+    "primary": "Recent technical trend is running against the position.",
+    "intent": "CUT_LOSSES"
+  },
+  "spread: exactly 50% captured|none": {
+    "kind": "close-winner",
+    "label": "Take Profit",
+    "urgency": "high",
+    "primary": "Profit target has been reached.",
+    "intent": "TAKE_PROFIT"
+  },
+  "spread: exactly 50% captured|uptrend": {
+    "kind": "close-winner",
+    "label": "Take Profit",
+    "urgency": "high",
+    "primary": "Profit target has been reached.",
+    "intent": "TAKE_PROFIT"
+  },
+  "spread: exactly 50% captured|downtrend": {
+    "kind": "close-winner",
+    "label": "Take Profit",
+    "urgency": "high",
+    "primary": "Profit target has been reached.",
+    "intent": "TAKE_PROFIT"
+  },
+  "spread: 22 DTE|none": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: 22 DTE|uptrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "Recent technical trend confirms the position.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: 22 DTE|downtrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: exactly 21 DTE|none": {
+    "kind": "roll-soon",
+    "label": "Roll Position",
+    "urgency": "medium",
+    "primary": "21 DTE is inside the standard management window.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: exactly 21 DTE|uptrend": {
+    "kind": "roll-soon",
+    "label": "Roll Position",
+    "urgency": "medium",
+    "primary": "21 DTE is inside the standard management window.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: exactly 21 DTE|downtrend": {
+    "kind": "roll-soon",
+    "label": "Cut Losses",
+    "urgency": "medium",
+    "primary": "Recent technical trend is running against the position.",
+    "intent": "CUT_LOSSES"
+  },
+  "spread: 8 DTE (last day of the window)|none": {
+    "kind": "roll-soon",
+    "label": "Roll Position",
+    "urgency": "medium",
+    "primary": "8 DTE is inside the standard management window.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: 8 DTE (last day of the window)|uptrend": {
+    "kind": "roll-soon",
+    "label": "Roll Position",
+    "urgency": "medium",
+    "primary": "8 DTE is inside the standard management window.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: 8 DTE (last day of the window)|downtrend": {
+    "kind": "roll-soon",
+    "label": "Cut Losses",
+    "urgency": "medium",
+    "primary": "Recent technical trend is running against the position.",
+    "intent": "CUT_LOSSES"
+  },
+  "spread: 7 DTE (window over, scoring takes it)|none": {
+    "kind": "watch",
+    "label": "Reduce Risk",
+    "urgency": "medium",
+    "primary": "Gamma risk increases as DTE (7) approaches expiration.",
+    "intent": "REDUCE_RISK"
+  },
+  "spread: 7 DTE (window over, scoring takes it)|uptrend": {
+    "kind": "watch",
+    "label": "Watch Position",
+    "urgency": "medium",
+    "primary": "Health score is 69.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: 7 DTE (window over, scoring takes it)|downtrend": {
+    "kind": "watch",
+    "label": "Cut Losses",
+    "urgency": "medium",
+    "primary": "Recent technical trend is running against the position.",
+    "intent": "CUT_LOSSES"
+  },
+  "loss just under the 2x-credit stop|none": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "Health score is 78; no primary action rule triggered.",
+    "intent": "HOLD_POSITION"
+  },
+  "loss just under the 2x-credit stop|uptrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "Health score is 78; no primary action rule triggered.",
+    "intent": "HOLD_POSITION"
+  },
+  "loss just under the 2x-credit stop|downtrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "Health score is 78; no primary action rule triggered.",
+    "intent": "HOLD_POSITION"
+  },
+  "loss exactly at the 2x-credit stop|none": {
+    "kind": "close-loser",
+    "label": "Cut Losses",
+    "urgency": "critical",
+    "primary": "Loss has reached the policy loss-stop threshold.",
+    "intent": "CUT_LOSSES"
+  },
+  "loss exactly at the 2x-credit stop|uptrend": {
+    "kind": "close-loser",
+    "label": "Cut Losses",
+    "urgency": "critical",
+    "primary": "Loss has reached the policy loss-stop threshold.",
+    "intent": "CUT_LOSSES"
+  },
+  "loss exactly at the 2x-credit stop|downtrend": {
+    "kind": "close-loser",
+    "label": "Cut Losses",
+    "urgency": "critical",
+    "primary": "Loss has reached the policy loss-stop threshold.",
+    "intent": "CUT_LOSSES"
+  },
+  "loss past the stop|none": {
+    "kind": "close-loser",
+    "label": "Cut Losses",
+    "urgency": "critical",
+    "primary": "Loss has reached the policy loss-stop threshold.",
+    "intent": "CUT_LOSSES"
+  },
+  "loss past the stop|uptrend": {
+    "kind": "close-loser",
+    "label": "Cut Losses",
+    "urgency": "critical",
+    "primary": "Loss has reached the policy loss-stop threshold.",
+    "intent": "CUT_LOSSES"
+  },
+  "loss past the stop|downtrend": {
+    "kind": "close-loser",
+    "label": "Cut Losses",
+    "urgency": "critical",
+    "primary": "Loss has reached the policy loss-stop threshold.",
+    "intent": "CUT_LOSSES"
+  },
+  "spread: loss just under the stop|none": {
+    "kind": "hold",
+    "label": "Reduce Risk",
+    "urgency": "low",
+    "primary": "Only 1% of risk-adjusted opportunity remains -- little recoverable upside justifies the current exposure.",
+    "intent": "REDUCE_RISK"
+  },
+  "spread: loss just under the stop|uptrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "Recent technical trend confirms the position.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: loss just under the stop|downtrend": {
+    "kind": "hold",
+    "label": "Reduce Risk",
+    "urgency": "low",
+    "primary": "Only 1% of risk-adjusted opportunity remains -- little recoverable upside justifies the current exposure.",
+    "intent": "REDUCE_RISK"
+  },
+  "spread: loss exactly at the stop|none": {
+    "kind": "close-loser",
+    "label": "Cut Losses",
+    "urgency": "critical",
+    "primary": "Loss has reached the policy loss-stop threshold.",
+    "intent": "CUT_LOSSES"
+  },
+  "spread: loss exactly at the stop|uptrend": {
+    "kind": "close-loser",
+    "label": "Cut Losses",
+    "urgency": "critical",
+    "primary": "Loss has reached the policy loss-stop threshold.",
+    "intent": "CUT_LOSSES"
+  },
+  "spread: loss exactly at the stop|downtrend": {
+    "kind": "close-loser",
+    "label": "Cut Losses",
+    "urgency": "critical",
+    "primary": "Loss has reached the policy loss-stop threshold.",
+    "intent": "CUT_LOSSES"
+  },
+  "spread: earnings on the expiry date|none": {
+    "kind": "earnings-risk",
+    "label": "Earnings Risk",
+    "urgency": "high",
+    "primary": "Upcoming earnings before expiration (2026-09-18).",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: earnings on the expiry date|uptrend": {
+    "kind": "earnings-risk",
+    "label": "Earnings Risk",
+    "urgency": "high",
+    "primary": "Upcoming earnings before expiration (2026-09-18).",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: earnings on the expiry date|downtrend": {
+    "kind": "earnings-risk",
+    "label": "Earnings Risk",
+    "urgency": "high",
+    "primary": "Upcoming earnings before expiration (2026-09-18).",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: earnings the day after expiry|none": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: earnings the day after expiry|uptrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "Recent technical trend confirms the position.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: earnings the day after expiry|downtrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: earnings already past|none": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: earnings already past|uptrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "Recent technical trend confirms the position.",
+    "intent": "HOLD_POSITION"
+  },
+  "spread: earnings already past|downtrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "92% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
+    "intent": "HOLD_POSITION"
+  },
+  "earnings before expiry (CSP)|none": {
+    "kind": "earnings-risk",
+    "label": "Earnings Risk",
+    "urgency": "high",
+    "primary": "Upcoming earnings before expiration (2026-09-01).",
+    "intent": "HOLD_POSITION"
+  },
+  "earnings before expiry (CSP)|uptrend": {
+    "kind": "earnings-risk",
+    "label": "Earnings Risk",
+    "urgency": "high",
+    "primary": "Upcoming earnings before expiration (2026-09-01).",
+    "intent": "HOLD_POSITION"
+  },
+  "earnings before expiry (CSP)|downtrend": {
+    "kind": "earnings-risk",
+    "label": "Earnings Risk",
+    "urgency": "high",
+    "primary": "Upcoming earnings before expiration (2026-09-01).",
+    "intent": "HOLD_POSITION"
+  },
+  "acquire put in a deep paper loss is never a loss exit|none": {
+    "kind": "watch",
+    "label": "Watch Position",
+    "urgency": "medium",
+    "primary": "Health score is 67.",
+    "intent": "HOLD_POSITION"
+  },
+  "acquire put in a deep paper loss is never a loss exit|uptrend": {
+    "kind": "watch",
+    "label": "Watch Position",
+    "urgency": "medium",
+    "primary": "Health score is 67.",
+    "intent": "HOLD_POSITION"
+  },
+  "acquire put in a deep paper loss is never a loss exit|downtrend": {
+    "kind": "watch",
+    "label": "Watch Position",
+    "urgency": "medium",
+    "primary": "Health score is 67.",
+    "intent": "HOLD_POSITION"
+  },
+  "wheel put at 21 DTE gets no roll suggestion|none": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "81% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
+    "intent": "HOLD_POSITION"
+  },
+  "wheel put at 21 DTE gets no roll suggestion|uptrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "81% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
+    "intent": "HOLD_POSITION"
+  },
+  "wheel put at 21 DTE gets no roll suggestion|downtrend": {
+    "kind": "hold",
+    "label": "Hold Position",
+    "urgency": "low",
+    "primary": "81% of risk-adjusted opportunity remains -- genuine upside is still on the table.",
+    "intent": "HOLD_POSITION"
+  }
 }

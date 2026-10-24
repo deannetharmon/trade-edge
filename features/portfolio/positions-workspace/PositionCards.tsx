@@ -81,7 +81,7 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
           <p className={`mt-0.5 text-xs ${th.textMuted}`}>{detailLine(p)}</p>
           <p className="mt-2 flex flex-wrap items-center gap-2">
             <span data-testid="card-bucket" className={`rounded-full border px-2.5 py-0.5 text-xs font-bold ${BUCKET_CLASS[card.bucket]}`}>{card.bucket === 'Unjudged' ? 'No verdict' : card.bucket}</span>
-            <span className="text-sm font-semibold text-white">{card.verdictLabel}</span>
+            {card.verdictLabel !== `${card.bucket} Position` && <span className="text-sm font-semibold text-white">{card.verdictLabel}</span>}
             {!p.recommendation && <button type="button" onClick={() => onRefresh?.()} disabled={!onRefresh} className="text-xs underline decoration-dotted underline-offset-2 disabled:opacity-40">Refresh</button>}
           </p>
           {card.reason && <p className={`mt-1 text-xs ${th.textFaint}`}>{card.reason}</p>}

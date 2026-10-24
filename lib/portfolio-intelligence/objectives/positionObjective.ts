@@ -464,7 +464,7 @@ export function cohereManagementIntentPresentation(
     positionId: 'presentation-only',
     symbol: '',
     kind: 'hold',
-    label: 'hold',
+    label: RECOMMENDATION_KIND_LABEL.hold,
     urgency: 'low',
     confidence: 0,
     primaryReason: legacyPrimaryReason,
@@ -479,6 +479,23 @@ export function cohereManagementIntentPresentation(
     managementIntent: coherent.managementIntent,
   };
 }
+
+/**
+ * LABEL-CONSISTENCY-0001: the display name for each engine kind when no management intent supplies one. Same Title Case vocabulary as
+ * MANAGEMENT_INTENT_LABEL, so a position never shows a raw kind such as 'watch' or 'earnings-risk'.
+ */
+export const RECOMMENDATION_KIND_LABEL: Record<PortfolioRecommendationKind, string> = {
+  hold: 'Hold Position',
+  watch: 'Watch Position',
+  'let-expire': 'Let Expire',
+  'earnings-risk': 'Earnings Risk',
+  'assignment-risk': 'Assignment Risk',
+  'verify-pricing': 'Verify Pricing',
+  'place-gtc': 'Set Profit Target',
+  'close-winner': 'Take Profit',
+  'close-loser': 'Cut Losses',
+  'roll-soon': 'Roll Position',
+};
 
 function makeLegacyRecommendation(
   input: PositionObjectiveInput,
@@ -495,7 +512,7 @@ function makeLegacyRecommendation(
     positionId: input.positionId ?? input.key ?? `${input.symbol}-${input.expDate ?? 'unknown'}`,
     symbol: input.symbol,
     kind,
-    label: kind,
+    label: RECOMMENDATION_KIND_LABEL[kind],
     urgency,
     confidence: Math.max(0, Math.min(100, Math.round(confidence))),
     primaryReason,
