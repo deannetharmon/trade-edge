@@ -568,7 +568,7 @@ function AnalysisView({ model, th, getManagementActions, onExecute, renderStopCo
     {cardsActive ? (() => {
       const cardRows = model.analysisRows.filter(row => matchesSymbolSearch(row.symbol, cardSearch) && matchesStrategyChip(row.position, preferences.filters.chip ?? 'all'));
       const strip = assignmentStrip(model.analysisRows.map(row => row.position));
-      const updated = updatedLabel(model.quoteAsOf, Date.now());
+      const updated = updatedLabel(model.quoteAsOf ?? model.snapshotAsOf, Date.now());
       return <>
         <div className={`mb-3 flex flex-wrap items-center gap-2 rounded-xl border ${th.border} p-3`}>
           <label className="sr-only" htmlFor="cards-symbol-search">Search symbol</label>

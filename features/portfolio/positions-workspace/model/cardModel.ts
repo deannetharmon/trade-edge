@@ -102,12 +102,14 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
   const breakeven = buildBreakevenViewModel(p);
   const structure = structuralChipOf(p);
   const shortSingle = p.legs?.length === 1 && p.legs[0].direction === 'Short';
-  if (shortSingle && moneyness) {
-    if (moneyness.state === 'ITM') chips.push({ id: 'itm', label: `ITM ${moneyness.distancePct.toFixed(1)}%`, tone: 'bad' });
-    else if (structure === 'csp') {
-      const buffer = priceBufferFor(breakeven, p.stockPrice);
-      if (buffer?.pct != null) chips.push({ id: 'buffer', label: `Buffer ${buffer.pct.toFixed(1)}%`, tone: 'ok' });
-    }
+  // Every option shows where it sits against its strike (long options too); the tone follows the position's own risk.
+  if (moneyness) {
+    const tone: CardChipTone = moneyness.tone === 'negative' ? 'bad' : moneyness.tone === 'warning' ? 'warn' : moneyness.tone === 'positive' ? 'ok' : 'info';
+    chips.push({ id: 'moneyness', label: moneyness.state === 'ATM' ? 'ATM' : `${moneyness.state} ${moneyness.distancePct.toFixed(1)}%`, tone });
+  }
+  if (shortSingle && moneyness && moneyness.state !== 'ITM' && structure === 'csp') {
+    const buffer = priceBufferFor(breakeven, p.stockPrice);
+    if (buffer?.pct != null) chips.push({ id: 'buffer', label: `Buffer ${buffer.pct.toFixed(1)}%`, tone: 'ok' });
   }
   if (p.gtcOrderId != null) {
     const pct = profitTargetOrderPct(p);

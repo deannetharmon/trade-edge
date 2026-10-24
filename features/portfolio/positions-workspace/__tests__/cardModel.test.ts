@@ -53,7 +53,7 @@ describe('card content', () => {
     const p = pos({ intent: 'wheel', stockPrice: 40, legs: [leg('Short', 'P', 50)], breakEven: 48 } as Partial<Position>);
     const c = buildPositionCard(p, { pctOfTarget: null });
     expect(c.itmShortPut).toBe(true);
-    expect(c.chips.some(x => x.id === 'itm' && x.tone === 'bad')).toBe(true);
+    expect(c.chips.some(x => x.id === 'moneyness' && x.tone === 'bad' && x.label.startsWith('ITM'))).toBe(true);
     expect(c.assignment?.shares).toBe(100);
   });
   it('Wheel and Acquire puts never get a No stop chip; an Income put does', () => {

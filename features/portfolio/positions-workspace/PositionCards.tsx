@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { IntentSelect } from './IntentSelect';
 import { SalvageEntry } from './salvage/SalvagePanel';
 import { buildPositionCard, type CardBucket, type CardChipTone, type PositionCard } from './model/cardModel';
@@ -15,7 +15,7 @@ import { canonicalRecommendationToAction } from '@/lib/portfolio/canonicalRecomm
 import { CONTROL_RADIUS } from './ui/chipStyle';
 import type { ActionType, Position, PositionIntent } from '@/lib/portfolio-data/types';
 
-const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take Profit Now', CLOSE_ROLL: 'Close Position', PLACE_GTC: 'Set/Edit Profit Target', CUT_LOSSES: 'Cut Losses' };
+const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take Profit Now', PLACE_GTC: 'Set/Edit Profit Target', CUT_LOSSES: 'Cut Losses' };
 
 const usd = (v: number | null) => v == null || !Number.isFinite(v) ? 'Unavailable' : `${v < 0 ? '-' : ''}$${Math.abs(Math.round(v)).toLocaleString('en-US')}`;
 const usd2 = (v: number) => `$${v.toFixed(2)}`;
@@ -65,14 +65,9 @@ export function PositionCards({ positions, order, pctOfTarget, getManagementActi
 
 function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh }: { card: PositionCard; th: PositionCardsProps['th']; actions: ActionType[]; onExecute?: PositionCardsProps['onExecute']; renderStopControl?: PositionCardsProps['renderStopControl']; onAnalyze?: PositionCardsProps['onAnalyze']; onIntentChange?: PositionCardsProps['onIntentChange']; onRefresh?: () => void }) {
   const p = card.position;
-  const [moreOpen, setMoreOpen] = useState(false);
   const horizon = standaloneLongOptionLabel(p);
   const suggested = p.recommendation ? canonicalRecommendationToAction(p.recommendation.kind) : null;
-  const primary = actions.find(a => a === suggested) ?? null;
-  const rest = actions.filter(a => a !== primary);
   const pnlTone = card.pnl == null || Math.abs(card.pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : card.pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative;
-  const stopControl = moreOpen ? renderStopControl?.(p) ?? null : null;
-  const run = (action: ActionType, mode?: 'close' | 'roll') => { setMoreOpen(false); onExecute?.(p, action, mode); };
   return (
     <article aria-label={`${p.symbol} ${horizon ?? p.strategy} position`} className={`rounded-xl border ${th.border} bg-white/[0.02] p-4`}>
       <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
@@ -99,26 +94,20 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
       {card.chips.length > 0 && <ul aria-label="Signals" className="mt-3 flex flex-wrap gap-1.5">{card.chips.map(chip => <li key={chip.id} className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${CHIP_CLASS[chip.tone]}`}>{chip.label}</li>)}</ul>}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button type="button" onClick={() => onAnalyze?.(p)} disabled={!onAnalyze} title={!onAnalyze ? 'Canonical analysis is unavailable' : undefined} className={`min-h-9 ${CONTROL_RADIUS} border border-blue-500/50 px-3 text-xs text-blue-300 focus:ring-2 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40`}>Analyze with AI</button>
-        {primary && <button type="button" onClick={() => run(primary, primary === 'CLOSE_ROLL' ? (p.recommendation?.kind === 'roll-soon' ? 'roll' : 'close') : undefined)} className={`min-h-9 ${CONTROL_RADIUS} border border-teal-400/60 bg-teal-400/10 px-3 text-xs font-semibold text-white focus:ring-2 focus:ring-teal-400`}>{primary === 'CLOSE_ROLL' && p.recommendation?.kind === 'roll-soon' ? 'Roll Position' : ACTION_LABELS[primary] ?? primary}</button>}
-        <button type="button" aria-expanded={moreOpen} onClick={() => setMoreOpen(open => !open)} className={`min-h-9 ${CONTROL_RADIUS} border border-white/20 px-3 text-xs text-white focus:ring-2 focus:ring-teal-400`}>More ▾</button>
+        {actions.map(action => {
+          const isSuggested = action === suggested;
+          const mark = isSuggested ? 'border-teal-400/60 bg-teal-400/10 font-semibold' : '';
+          return action === 'CLOSE_ROLL' ? (
+            <span key={action} className="contents">
+              <button type="button" onClick={() => onExecute?.(p, action, 'close')} className={`min-h-9 ${CONTROL_RADIUS} border px-3 text-xs text-white focus:ring-2 focus:ring-teal-400 ${isSuggested && p.recommendation?.kind !== 'roll-soon' ? mark : 'border-white/20'}`}>Close Position</button>
+              <button type="button" onClick={() => onExecute?.(p, action, 'roll')} className={`min-h-9 ${CONTROL_RADIUS} border px-3 text-xs text-purple-300 focus:ring-2 focus:ring-purple-400 ${isSuggested && p.recommendation?.kind === 'roll-soon' ? 'border-purple-400 bg-purple-400/10 font-semibold' : 'border-purple-500/50'}`}>Roll Position</button>
+            </span>
+          ) : <button key={action} type="button" onClick={() => onExecute?.(p, action)} className={`min-h-9 ${CONTROL_RADIUS} border px-3 text-xs focus:ring-2 focus:ring-teal-400 ${isSuggested ? `${mark} text-white` : action === 'CUT_LOSSES' ? 'border-amber-500/50 text-amber-300' : 'border-white/20 text-white'}`}>{ACTION_LABELS[action] ?? action}</button>;
+        })}
+        {renderStopControl?.(p)}
+        <SalvageEntry position={p} />
         <span className="ml-auto"><IntentSelect position={p} onIntentChange={onIntentChange} /></span>
       </div>
-      {moreOpen && (
-        <div role="group" aria-label={`More actions for ${p.symbol}`} className="mt-2 space-y-2 rounded-lg border border-white/10 bg-white/[0.03] p-3">
-          <div className="flex flex-wrap gap-2">
-            {rest.map(action => action === 'CLOSE_ROLL' ? (
-              <span key={action} className="contents">
-                <button type="button" onClick={() => run(action, 'close')} className="min-h-8 rounded border border-white/20 px-2 text-xs text-white">Close Position</button>
-                <button type="button" onClick={() => run(action, 'roll')} className="min-h-8 rounded border border-purple-500/50 px-2 text-xs text-purple-300">Roll Position</button>
-              </span>
-            ) : <button key={action} type="button" onClick={() => run(action)} className={`min-h-8 rounded border px-2 text-xs ${action === 'CUT_LOSSES' ? 'border-amber-500/50 text-amber-300' : 'border-white/20 text-white'}`}>{ACTION_LABELS[action] ?? action}</button>)}
-            {primary === 'CLOSE_ROLL' && p.recommendation?.kind !== 'roll-soon' && <button type="button" onClick={() => run('CLOSE_ROLL', 'roll')} className="min-h-8 rounded border border-purple-500/50 px-2 text-xs text-purple-300">Roll Position</button>}
-            {primary === 'CLOSE_ROLL' && p.recommendation?.kind === 'roll-soon' && <button type="button" onClick={() => run('CLOSE_ROLL', 'close')} className="min-h-8 rounded border border-white/20 px-2 text-xs text-white">Close Position</button>}
-          </div>
-          {stopControl && <div>{stopControl}</div>}
-          <SalvageEntry position={p} />
-        </div>
-      )}
     </article>
   );
 }
