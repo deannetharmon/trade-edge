@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import Redis from 'ioredis';
+import { applyClose, type SnapshotClose } from '@/lib/portfolio-data/snapshotClose';
 
 const redis = new Redis(process.env.REDIS_URL!);
 
@@ -16,6 +17,7 @@ function redisKey(userId: string) {
 // not intraday).
 interface PositionSnapshot {
   date: string;          // YYYY-MM-DD
+  close?: SnapshotClose | null;
   dte: number;
   currentValue: number | null;
   pnl: number | null;
@@ -59,7 +61,7 @@ export async function POST(req: NextRequest) {
   const userId = (session.user as any).id;
   try {
     const body = await req.json();
-    const entries: { positionKey: string; snapshot: PositionSnapshot }[] = body?.entries ?? [];
+    const entries: { positionKey: string; snapshot: PositionSnapshot; close?: SnapshotClose | null }[] = body?.entries ?? [];
     if (!Array.isArray(entries) || entries.length === 0) {
       return NextResponse.json({ error: 'entries required' }, { status: 400 });
     }
@@ -70,9 +72,15 @@ export async function POST(req: NextRequest) {
     let added = 0;
     let skipped = 0;
 
-    for (const { positionKey, snapshot } of entries) {
+    for (const { positionKey, snapshot, close } of entries) {
       if (!positionKey || !snapshot?.date) { skipped++; continue; }
       const existing = store[positionKey] ?? [];
+      // LEAPS-SPARK-0003: a post-close entry records the day's closing reading beside the first reading; the first reading is never changed.
+      if (close && typeof close.capturedAt === 'string') {
+        const result = applyClose(existing, snapshot, close);
+        if (result.changed) { store[positionKey] = result.list; added++; } else skipped++;
+        continue;
+      }
       const alreadyHasToday = existing.some(s => s.date === snapshot.date);
       if (alreadyHasToday) { skipped++; continue; }
       store[positionKey] = [...existing, snapshot];

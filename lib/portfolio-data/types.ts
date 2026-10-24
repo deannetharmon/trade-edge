@@ -384,6 +384,8 @@ export interface PendingOrder {
 // real recorded values instead of a modeled estimate.
 export interface PositionSnapshot {
   date: string;          // YYYY-MM-DD, the day this snapshot was taken
+  /** LEAPS-SPARK-0003: the day's closing reading, recorded after the market closes; the fields below stay the first reading of the day. */
+  close?: import('./snapshotClose').SnapshotClose | null;
   dte: number;
   currentValue: number | null;
   // TE-0002: marketable "if I closed now" buyback value, same convention as

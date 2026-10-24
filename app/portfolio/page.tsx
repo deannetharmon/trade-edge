@@ -1,6 +1,7 @@
 // app/portfolio/page.tsx
 
 'use client';
+import { isAfterMarketCloseNy } from '@/lib/portfolio-data/snapshotClose';
 import { AppHeader } from '@/components/nav/AppHeader';
 import { THEMES, ACCENTS, Theme, Accent, LS_THEME, LS_ACCENT, getSavedTheme, getSavedAccent, applyAccent, injectAccentStyle } from '@/lib/theme';
 import { RsiStrip } from '@/components/RsiStrip';
@@ -342,8 +343,12 @@ function setDryRun(val: boolean) {
 async function captureSnapshotsIfNeeded(positions: Position[]): Promise<void> {
   if (positions.length === 0) return;
   const today = todayLocalDateString();
+  // LEAPS-SPARK-0003: after the close, also send the day's closing reading (the server keeps the first reading as it was and records this beside it).
+  const nowMs = Date.now();
+  const afterClose = isAfterMarketCloseNy(nowMs);
   const entries = positions.map(p => ({
     positionKey: p.key,
+    ...(afterClose ? { close: { currentValue: p.currentValue, netDelta: p.netDelta, stockPrice: p.stockPrice, capturedAt: new Date(nowMs).toISOString() } } : {}),
     snapshot: {
       date: today,
       // TE-0002 corrective round 2: full capture timestamp, so this
