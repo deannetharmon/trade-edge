@@ -31,11 +31,11 @@ const DAY_MS = 86400 * 1000;
 export type SummaryGroupKey = 'SHORT_PUTS' | 'SHORT_CALLS' | 'SPREADS' | 'LEAPS' | 'LONG_OPTIONS' | 'PMCC' | 'EQUITY' | 'OTHER';
 
 export const SUMMARY_GROUPS: ReadonlyArray<{ key: SummaryGroupKey; label: string; basis: 'credit' | 'cost' }> = [
-  { key: 'SHORT_PUTS', label: 'Short puts', basis: 'credit' },
-  { key: 'SHORT_CALLS', label: 'Short calls', basis: 'credit' },
-  { key: 'SPREADS', label: 'Credit spreads', basis: 'credit' },
-  { key: 'LEAPS', label: 'LEAPS', basis: 'cost' },
-  { key: 'LONG_OPTIONS', label: 'Long options', basis: 'cost' },
+  { key: 'SHORT_PUTS', label: 'CSP', basis: 'credit' },
+  { key: 'SHORT_CALLS', label: 'CC', basis: 'credit' },
+  { key: 'SPREADS', label: 'Spreads', basis: 'credit' },
+  { key: 'LEAPS', label: 'LEAP', basis: 'cost' },
+  { key: 'LONG_OPTIONS', label: 'Long Options', basis: 'cost' },
   { key: 'PMCC', label: 'PMCC', basis: 'cost' },
   { key: 'EQUITY', label: 'Equity', basis: 'cost' },
   { key: 'OTHER', label: 'Other', basis: 'cost' },

@@ -5,7 +5,7 @@
 // Wheel is an overlay on the trader's intent setting, not a structure, so a Wheel put counts under both CSP and Wheel.
 
 import type { Position } from '@/lib/portfolio-data/types';
-import { standaloneLongOptionLabel } from '@/lib/portfolio/positionStrategyFilter';
+import { summaryGroupForPosition } from './portfolioSummary';
 import type { StrategyChipId } from './types';
 
 export const STRATEGY_CHIPS: ReadonlyArray<{ id: StrategyChipId; label: string }> = [
@@ -21,32 +21,31 @@ export const STRATEGY_CHIPS: ReadonlyArray<{ id: StrategyChipId; label: string }
 
 const SPREAD_STRATEGIES = new Set(['BPS', 'BCS', 'IC']);
 
-/** The one structural bucket a position falls in. PMCC and every multi-leg structure count as Spreads. */
-export function structuralChipOf(position: Pick<Position, 'strategy' | 'legs' | 'isPmccShortLeg' | 'entryDte' | 'dte'>): 'csp' | 'cc' | 'long' | 'leap' | 'spreads' | 'pmcc' | 'other' {
-  const strategy = String(position.strategy ?? '').toUpperCase();
-  if (strategy === 'PMCC' || position.isPmccShortLeg) return 'pmcc';
-  if (SPREAD_STRATEGIES.has(strategy)) return 'spreads';
-  if (strategy === 'CSP') return 'csp';
-  if (strategy === 'CC') return 'cc';
-  const legs = position.legs ?? [];
-  if (legs.length > 1) return 'spreads';
-  if (legs.length === 1) {
-    const leg = legs[0];
-    if (leg.direction === 'Long') return standaloneLongOptionLabel(position as Pick<Position, 'legs' | 'entryDte' | 'dte'>)?.startsWith('LEAP') ? 'leap' : 'long';
-    if (leg.optionType === 'P') return 'csp';
-    return 'cc';
+/**
+ * The one structural bucket a position falls in. It reads the same classifier as the P/L tiles above the table (summaryGroupForPosition),
+ * so a chip count and its tile can never disagree. A PMCC short call counts under PMCC.
+ */
+export function structuralChipOf(position: Position): 'csp' | 'cc' | 'long' | 'leap' | 'spreads' | 'pmcc' | 'other' {
+  if (position.isPmccShortLeg) return 'pmcc';
+  switch (summaryGroupForPosition(position)) {
+    case 'SHORT_PUTS': return 'csp';
+    case 'SHORT_CALLS': return 'cc';
+    case 'SPREADS': return 'spreads';
+    case 'LEAPS': return 'leap';
+    case 'LONG_OPTIONS': return 'long';
+    case 'PMCC': return 'pmcc';
+    default: return 'other';
   }
-  return 'other';
 }
 
-export function matchesStrategyChip(position: Pick<Position, 'strategy' | 'legs' | 'isPmccShortLeg' | 'intent' | 'entryDte' | 'dte'>, chip: StrategyChipId): boolean {
+export function matchesStrategyChip(position: Position, chip: StrategyChipId): boolean {
   if (chip === 'all') return true;
   if (chip === 'wheel') return position.intent === 'wheel';
   return structuralChipOf(position) === chip;
 }
 
 /** Count per chip over the given positions (the caller passes the rows that already pass the other filters). */
-export function strategyChipCounts(positions: ReadonlyArray<Pick<Position, 'strategy' | 'legs' | 'isPmccShortLeg' | 'intent' | 'entryDte' | 'dte'>>): Record<StrategyChipId, number> {
+export function strategyChipCounts(positions: ReadonlyArray<Position>): Record<StrategyChipId, number> {
   const counts: Record<StrategyChipId, number> = { all: positions.length, csp: 0, cc: 0, long: 0, leap: 0, spreads: 0, pmcc: 0, wheel: 0 };
   for (const position of positions) {
     const structural = structuralChipOf(position);

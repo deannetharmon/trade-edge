@@ -764,12 +764,12 @@ describe('P/L summary strip', () => {
     render(<PositionsWorkspace model={twoModel} th={THEMES.dark} cashBalance={20000} />);
     const strip = screen.getByRole('region', { name: 'P/L by position type' });
     expect(within(strip).getByRole('button', { name: /Total/ })).toHaveTextContent('+$65');
-    expect(within(strip).getByRole('button', { name: /Credit spreads/ })).toHaveTextContent('1 need attention');
+    expect(within(strip).getByRole('button', { name: /Spreads/ })).toHaveTextContent('1 need attention');
     expect(strip).toHaveTextContent('Cash to deploy (no margin)');
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     expect(screen.getByText('2 of 2 option positions')).toBeInTheDocument();
-    await user.click(within(strip).getByRole('button', { name: /Credit spreads/ }));
-    expect(within(strip).getByRole('button', { name: /Credit spreads/ })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(within(strip).getByRole('button', { name: /Spreads/ }));
+    expect(within(strip).getByRole('button', { name: /Spreads/ })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText('1 of 1 option positions')).toBeInTheDocument();
     expect(within(strip).getByRole('button', { name: /Total/ })).toHaveTextContent('+$65');
   });

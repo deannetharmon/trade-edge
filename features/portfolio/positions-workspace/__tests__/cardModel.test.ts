@@ -72,7 +72,7 @@ describe('card content', () => {
   });
   it('a LEAP shows earnings only inside 30 days; a short-dated option keeps it for the whole life', () => {
     const day = (n: number) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
-    const leap = (e: number) => pos({ strategy: 'CALL', legs: [leg('Long', 'C')], entryPriceEffect: 'Debit', dte: 329, entryDte: 400, nextEarningsDate: day(e), expDate: day(329) } as Partial<Position>);
+    const leap = (e: number) => pos({ strategy: 'CALL', legs: [{ ...leg('Long', 'C'), symbol: 'UBER  270917C00067500' }], entryPriceEffect: 'Debit', dte: 329, entryDte: 400, nextEarningsDate: day(e), expDate: day(329) } as Partial<Position>);
     expect(buildPositionCard(leap(60), { pctOfTarget: null }).chips.some(x => x.id === 'earnings')).toBe(false);
     expect(buildPositionCard(leap(12), { pctOfTarget: null }).chips.some(x => x.id === 'earnings')).toBe(true);
     const near = pos({ nextEarningsDate: day(60), expDate: day(90), dte: 90 } as Partial<Position>);

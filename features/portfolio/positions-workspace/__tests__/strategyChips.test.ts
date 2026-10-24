@@ -5,8 +5,10 @@ import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
 import { chipFromLegacyStrategy, matchesStrategyChip, strategyChipCounts, structuralChipOf } from '../model/strategyChips';
 import { decodePreferences } from '../model/preferences';
 import { DEFAULT_FILTERS, matchesAnalysisFilters } from '../model/filters';
+import { positionInSummaryGroup } from '../model/portfolioSummary';
 
 const leg = (direction: 'Long' | 'Short', optionType: 'C' | 'P') => ({ symbol: 'x', optionType, strikePrice: 10, direction, quantity: 1, avgOpenPrice: 1, currentPrice: 1 }) as unknown as PositionLeg;
+const occ = (root: string, ymd: string, type: 'C' | 'P', strike: number, direction: 'Long' | 'Short') => ({ symbol: `${root.padEnd(6)}${ymd}${type}${String(Math.round(strike * 1000)).padStart(8, '0')}`, optionType: type, strikePrice: strike, direction, quantity: 1, avgOpenPrice: 1, currentPrice: 1 }) as unknown as PositionLeg;
 const pos = (o: Partial<Position>) => ({ strategy: 'PUT', legs: [], intent: 'income', ...o }) as unknown as Position;
 
 describe('structuralChipOf', () => {
@@ -22,24 +24,52 @@ describe('structuralChipOf', () => {
     expect(structuralChipOf(pos({ strategy: 'CALL', legs: [leg('Long', 'C')] }))).toBe('long');
     expect(structuralChipOf(pos({ strategy: 'PUT', legs: [leg('Long', 'P')] }))).toBe('long');
   });
-  it('BPS, BCS, IC and any multi-leg structure are Spreads; PMCC has its own chip', () => {
-    for (const strategy of ['BPS', 'BCS', 'IC']) expect(structuralChipOf(pos({ strategy }))).toBe('spreads');
-    expect(structuralChipOf(pos({ strategy: 'PMCC' }))).toBe('pmcc');
-    expect(structuralChipOf(pos({ strategy: 'UNKNOWN', legs: [leg('Short', 'P'), leg('Long', 'P')] }))).toBe('spreads');
+  it('BPS, BCS and IC are Spreads; an unrecognised structure is Other', () => {
+    for (const strategy of ['BPS', 'BCS', 'IC']) expect(structuralChipOf(pos({ strategy, legs: [occ('SPY', '261120', 'P', 500, 'Short'), occ('SPY', '261120', 'P', 495, 'Long')] }))).toBe('spreads');
+    // Anything the tiles file under Other (an unrecognised structure) is in All only, so chips and tiles never disagree.
+    expect(structuralChipOf(pos({ strategy: 'UNKNOWN', legs: [leg('Short', 'P'), leg('Long', 'P')] }))).toBe('other');
   });
   it('a position with no legs and an unknown strategy is in All only', () => {
     expect(structuralChipOf(pos({ strategy: 'UNKNOWN', legs: [] }))).toBe('other');
   });
 });
 
-describe('LEAP vs Long Options', () => {
-  it('a long call or put far out is a LEAP; a short-dated one stays in Long Options, never both', () => {
-    expect(structuralChipOf(pos({ strategy: 'CALL', legs: [leg('Long', 'C')], dte: 329, entryDte: 400 } as Partial<Position>))).toBe('leap');
-    expect(structuralChipOf(pos({ strategy: 'PUT', legs: [leg('Long', 'P')], dte: 28, entryDte: 45 } as Partial<Position>))).toBe('long');
-    const counts = strategyChipCounts([pos({ strategy: 'CALL', legs: [leg('Long', 'C')], dte: 329, entryDte: 400 } as Partial<Position>)]);
+describe('LEAP, PMCC and Long Options', () => {
+  const far = '270917'; const near = '261120';
+  it('a standalone long call far out is a LEAP; a short-dated long call or put stays in Long Options, never both', () => {
+    const leap = pos({ strategy: 'CALL', legs: [occ('UBER', far, 'C', 67.5, 'Long')] });
+    expect(structuralChipOf(leap)).toBe('leap');
+    expect(structuralChipOf(pos({ strategy: 'PUT', legs: [occ('MRNA', near, 'P', 140, 'Long')] }))).toBe('long');
+    const counts = strategyChipCounts([leap]);
     expect(counts.leap).toBe(1); expect(counts.long).toBe(0);
   });
+  it('a LEAP with a short call against it is a PMCC, and the short call alone is flagged as a PMCC leg', () => {
+    expect(structuralChipOf(pos({ strategy: 'PMCC', legs: [occ('UBER', far, 'C', 67.5, 'Long'), occ('UBER', near, 'C', 90, 'Short')] }))).toBe('pmcc');
+  });
   it('a saved PMCC filter migrates to the PMCC chip', () => { expect(chipFromLegacyStrategy('PMCC')).toBe('pmcc'); });
+});
+
+describe('chips reconcile with the P/L tiles', () => {
+  it('every chip count equals the matching tile group count, and every option lands in exactly one', () => {
+    const far = '270917'; const near = '261120';
+    const book = [
+      pos({ strategy: 'CSP', legs: [occ('TQQQ', near, 'P', 60, 'Short')] }),
+      pos({ strategy: 'PUT', legs: [occ('METU', near, 'P', 28.5, 'Short')] }),
+      pos({ strategy: 'CALL', legs: [occ('UBER', far, 'C', 67.5, 'Long')] }),
+      pos({ strategy: 'CALL', legs: [occ('NFLX', far, 'C', 70, 'Long')] }),
+      pos({ strategy: 'PUT', legs: [occ('MRNA', near, 'P', 140, 'Long')] }),
+      pos({ strategy: 'BPS', legs: [occ('SPY', near, 'P', 500, 'Short'), occ('SPY', near, 'P', 495, 'Long')] }),
+    ];
+    const counts = strategyChipCounts(book);
+    const tile = (g: Parameters<typeof positionInSummaryGroup>[1]) => book.filter(p => positionInSummaryGroup(p, g)).length;
+    expect(counts.csp).toBe(tile('SHORT_PUTS'));
+    expect(counts.cc).toBe(tile('SHORT_CALLS'));
+    expect(counts.leap).toBe(tile('LEAPS'));
+    expect(counts.long).toBe(tile('LONG_OPTIONS'));
+    expect(counts.spreads).toBe(tile('SPREADS'));
+    expect(counts.pmcc).toBe(tile('PMCC'));
+    expect(counts.csp + counts.cc + counts.leap + counts.long + counts.spreads + counts.pmcc).toBe(book.length);
+  });
 });
 
 describe('chips match, count, and migrate', () => {

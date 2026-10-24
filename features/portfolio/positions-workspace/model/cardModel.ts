@@ -18,7 +18,7 @@ import { netEdgeLive } from '@/lib/portfolio-data/acquisition';
 import { parseSymbolList } from './filters';
 
 export const LEAP_EARNINGS_WINDOW_DAYS = 30;
-const isLeapPosition = (p: Position) => structuralChipOf(p) === 'leap';
+const isLeapPosition = (p: Position) => structuralChipOf(p) === 'leap' || standaloneLongOptionLabel(p)?.startsWith('LEAP') === true;
 
 /** Dean's per-position sizing limit, as a percent of net liquidating value (Ian, 2026-10-23). */
 export const SIZING_LIMIT_PCT = 10;
