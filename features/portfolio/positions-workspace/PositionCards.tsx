@@ -77,7 +77,7 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
     <article aria-label={`${p.symbol} ${horizon ?? p.strategy} position`} className={`rounded-xl border border-l-4 ${th.border} ${EDGE_CLASS[card.bucket]} bg-white/[0.02] p-4`}>
       <div className="grid gap-x-4 gap-y-2 sm:grid-cols-[1fr_auto]">
         <div className="min-w-0">
-          <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-white">{p.symbol}<span className="rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">{horizon ?? p.strategy}</span></h3>
+          <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-white">{p.symbol}<span className="rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">{horizon ?? p.strategy}</span>{renderChart?.(p)}</h3>
           <p className={`mt-0.5 text-xs ${th.textMuted}`}>{detailLine(p)}</p>
           <p className="mt-2 flex flex-wrap items-center gap-2">
             <span data-testid="card-bucket" className={`rounded-full border px-2.5 py-0.5 text-xs font-bold ${BUCKET_CLASS[card.bucket]}`}>{card.bucket === 'Unjudged' ? 'No verdict' : card.bucket}</span>
@@ -116,7 +116,6 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
             </span>
           ) : <button key={action} type="button" onClick={() => onExecute?.(p, action)} className={`min-h-9 ${CONTROL_RADIUS} border px-3 text-xs focus:ring-2 focus:ring-teal-400 ${isSuggested ? `${mark} text-white` : action === 'CUT_LOSSES' ? 'border-amber-500/50 text-amber-300' : 'border-white/20 text-white'}`}>{ACTION_LABELS[action] ?? action}</button>;
         })}
-        {renderChart?.(p)}
         {!stopNotExpected(p) && renderStopControl?.(p)}
         <SalvageEntry position={p} />
         <button type="button" aria-expanded={detailOpen} onClick={() => setDetailOpen(open => !open)} className="ml-auto text-xs text-white/70 underline decoration-dotted underline-offset-2 hover:text-white">{detailOpen ? 'Hide detail' : 'Show detail'}</button>
