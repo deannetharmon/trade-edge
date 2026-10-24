@@ -55,17 +55,19 @@ export interface PositionCardsProps {
   onAnalyze?: (position: Position) => void;
   onIntentChange?: (key: string, intent: PositionIntent) => void;
   onRefresh?: () => void;
+  /** The same quick-chart link the table has, per ticker. */
+  renderChart?: (position: Position) => ReactNode;
   th: { textFaint: string; textMuted: string; border: string };
   emptyText: string;
 }
 
-export function PositionCards({ positions, order, pctOfTarget, netLiquidity, getManagementActions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, th, emptyText }: PositionCardsProps) {
+export function PositionCards({ positions, order, pctOfTarget, netLiquidity, getManagementActions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart, th, emptyText }: PositionCardsProps) {
   const cards = useMemo(() => order(positions.map(p => buildPositionCard(p, { pctOfTarget: pctOfTarget(p), netLiquidity }))), [positions, order, pctOfTarget, netLiquidity]);
   if (cards.length === 0) return <p role="status" className={`rounded-xl border ${th.border} p-6 text-center text-sm ${th.textFaint}`}>{emptyText}</p>;
-  return <div data-testid="position-cards" className="grid gap-3 lg:grid-cols-2">{cards.map(card => <CardItem key={card.key} card={card} th={th} actions={getManagementActions?.(card.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} onIntentChange={onIntentChange} onRefresh={onRefresh} />)}</div>;
+  return <div data-testid="position-cards" className="grid gap-3 lg:grid-cols-2">{cards.map(card => <CardItem key={card.key} card={card} th={th} actions={getManagementActions?.(card.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} onIntentChange={onIntentChange} onRefresh={onRefresh} renderChart={renderChart} />)}</div>;
 }
 
-function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh }: { card: PositionCard; th: PositionCardsProps['th']; actions: ActionType[]; onExecute?: PositionCardsProps['onExecute']; renderStopControl?: PositionCardsProps['renderStopControl']; onAnalyze?: PositionCardsProps['onAnalyze']; onIntentChange?: PositionCardsProps['onIntentChange']; onRefresh?: () => void }) {
+function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart }: { card: PositionCard; th: PositionCardsProps['th']; actions: ActionType[]; onExecute?: PositionCardsProps['onExecute']; renderStopControl?: PositionCardsProps['renderStopControl']; onAnalyze?: PositionCardsProps['onAnalyze']; onIntentChange?: PositionCardsProps['onIntentChange']; onRefresh?: () => void; renderChart?: (position: Position) => ReactNode }) {
   const p = card.position;
   const [detailOpen, setDetailOpen] = useState(false);
   const horizon = standaloneLongOptionLabel(p);
@@ -73,28 +75,28 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
   const pnlTone = card.pnl == null || Math.abs(card.pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : card.pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative;
   return (
     <article aria-label={`${p.symbol} ${horizon ?? p.strategy} position`} className={`rounded-xl border border-l-4 ${th.border} ${EDGE_CLASS[card.bucket]} bg-white/[0.02] p-4`}>
-      <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
+      <div className="grid gap-x-4 gap-y-2 sm:grid-cols-[1fr_auto]">
         <div className="min-w-0">
           <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-white">{p.symbol}<span className="rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">{horizon ?? p.strategy}</span></h3>
           <p className={`mt-0.5 text-xs ${th.textMuted}`}>{detailLine(p)}</p>
+          <p className="mt-2 flex flex-wrap items-center gap-2">
+            <span data-testid="card-bucket" className={`rounded-full border px-2.5 py-0.5 text-xs font-bold ${BUCKET_CLASS[card.bucket]}`}>{card.bucket === 'Unjudged' ? 'No verdict' : card.bucket}</span>
+            <span className="text-sm font-semibold text-white">{card.verdictLabel}</span>
+            {!p.recommendation && <button type="button" onClick={() => onRefresh?.()} disabled={!onRefresh} className="text-xs underline decoration-dotted underline-offset-2 disabled:opacity-40">Refresh</button>}
+          </p>
+          {card.reason && <p className={`mt-1 text-xs ${th.textFaint}`}>{card.reason}</p>}
+          {card.assignment && (
+            <p data-testid="card-assignment" className={`mt-1 text-xs ${th.textMuted}`}>
+              Assigned: {card.assignment.shares} sh{card.assignment.netPrice != null ? ` @ ${usd2(card.assignment.netPrice)} net` : ''}{card.assignment.underwaterNow != null ? <span className={SEMANTIC_TONE_CLASS.negative}>, {usd(card.assignment.underwaterNow)} now</span> : null}
+            </p>
+          )}
         </div>
-        <div className="text-right">
+        <div className="sm:max-w-[17rem] sm:text-right">
           <b data-testid="card-pnl" className={`block text-xl ${pnlTone}`}>{usd(card.pnl)}</b>
           <span className={`block text-[11px] ${card.unverifiedQuote ? 'text-amber-300' : th.textFaint}`}>{card.pnlNote}</span>
+          {card.chips.length > 0 && <ul aria-label="Signals" className="mt-2 flex flex-wrap gap-1.5 sm:justify-end">{card.chips.map(chip => <li key={chip.id} className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${CHIP_CLASS[chip.tone]}`}>{chip.label}</li>)}</ul>}
         </div>
-        <p className="col-span-2 mt-2 flex flex-wrap items-center gap-2">
-          <span data-testid="card-bucket" className={`rounded-full border px-2.5 py-0.5 text-xs font-bold ${BUCKET_CLASS[card.bucket]}`}>{card.bucket === 'Unjudged' ? 'No verdict' : card.bucket}</span>
-          <span className="text-sm font-semibold text-white">{card.verdictLabel}</span>
-          {!p.recommendation && <button type="button" onClick={() => onRefresh?.()} disabled={!onRefresh} className="text-xs underline decoration-dotted underline-offset-2 disabled:opacity-40">Refresh</button>}
-        </p>
-        {card.reason && <p className={`col-span-2 text-xs ${th.textFaint}`}>{card.reason}</p>}
       </div>
-      {card.assignment && (
-        <p data-testid="card-assignment" className={`mt-2 text-xs ${th.textMuted}`}>
-          Assigned: {card.assignment.shares} sh{card.assignment.netPrice != null ? ` @ ${usd2(card.assignment.netPrice)} net` : ''}{card.assignment.underwaterNow != null ? <span className={SEMANTIC_TONE_CLASS.negative}>, {usd(card.assignment.underwaterNow)} now</span> : null}
-        </p>
-      )}
-      {card.chips.length > 0 && <ul aria-label="Signals" className="mt-3 flex flex-wrap gap-1.5">{card.chips.map(chip => <li key={chip.id} className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${CHIP_CLASS[chip.tone]}`}>{chip.label}</li>)}</ul>}
       {detailOpen && <dl data-testid="card-detail" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">{card.stats.map(stat => {
         const warn = stat.label === '% of account' && card.overSizing;
         return <div key={stat.label} className={`rounded-lg border px-3 py-2 ${warn ? 'border-amber-400/60 bg-amber-400/10' : 'border-white/10 bg-white/[0.03]'}`}><dt className={`text-[10px] uppercase tracking-wider ${th.textFaint}`}>{stat.label}</dt><dd className={`text-sm font-bold ${warn ? 'text-amber-200' : 'text-white'}`}>{stat.value}</dd></div>;
@@ -111,6 +113,7 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
             </span>
           ) : <button key={action} type="button" onClick={() => onExecute?.(p, action)} className={`min-h-9 ${CONTROL_RADIUS} border px-3 text-xs focus:ring-2 focus:ring-teal-400 ${isSuggested ? `${mark} text-white` : action === 'CUT_LOSSES' ? 'border-amber-500/50 text-amber-300' : 'border-white/20 text-white'}`}>{ACTION_LABELS[action] ?? action}</button>;
         })}
+        {renderChart?.(p)}
         {!stopNotExpected(p) && renderStopControl?.(p)}
         <SalvageEntry position={p} />
         <button type="button" aria-expanded={detailOpen} onClick={() => setDetailOpen(open => !open)} className="ml-auto text-xs text-white/70 underline decoration-dotted underline-offset-2 hover:text-white">{detailOpen ? 'Hide detail' : 'Show detail'}</button>

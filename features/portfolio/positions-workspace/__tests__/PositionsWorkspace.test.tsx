@@ -820,4 +820,11 @@ describe('P/L summary strip', () => {
     await user.type(screen.getByLabelText('Search symbol'), 'ZZZZ');
     expect(screen.getByText('No positions match this chip or search.')).toBeInTheDocument();
   });
+  it('POSITIONS-CARDS-0001: each option card has the quick chart link for its ticker', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem('tradeedge:positions-view:v1', JSON.stringify({ setting: 'cards', last: 'cards' }));
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(within(screen.getByTestId('position-cards')).getAllByRole('button', { name: /Quick chart for/ }).length).toBeGreaterThan(0);
+  });
 });
