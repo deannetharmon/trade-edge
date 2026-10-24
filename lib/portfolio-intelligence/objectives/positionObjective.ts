@@ -434,6 +434,8 @@ export function cohereManagementIntentRecommendation(
     return {
       ...recommendation,
       supportingReasons,
+      // LABEL-CONSISTENCY-0001: the label follows the winning intent, so the bucket pill and the label can never disagree (was Close + 'Hold Position').
+      label: intentResult.label,
       managementIntent: intentResult,
     };
   }

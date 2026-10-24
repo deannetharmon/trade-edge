@@ -131,6 +131,16 @@ describe('the live recommendation is unchanged from before the refactor', () => 
   }
 });
 
+describe('LABEL-CONSISTENCY-0001: the label never contradicts the bucket', () => {
+  for (const g of GOLDEN) {
+    it(g.name, () => {
+      const r = scorePortfolioPositionObjective(g.pos, NOW, false, undefined).recommendation;
+      const intent = r.managementIntent?.intent;
+      if (intent && intent !== 'HOLD_POSITION' && intent !== 'DEPLOY_IDLE_CASH') expect(r.label).toBe(r.managementIntent!.label);
+    });
+  }
+});
+
 describe('verdict structure', () => {
   it('every reason names its rule id and the fact it reacted to', () => {
     const v = verdictOf(GOLDEN[2].pos);
