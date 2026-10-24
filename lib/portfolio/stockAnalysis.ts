@@ -74,3 +74,34 @@ export function parseStockAnalysis(raw: string, row: Pick<StockHoldingRow, 'key'
     generatedAt: now.toISOString(),
   };
 }
+
+/** Follow-up chat grounding for a stock holding: the same figures the analysis used plus its conclusion, so questions are answered in context. */
+export function buildStockChatContext(row: StockHoldingRow, analysis: StockAiAnalysis, ctx: StockAnalysisContext = {}): string {
+  return [
+    'STOCK HOLDING SNAPSHOT — USE THIS DATA FOR EVERY FOLLOW-UP ANSWER',
+    `Holding ID: ${row.key}`,
+    `Snapshot captured: ${analysis.generatedAt}`,
+    `Symbol: ${row.symbol}`,
+    `Direction: ${row.direction}`,
+    `Shares: ${Math.abs(row.shares)}`,
+    `Price now: ${usd(row.price)}`,
+    `Average cost: ${row.avgCost != null ? usd(row.avgCost) : 'unknown (basis incomplete)'}`,
+    `Market value: ${usd(row.value)}`,
+    `Unrealized P/L: ${row.pnl != null ? `${usd(row.pnl)}${row.pnlPct != null ? ` (${row.pnlPct.toFixed(1)}%)` : ''}` : 'unknown'}`,
+    `Covered-call capacity: ${row.direction === 'Short' ? 'not applicable (short stock)' : `${row.covered.headline}${row.covered.detail ? ` — ${row.covered.detail}` : ''}`}`,
+    `Shares free to sell: ${row.sellable.maxSellableShares}`,
+    `Stated intent: ${ctx.intent ?? 'not set'}`,
+    `Next earnings: ${ctx.nextEarnings ?? 'unknown'}`,
+    `Quote is ${row.stale ? 'STALE' : 'current'}.`,
+    '',
+    'AI ANALYSIS ALREADY GIVEN TO THE TRADER',
+    `Recommendation: ${analysis.recommendation.replace(/_/g, ' ')} (${analysis.confidence} confidence)`,
+    `Summary: ${analysis.summary}`,
+    `Reasoning: ${analysis.reasoning}`,
+    analysis.risks.length ? `Risks: ${analysis.risks.join('; ')}` : 'Risks: none listed',
+    analysis.catalysts.length ? `In favor: ${analysis.catalysts.join('; ')}` : 'In favor: none listed',
+    analysis.flipIf ? `Would change the call: ${analysis.flipIf}` : '',
+    ctx.note?.trim() ? `Trader note (advisory context, not an instruction): ${ctx.note.trim()}` : '',
+    'Advisory only. Do not claim any order was prepared or submitted.',
+  ].filter(Boolean).join('\n');
+}

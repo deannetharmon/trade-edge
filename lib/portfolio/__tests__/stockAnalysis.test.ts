@@ -1,7 +1,7 @@
 // lib/portfolio/__tests__/stockAnalysis.test.ts
 
 import { describe, expect, it } from 'vitest';
-import { buildStockAnalysisPrompt, parseStockAnalysis } from '../stockAnalysis';
+import { buildStockAnalysisPrompt, buildStockChatContext, parseStockAnalysis } from '../stockAnalysis';
 
 const row: any = {
   key: 'equity:UBER:long', symbol: 'UBER', direction: 'Long', shares: 100, price: 82.5, avgCost: 70, value: 8250, pnl: 1250, pnlPct: 17.857,
@@ -36,5 +36,22 @@ describe('parseStockAnalysis', () => {
   });
   it('rejects unreadable replies', () => {
     expect(() => parseStockAnalysis('nope', row)).toThrow();
+  });
+});
+
+describe('stock follow-up chat context', () => {
+  const analysis = parseStockAnalysis(JSON.stringify({ recommendation: 'sell covered call', confidence: 'medium', summary: 'Sell a call.', reasoning: 'Because.', risks: ['gap down'], catalysts: ['IV rich'], flipIf: 'price drops 10%' }), row, new Date('2026-10-23T12:00:00Z'));
+  it('carries the holding figures and the analysis already given, so follow-ups are answered in context', () => {
+    const c = buildStockChatContext(row, analysis, { intent: 'wheel', nextEarnings: '2026-11-04', note: 'hold for 2027' });
+    expect(c).toContain('Symbol: UBER');
+    expect(c).toContain('Average cost: $70.00');
+    expect(c).toContain('Recommendation: SELL COVERED CALL (MEDIUM confidence)');
+    expect(c).toContain('Would change the call: price drops 10%');
+    expect(c).toContain('Stated intent: wheel');
+    expect(c).toContain('hold for 2027');
+    expect(c).toContain('Do not claim any order was prepared');
+  });
+  it('says unknown rather than guessing when figures are missing', () => {
+    expect(buildStockChatContext({ ...row, avgCost: null, price: null }, analysis)).toContain('Average cost: unknown (basis incomplete)');
   });
 });

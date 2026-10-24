@@ -240,7 +240,7 @@ import { buildDisagreementEntry } from '@/lib/portfolio-facts/disagreementLog';
 import { updateClosedTracker, type ClosedTracker } from '@/lib/portfolio-facts/closedPositions';
 import { computeVerdict, type Verdict } from '@/lib/portfolio-facts/verdict';
 import { buildVerdictPromptBlock } from '@/lib/portfolio-facts/verdictPrompt';
-import { buildStockAnalysisPrompt, parseStockAnalysis, type StockAiAnalysis, type StockAnalysisContext } from '@/lib/portfolio/stockAnalysis';
+import { buildStockAnalysisPrompt, buildStockChatContext, parseStockAnalysis, type StockAiAnalysis, type StockAnalysisContext } from '@/lib/portfolio/stockAnalysis';
 import type { StockHoldingRow } from '@/features/portfolio/positions-workspace/model/stockHoldings';
 import { usePortfolioData } from '@/components/portfolio-data/PortfolioDataProvider';
 import { PercentPriceInputs, formatPct } from '@/features/portfolio/components/PercentPriceInputs';
@@ -5495,6 +5495,17 @@ function PositionAnalysisConversation({ analysis, pos, th }: { analysis: Positio
     initialContext={chatContext}
     systemPrompt={TRADING_CHAT_PROMPT}
     placeholder={`Ask about ${analysis.symbol}... e.g. "What would change this recommendation?"`}
+    th={th}
+  />;
+}
+
+// STOCK-ANALYZE-0002: the same follow-up chat the option analysis has, grounded in the holding's figures and the analysis just shown.
+function StockAnalysisConversation({ row, analysis, context, th }: { row: StockHoldingRow; analysis: StockAiAnalysis; context: StockAnalysisContext; th: typeof THEMES[Theme] }) {
+  return <ChatThread
+    key={`${row.key}:${analysis.generatedAt}`}
+    initialContext={buildStockChatContext(row, analysis, context)}
+    systemPrompt={TRADING_CHAT_PROMPT}
+    placeholder={`Ask about ${row.symbol} shares... e.g. "Should I sell a covered call here?"`}
     th={th}
   />;
 }
@@ -11431,6 +11442,7 @@ export default function PortfolioPage() {
                   return analyzePosition(position, trend, traderNote);
                 }}
                 onAnalyzeStock={(row, context) => analyzeStock(row, context)}
+                renderStockConversation={(row, analysis, context) => <StockAnalysisConversation row={row} analysis={analysis} context={context} th={th} />}
                 renderAnalysisConversation={(position, analysis) => <PositionAnalysisConversation analysis={analysis as PositionAnalysis} pos={position} th={th} />}
                 renderStopControl={position => <PortfolioStopControl pos={position} th={th} onRetry={fetchPositions} />}
                 onFindPmccShortCall={findPmccShortCall}

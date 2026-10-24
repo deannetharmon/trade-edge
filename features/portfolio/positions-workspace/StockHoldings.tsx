@@ -153,7 +153,7 @@ function Row({ row, th, chart, intentControl, earnings, gridStyle, savedNote, on
   );
 }
 
-export function StockHoldings({ earningsEnabled = false, intentEnabled = false, columnWidths, groups, quoteAsOf, th, storageKey, notes, onSaveNote, alerts, onSaveAlert, sellDeps, onAnalyze }: {
+export function StockHoldings({ earningsEnabled = false, intentEnabled = false, columnWidths, groups, quoteAsOf, th, storageKey, notes, onSaveNote, alerts, onSaveAlert, sellDeps, onAnalyze, renderConversation }: {
   /** Show each holding's next earnings date under its chart link (looked up from the broker's market metrics). */
   earningsEnabled?: boolean;
   /** POSITION-INTENT-0001: show the Hold / Wheel / Undecided control on each holding (saved in the same store as option intents). */
@@ -173,6 +173,8 @@ export function StockHoldings({ earningsEnabled = false, intentEnabled = false, 
   sellDeps?: SellStockDialogDeps;
   /** STOCK-ANALYZE-0001. Omit to hide the Analyze button. */
   onAnalyze?: (row: StockHoldingRow, context: StockAnalysisContext) => Promise<StockAiAnalysis>;
+  /** Follow-up questions about the analysis, in context (same "Continue with AI" section the option analysis has). */
+  renderConversation?: (row: StockHoldingRow, analysis: StockAiAnalysis, context: StockAnalysisContext) => ReactNode;
 }) {
   const rows = buildStockHoldingRows(groups);
   // Shares are not option positions, so their intent is saved under the account and holding key in the same store.
@@ -206,17 +208,20 @@ export function StockHoldings({ earningsEnabled = false, intentEnabled = false, 
   const [analysis, setAnalysis] = useState<StockAiAnalysis | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisContext, setAnalysisContext] = useState<StockAnalysisContext>({});
   const runAnalysis = async (row: StockHoldingRow) => {
     if (!onAnalyze) return;
     setAnalyzeRow(row); setAnalysis(null); setAnalysisError(null); setAnalysisLoading(true);
     const earnings = earningsBySymbol[row.symbol.toUpperCase()];
     const idKey = `${row.accountNumber}::${row.key}`;
     try {
-      const result = await onAnalyze(row, {
+      const context: StockAnalysisContext = {
         note: notes[storageKey(row.accountNumber, row.key)] ?? '',
         intent: intents[idKey] ?? null,
         nextEarnings: earnings?.date ? `${earnings.date}${earnings.estimated ? ' (estimated)' : ''}` : null,
-      });
+      };
+      const result = await onAnalyze(row, context);
+      setAnalysisContext(context);
       if (result.rowKey !== row.key) throw new Error('Analysis did not match this holding. Try again.');
       setAnalysis(result);
     } catch (e) { setAnalysisError(e instanceof Error ? e.message : 'Analysis failed'); }
@@ -230,8 +235,6 @@ export function StockHoldings({ earningsEnabled = false, intentEnabled = false, 
   const totals = buildStockTotals(rows);
   const nowMs = Date.now();
   const asOf = stockPricesAsOf({ rows, fallback: quoteAsOf, nowMs, marketOpen: derivePmccMarketSession(new Date(nowMs)) === 'open' });
-  const longRows = rows.filter(r => r.direction === 'Long');
-  const noneReach100 = longRows.length > 0 && longRows.every(r => r.covered.kind === 'needs-shares');
   const incomplete = rows.filter(r => !r.basisComplete);
 
   return (
@@ -276,8 +279,6 @@ export function StockHoldings({ earningsEnabled = false, intentEnabled = false, 
       <ul className="mt-3 space-y-2 text-xs">
         {asOf && asOf.staleCount > 0 && <li className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-amber-200">{asOf.staleCount} price{asOf.staleCount === 1 ? ' is' : 's are'} marked stale by the broker feed.</li>}
         {incomplete.length > 0 && <li className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-amber-200">{incomplete.map(r => r.symbol).join(', ')} {incomplete.length === 1 ? 'has' : 'have'} no complete cost basis (several lots), so cost and P/L are not shown.</li>}
-        {noneReach100 && <li className="rounded-lg border border-neutral-500/30 bg-neutral-500/10 px-3 py-2 text-neutral-200">{longRows.length === 1 ? 'This holding does not reach' : 'No holding reaches'} 100 shares, so covered calls are not available on {longRows.length === 1 ? 'it' : 'them'}.</li>}
-        <li className="rounded-lg border border-neutral-500/30 bg-neutral-500/10 px-3 py-2 text-neutral-300">No suggested action for stocks here: the recommendation engine covers options only.</li>
       </ul>
       {analyzeRow && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !analysisLoading) setAnalyzeRow(null); }}>
@@ -291,6 +292,7 @@ export function StockHoldings({ earningsEnabled = false, intentEnabled = false, 
                     <p><b>{analysis.recommendation.replace(/_/g, ' ')}</b> · {analysis.confidence} confidence</p>
                     <p>{analysis.summary}</p>
                     {analysis.flipIf && <p className="text-xs text-white/70"><b>Would change the call:</b> {analysis.flipIf}</p>}
+                    {renderConversation && <section aria-label={`AI follow-up conversation for ${analyzeRow.symbol} shares`} className="overflow-hidden rounded-lg border border-indigo-500/30 bg-indigo-500/[0.04]"><div className="px-4 pt-3"><p className="text-xs font-semibold text-indigo-200">Continue with AI</p><p className="mt-1 text-[10px] text-white/50">Ask a follow-up about this holding.</p></div>{renderConversation(analyzeRow, analysis, analysisContext)}</section>}
                     <details className="rounded border border-white/10 p-3 text-xs"><summary className="cursor-pointer font-semibold text-white/70">Show reasoning and risks</summary>
                       <p className="mt-3 text-white/70">{analysis.reasoning}</p>
                       {analysis.risks.length > 0 && <div className="mt-3"><b>Risks</b><ul className="list-disc pl-5">{analysis.risks.map(r => <li key={r}>{r}</li>)}</ul></div>}
