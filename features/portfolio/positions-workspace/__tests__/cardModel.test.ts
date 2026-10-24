@@ -149,12 +149,14 @@ describe('opt-in: a fresh browser lands on Table', () => {
     expect(isCardsDisabled(undefined)).toBe(false);
     expect(isCardsDisabled('1')).toBe(false);
   });
-  it('chips keep fixed rows and order: Wide market is always row 3, after risk flags', () => {
+  it('chips keep two fixed rows and order: status on row 1, flags (incl. Wide market) on row 2', () => {
     const d = (n: number) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
     const c = buildPositionCard(pos({ nextEarningsDate: d(5), expDate: d(30), dte: 30 } as Partial<Position>), { pctOfTarget: 60 });
     const rows = c.chips.map(x => x.row);
     expect([...rows].sort()).toEqual(rows);
-    for (const x of c.chips) if (x.id === 'wide' || x.id === 'verify') expect(x.row).toBe(3);
-    for (const x of c.chips) if (x.id === 'net-edge' || x.id === 'earnings' || x.id === 'no-stop') expect(x.row).toBe(2);
+    for (const x of c.chips) if (x.id === 'wide' || x.id === 'verify') expect(x.row).toBe(2);
+    for (const x of c.chips) if (x.id === 'net-edge' || x.id === 'earnings') expect(x.row).toBe(2);
+    for (const x of c.chips) if (x.id === 'no-stop' || x.id === 'moneyness' || x.id === 'target' || x.id === 'buffer') expect(x.row).toBe(1);
+    expect(Math.max(...c.chips.map(x => x.row))).toBeLessThanOrEqual(2);
   });
 });

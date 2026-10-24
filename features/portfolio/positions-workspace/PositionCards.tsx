@@ -91,12 +91,12 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
             </p>
           )}
         </div>
-        <div className="sm:max-w-[17rem] sm:text-right">
+        <div className="sm:max-w-[30rem] sm:text-right">
           <b data-testid="card-pnl" className={`block text-xl ${pnlTone}`}>{usd(card.pnl)}</b>
           <span className={`block text-[11px] ${card.unverifiedQuote ? 'text-amber-300' : th.textFaint}`}>{card.pnlNote}</span>
           {card.chips.length > 0 && (() => {
             const last = Math.max(...card.chips.map(c => c.row));
-            return <div aria-label="Signals" className="mt-2 space-y-1.5 sm:flex sm:flex-col sm:items-end">{([1, 2, 3] as const).filter(r => r <= last).map(r => <ul key={r} className="flex min-h-[22px] flex-wrap gap-1.5 sm:justify-end">{card.chips.filter(c => c.row === r).map(chip => <li key={chip.id} className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${CHIP_CLASS[chip.tone]}`}>{chip.label}</li>)}</ul>)}</div>;
+            return <div aria-label="Signals" className="mt-2 space-y-1.5 sm:flex sm:flex-col sm:items-end">{([1, 2] as const).filter(r => r <= last).map(r => <ul key={r} className="flex min-h-[22px] flex-wrap gap-1.5 sm:justify-end">{card.chips.filter(c => c.row === r).map(chip => <li key={chip.id} className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${CHIP_CLASS[chip.tone]}`}>{chip.label}</li>)}</ul>)}</div>;
           })()}
         </div>
       </div>

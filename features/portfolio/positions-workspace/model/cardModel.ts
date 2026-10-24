@@ -25,8 +25,8 @@ export const SIZING_LIMIT_PCT = 10;
 
 export type CardBucket = VerdictBucket | 'Unjudged';
 export type CardChipTone = 'bad' | 'warn' | 'ok' | 'info';
-/** row: chips always sit on the same line when present — 1 position status, 2 risk flags, 3 quote quality. */
-export interface CardChip { id: string; label: string; tone: CardChipTone; row: 1 | 2 | 3 }
+/** row: chips always sit on the same line when present — 1 position status, 2 flags (earnings, net edge, quote quality). Never more than two rows. */
+export interface CardChip { id: string; label: string; tone: CardChipTone; row: 1 | 2 }
 const CHIP_ORDER = ['moneyness', 'buffer', 'target', 'no-stop', 'earnings', 'net-edge', 'wide', 'verify'];
 
 /** Most urgent first. Unjudged (no recommendation) sorts last: it is unknown, not calm. */
@@ -129,9 +129,9 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
     chips.push({ id: 'target', label: `Target ${pct != null ? `${pct}% ` : ''}live`, tone: 'ok', row: 1 });
   }
   const stop = stopPresentationForPosition(p);
-  if (p.stopLossClassification === 'NO_STOP' && stop.label === 'No stop' && !stopNotExpected(p)) chips.push({ id: 'no-stop', label: 'No stop', tone: 'warn', row: 2 });
-  if (wide != null) chips.push({ id: 'wide', label: 'Wide market', tone: 'warn', row: 3 });
-  if (verifyPricing) chips.push({ id: 'verify', label: 'Verify price', tone: 'warn', row: 3 });
+  if (p.stopLossClassification === 'NO_STOP' && stop.label === 'No stop' && !stopNotExpected(p)) chips.push({ id: 'no-stop', label: 'No stop', tone: 'warn', row: 1 });
+  if (wide != null) chips.push({ id: 'wide', label: 'Wide market', tone: 'warn', row: 2 });
+  if (verifyPricing) chips.push({ id: 'verify', label: 'Verify price', tone: 'warn', row: 2 });
   const earnings = nextEarningsLine(p.nextEarningsDate, p.nextEarningsEstimated, p.expDate, undefined, p.nextEarningsUnderlying);
   // A LEAP is held for months, so earnings only matter when they are close (LEAP_EARNINGS_WINDOW_DAYS).
   if (earnings?.beforeExpiry && p.nextEarningsDate && !(isLeapPosition(p) && earnings.daysAway > LEAP_EARNINGS_WINDOW_DAYS)) {
