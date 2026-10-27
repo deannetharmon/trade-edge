@@ -72,6 +72,7 @@ import { PMCC_DECISION_POLICY_VERSION, pmccDecisionRankEligible, unavailablePmcc
 import { evaluateEventRisk, type EventRiskResult } from '@/lib/scans/eventRisk';
 import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
+import { excludedContractPremiumText, heldLeapOtmTag, selectLongLegBlockerLine } from '@/lib/scans/pmccHeldUnderwaterDisplay';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { TradeLookupModal } from '@/features/screener/components/TradeLookupModal';
 import { defaultLookupDeps } from '@/lib/tradeLookup/defaultDeps';
@@ -5638,7 +5639,7 @@ function PmccLegRejectionAudit({ rejections, summary }: {
     <details className="mt-3">
       <summary>View individual excluded contracts ({rejections.length})</summary>
       <ul className="mt-2 list-disc space-y-1 pl-5 text-[11px]">
-        {rejections.flatMap((leg, index) => leg.reasons.map((reason, reasonIndex) => <li key={`${index}-${reasonIndex}`}>{leg.role} {leg.expiration} {leg.strike}: {reason.message}</li>))}
+        {rejections.flatMap((leg, index) => leg.reasons.map((reason, reasonIndex) => <li key={`${index}-${reasonIndex}`}>{leg.role} {leg.expiration} {leg.strike}: {reason.message}{excludedContractPremiumText(leg)}</li>))}
       </ul>
     </details>
   </section>;
@@ -5785,13 +5786,15 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
     ? Math.max(result.price - pair.longLeg.strike, 0)
     : null;
   const profitAtCurrentPrice = totalPremium != null && longIntrinsicAtCurrentPrice != null && pair
-    ? totalPremium + longIntrinsicAtCurrentPrice - pair.longLeg.executablePrice
+    ? totalPremium + longIntrinsicAtCurrentPrice - (pair.metrics?.costBasisPerShare ?? pair.longLeg.executablePrice)
     : null;
   if (!pair) {
     // SCAN-ALIGN-0001D: held symbol whose shorts were all removed by earnings. The banner replaces the generic audit reasons; no action button.
     const earningsRemovedNotice = selectEarningsRemovedBanner(result.pmccEarningsRemoval);
     // SCAN-ALIGN-0001F: held symbol whose shorts were all removed by the delta window (earnings wins). One line plus a real reason; no action button.
     const deltaRemovedNotice = selectDeltaRemovedNotice(result.pmccDeltaRemoval, false, earningsRemovedNotice != null);
+    // PMCC-HELD-UNDERWATER-0001A: a long-leg blocker gets its own line, so an earnings or delta banner never hides it.
+    const longLegBlockerLine = earningsRemovedNotice || deltaRemovedNotice ? selectLongLegBlockerLine(result.pmccLegRejections, result.pmccPairingCounts) : null;
     return <article className={`rounded-xl border ${th.border} p-4`} data-testid="pmcc-audit-card">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-bold">{result.symbol}</span>
@@ -5810,6 +5813,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
               <p className={`mt-2 text-xs ${th.textMuted}`} data-testid="held-delta-removed-reason">{deltaRemovedNotice.reasonLine}</p>
             </>
           : <p className={`mt-2 text-xs ${th.textMuted}`}>{result.failReasons.join(' · ')}</p>}
+      {longLegBlockerLine && <p className={`mt-2 text-xs ${th.textMuted}`} data-testid="pmcc-long-leg-blocker">{longLegBlockerLine}</p>}
       <p className={`mt-2 text-[10px] ${th.textFaint}`}>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Readiness: no executable pair</p>
       {counts && <p className={`mt-2 text-[10px] ${th.textFaint}`}>Eligible long/short: {counts.eligibleLongLegs}/{counts.eligibleShortLegs} · evaluated {counts.combinationsEvaluated}/{counts.potentialCombinations} combinations · safety omitted {counts.combinationsOmittedBySafetyLimit} · retention omitted {counts.qualifiedPairsOmittedByRetention + counts.nearMissPairsOmittedByRetention}</p>}
       {result.pmccIncompleteAnalysis && <p className="mt-2 text-xs font-bold text-amber-400">Incomplete analysis: some combinations were not evaluated.</p>}
@@ -5852,6 +5856,9 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
         <span className="text-lg font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span>
         <ScreenerChartLink symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
         <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300">{heldLong ? 'HELD LEAP · SHORT-CALL CANDIDATE' : 'PMCC'}</span>
+        {heldLong && pair && heldLeapOtmTag(pair.longLeg.strike, result.price, pair.longLeg.delta) && (
+          <span className="rounded border border-amber-700 px-2 py-0.5 text-[9px] font-bold text-amber-300" data-testid="held-otm-leap-tag">{heldLeapOtmTag(pair.longLeg.strike, result.price, pair.longLeg.delta)}</span>
+        )}
         <span className={`text-[10px] ${th.textFaint}`}>Contract order {result.publishedOrder ?? 1}</span>
         {heldOutcome && <span className="rounded border border-amber-700 px-2 py-0.5 text-[9px] font-bold text-amber-300" data-testid="held-outcome-caption">{heldOutcome.caption}</span>}
         {heldRejected && <span className="rounded border border-neutral-700 px-2 py-0.5 text-[9px] font-bold text-neutral-400" data-testid="held-rejected-tag">Short call not eligible · {heldOutcome!.code}</span>}
@@ -5985,17 +5992,19 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
           <div className={`rounded-lg border ${th.border} p-3`}>
             <p className="text-xs font-bold mb-2">Structure economics</p>
             <div className="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
-              <div className="flex justify-between"><span className={th.textFaint}>Net debit</span><span>{money(metrics.netDebitPerShare)}/share · {money(metrics.netDebitPerShare * 100)}/contract</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>{metrics.costBasisPerShare != null ? 'Net cost (your cost − short bid)' : 'Net debit'}</span><span>{money(metrics.netDebitPerShare)}/share · {money(metrics.netDebitPerShare * 100)}/contract</span></div>
               <div className="flex justify-between"><span className={th.textFaint}>Strike width</span><span>{money(metrics.strikeWidth)}</span></div>
               <div className="flex justify-between"><span className={th.textFaint}>Long intrinsic / extrinsic</span><span>{money(metrics.longIntrinsicPerShare)} / {money(metrics.longExtrinsicPerShare)}</span></div>
-              <div className="flex justify-between"><span className={th.textFaint}>Width − debit</span><span>{money(metrics.widthMinusDebitPerShare)}</span></div>
-              <div className="flex justify-between"><span className={th.textFaint}>Credit / net debit</span><span>{metrics.shortCreditToNetDebitPct.toFixed(1)}%</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>{metrics.costBasisPerShare != null ? 'Width − cost' : 'Width − debit'}</span><span>{money(metrics.widthMinusDebitPerShare)}</span></div>
+              <div className="flex justify-between"><span className={th.textFaint}>{metrics.costBasisPerShare != null ? 'Credit / net cost' : 'Credit / net debit'}</span><span>{metrics.shortCreditToNetDebitPct.toFixed(1)}%</span></div>
               <div className="flex justify-between"><span className={th.textFaint}>Credit / long extrinsic</span><span>{metrics.shortCreditToLongExtrinsicPct?.toFixed(1) ?? '—'}%</span></div>
               <div className="flex justify-between"><span className={th.textFaint}>Net delta ideal range</span><span>{(DEFAULT_PMCC_LONG_DELTA_RANGE.min - DEFAULT_PMCC_SHORT_DELTA_RANGE.max).toFixed(2)}–{(DEFAULT_PMCC_LONG_DELTA_RANGE.max - DEFAULT_PMCC_SHORT_DELTA_RANGE.min).toFixed(2)}</span></div>
               <div className="flex justify-between"><span className={th.textFaint}>Total premium (level rolls)</span><span>{totalPremium == null ? '—' : money(totalPremium)}</span></div>
               <div className="flex justify-between"><span className={th.textFaint}>Profit if closed today</span><span>{profitAtCurrentPrice == null ? '—' : money(profitAtCurrentPrice)}</span></div>
             </div>
-            <p className={`text-[9px] ${th.textFaint} mt-2`}>Natural price: long ask {money(pair.longLeg.quote.ask)} − short bid {money(pair.shortLeg.quote.bid)} = {money(metrics.netDebitPerShare)}. Width−debit is structure economics, not maximum profit. Total premium/profit assume level rolls; delta range reflects default scan criteria.</p>
+            <p className={`text-[9px] ${th.textFaint} mt-2`}>{metrics.costBasisPerShare != null
+              ? <>Held cost basis: your cost {money(metrics.costBasisPerShare)} − short bid {money(pair.shortLeg.quote.bid)} = {money(metrics.netDebitPerShare)}. Breakeven = LEAP strike + net cost. Width − cost is the result per share if the short is assigned and the LEAP exercised (before fees, ignores the LEAP&apos;s remaining time value). </>
+              : <>Natural price: long ask {money(pair.longLeg.quote.ask)} − short bid {money(pair.shortLeg.quote.bid)} = {money(metrics.netDebitPerShare)}. Width−debit is structure economics, not maximum profit.</>} Total premium/profit assume level rolls; delta range reflects default scan criteria.</p>
           </div>
         )}
       </div>}

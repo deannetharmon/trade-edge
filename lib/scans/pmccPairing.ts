@@ -180,7 +180,11 @@ function filterLegs(
       else if (role === 'long' && oi < oiMin) reasons.push(reason('OPEN_INTEREST_BELOW_MINIMUM'));
     }
 
-    if (role === 'long' && !(leg.strike < underlyingPrice)) reasons.push(reason('LONG_NOT_ITM'));
+    // PMCC-HELD-UNDERWATER-0001A (Ian): the ITM gate is an ENTRY rule for choosing a LEAP to buy. A held
+    // long is an owned contract (delta, DTE, OI and quote are already exempt, and the decision layer treats
+    // held delta as a preference), so an OTM held LEAP must still reach short-call pairing. A new-entry long
+    // stays strict.
+    if (role === 'long' && !isHeldLong && !(leg.strike < underlyingPrice)) reasons.push(reason('LONG_NOT_ITM'));
     if (role === 'short' && !(leg.strike > underlyingPrice)) reasons.push(reason('SHORT_NOT_OTM'));
 
     const quote = evaluatePmccQuoteQuality(leg, criteria.quotePolicy, asOf, marketSession, role);
@@ -203,7 +207,7 @@ function filterLegs(
       // Every rejection must carry a reason code: a fall-through with none
       // recorded (previously openInterest == null) was a silent rejection.
       if (reasons.length === 0) reasons.push(reason('INSUFFICIENT_DATA'));
-      rejected.push({ role, occSymbol: leg.occSymbol, strike: leg.strike, expiration: leg.expiration, reasons });
+      rejected.push({ role, occSymbol: leg.occSymbol, strike: leg.strike, expiration: leg.expiration, reasons, bid: quote.bid, ask: quote.ask });
       continue;
     }
     seen.add(identity);
@@ -247,6 +251,25 @@ function pairMetrics(longLeg: PmccEligibleLeg, shortLeg: PmccEligibleLeg): PmccP
   };
 }
 
+/**
+ * PMCC-HELD-UNDERWATER-0001A (Alan): economics of a held LEAP are measured from what the owner PAID, not from
+ * today's market ask. Per share: net cost = avgOpen - short credit; breakeven = LEAP strike + net cost;
+ * width minus cost = (Ks - Kl) - net cost, which is the P/L if the short is assigned and the LEAP is
+ * exercised (before fees, ignoring the LEAP's residual time value). Intrinsic/extrinsic/net delta stay market-based.
+ */
+export function heldCostBasisMetrics(metrics: PmccPairMetrics, avgOpen: number, shortCredit: number): PmccPairMetrics {
+  const netCost = avgOpen - shortCredit;
+  const widthMinusCost = metrics.strikeWidth - netCost;
+  return {
+    ...metrics,
+    netDebitPerShare: netCost,
+    widthMinusDebitPerShare: widthMinusCost,
+    widthMinusDebitPctOfDebit: netCost > 0 ? (widthMinusCost / netCost) * 100 : 0,
+    shortCreditToNetDebitPct: netCost > 0 ? (shortCredit / netCost) * 100 : 0,
+    costBasisPerShare: avgOpen,
+  };
+}
+
 function evaluatePair(
   longLeg: PmccEligibleLeg,
   shortLeg: PmccEligibleLeg,
@@ -258,7 +281,7 @@ function evaluatePair(
   const isHeldLong = heldLongOccSymbols.has(longLeg.candidateId);
   if (longLeg.expiration <= shortLeg.expiration) failures.push(reason('LONG_EXPIRATION_NOT_LATER'));
   if (longLeg.strike >= shortLeg.strike) failures.push(reason('LONG_STRIKE_NOT_BELOW_SHORT'));
-  const metrics = pairMetrics(longLeg, shortLeg);
+  let metrics = pairMetrics(longLeg, shortLeg);
   if (metrics == null) failures.push(reason('INSUFFICIENT_DATA'));
   // These are entry-price tests for purchasing a new long call. A held
   // LEAPS PMCC submits only the short call, so reusing them would falsely
@@ -284,6 +307,11 @@ function evaluatePair(
       quantity: held?.quantity,
     });
     if (failure) failures.push(reason(failure.code, failure.message));
+    // PMCC-HELD-UNDERWATER-0001A: only a usable, single-lot, unit-sane basis reaches here (every
+    // COST_BASIS_UNAVAILABLE case is excluded), so the held economics can be measured from cost.
+    if (failure?.code !== 'COST_BASIS_UNAVAILABLE' && typeof held?.avgOpen === 'number' && Number.isFinite(held.avgOpen)) {
+      metrics = heldCostBasisMetrics(metrics, held.avgOpen, shortLeg.executablePrice);
+    }
   }
   // Every remaining failure, including debit >= width (SCAN-ALIGN-0001E), is a hard reject.
   const structurallyValid = failures.length === 0;

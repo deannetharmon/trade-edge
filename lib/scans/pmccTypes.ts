@@ -139,6 +139,10 @@ export interface PmccLegRejection {
   strike: number;
   expiration: string;
   reasons: PmccFailureReason[];
+  /** PMCC-HELD-UNDERWATER-0001A: quote carried through so an excluded contract still shows its premium.
+   * Optional so older restored sessions still validate. */
+  bid?: number | null;
+  ask?: number | null;
 }
 
 export interface PmccEligibleLeg {
@@ -171,6 +175,11 @@ export interface PmccPairMetrics {
   shortCreditToNetDebitPct: number;
   shortCreditToLongExtrinsicPct: number | null;
   netDelta: number;
+  /** PMCC-HELD-UNDERWATER-0001A (Alan): set ONLY on held-LEAP pairs whose cost basis was usable. When set,
+   * netDebitPerShare is the held net cost (this per-share cost minus the short credit), and widthMinusDebit*
+   * and shortCreditToNetDebitPct are computed from it, so breakeven = LEAP strike + cost - credit. Absent on
+   * new-entry pairs and on older restored sessions (market-ask economics, unchanged). */
+  costBasisPerShare?: number;
 }
 
 export interface PmccPairResult {
