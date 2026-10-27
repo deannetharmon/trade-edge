@@ -8,7 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '../pmccConfig';
 import { heldLongKey } from '../pmccHeldBreakeven';
 import { pairPmccCandidates } from '../pmccPairing';
-import { excludedContractPremiumText, heldIncomeSummary, heldLeapOtmTag, selectLongLegBlockerLine } from '../pmccHeldUnderwaterDisplay';
+import { evaluatePmccDecision } from '../pmccDecision';
+import { excludedContractPremiumText, heldIncomeSummary, heldLeapOtmTag, heldStrikeBelowLeapLine, selectLongLegBlockerLine } from '../pmccHeldUnderwaterDisplay';
 import { DEFAULT_HELD_PMCC_SHORT_DELTA, DEFAULT_HELD_PMCC_SHORT_DTE, DEFAULT_PMCC_DTE_RANGES, HELD_PMCC_SHORT_DTE_PRESETS } from '../pmccDteRanges';
 import { PMCC_SHORT_DELTA_BOUNDS } from '../pmccConfig';
 import { PMCC_DELTA_PRESETS } from '@/features/screener/components/PmccScanModal';
@@ -275,5 +276,49 @@ describe('0001B: held scan defaults', () => {
     });
     expect(result.qualifiedPairs).toHaveLength(1);
     expect(result.qualifiedPairs[0].shortLeg.dte).toBe(10);
+  });
+});
+
+describe('0001B: best income, trend, and the strike-below-LEAP line', () => {
+  const heldRun = (shorts: PmccChainLeg[], shortDelta = { min: 0.1, max: 0.2 }, dte = { shortMin: 7, shortMax: 45 }) => {
+    const long = nflxLong();
+    return pairPmccCandidates({
+      symbol: 'NFLX', underlyingPrice: 62.7, longLegs: [long], shortLegs: shorts,
+      criteria: { ...criteria, dte: { ...criteria.dte, ...dte }, shortDelta },
+      asOf, marketSession: 'open',
+      heldLongOccSymbols: new Set([heldLongKey(long.occSymbol!)]), heldLongBasis: basisFor(long, 20.85, 1),
+    });
+  };
+
+  it('ranks held pairs by premium per day, so a 40-day call that pays more per day beats a 10-day call', () => {
+    const result = heldRun([
+      leg('NFLX', { expiration: '2026-11-06', strike: 72.5, delta: 0.15, bid: 0.07, ask: 0.08 }),   // 10 DTE: 0.7 cents/day
+      leg('NFLX', { expiration: '2026-12-04', strike: 72.5, delta: 0.15, bid: 0.50, ask: 0.52 }),   // 38 DTE: ~1.3 cents/day
+    ]);
+    expect(result.qualifiedPairs.map(pair => pair.shortLeg.expiration)).toEqual(['2026-12-04', '2026-11-06']);
+  });
+
+  it('delta closeness only breaks ties when premium per day is equal', () => {
+    const result = heldRun([
+      leg('NFLX', { expiration: '2026-12-04', strike: 72.5, delta: 0.12, bid: 0.40, ask: 0.42 }),
+      leg('NFLX', { expiration: '2026-12-04', strike: 73, delta: 0.15, bid: 0.40, ask: 0.42 }),
+    ]);
+    expect(result.qualifiedPairs[0].shortLeg.strike).toBe(73);
+  });
+
+  it('a short below the LEAP strike is not qualified and the explanation names both strikes', () => {
+    const result = heldRun([leg('NFLX', { expiration: '2026-12-04', strike: 66, delta: 0.17, bid: 0.29, ask: 0.31 })]);
+    expect(result.qualifiedPairs).toHaveLength(0);
+    const pair = result.nearMissPairs.concat(result.qualifiedPairs)[0];
+    expect(heldStrikeBelowLeapLine(70, 66)).toContain('$66 strike is below your $70 LEAP strike');
+    expect(pair?.failureReasons.map(item => item.code) ?? []).toContain('LONG_STRIKE_NOT_BELOW_SHORT');
+  });
+
+  it('trend against the bullish thesis is a note for a held pair and still a block for a new entry', () => {
+    const held = heldRun([leg('NFLX', { expiration: '2026-12-04', strike: 72.5, delta: 0.15, bid: 0.40, ask: 0.42 })]).qualifiedPairs[0];
+    const heldDecision = evaluatePmccDecision({ pair: { ...held, entryMode: 'covered-short-call-against-held-leaps' }, criteria, marketSession: 'open', trendAgainst: true });
+    expect(heldDecision.gates.find(g => g.code === 'TREND_AGAINST_BULLISH_THESIS')?.status).toBe('warning');
+    const newDecision = evaluatePmccDecision({ pair: { ...held, entryMode: 'new-pmcc' }, criteria, marketSession: 'open', trendAgainst: true });
+    expect(newDecision.gates.find(g => g.code === 'TREND_AGAINST_BULLISH_THESIS')?.status).toBe('fail');
   });
 });

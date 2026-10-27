@@ -90,8 +90,13 @@ function stablePairOrder(a: PmccPairResult, b: PmccPairResult): number {
  * preferred delta band as an on/off eligibility gate. */
 function heldPmccPairOrder(criteria: PmccPairingCriteria) {
   const targetDelta = (criteria.shortDelta.min + criteria.shortDelta.max) / 2;
+  // PMCC-HELD-UNDERWATER-0001B (Dean, Ian): a held LEAP sells calls for income, so the best pair is the one that
+  // pays the most per day inside the trader's own delta and DTE window (premium in cents per calendar day, so a
+  // 10-day call and a 40-day call compare fairly). Delta closeness and the old tie-breakers only break ties.
+  const perDayCents = (pair: PmccPairResult): number => Math.round((pair.shortLeg.executablePrice * 100 / Math.max(1, pair.shortLeg.dte)) * 100);
   return (a: PmccPairResult, b: PmccPairResult): number =>
-    Math.abs(a.shortLeg.delta - targetDelta) - Math.abs(b.shortLeg.delta - targetDelta)
+    perDayCents(b) - perDayCents(a)
+    || Math.abs(a.shortLeg.delta - targetDelta) - Math.abs(b.shortLeg.delta - targetDelta)
     || (a.shortLeg.quote.spreadPct ?? Number.POSITIVE_INFINITY) - (b.shortLeg.quote.spreadPct ?? Number.POSITIVE_INFINITY)
     || (b.shortLeg.openInterest ?? 0) - (a.shortLeg.openInterest ?? 0)
     || b.shortLeg.executablePrice - a.shortLeg.executablePrice

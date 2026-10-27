@@ -78,3 +78,9 @@ export function heldIncomeSummary(input: {
     : null;
   return { collect, abovePrice, chanceAssigned, assignedOutcome };
 }
+
+/** Plain explanation for a held-LEAP short call that sits below the LEAP strike (it would not be covered). */
+export function heldStrikeBelowLeapLine(longStrike: number, shortStrike: number): string {
+  return `This call's $${shortStrike} strike is below your $${longStrike} LEAP strike, so it would not be covered. `
+    + `No call above $${longStrike} fits this scan's delta and DTE range. Widen the DTE range or lower the minimum delta to see more.`;
+}

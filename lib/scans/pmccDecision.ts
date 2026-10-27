@@ -192,7 +192,12 @@ export function evaluatePmccDecision(input: {
   }
 
   if (input.trendAgainst) {
-    gates.push(gate('TREND_AGAINST_BULLISH_THESIS', 'fail', "Trend is against PMCC's bullish thesis.", 'against', 'aligned or unknown', 'technicalAlignmentForStrategy'));
+    // PMCC-HELD-UNDERWATER-0001B (Ian): a bullish-trend test is an ENTRY rule for opening a new PMCC. A held LEAP
+    // sells short calls for income whatever the trend (a downtrend is when the owner most wants the premium), so
+    // for a held pair it is a note, not a block.
+    gates.push(held
+      ? gate('TREND_AGAINST_BULLISH_THESIS', 'warning', "Trend is against PMCC's bullish thesis. This does not block a call against a LEAP you already hold.", 'against', 'aligned or unknown', 'technicalAlignmentForStrategy')
+      : gate('TREND_AGAINST_BULLISH_THESIS', 'fail', "Trend is against PMCC's bullish thesis.", 'against', 'aligned or unknown', 'technicalAlignmentForStrategy'));
   }
 
   // PMCC-EARNINGS-PAST-0001 / SCAN-ALIGN-0001D -- one shared zone classifier

@@ -72,7 +72,7 @@ import { PMCC_DECISION_POLICY_VERSION, pmccDecisionRankEligible, unavailablePmcc
 import { evaluateEventRisk, type EventRiskResult } from '@/lib/scans/eventRisk';
 import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
-import { heldIncomeSummary, excludedContractPremiumText, heldLeapOtmTag, selectLongLegBlockerLine } from '@/lib/scans/pmccHeldUnderwaterDisplay';
+import { heldIncomeSummary, heldStrikeBelowLeapLine, excludedContractPremiumText, heldLeapOtmTag, selectLongLegBlockerLine } from '@/lib/scans/pmccHeldUnderwaterDisplay';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { TradeLookupModal } from '@/features/screener/components/TradeLookupModal';
 import { defaultLookupDeps } from '@/lib/tradeLookup/defaultDeps';
@@ -5864,6 +5864,9 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
         {heldLong && pair && heldLeapOtmTag(pair.longLeg.strike, result.price, pair.longLeg.delta) && (
           <span className="rounded border border-amber-700 px-2 py-0.5 text-[9px] font-bold text-amber-300" data-testid="held-otm-leap-tag">{heldLeapOtmTag(pair.longLeg.strike, result.price, pair.longLeg.delta)}</span>
         )}
+        {heldLong && pair.qualified && (result.publishedOrder ?? 1) === 1 && (
+          <span className="rounded border border-emerald-600 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold text-emerald-300" data-testid="held-best-income-tag">BEST INCOME</span>
+        )}
         <span className={`text-[10px] ${th.textFaint}`}>Contract order {result.publishedOrder ?? 1}</span>
         {heldOutcome && <span className="rounded border border-amber-700 px-2 py-0.5 text-[9px] font-bold text-amber-300" data-testid="held-outcome-caption">{heldOutcome.caption}</span>}
         {heldRejected && <span className="rounded border border-neutral-700 px-2 py-0.5 text-[9px] font-bold text-neutral-400" data-testid="held-rejected-tag">Short call not eligible · {heldOutcome!.code}</span>}
@@ -5901,7 +5904,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
   </span>
 )}</span></div>}
       </div>
-      {heldLong && !heldRejected && !heldOutcome?.notChecked && (() => {
+      {heldLong && pair.qualified && !heldRejected && !heldOutcome?.notChecked && (() => {
         // PMCC-HELD-UNDERWATER-0001B (Ian): the plain-English income line. What you collect comes first; the
         // assigned outcome is information only (it never gates or reorders anything).
         const income = heldIncomeSummary({
@@ -5916,6 +5919,9 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
           </div>
         );
       })()}
+      {heldLong && pair.failureReasons.some(item => item.code === 'LONG_STRIKE_NOT_BELOW_SHORT') && (
+        <p className="mt-2 text-[10px] text-amber-200" data-testid="held-strike-below-leap">{heldStrikeBelowLeapLine(pair.longLeg.strike, pair.shortLeg.strike)}</p>
+      )}
       {pmccDecision.gates.some(gate => gate.status === 'fail' || gate.status === 'unavailable') && (
         <p className="mt-2 text-[10px] text-red-300">
           Blocked because: {pmccDecision.gates.filter(gate => gate.status === 'fail' || gate.status === 'unavailable').map(gate => gate.explanation).join(' · ')}
