@@ -129,7 +129,7 @@ export function buildScanExportReport(
     { label: 'Ruleset version', value: String(session.schemaVersion) },
   ];
   if (uncoveredSkippedCount > 0) configuration.push(
-    { label: 'Held calls below LEAP strike', value: `${uncoveredSkippedCount} skipped (not covered)` },
+    { label: 'Held calls at or below LEAP strike', value: `${uncoveredSkippedCount} skipped (could call away the LEAP)` },
   );
   if (snapshot) configuration.push(
     { label: 'DTE range', value: `${snapshot.dteMin}–${snapshot.dteMax}` },

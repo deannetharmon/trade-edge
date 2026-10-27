@@ -5946,7 +5946,8 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
         ))}
       </div>}
       {result.earningsDate && <p className="mt-2 text-[10px] text-amber-300">Earnings: {result.earningsDate}</p>}
-      {pmccBestFit && (pmccBestFit.earningsBlocksRecommendation ? (
+      {/* PMCC-HELD-UNDERWATER-0001B7: Best Balanced ranks new entries toward delta .30; a held-LEAP call is ranked by income, so the panel would contradict the card. */}
+      {pmccBestFit && !heldLong && (pmccBestFit.earningsBlocksRecommendation ? (
         <p className="mt-2 rounded border border-amber-700 bg-amber-950/30 px-2 py-1.5 text-[10px] font-semibold text-amber-200">Earnings before short expiry — Best Fit is informational, not a recommendation.</p>
       ) : (
         <div className="mt-2 rounded border border-cyan-800 bg-cyan-950/20 px-2 py-1.5 text-[10px] text-cyan-100" aria-label={`Why this is Best ${pmccBestFit.profile[0].toUpperCase() + pmccBestFit.profile.slice(1)}`}>

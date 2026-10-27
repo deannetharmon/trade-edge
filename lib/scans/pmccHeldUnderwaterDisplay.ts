@@ -98,7 +98,7 @@ export function isUncoveredHeldShort(pair: {
 /** One line that replaces the skipped uncovered calls. */
 export function heldUncoveredSkippedLine(count: number, longStrike: number | null, nothingElseShown: boolean): string {
   const strikeText = longStrike != null ? `$${longStrike} ` : '';
-  const base = `${count} ${count === 1 ? 'call' : 'calls'} below your ${strikeText}LEAP strike ${count === 1 ? 'was' : 'were'} skipped (not covered).`;
+  const base = `${count} ${count === 1 ? 'call' : 'calls'} at or below your ${strikeText}LEAP strike ${count === 1 ? 'was' : 'were'} skipped (${count === 1 ? 'it' : 'they'} could call away your LEAP).`;
   return nothingElseShown
     ? `${base} No call above your ${strikeText}LEAP strike fits this scan's delta and DTE range. Widen the DTE range or lower the maximum delta toward 0 to see more.`
     : base;
