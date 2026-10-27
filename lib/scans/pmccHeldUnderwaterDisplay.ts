@@ -103,3 +103,20 @@ export function heldUncoveredSkippedLine(count: number, longStrike: number | nul
     ? `${base} No call above your ${strikeText}LEAP strike fits this scan's delta and DTE range. Widen the DTE range or lower the maximum delta toward 0 to see more.`
     : base;
 }
+
+/** Notes that are the same on every call against one held LEAP (shown once per LEAP, PMCC-HELD-UNDERWATER-0001B8). */
+export const HELD_LEAP_LEVEL_NOTE_CODES: ReadonlySet<string> = new Set([
+  'HELD_LONG_DELTA_PREFERENCE', 'TREND_AGAINST_BULLISH_THESIS', 'MARKET_CLOSED_QUOTES',
+]);
+
+/** Warning gates to print on a card. A repeat card for the same held LEAP drops the LEAP-level notes. */
+export function preferenceNoteGates<T extends { status: string; code: string }>(gates: readonly T[], hideLeapLevel: boolean): T[] {
+  return gates.filter(gate => gate.status === 'warning' && gate.code !== 'EARNINGS_AFTER_SHORT_EXPIRY'
+    && !(hideLeapLevel && HELD_LEAP_LEVEL_NOTE_CODES.has(gate.code)));
+}
+
+/** Premium per calendar day in cents: the held-call ranking key, reused to order the report. */
+export function heldPremiumPerDayCents(pair: { shortLeg: { executablePrice: number; dte: number } } | null | undefined): number {
+  if (!pair) return 0;
+  return Math.round((pair.shortLeg.executablePrice * 100 / Math.max(1, pair.shortLeg.dte)) * 100);
+}

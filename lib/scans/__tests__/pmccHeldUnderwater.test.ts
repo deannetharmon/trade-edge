@@ -9,7 +9,7 @@ import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '../pmccC
 import { heldLongKey } from '../pmccHeldBreakeven';
 import { pairPmccCandidates } from '../pmccPairing';
 import { evaluatePmccDecision } from '../pmccDecision';
-import { excludedContractPremiumText, heldIncomeSummary, heldLeapOtmTag, heldStrikeBelowLeapLine, heldUncoveredSkippedLine, isUncoveredHeldShort, selectLongLegBlockerLine } from '../pmccHeldUnderwaterDisplay';
+import { excludedContractPremiumText, heldIncomeSummary, heldLeapOtmTag, heldStrikeBelowLeapLine, heldPremiumPerDayCents, heldUncoveredSkippedLine, isUncoveredHeldShort, preferenceNoteGates, selectLongLegBlockerLine } from '../pmccHeldUnderwaterDisplay';
 import { DEFAULT_HELD_PMCC_SHORT_DELTA, DEFAULT_HELD_PMCC_SHORT_DTE, DEFAULT_PMCC_DTE_RANGES, HELD_PMCC_SHORT_DTE_PRESETS } from '../pmccDteRanges';
 import { PMCC_SHORT_DELTA_BOUNDS } from '../pmccConfig';
 import { PMCC_DELTA_PRESETS } from '@/features/screener/components/PmccScanModal';
@@ -393,5 +393,26 @@ describe('PMCC-HELD-UNDERWATER-0001B6 minimum % above price', () => {
       expect(strikes(result.qualifiedPairs)).toEqual([72, 74]);
       expect(strikes(result.nearMissPairs)).toEqual([68, 70]);
     }
+  });
+});
+
+describe('PMCC-HELD-UNDERWATER-0001B8 notes once per LEAP, rank order', () => {
+  const gates = [
+    { status: 'warning', code: 'HELD_LONG_DELTA_PREFERENCE' },
+    { status: 'warning', code: 'EXTRINSIC_RATIO' },
+    { status: 'warning', code: 'TREND_AGAINST_BULLISH_THESIS' },
+    { status: 'warning', code: 'MARKET_CLOSED_QUOTES' },
+    { status: 'warning', code: 'EARNINGS_AFTER_SHORT_EXPIRY' },
+    { status: 'pass', code: 'OTHER' },
+  ];
+  it('first card keeps every note; a repeat card keeps only the call-specific one', () => {
+    expect(preferenceNoteGates(gates, false).map(g => g.code)).toEqual(['HELD_LONG_DELTA_PREFERENCE', 'EXTRINSIC_RATIO', 'TREND_AGAINST_BULLISH_THESIS', 'MARKET_CLOSED_QUOTES']);
+    expect(preferenceNoteGates(gates, true).map(g => g.code)).toEqual(['EXTRINSIC_RATIO']);
+  });
+  it('premium per day ranks $0.19 over 24 days above $0.16 over 24 days', () => {
+    const a = { shortLeg: { executablePrice: 0.19, dte: 24 } };
+    const b = { shortLeg: { executablePrice: 0.16, dte: 24 } };
+    expect(heldPremiumPerDayCents(a)).toBeGreaterThan(heldPremiumPerDayCents(b));
+    expect(heldPremiumPerDayCents(null)).toBe(0);
   });
 });

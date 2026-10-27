@@ -3,7 +3,7 @@
 // Scan-session report view model.  This module is deliberately pure: it only
 // reads the completed scan snapshot and never asks the scanner, broker, or a
 // market-data provider for anything.
-import { isUncoveredHeldShort } from '@/lib/scans/pmccHeldUnderwaterDisplay';
+import { heldPremiumPerDayCents, isUncoveredHeldShort } from '@/lib/scans/pmccHeldUnderwaterDisplay';
 import type { ScreenResult } from '@/lib/scans/types';
 import { computeSessionAccounting, REASON_CODE_LABELS, type ScreenerScanSession } from '@/lib/screener/scanSession';
 
@@ -98,11 +98,18 @@ function candidateFor(result: ScreenResult): ScanExportCandidate {
       { label: 'Quote evidence', value: `${pmcc.longLeg.quote.status} / ${pmcc.shortLeg.quote.status}` },
     );
   }
-  const reasons = [
-    ...result.failReasons,
-    ...(result.pmccDecision?.gates.filter(g => g.status !== 'pass').map(g => `${g.code}: ${g.explanation}`) ?? []),
-    ...(pmcc?.failureReasons.map(reason => `${reason.code}: ${reason.message}`) ?? []),
+  // PMCC-HELD-UNDERWATER-0001B8: the same reason reached the report as plain text and as a coded line; print each once, coded first.
+  const coded = [
+    ...(result.pmccDecision?.gates.filter(g => g.status !== 'pass').map(g => ({ text: g.explanation, line: `${g.code}: ${g.explanation}` })) ?? []),
+    ...(pmcc?.failureReasons.map(reason => ({ text: reason.message, line: `${reason.code}: ${reason.message}` })) ?? []),
   ];
+  const seenText = new Set<string>();
+  const reasons: string[] = [];
+  for (const item of [...coded, ...result.failReasons.map(text => ({ text, line: text }))]) {
+    if (seenText.has(item.text)) continue;
+    seenText.add(item.text);
+    reasons.push(item.line);
+  }
   return { symbol: result.symbol, status, strategy: result.strategy, details, reasons: reasons.length ? reasons : ['No adverse decision reasons recorded in this scan snapshot.'] };
 }
 
@@ -117,7 +124,11 @@ export function buildScanExportReport(
   const included = scoped.filter(result => !isUncoveredHeldShort(result.pmccPair));
   const uncoveredSkippedCount = scoped.length - included.length;
   const candidates = included.map(candidateFor);
-  const heldLeapCandidates = candidates.filter(candidate => candidate.status === 'Potential short-call candidate');
+  // Held short calls are listed best income first (premium per day), the same order as the scan.
+  const heldRank = new Map<ScanExportCandidate, number>();
+  included.forEach((result, index) => heldRank.set(candidates[index], heldPremiumPerDayCents(result.pmccPair)));
+  const heldLeapCandidates = candidates.filter(candidate => candidate.status === 'Potential short-call candidate')
+    .sort((a, b) => (heldRank.get(b) ?? 0) - (heldRank.get(a) ?? 0));
   const qualified = candidates.filter(candidate => candidate.status === 'Qualified opportunity');
   const otherCandidates = candidates.filter(candidate => candidate.status === 'Other non-actionable candidate');
   const snapshot = session.ruleSnapshot;

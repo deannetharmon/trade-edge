@@ -72,7 +72,7 @@ import { PMCC_DECISION_POLICY_VERSION, pmccDecisionRankEligible, unavailablePmcc
 import { evaluateEventRisk, type EventRiskResult } from '@/lib/scans/eventRisk';
 import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
-import { heldIncomeSummary, heldStrikeBelowLeapLine, excludedContractPremiumText, heldLeapOtmTag, selectLongLegBlockerLine, isUncoveredHeldShort, heldUncoveredSkippedLine } from '@/lib/scans/pmccHeldUnderwaterDisplay';
+import { heldIncomeSummary, heldStrikeBelowLeapLine, excludedContractPremiumText, heldLeapOtmTag, selectLongLegBlockerLine, isUncoveredHeldShort, heldUncoveredSkippedLine, preferenceNoteGates } from '@/lib/scans/pmccHeldUnderwaterDisplay';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { TradeLookupModal } from '@/features/screener/components/TradeLookupModal';
 import { defaultLookupDeps } from '@/lib/tradeLookup/defaultDeps';
@@ -5596,6 +5596,8 @@ type ResultCardProps = {
   // PMCC-HELD-BREAKEVEN-0001B-1: held-LEAP outcome card. False/undefined = this pair's LEAP has no short
   // that cleared the floor. Refresh action reuses the page's existing refreshPortfolioRef path.
   heldLeapHasResults?: boolean;
+  /** PMCC-HELD-UNDERWATER-0001B8: a repeat card for the same held LEAP drops the LEAP-level notes. */
+  hideLeapNotes?: boolean;
   onRefreshPortfolio?: () => Promise<unknown>;
   cachedEntry?: RawScanEntry;
   existingPositions?: ExistingPosition[];
@@ -5695,7 +5697,7 @@ function PmccComparisonRow({ rank, result, th, isBest, children }: {
   );
 }
 
-function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, onRefreshPortfolio }: ResultCardProps) {
+function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, hideLeapNotes, onRefreshPortfolio }: ResultCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [heldRefreshState, setHeldRefreshState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
   const [showPairLookup, setShowPairLookup] = useState(false);
@@ -5927,9 +5929,9 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
           Blocked because: {pmccDecision.gates.filter(gate => gate.status === 'fail' || gate.status === 'unavailable').map(gate => gate.explanation).join(' · ')}
         </p>
       )}
-      {pmccDecision.gates.some(gate => gate.status === 'warning' && gate.code !== 'EARNINGS_AFTER_SHORT_EXPIRY') && (
+      {preferenceNoteGates(pmccDecision.gates, heldLong && hideLeapNotes === true).length > 0 && (
         <p className="mt-2 text-[10px] text-amber-300">
-          Preference notes (does not block): {pmccDecision.gates.filter(gate => gate.status === 'warning' && gate.code !== 'EARNINGS_AFTER_SHORT_EXPIRY').map(gate => gate.explanation).join(' · ')}
+          Preference notes (does not block): {preferenceNoteGates(pmccDecision.gates, heldLong && hideLeapNotes === true).map(gate => gate.explanation).join(' · ')}
         </p>
       )}
       {/* SCAN-ALIGN-0001D: ambient-tier tag only (no modal, no banner); never affects qualification or ranking. */}
@@ -12588,7 +12590,7 @@ export default function Home() {
                       className={isJumpHighlighted ? 'transition-colors duration-500 ring-2 ring-cyan-400 rounded-xl' : 'transition-colors duration-500'}
                     >
                       {isTopOpportunity && <p className="mb-1 text-[9px] font-bold text-emerald-400" data-testid="top-opportunity-marker">★ Top opportunity — see Best Opportunities above</p>}
-                      <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} onTradeCsp={setCspTradeResult} onTradeCc={openCcFromScan} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions}
+                      <ResultCard hideLeapNotes={r.pmccPair?.entryMode === 'covered-short-call-against-held-leaps' && filteredQualified.find(q => q.symbol === r.symbol && q.pmccPair?.entryMode === 'covered-short-call-against-held-leaps') !== r} result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} onTradeCsp={setCspTradeResult} onTradeCc={openCcFromScan} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions}
                         pmccBestFit={pmccBestFitWinner?.result === r ? { profile: pmccBestFitProfile, score: pmccBestFitWinner.score, runnerUp: pmccBestFitRanked[1]?.result ?? null, earningsBlocksRecommendation: pmccEarningsBlocksBestFit(r) } : undefined} />
                       {(filteredOiByResult.get(r)?.protectiveLegWarnings ?? []).map((w, wi) => <p key={wi} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">⚠ {w}</p>)}
                     </div>
@@ -12894,8 +12896,9 @@ export default function Home() {
                                   itemLabel={heldLeapCandidatesOnly ? 'short-call candidate' : 'near-miss structure'}
                                   summaryLine={heldSummaryOwner.get(symbol) === 'near-miss' ? heldPmccPlan?.summaryBySymbol.get(symbol) : null}
                                   defaultOpen={heldLeapCandidatesOnly} borderClassName={th.border}>
-                                  {group.map(result => (
+                                  {group.map((result, groupIndex) => (
                                     <PmccResultCard key={result.candidateId} result={result} th={th} rules={runtimeStockRules}
+                                      hideLeapNotes={groupIndex > 0 || filteredQualified.some(q => q.symbol === result.symbol && q.pmccPair?.entryMode === 'covered-short-call-against-held-leaps')}
                                       heldLeapHasResults={result.candidateId != null && heldPmccPlan?.leapHasResultsIds.has(result.candidateId) === true}
                                       onRefreshPortfolio={refreshHeldPortfolio} />
                                   ))}
