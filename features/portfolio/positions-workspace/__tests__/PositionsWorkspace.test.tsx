@@ -827,6 +827,15 @@ describe('P/L summary strip', () => {
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     expect(within(screen.getByTestId('position-cards')).getAllByRole('button', { name: /Quick chart for/ }).length).toBeGreaterThan(0);
   });
+  it('POS-CARD-PRICE-0001: each option card shows the underlying price next to the symbol', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem('tradeedge:positions-view:v1', JSON.stringify({ setting: 'cards', last: 'cards' }));
+    render(<PositionsWorkspace model={model} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    const prices = within(screen.getByTestId('position-cards')).getAllByTestId('card-stock-price');
+    expect(prices.length).toBeGreaterThan(0);
+    expect(prices[0]).toHaveTextContent(/^\$\d[\d,]*\.\d{2}$/);
+  });
   it('STOCK-CHIP: stock holdings count under All and their own Stock chip, and the chip shows only the stocks', async () => {
     const user = userEvent.setup();
     window.localStorage.setItem('tradeedge:positions-view:v1', JSON.stringify({ setting: 'cards', last: 'cards' }));

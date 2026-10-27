@@ -77,7 +77,7 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
     <article aria-label={`${p.symbol} ${horizon ?? p.strategy} position`} className={`rounded-xl border border-l-4 ${th.border} ${EDGE_CLASS[card.bucket]} bg-white/[0.02] p-4`}>
       <div className="grid gap-x-4 gap-y-2 sm:grid-cols-[1fr_auto]">
         <div className="min-w-0">
-          <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-white">{p.symbol}<span className="rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">{horizon ?? p.strategy}</span>{renderChart?.(p)}</h3>
+          <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-white">{p.symbol}<span className="rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">{horizon ?? p.strategy}</span>{p.stockPrice != null && Number.isFinite(p.stockPrice) && p.stockPrice > 0 && <span data-testid="card-stock-price" className={`text-sm font-semibold ${th.textMuted}`} title="Underlying price (the quote behind the OTM and buffer figures)">{usd2(p.stockPrice)}</span>}{renderChart?.(p)}</h3>
           <p className={`mt-0.5 text-xs ${th.textMuted}`}>{detailLine(p)}</p>
           <p className="mt-2 flex flex-wrap items-center gap-2">
             <span data-testid="card-bucket" className={`rounded-full border px-2.5 py-0.5 text-xs font-bold ${BUCKET_CLASS[card.bucket]}`}>{card.bucket === 'Unjudged' ? 'No verdict' : card.bucket}</span>
