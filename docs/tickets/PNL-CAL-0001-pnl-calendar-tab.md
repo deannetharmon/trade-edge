@@ -31,5 +31,5 @@ A new Portfolio sub tab, "P/L Calendar", after Balances. Two cards:
 ## Known limits
 
 - The Trade Log covers the active broker account's last 12 months; the first month is marked partial when the window starts mid-month.
-- Stock sales are not in the Trade Log, so they are not in the calendar.
+- Stock sales are not in the Trade Log; PNL-CAL-0002 adds them to the calendar (not to Performance).
 - The baseline needs stored balance history (filled whenever the Balances tab is opened); with none stored, the calendar still shows.

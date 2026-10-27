@@ -67,6 +67,31 @@ describe('PnlCalendarTab', () => {
     expect(screen.queryByText(/Goal achieved/)).not.toBeInTheDocument();
   });
 
+  it('PNL-CAL-0002: counts realized share P/L with the option trades, notes it, and warns about shares it could not value', async () => {
+    const lot = { id: 'l1', symbol: 'META', openDate: '2026-09-20', closeDate: '2026-10-09', shares: 10, side: 'LONG' as const, openPrice: 700, closePrice: 730, fees: 0, pnl: 300 };
+    loadClosedTradesMock.mockResolvedValue({
+      trades: TRADES, unmatchedClosures: [], windowFrom: '2025-10-27', accountNumber: 'A', equityLots: [lot],
+      equityUnmatched: [{ symbol: 'SOXL', underlying: 'SOXL', executedAt: '2026-10-12T15:08:00.000+0000', quantity: 5, transactionId: 'x', reason: 'no purchase' }],
+    });
+    render(<PnlCalendarTab />);
+    await screen.findByTestId('month-total');
+    expect(screen.getByTestId('month-total')).toHaveTextContent('+$1,883'); // 1,583 from options + 300 from shares
+    expect(screen.getByTestId('day-2026-10-09')).toHaveTextContent('+$2.1k'); // 1,800 + 300
+    expect(screen.getByTestId('day-2026-10-09')).toHaveAttribute('aria-label', expect.stringContaining('including +$300 from shares'));
+    expect(screen.getByTestId('share-note')).toHaveTextContent('Includes 1 share sale');
+    expect(screen.getByTestId('share-unmatched')).toHaveTextContent('SOXL');
+  });
+
+  it('the left-out footer counts only the viewed month, matching the days shown', async () => {
+    const incompleteSep = { ...trade('2026-09-20', 900), reconstructionStatus: 'INCOMPLETE' as const };
+    loadClosedTradesMock.mockResolvedValue({ trades: [...TRADES, incompleteSep], unmatchedClosures: [], windowFrom: '2025-10-27', accountNumber: 'A' });
+    render(<PnlCalendarTab />);
+    await screen.findByTestId('month-total');
+    expect(screen.queryByText(/Left out, as on Performance/)).not.toBeInTheDocument(); // the incomplete trade closed in September
+    fireEvent.click(screen.getByLabelText('Previous month'));
+    expect(screen.getByText(/Left out, as on Performance: 0 excluded by you, 1 incomplete/)).toBeInTheDocument();
+  });
+
   it('shows the load error instead of an empty calendar', async () => {
     loadClosedTradesMock.mockRejectedValue(new Error('Session expired'));
     render(<PnlCalendarTab />);

@@ -2,14 +2,16 @@
 //
 // PNL-CAL-0001: the Portfolio "P/L Calendar" sub tab. A monthly goal card (locked-in profit against a target percent of the month's
 // starting net liquidating value) over a Sunday-first calendar of locked-in profit per day, with week totals and month navigation.
-// Locked-in = realized: closed trades from the Trade Log (same complete, not-excluded records as Performance), by close date.
-// Open (unrealized) P/L is not in any figure here. Reads the stored daily balance history for the baseline; nothing is written.
+// Locked-in = realized: closed option trades from the Trade Log (same complete, not-excluded records as Performance) plus realized P/L on
+// shares (PNL-CAL-0002), by close date, so every instrument is counted. Open (unrealized) P/L is not in any figure here. Reads the stored
+// daily balance history for the baseline; nothing is written.
 
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { loadClosedTrades, type LoadedClosedTrades } from '../positions-workspace/cycleTradesLoader';
 import { todayNewYork } from '@/lib/portfolio-data/balancePerformance';
+import type { EquityRealizedLot } from '@/lib/tradeLog/equityRealized';
 import {
   buildMonthCalendar, buildMonthlyGoal, buildPace, formatCellMoney, formatSignedMoney, formatSignedPct, monthBaseline, monthOf, shiftMonth,
 } from '@/lib/pnlCalendar/buildPnlCalendar';
@@ -19,6 +21,7 @@ const DEFAULT_TARGET_PCT = 5;
 const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 
 const tone = (n: number | null) => (n == null ? 'text-white/40' : n >= 0 ? 'text-emerald-400' : 'text-red-400');
+const NO_LOTS: EquityRealizedLot[] = [];
 
 function readTarget(): number {
   try {
@@ -56,14 +59,17 @@ export default function PnlCalendarTab() {
   }, []);
 
   const trades = loaded?.trades ?? [];
-  const calendar = useMemo(() => buildMonthCalendar(trades, month), [trades, month]);
+  const equityLots = loaded?.equityLots ?? NO_LOTS;
+  const calendar = useMemo(() => buildMonthCalendar(trades, month, equityLots), [trades, month, equityLots]);
   const baseline = useMemo(() => monthBaseline(history, month), [history, month]);
   const goal = useMemo(() => buildMonthlyGoal({ realized: calendar.total, baseline, targetPct, month, today }), [calendar.total, baseline, targetPct, month, today]);
-  const pace = useMemo(() => buildPace(trades, today, monthBaseline(history, monthOf(today))), [trades, history, today]);
+  const pace = useMemo(() => buildPace(trades, today, monthBaseline(history, monthOf(today)), equityLots), [trades, history, today, equityLots]);
 
   const earliest = loaded ? monthOf(loaded.windowFrom) : month;
   const partialStart = loaded != null && month === earliest && loaded.windowFrom.slice(8, 10) !== '01';
   const unmatched = (loaded?.unmatchedClosures ?? []).filter(u => String(u.executedAt).slice(0, 7) === month).length;
+  const shareUnmatched = (loaded?.equityUnmatched ?? []).filter(u => String(u.executedAt).slice(0, 7) === month);
+  const shareUnmatchedSymbols = Array.from(new Set(shareUnmatched.map(u => u.symbol))).join(', ');
   const barPct = goal.progressPct == null ? 0 : Math.max(0, Math.min(100, goal.progressPct));
 
   const changeTarget = (raw: string) => {
@@ -140,6 +146,14 @@ export default function PnlCalendarTab() {
             <div className="mt-3 space-y-1 text-[11px] text-white/40">
               {partialStart && <p>History starts {loaded.windowFrom}; earlier days of this month are not included.</p>}
               {unmatched > 0 && <p className="text-amber-300/80">{unmatched} closing {unmatched === 1 ? 'transaction' : 'transactions'} this month could not be matched to an opening trade, so this month may be understated.</p>}
+              {shareUnmatched.length > 0 && (
+                <p className="text-amber-300/80" data-testid="share-unmatched">
+                  {shareUnmatched.length} share {shareUnmatched.length === 1 ? 'transaction' : 'transactions'} this month ({shareUnmatchedSymbols}) could not be matched to a purchase in the last 12 months, so the cost basis is unknown and {shareUnmatched.length === 1 ? 'it is' : 'they are'} not in this month.
+                </p>
+              )}
+              {calendar.stockSales > 0 && (
+                <p data-testid="share-note">Includes {calendar.stockSales} share {calendar.stockSales === 1 ? 'sale' : 'sales'} (stocks and ETFs, first-in first-out cost, net of fees): {formatSignedMoney(calendar.stockPnl)}.</p>
+              )}
               {(calendar.excludedByUser > 0 || calendar.incomplete > 0) && (
                 <p>Left out, as on Performance: {calendar.excludedByUser} excluded by you, {calendar.incomplete} incomplete.</p>
               )}
@@ -163,7 +177,7 @@ function WeekRow({ week, today }: { week: ReturnType<typeof buildMonthCalendar>[
             : (d.pnl as number) >= 0 ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-red-500/40 bg-red-500/10 text-red-300';
         return (
           <div key={d.date} data-testid={`day-${d.date}`}
-            aria-label={has ? `${d.date}: ${formatSignedMoney(d.pnl as number)} from ${d.trades} ${d.trades === 1 ? 'trade' : 'trades'}` : d.date}
+            aria-label={has ? `${d.date}: ${formatSignedMoney(d.pnl as number)} from ${d.trades} ${d.trades === 1 ? 'trade' : 'trades'}${d.stockPnl != null ? `, including ${formatSignedMoney(d.stockPnl)} from shares` : ''}` : d.date}
             className={`flex min-h-[68px] flex-col justify-between rounded-lg border p-2 ${cls} ${d.date === today ? 'ring-1 ring-teal-400' : ''}`}>
             <span className="text-[11px] text-white/50">{d.day}</span>
             {has && <span className="text-sm font-semibold">{formatCellMoney(d.pnl as number)}</span>}

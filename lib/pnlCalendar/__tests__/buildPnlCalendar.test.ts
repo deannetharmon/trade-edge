@@ -5,7 +5,12 @@ import {
   buildMonthCalendar, buildMonthlyGoal, buildPace, formatCellMoney, formatSignedMoney, formatSignedPct, monthBaseline, shiftMonth,
 } from '../buildPnlCalendar';
 import { buildPerformanceReport } from '../../tradeLog/performanceMetrics';
+import type { EquityRealizedLot } from '../../tradeLog/equityRealized';
 import type { ClosedTrade } from '../../tradeLog/types';
+
+const lot = (symbol: string, closeDate: string, pnl: number, over: Partial<EquityRealizedLot> = {}): EquityRealizedLot => ({
+  id: `${symbol}-${closeDate}-${pnl}`, symbol, openDate: '2026-09-01', closeDate, shares: 10, side: 'LONG', openPrice: 100, closePrice: 110, fees: 0, pnl, ...over,
+});
 
 let seq = 0;
 const trade = (closeDate: string, pnl: number, over: Partial<ClosedTrade> = {}): ClosedTrade => ({
@@ -76,6 +81,62 @@ describe('buildMonthCalendar', () => {
     expect(buildMonthCalendar([], '2026-08').weeks).toHaveLength(6); // Aug 2026 starts on a Saturday
     expect(buildMonthCalendar([], '2026-02').weeks).toHaveLength(4);
     expect(buildMonthCalendar([], '2026-02').daysInMonth).toBe(28);
+  });
+});
+
+describe('PNL-CAL-0002: share P/L in the calendar', () => {
+  // The October 2026 gap: options only (+$660 here) plus a META share sale on the 9th that the option-only Trade Log never saw.
+  const options = [trade('2026-10-01', -112), trade('2026-10-05', 49), trade('2026-10-06', 401), trade('2026-10-12', 171), trade('2026-10-13', -158), trade('2026-10-19', 73), trade('2026-10-21', 122), trade('2026-10-27', 114)];
+  const meta = lot('META', '2026-10-09', 1761);
+
+  it('puts a share sale on its close day and adds it to the day, the week and the month', () => {
+    const cal = buildMonthCalendar(options, '2026-10', [meta]);
+    const day = cal.weeks.flatMap(w => w.days).find(d => d.date === '2026-10-09')!;
+    expect(day.pnl).toBe(1761);
+    expect(day.stockPnl).toBe(1761);
+    expect(day.trades).toBe(1);
+    expect(cal.weeks[1].total).toBe(2211); // Oct 5 (49) + Oct 6 (401) + Oct 9 (1,761)
+    expect(cal.stockPnl).toBe(1761);
+    expect(cal.stockSales).toBe(1);
+    expect(cal.total).toBe(buildMonthCalendar(options, '2026-10').total + 1761);
+    expect(buildMonthCalendar(options, '2026-10').total).toBe(660);
+  });
+
+  it('a share loss reduces the day and the month, and options-only months are unchanged when no lots are passed', () => {
+    const withLoss = buildMonthCalendar(options, '2026-10', [lot('GGLL', '2026-10-13', -40)]);
+    const day = withLoss.weeks.flatMap(w => w.days).find(d => d.date === '2026-10-13')!;
+    expect(day.pnl).toBe(-198);
+    expect(withLoss.total).toBe(620);
+    const plain = buildMonthCalendar(options, '2026-10');
+    expect(plain.stockPnl).toBe(0);
+    expect(plain.stockSales).toBe(0);
+    expect(plain.weeks.flatMap(w => w.days).every(d => d.stockPnl == null)).toBe(true);
+  });
+
+  it('one symbol sold in several lots on a day counts as one sale; two symbols count as two', () => {
+    const cal = buildMonthCalendar([], '2026-10', [lot('SOXL', '2026-10-09', 100), lot('SOXL', '2026-10-09', 50), lot('TQQQ', '2026-10-09', 25)]);
+    const day = cal.weeks.flatMap(w => w.days).find(d => d.date === '2026-10-09')!;
+    expect(day.pnl).toBe(175);
+    expect(day.trades).toBe(2);
+    expect(cal.stockSales).toBe(2);
+  });
+
+  it('a day with only a share sale still shows (pnl is not null), and other months are ignored', () => {
+    const cal = buildMonthCalendar([], '2026-10', [lot('META', '2026-10-09', 300), lot('META', '2026-09-30', 9999), lot('META', '2026-11-02', 9999)]);
+    expect(cal.total).toBe(300);
+    expect(cal.trades).toBe(1);
+  });
+
+  it('pace includes share sales inside the trailing 30 days', () => {
+    const p = buildPace([trade('2026-10-20', 100)], '2026-10-27', 40000, [lot('META', '2026-10-09', 1761), lot('META', '2026-09-01', 5000)]);
+    expect(p.pnl).toBe(1861);
+    expect(p.returnPct).toBe(4.65);
+  });
+
+  it('excluded and incomplete counts cover only the viewed month', () => {
+    const noisy = [...options, trade('2026-09-14', 5, { excluded: true }), trade('2026-09-15', 6, { reconstructionStatus: 'INCOMPLETE' }), trade('2026-10-14', 7, { reconstructionStatus: 'INCOMPLETE' })];
+    expect(buildMonthCalendar(noisy, '2026-10')).toMatchObject({ excludedByUser: 0, incomplete: 1 });
+    expect(buildMonthCalendar(noisy, '2026-09')).toMatchObject({ excludedByUser: 1, incomplete: 1 });
   });
 });
 

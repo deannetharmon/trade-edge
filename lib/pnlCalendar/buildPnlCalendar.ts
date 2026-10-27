@@ -1,20 +1,25 @@
 // lib/pnlCalendar/buildPnlCalendar.ts
 //
 // PNL-CAL-0001: pure math for the Portfolio "P/L Calendar" sub tab. Realized (locked-in) profit per day, week and month, a monthly
-// goal against a baseline, and a trailing 30-day pace. One record set: buildPerformanceReport(...).included, the same complete,
-// not-excluded trades every Performance panel uses, bucketed by close date, so the month total here equals Performance for the
-// same month. Open (unrealized) P/L is not part of any figure in this file.
+// goal against a baseline, and a trailing 30-day pace. Option trades come from buildPerformanceReport(...).included, the same complete,
+// not-excluded trades every Performance panel uses, bucketed by close date. PNL-CAL-0002 adds realized P/L on shares (stocks and ETFs,
+// from reconstructEquityRealized), also by close date, so the calendar holds all locked-in profit and loss whatever the instrument.
+// Without share lots the month total still equals Performance for the same month. Open (unrealized) P/L is not in any figure here.
 
 import { buildPerformanceReport } from '../tradeLog/performanceMetrics';
+import type { EquityRealizedLot } from '../tradeLog/equityRealized';
 import type { ClosedTrade } from '../tradeLog/types';
 
 export interface CalendarDay {
   date: string; // YYYY-MM-DD
   day: number;
   inMonth: boolean;
-  /** Locked-in P/L for trades closed that day; null when nothing closed. */
+  /** Locked-in P/L for everything closed that day (options and shares); null when nothing closed. */
   pnl: number | null;
+  /** Closed option trades plus share sales (one per symbol per day). */
   trades: number;
+  /** The share-sale part of pnl; null when no shares were sold that day. */
+  stockPnl: number | null;
 }
 
 export interface CalendarWeek {
@@ -29,8 +34,11 @@ export interface MonthCalendar {
   weeks: CalendarWeek[];
   total: number;
   trades: number;
+  /** The share-sale part of the month total, and how many symbol-days of share sales it covers. */
+  stockPnl: number;
+  stockSales: number;
   daysInMonth: number;
-  /** Trades the user excluded from reporting, and rows too incomplete to total (same rules as Performance). */
+  /** Option trades closed in this month that the user excluded from reporting, and ones too incomplete to total (same rules as Performance). */
   excludedByUser: number;
   incomplete: number;
 }
@@ -98,20 +106,47 @@ export function monthLabel(month: string): string {
 /** The records every figure is built from: complete and not user-excluded, exactly Performance's rule. */
 export function pnlCalendarRecords(trades: readonly ClosedTrade[]) {
   const report = buildPerformanceReport(trades);
-  return { included: report.included, excludedByUser: report.excludedByUser, incomplete: report.incomplete.length };
+  return { included: report.included, excludedByUser: report.excludedByUser, incomplete: report.incomplete.length, incompleteTrades: report.incomplete };
 }
 
-export function buildMonthCalendar(trades: readonly ClosedTrade[], month: string): MonthCalendar {
-  const { included, excludedByUser, incomplete } = pnlCalendarRecords(trades);
+/** Share lots closed in the month, one entry per symbol per day, so a sale split across several lots counts once. */
+function stockByDay(equity: readonly EquityRealizedLot[], inRange: (date: string) => boolean) {
+  const byDay = new Map<string, { pnl: number; symbols: Set<string> }>();
+  for (const lot of equity) {
+    if (!inRange(lot.closeDate)) continue;
+    const entry = byDay.get(lot.closeDate) ?? { pnl: 0, symbols: new Set<string>() };
+    entry.pnl += lot.pnl;
+    entry.symbols.add(lot.symbol);
+    byDay.set(lot.closeDate, entry);
+  }
+  return byDay;
+}
 
-  const byDay = new Map<string, { pnl: number; trades: number }>();
+export function buildMonthCalendar(trades: readonly ClosedTrade[], month: string, equity: readonly EquityRealizedLot[] = []): MonthCalendar {
+  const { included, incompleteTrades } = pnlCalendarRecords(trades);
+  // Counts are for the viewed month only, so the footer agrees with the days shown (and with Performance for that period).
+  const excludedByUser = trades.filter(t => t.excluded && monthOf(t.closeDate) === month).length;
+  const incomplete = incompleteTrades.filter(t => monthOf(t.closeDate) === month).length;
+
+  const byDay = new Map<string, { pnl: number; trades: number; stockPnl: number | null }>();
   for (const t of included) {
     if (monthOf(t.closeDate) !== month) continue;
-    const entry = byDay.get(t.closeDate) ?? { pnl: 0, trades: 0 };
+    const entry = byDay.get(t.closeDate) ?? { pnl: 0, trades: 0, stockPnl: null };
     entry.pnl += t.pnl;
     entry.trades += 1;
     byDay.set(t.closeDate, entry);
   }
+  let stockPnl = 0;
+  let stockSales = 0;
+  stockByDay(equity, d => monthOf(d) === month).forEach((s, date) => {
+    const entry = byDay.get(date) ?? { pnl: 0, trades: 0, stockPnl: null };
+    entry.pnl += s.pnl;
+    entry.trades += s.symbols.size;
+    entry.stockPnl = (entry.stockPnl ?? 0) + s.pnl;
+    byDay.set(date, entry);
+    stockPnl += s.pnl;
+    stockSales += s.symbols.size;
+  });
 
   const first = `${month}-01`;
   const total = daysInMonth(month);
@@ -126,7 +161,7 @@ export function buildMonthCalendar(trades: readonly ClosedTrade[], month: string
       const date = addDays(gridStart, w * 7 + d);
       const inMonth = monthOf(date) === month;
       const hit = inMonth ? byDay.get(date) : undefined;
-      days.push({ date, day: Number(date.slice(8, 10)), inMonth, pnl: hit ? round2(hit.pnl) : null, trades: hit?.trades ?? 0 });
+      days.push({ date, day: Number(date.slice(8, 10)), inMonth, pnl: hit ? round2(hit.pnl) : null, trades: hit?.trades ?? 0, stockPnl: hit?.stockPnl != null ? round2(hit.stockPnl) : null });
     }
     const closed = days.filter(x => x.inMonth && x.pnl != null);
     weeks.push({ days, total: closed.length ? round2(closed.reduce((n, x) => n + (x.pnl as number), 0)) : null });
@@ -136,7 +171,7 @@ export function buildMonthCalendar(trades: readonly ClosedTrade[], month: string
   let monthTrades = 0;
   byDay.forEach(v => { monthTotal += v.pnl; monthTrades += v.trades; });
 
-  return { month, label: monthLabel(month), weeks, total: round2(monthTotal), trades: monthTrades, daysInMonth: total, excludedByUser, incomplete };
+  return { month, label: monthLabel(month), weeks, total: round2(monthTotal), trades: monthTrades, stockPnl: round2(stockPnl), stockSales, daysInMonth: total, excludedByUser, incomplete };
 }
 
 export function buildMonthlyGoal(input: { realized: number; baseline: number | null; targetPct: number; month: string; today: string }): MonthlyGoal {
@@ -160,10 +195,12 @@ export function buildMonthlyGoal(input: { realized: number; baseline: number | n
 }
 
 /** Locked-in P/L over the trailing 30 days ending today (inclusive), as a percent of the same baseline. */
-export function buildPace(trades: readonly ClosedTrade[], today: string, baseline: number | null): Pace {
+export function buildPace(trades: readonly ClosedTrade[], today: string, baseline: number | null, equity: readonly EquityRealizedLot[] = []): Pace {
   const { included } = pnlCalendarRecords(trades);
   const from = addDays(today, -29);
-  const pnl = round2(included.filter(t => t.closeDate >= from && t.closeDate <= today).reduce((n, t) => n + t.pnl, 0));
+  const optionsPnl = included.filter(t => t.closeDate >= from && t.closeDate <= today).reduce((n, t) => n + t.pnl, 0);
+  const sharesPnl = equity.filter(l => l.closeDate >= from && l.closeDate <= today).reduce((n, l) => n + l.pnl, 0);
+  const pnl = round2(optionsPnl + sharesPnl);
   const hasBaseline = baseline != null && Number.isFinite(baseline) && baseline > 0;
   return { pnl, returnPct: hasBaseline ? round2((pnl / (baseline as number)) * 100) : null, from, to: today };
 }

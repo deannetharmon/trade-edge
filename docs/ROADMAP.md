@@ -7,9 +7,11 @@
 
 # TradeEdge Roadmap (maintained by Paul — update after every major decision)
 
-Last updated: 2026-10-27 (PNL-CAL-0001)
+Last updated: 2026-10-27 (PNL-CAL-0002)
 
 ## P/L Calendar — 2026-10-27
+
+- **PNL-CAL-0002** — IMPLEMENTED 2026-10-27 (Dean: the calendar contains all profit and loss, whatever the instrument; Alan, Ian, Quinn, Paul inline). Realized P/L on shares (stocks and ETFs, first-in first-out, net of fees) now counts in the day, week, month, goal and pace; found when a META share sale on Oct 9 (about +$1,761) was missing. The "excluded / incomplete" footer now counts only the viewed month. Shares bought before the 12-month window cannot be valued and are listed in the footer instead of guessed. **Open for Dean:** Performance is still options-only, so its month no longer equals the calendar when shares were sold; say if shares should go into Performance too. Live check: the Oct 9 META sale on the preview. Ticket: `docs/tickets/PNL-CAL-0002-share-pnl-in-calendar.md`.
 
 - **PNL-CAL-0001** — IMPLEMENTED 2026-10-27 (Dean's reference screenshot; Alan, Ian, Quinn, Paul inline). New Portfolio sub tab "P/L Calendar": a Monthly Goal card (locked-in profit against a target percent, default 5, of the month's starting net liquidating value) over a month calendar of locked-in profit per day with week totals and month navigation. Locked-in = the Trade Log's complete, not-excluded closed trades by close date, so the month total equals Performance. Read-only, no order or scoring change. **Next:** PNL-CAL-0001B adds Open (unrealized) and Open CSP premium from the live position model (needs Diane's placement); Dean's live check on production. Ticket: `docs/tickets/PNL-CAL-0001-pnl-calendar-tab.md`.
 
