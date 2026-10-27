@@ -37,9 +37,14 @@ describe('guardCspOrder', () => {
     expect(guard.allowed).toBe(false);
     const reason = !guard.allowed ? guard.reason : '';
     expect(reason).toContain('$7,500 in cash-secured collateral');
-    expect(reason).toContain('Limited by cash available to withdraw');
+    expect(reason).toContain('Limited by cash balance');
     expect(reason).toContain('$10,743.44');
     expect(reason).toContain('$5,032.08');
+  });
+
+  it('2026-10-27 live balances: $41,155.86 cash and $10,743.44 buying power allow a $7,500 CSP', () => {
+    const guard = guardCspOrder(capital({ optionBuyingPower: 10_743.443, cashBalance: 41_155.86 }), { strike: 75, creditPerContract: 295, quantity: 1 });
+    expect(guard.allowed).toBe(true);
   });
 
   it('scales required cash with quantity', () => {

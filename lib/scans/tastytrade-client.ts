@@ -474,9 +474,12 @@ export async function getCspCapitalContext(token: string): Promise<CspCapitalCon
       ?? balData['option-buying-power']
       ?? 'NaN'
     );
+    // CSP-COLLATERAL-0001: cash is the broker's cash-balance, the same figure the dashboard shows. cash-available-to-withdraw is a
+    // margin-driven withdrawable amount (it drops with the maintenance requirement on open positions), which option buying power
+    // already reflects -- using it here counted the same margin twice and blocked orders option buying power could cover.
     const cash = parseFloat(
-      balData['cash-available-to-withdraw']
-      ?? balData['cash-balance']
+      balData['cash-balance']
+      ?? balData['cash-available-to-withdraw']
       ?? 'NaN'
     );
 

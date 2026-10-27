@@ -34,12 +34,11 @@ export function guardCspOrder(capital: CspCapitalContext, request: CspOrderReque
   const available = Math.min(capital.optionBuyingPower ?? 0, capital.cashBalance ?? 0);
   if (requiredCash > available) {
     // Name both inputs and which one limits, so the figure can be reconciled against the balances shown elsewhere.
-    // cashBalance here is the broker's cash-available-to-withdraw (falling back to cash-balance), not the dashboard's Cash Balance.
     const money = (n: number | null) => (n == null ? 'not reported' : `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-    const limiter = (capital.optionBuyingPower ?? 0) <= (capital.cashBalance ?? 0) ? 'option buying power' : 'cash available to withdraw';
+    const limiter = (capital.optionBuyingPower ?? 0) <= (capital.cashBalance ?? 0) ? 'option buying power' : 'cash balance';
     return {
       allowed: false,
-      reason: `Requires $${requiredCash.toLocaleString()} in cash-secured collateral, $${Math.max(0, available).toLocaleString()} available. Limited by ${limiter} (option buying power ${money(capital.optionBuyingPower)}; cash available to withdraw ${money(capital.cashBalance)}).`,
+      reason: `Requires $${requiredCash.toLocaleString()} in cash-secured collateral, $${Math.max(0, available).toLocaleString()} available. Limited by ${limiter} (option buying power ${money(capital.optionBuyingPower)}; cash balance ${money(capital.cashBalance)}).`,
     };
   }
   const maxLoss = computeCspMaxLoss(request.strike, request.creditPerContract, request.quantity);

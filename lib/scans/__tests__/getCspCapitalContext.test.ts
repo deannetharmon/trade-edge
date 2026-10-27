@@ -35,10 +35,20 @@ describe('getCspCapitalContext — BLOCKER-02 fail-closed production capital bri
   it('exactly one account: resolves the real account identifier and min-eligible optionBuyingPower/cashBalance', async () => {
     (global.fetch as any)
       .mockResolvedValueOnce(jsonResponse({ data: { items: [{ account: { 'account-number': 'ACCT-1' } }] } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { 'derivative-buying-power': '12000', 'cash-balance': '41155.86', 'cash-available-to-withdraw': '4800' } }));
+
+    const result = await getCspCapitalContext('token');
+    // CSP-COLLATERAL-0001: cash is cash-balance (the dashboard figure), not the margin-driven withdrawable amount.
+    expect(result).toEqual({ accountSelected: true, accountId: 'ACCT-1', optionBuyingPower: 12000, cashBalance: 41155.86, accountResolutionStatus: 'ready' });
+  });
+
+  it('falls back to cash-available-to-withdraw only when cash-balance is absent', async () => {
+    (global.fetch as any)
+      .mockResolvedValueOnce(jsonResponse({ data: { items: [{ account: { 'account-number': 'ACCT-1' } }] } }))
       .mockResolvedValueOnce(jsonResponse({ data: { 'derivative-buying-power': '12000', 'cash-available-to-withdraw': '4800' } }));
 
     const result = await getCspCapitalContext('token');
-    expect(result).toEqual({ accountSelected: true, accountId: 'ACCT-1', optionBuyingPower: 12000, cashBalance: 4800, accountResolutionStatus: 'ready' });
+    expect(result.cashBalance).toBe(4800);
   });
 
   it('zero accounts: fails closed to accountSelected: false with every capital figure null, never a fallback constant', async () => {
