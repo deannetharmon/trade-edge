@@ -363,3 +363,29 @@ describe('PMCC-HELD-UNDERWATER-0001B4 uncovered held calls are skipped, not list
     expect(heldUncoveredSkippedLine(5, 70, true)).toContain('No call above your $70 LEAP strike fits');
   });
 });
+
+describe('PMCC-HELD-UNDERWATER-0001B6 minimum % above price', () => {
+  const run = (pct: number | undefined) => {
+    const long = nflxLong();
+    return pairPmccCandidates({
+      symbol: 'NFLX', underlyingPrice: 62.7, longLegs: [long],
+      shortLegs: [68, 70, 72].map(strike => leg('NFLX', { expiration: '2026-12-04', strike, delta: 0.20, bid: 0.5, ask: 0.52 })),
+      criteria: { ...criteria, shortMinAbovePricePct: pct }, asOf, marketSession: 'open',
+      heldLongOccSymbols: new Set([heldLongKey(long.occSymbol!)]), heldLongBasis: basisFor(long, 20.85, 1),
+    });
+  };
+  it('10% above $62.70 keeps $70 and $72 and removes $68 with a stated reason', () => {
+    const result = run(10);
+    expect(result.qualifiedPairs.map(pair => pair.shortLeg.strike).sort()).toEqual([70, 72]);
+    const rejected = result.legRejections.filter(item => item.role === 'short');
+    expect(rejected.map(item => item.strike)).toEqual([68]);
+    expect(rejected[0].reasons.map(item => item.code)).toEqual(['STRIKE_TOO_CLOSE_TO_PRICE']);
+  });
+  it('14% keeps only $72; unset or 0 removes nothing', () => {
+    expect(run(14).qualifiedPairs.map(pair => pair.shortLeg.strike)).toEqual([72]);
+    // $68 is below the $70 LEAP strike, so it stays a not-covered near miss rather than qualifying.
+    expect(run(undefined).qualifiedPairs.map(pair => pair.shortLeg.strike).sort()).toEqual([70, 72]);
+    expect(run(0).qualifiedPairs.map(pair => pair.shortLeg.strike).sort()).toEqual([70, 72]);
+    expect(run(undefined).nearMissPairs.map(pair => pair.shortLeg.strike)).toEqual([68]);
+  });
+});

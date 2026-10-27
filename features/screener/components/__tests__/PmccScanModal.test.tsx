@@ -15,7 +15,7 @@ const th: ScanModalTheme = {
 
 const initial: PmccScanRequest = {
   shortDteMin: 20, shortDteMax: 45, shortDeltaMin: 0.15, shortDeltaMax: 0.4,
-  shortOiMin: 100, maxSpreadPct: 10, widthCeiling: 0.5,
+  shortMinAbovePricePct: 10, shortOiMin: 100, maxSpreadPct: 10, widthCeiling: 0.5,
 };
 
 function renderModal(over: Partial<PmccScanRequest> = {}, onRun = vi.fn()) {
@@ -140,7 +140,7 @@ describe('SCAN-MODAL-UX-0002A PMCC compact layout', () => {
 
   it('shows a recap that follows the fields and the selection count', async () => {
     renderModal();
-    expect(screen.getByTestId('pmcc-rule-preview')).toHaveTextContent('20–45d · Δ .15–.40 · ≤10% / $0.50 · OI pref 100');
+    expect(screen.getByTestId('pmcc-rule-preview')).toHaveTextContent('20–45d · Δ .15–.40 · ≤10% / $0.50 · ≥10% above price · OI pref 100');
     expect(screen.getByTestId('pmcc-rule-preview')).toHaveTextContent('1 LEAPS selected');
     await userEvent.click(chip('Δ .20–.35'));
     expect(screen.getByTestId('pmcc-rule-preview')).toHaveTextContent('Δ .20–.35');

@@ -731,6 +731,7 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
       shortDeltaMin: 0,
       shortDeltaMax: 0.15,
       shortOiMin: 100,
+      shortMinAbovePricePct: 10,
       maxSpreadPct: 10,
       widthCeiling: 0.5,
     }));

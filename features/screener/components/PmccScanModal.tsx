@@ -29,6 +29,8 @@ export interface PmccScanRequest {
   shortDeltaMin: number;
   shortDeltaMax: number;
   shortOiMin: number;
+  /** PMCC-HELD-UNDERWATER-0001B6: short strike at least this % above the stock price. */
+  shortMinAbovePricePct: number;
   maxSpreadPct: number;
   /** SCAN-ALIGN-0001C2: absolute width ceiling ($ per share), applied to the short call only. */
   widthCeiling: number;
@@ -86,6 +88,7 @@ export function PmccScanModal({
   const valid = useMemo(() => Object.values(draft).every(Number.isFinite)
     && draft.shortDteMin >= 0 && draft.shortDteMax >= draft.shortDteMin
     && draft.shortDeltaMin >= 0 && draft.shortDeltaMax <= 0.4 && draft.shortDeltaMax >= draft.shortDeltaMin
+    && draft.shortMinAbovePricePct >= 0 && draft.shortMinAbovePricePct <= 100
     && draft.shortOiMin >= 0 && draft.maxSpreadPct >= 0 && draft.widthCeiling >= 0.01
     && !discoveryLoading && selectedCount > 0, [draft, selectedCount, discoveryLoading]);
   // Same delta predicate as `valid` above; surfaced so a disabled Run is never silent.
@@ -110,7 +113,7 @@ export function PmccScanModal({
     { id: 'heldExempt', label: 'Held LEAP exempt', tag: 'READ ONLY', attr: { [ATTR]: 'heldExempt' }, tip: <p>Your held LEAP is not rejected by the DTE range, the delta range or the open-interest check, because you already own it.</p> },
     { id: 'noShortOi', label: 'No short OI = rejected', tag: 'GATE · FIXED', attr: { [ATTR]: 'noShortOi' }, emphasis: true, tip: <p>A short call with no open interest on file is rejected. Low open interest is kept and flagged.</p> },
   ];
-  const recap = `${draft.shortDteMin}–${draft.shortDteMax}d · Δ ${fmtDelta(draft.shortDeltaMin)}–${fmtDelta(draft.shortDeltaMax)} · ≤${draft.maxSpreadPct}% / $${draft.widthCeiling.toFixed(2)} · OI pref ${draft.shortOiMin}`;
+  const recap = `${draft.shortDteMin}–${draft.shortDteMax}d · Δ ${fmtDelta(draft.shortDeltaMin)}–${fmtDelta(draft.shortDeltaMax)} · ≤${draft.maxSpreadPct}% / $${draft.widthCeiling.toFixed(2)} · ≥${draft.shortMinAbovePricePct}% above price · OI pref ${draft.shortOiMin}`;
   return <ScanModalShell th={th} titleId="pmcc-scan-title" title="PMCC SCAN" subtitle={`${selectedCount} of ${symbols.length} held LEAPS position${symbols.length === 1 ? '' : 's'} selected · configure short-call search`} closeLabel="Close PMCC scan configuration" onClose={onClose} maxWidthClassName="max-w-[720px]" compact>
     <div className="flex flex-col gap-3">
       <ScanLegend lifecycles={['fetch', 'advisory']} />
@@ -172,6 +175,13 @@ export function PmccScanModal({
           </div>
           {deltaInvalid && <StatusLine message="Delta must be between 0 and 0.40, and Max at least Min." />}
           <CriterionPills th={th} groupLabel="Delta range quick select" pills={deltaPills} compact />
+        </div>
+        <div className="flex min-w-0 flex-col gap-1">
+          <FieldHead lifecycle="fetch" fixed={false} rescan name="Min % above price" tip={<p data-testid="pmcc-min-above-hint">Short strikes closer to the stock price than this are removed. Higher keeps the call further out of the money, so your LEAP is less likely to be called away.</p>} />
+          <div className="flex items-center gap-1.5">
+            {num('shortMinAbovePricePct', 'Min % above price', '1')}
+            <span className="text-[10px] text-neutral-500">% above stock price</span>
+          </div>
         </div>
         <div className="flex min-w-0 flex-col gap-1">
           <FieldHead lifecycle="fetch" fixed={false} rescan name="Max bid/ask width" tip={<>

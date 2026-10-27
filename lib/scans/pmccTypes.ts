@@ -71,6 +71,8 @@ export interface PmccPairingCriteria {
   shortDelta: PmccDeltaRange;
   longOiMin: number;
   shortOiMin: number;
+  /** Optional: a short strike must be at least this many percent above the stock price (held scans). */
+  shortMinAbovePricePct?: number;
   quotePolicy: PmccQuotePolicy;
   limits: PmccPairingLimits;
 }
@@ -118,6 +120,7 @@ export type PmccFailureCode =
   | 'BID_ASK_TOO_WIDE'
   | 'LONG_NOT_ITM'
   | 'SHORT_NOT_OTM'
+  | 'STRIKE_TOO_CLOSE_TO_PRICE'
   | 'LONG_EXPIRATION_NOT_LATER'
   | 'LONG_STRIKE_NOT_BELOW_SHORT'
   | 'NET_DEBIT_NOT_POSITIVE'

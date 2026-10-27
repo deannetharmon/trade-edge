@@ -39,6 +39,7 @@ const FAILURE_MESSAGES: Record<PmccFailureCode, string> = {
   BID_ASK_TOO_WIDE: 'Bid/ask spread exceeds the qualifying maximum',
   LONG_NOT_ITM: 'Long call is not in the money',
   SHORT_NOT_OTM: 'Short call is not out of the money',
+  STRIKE_TOO_CLOSE_TO_PRICE: 'Short strike is closer to the stock price than the minimum % above price',
   LONG_EXPIRATION_NOT_LATER: 'Long expiration must be later than short expiration',
   LONG_STRIKE_NOT_BELOW_SHORT: 'Long strike must be below short strike',
   NET_DEBIT_NOT_POSITIVE: 'Net debit must be finite and positive',
@@ -191,6 +192,11 @@ function filterLegs(
     // stays strict.
     if (role === 'long' && !isHeldLong && !(leg.strike < underlyingPrice)) reasons.push(reason('LONG_NOT_ITM'));
     if (role === 'short' && !(leg.strike > underlyingPrice)) reasons.push(reason('SHORT_NOT_OTM'));
+    // PMCC-HELD-UNDERWATER-0001B6: optional minimum distance above the stock price.
+    else if (role === 'short' && criteria.shortMinAbovePricePct != null && criteria.shortMinAbovePricePct > 0
+      && leg.strike < underlyingPrice * (1 + criteria.shortMinAbovePricePct / 100) - 1e-9) {
+      reasons.push(reason('STRIKE_TOO_CLOSE_TO_PRICE', `Strike ${leg.strike} is less than ${criteria.shortMinAbovePricePct}% above the $${underlyingPrice.toFixed(2)} price`));
+    }
 
     const quote = evaluatePmccQuoteQuality(leg, criteria.quotePolicy, asOf, marketSession, role);
     if (!isHeldLong && !quote.structurallyUsable) reasons.push(reason(quote.status === 'too_wide' ? 'BID_ASK_TOO_WIDE' : 'INVALID_QUOTE', quote.reason));

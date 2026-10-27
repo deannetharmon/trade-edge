@@ -39,7 +39,7 @@ import {
 } from '@/lib/scans/spread-finder';
 import { findBestCsp, findAllCsp } from '@/lib/scans/csp-finder';
 import { MAX_OCR_IMAGES, extractTickerCandidatesFromImages, describeOcrBatch, describeOcrProgress, progressPercent, type OcrPhase, type OcrStatus } from '@/lib/screener/ocrBatch';
-import { DEFAULT_HELD_PMCC_SHORT_DELTA, DEFAULT_HELD_PMCC_SHORT_DTE, DEFAULT_PMCC_DTE_RANGES, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
+import { DEFAULT_HELD_PMCC_MIN_ABOVE_PRICE_PCT, DEFAULT_HELD_PMCC_SHORT_DELTA, DEFAULT_HELD_PMCC_SHORT_DTE, DEFAULT_PMCC_DTE_RANGES, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
 import { LEAP_ENTRY_DTE_TARGET, LEAPS_DTE_MAX_CHIPS, LEAPS_DTE_MIN_CHIPS } from '@/lib/scans/leapsEntryTargets';
 import { getPmccChain } from '@/lib/scans/pmccChainClient';
 import { buildCreditSpreadEntryFacts } from '@/lib/entry-context/analysis';
@@ -9097,6 +9097,7 @@ export default function Home() {
   const [pmccShortDeltaMin, setPmccShortDeltaMin] = useState<number>(DEFAULT_HELD_PMCC_SHORT_DELTA.min);
   const [pmccShortDeltaMax, setPmccShortDeltaMax] = useState<number>(DEFAULT_HELD_PMCC_SHORT_DELTA.max);
   const [pmccShortOiMin, setPmccShortOiMin] = useState(DEFAULT_PMCC_SHORT_OI_MIN);
+  const [pmccMinAbovePct, setPmccMinAbovePct] = useState<number>(DEFAULT_HELD_PMCC_MIN_ABOVE_PRICE_PCT);
   const [pmccMaxSpreadPct, setPmccMaxSpreadPct] = useState(DEFAULT_PMCC_QUOTE_POLICY.qualifyingSpreadPctMax);
   // SCAN-ALIGN-0001C2: short-leg absolute width ceiling ($ per share), persisted with the other PMCC modal settings.
   const [pmccWidthCeiling, setPmccWidthCeiling] = useState<number>(DEFAULT_PMCC_QUOTE_POLICY.shortWidthCeiling ?? 0.5);
@@ -9114,6 +9115,7 @@ export default function Home() {
       if (parsed.rangeV === 2 && Number.isFinite(parsed.shortDeltaMin)) setPmccShortDeltaMin(parsed.shortDeltaMin);
       if (parsed.rangeV === 2 && Number.isFinite(parsed.shortDeltaMax)) setPmccShortDeltaMax(parsed.shortDeltaMax);
       if (Number.isFinite(parsed.shortOiMin)) setPmccShortOiMin(parsed.shortOiMin);
+      if (Number.isFinite(parsed.shortMinAbovePricePct) && parsed.shortMinAbovePricePct >= 0 && parsed.shortMinAbovePricePct <= 100) setPmccMinAbovePct(parsed.shortMinAbovePricePct);
       if (Number.isFinite(parsed.maxSpreadPct)) setPmccMaxSpreadPct(parsed.maxSpreadPct);
       if (Number.isFinite(parsed.widthCeiling) && parsed.widthCeiling >= 0.01) setPmccWidthCeiling(parsed.widthCeiling);
     } catch {}
@@ -10485,6 +10487,7 @@ export default function Home() {
       shortDelta: { min: request?.shortDeltaMin ?? pmccShortDeltaMin, max: request?.shortDeltaMax ?? pmccShortDeltaMax },
       longOiMin: DEFAULT_PMCC_LONG_OI_MIN,
       shortOiMin: request?.shortOiMin ?? pmccShortOiMin,
+      shortMinAbovePricePct: request?.shortMinAbovePricePct ?? pmccMinAbovePct,
       quotePolicy: { ...DEFAULT_PMCC_QUOTE_POLICY, qualifyingSpreadPctMax: request?.maxSpreadPct ?? pmccMaxSpreadPct, shortWidthCeiling: request?.widthCeiling ?? pmccWidthCeiling },
       limits: { ...DEFAULT_PMCC_PAIRING_LIMITS },
     };
@@ -13601,19 +13604,19 @@ export default function Home() {
           onToggleSymbol={togglePmccLeapsSymbol}
           discoveryLoading={pmccDiscoveryLoading}
           exclusions={pmccDiscoveryExclusions}
-          initial={{ shortDteMin: pmccShortDteMin, shortDteMax: pmccShortDteMax, shortDeltaMin: pmccShortDeltaMin, shortDeltaMax: pmccShortDeltaMax, shortOiMin: pmccShortOiMin, maxSpreadPct: pmccMaxSpreadPct, widthCeiling: pmccWidthCeiling }}
+          initial={{ shortDteMin: pmccShortDteMin, shortDteMax: pmccShortDteMax, shortDeltaMin: pmccShortDeltaMin, shortDeltaMax: pmccShortDeltaMax, shortOiMin: pmccShortOiMin, shortMinAbovePricePct: pmccMinAbovePct, maxSpreadPct: pmccMaxSpreadPct, widthCeiling: pmccWidthCeiling }}
           onClose={() => setShowPmccScanModal(false)}
           onRun={(request: PmccScanRequest) => {
             setPmccShortDteMin(request.shortDteMin); setPmccShortDteMax(request.shortDteMax);
             setPmccShortDeltaMin(request.shortDeltaMin); setPmccShortDeltaMax(request.shortDeltaMax);
-            setPmccShortOiMin(request.shortOiMin); setPmccMaxSpreadPct(request.maxSpreadPct); setPmccWidthCeiling(request.widthCeiling);
+            setPmccShortOiMin(request.shortOiMin); setPmccMinAbovePct(request.shortMinAbovePricePct); setPmccMaxSpreadPct(request.maxSpreadPct); setPmccWidthCeiling(request.widthCeiling);
             // PMCC-OI-DEFAULT-0001 -- Dean's request: the post-scan "Leg OI"
             // filter was always defaulting to "Any" regardless of what OI
             // floor was actually configured in the scan itself, which read
             // as the scan's own filter silently not applying. Sync it to
             // match what was just run.
             setFilteredMinOi(request.shortOiMin);
-            try { localStorage.setItem(LS_PMCC_DTE, JSON.stringify({ rangeV: 2, shortMin: request.shortDteMin, shortMax: request.shortDteMax, shortDeltaMin: request.shortDeltaMin, shortDeltaMax: request.shortDeltaMax, shortOiMin: request.shortOiMin, maxSpreadPct: request.maxSpreadPct, widthCeiling: request.widthCeiling })); } catch {}
+            try { localStorage.setItem(LS_PMCC_DTE, JSON.stringify({ rangeV: 2, shortMin: request.shortDteMin, shortMax: request.shortDteMax, shortDeltaMin: request.shortDeltaMin, shortDeltaMax: request.shortDeltaMax, shortOiMin: request.shortOiMin, shortMinAbovePricePct: request.shortMinAbovePricePct, maxSpreadPct: request.maxSpreadPct, widthCeiling: request.widthCeiling })); } catch {}
             setShowPmccScanModal(false); void runPMCCScan(request);
           }}
         />

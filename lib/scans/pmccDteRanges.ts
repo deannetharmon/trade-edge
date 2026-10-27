@@ -23,6 +23,8 @@ export const DEFAULT_HELD_PMCC_SHORT_DTE = { min: 7, max: 10 } as const;
 
 /** Held-LEAP scan opens at delta 0-.15 (at most about a 15% chance of assignment) so the LEAP is rarely called away. */
 export const DEFAULT_HELD_PMCC_SHORT_DELTA = { min: 0, max: 0.15 } as const;
+/** PMCC-HELD-UNDERWATER-0001B6: held scans default to short strikes at least this % above the stock price. */
+export const DEFAULT_HELD_PMCC_MIN_ABOVE_PRICE_PCT = 10;
 
 /**
  * Quick-select presets for the held-LEAP scan's short DTE range. Every chip overlaps the next one

@@ -107,6 +107,7 @@ export function isValidPmccScanSnapshot(value: unknown): value is PmccScanSnapsh
     && isValidPmccDeltaRange(criteria.shortDelta, PMCC_SHORT_DELTA_BOUNDS)
     && Number.isInteger(criteria.longOiMin) && criteria.longOiMin >= 0
     && Number.isInteger(criteria.shortOiMin) && criteria.shortOiMin >= 0
+    && (criteria.shortMinAbovePricePct === undefined || (Number.isFinite(criteria.shortMinAbovePricePct) && criteria.shortMinAbovePricePct >= 0 && criteria.shortMinAbovePricePct <= 100))
     && isValidPmccQuotePolicy(criteria.quotePolicy)
     && isValidPmccPairingLimits(criteria.limits);
 }
