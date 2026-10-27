@@ -3,6 +3,7 @@
 // Scan-session report view model.  This module is deliberately pure: it only
 // reads the completed scan snapshot and never asks the scanner, broker, or a
 // market-data provider for anything.
+import { isUncoveredHeldShort } from '@/lib/scans/pmccHeldUnderwaterDisplay';
 import type { ScreenResult } from '@/lib/scans/types';
 import { computeSessionAccounting, REASON_CODE_LABELS, type ScreenerScanSession } from '@/lib/screener/scanSession';
 
@@ -111,7 +112,10 @@ export function buildScanExportReport(
   scope: ScanExportScope,
   currentViewResults?: ScreenResult[],
 ): ScanExportReport {
-  const included = scope === 'full' ? session.results : (currentViewResults ?? session.results);
+  const scoped = scope === 'full' ? session.results : (currentViewResults ?? session.results);
+  // PMCC-HELD-UNDERWATER-0001B5: held short calls below the LEAP strike are not covered; the report skips them like the scan list.
+  const included = scoped.filter(result => !isUncoveredHeldShort(result.pmccPair));
+  const uncoveredSkippedCount = scoped.length - included.length;
   const candidates = included.map(candidateFor);
   const heldLeapCandidates = candidates.filter(candidate => candidate.status === 'Potential short-call candidate');
   const qualified = candidates.filter(candidate => candidate.status === 'Qualified opportunity');
@@ -124,6 +128,9 @@ export function buildScanExportReport(
     { label: 'Selected universe', value: `${session.selectedSymbols.length} symbols: ${session.selectedSymbols.join(', ') || unavailable}` },
     { label: 'Ruleset version', value: String(session.schemaVersion) },
   ];
+  if (uncoveredSkippedCount > 0) configuration.push(
+    { label: 'Held calls below LEAP strike', value: `${uncoveredSkippedCount} skipped (not covered)` },
+  );
   if (snapshot) configuration.push(
     { label: 'DTE range', value: `${snapshot.dteMin}–${snapshot.dteMax}` },
     { label: 'IVR range', value: `${snapshot.ivrMin}–${snapshot.ivrMax}` },

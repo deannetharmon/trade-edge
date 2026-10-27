@@ -285,7 +285,10 @@ function evaluatePair(
   const failures: PmccFailureReason[] = [];
   const isHeldLong = heldLongOccSymbols.has(longLeg.candidateId);
   if (longLeg.expiration <= shortLeg.expiration) failures.push(reason('LONG_EXPIRATION_NOT_LATER'));
-  if (longLeg.strike >= shortLeg.strike) failures.push(reason('LONG_STRIKE_NOT_BELOW_SHORT'));
+  // PMCC-HELD-UNDERWATER-0001B5: a held LEAP covers a short at the SAME strike (no collateral; assignment nets to the
+  // LEAP's own strike), so only a short strictly below the held LEAP is uncovered. New entries keep the strict rule.
+  const uncoveredStrike = isHeldLong ? longLeg.strike > shortLeg.strike : longLeg.strike >= shortLeg.strike;
+  if (uncoveredStrike) failures.push(reason('LONG_STRIKE_NOT_BELOW_SHORT'));
   let metrics = pairMetrics(longLeg, shortLeg);
   if (metrics == null) failures.push(reason('INSUFFICIENT_DATA'));
   // These are entry-price tests for purchasing a new long call. A held

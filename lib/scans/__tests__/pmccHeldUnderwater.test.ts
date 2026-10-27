@@ -91,16 +91,18 @@ describe('held OTM LEAP (NFLX, below cost)', () => {
     expect(result.nearMissPairs[0].failureReasons.map(item => item.code)).toEqual(['SHORT_NOT_ABOVE_HELD_BREAKEVEN']);
   });
 
-  it('a short strike at or below the LEAP strike still never qualifies (it would be uncovered)', () => {
+  it('a short at the SAME strike as the held LEAP is covered and qualifies; one strictly below never does', () => {
     const long = nflxLong();
-    const shorts = [leg('NFLX', { expiration: '2026-12-04', strike: 70, delta: 0.30, bid: 2.4, ask: 2.5 })];
-    const result = pairPmccCandidates({
-      symbol: 'NFLX', underlyingPrice: 62.7, longLegs: [long], shortLegs: shorts, criteria, asOf, marketSession: 'open',
+    const run = (strike: number) => pairPmccCandidates({
+      symbol: 'NFLX', underlyingPrice: 62.7, longLegs: [long],
+      shortLegs: [leg('NFLX', { expiration: '2026-12-04', strike, delta: 0.30, bid: 2.4, ask: 2.5 })],
+      criteria, asOf, marketSession: 'open',
       heldLongOccSymbols: new Set([heldLongKey(long.occSymbol!)]), heldLongBasis: basisFor(long, 20.85, 1),
     });
-    expect(result.qualifiedPairs).toHaveLength(0);
-    expect(result.counts.eligibleShortLegs).toBe(1);
-    expect(result.nearMissPairs.concat(result.qualifiedPairs).every(pair => !pair.qualified)).toBe(true);
+    expect(run(70).qualifiedPairs.map(pair => pair.shortLeg.strike)).toEqual([70]);
+    const below = run(69.5);
+    expect(below.qualifiedPairs).toHaveLength(0);
+    expect(below.nearMissPairs[0].failureReasons.map(item => item.code)).toContain('LONG_STRIKE_NOT_BELOW_SHORT');
   });
 
   it('measures economics from cost, not the market ask (Alan)', () => {
