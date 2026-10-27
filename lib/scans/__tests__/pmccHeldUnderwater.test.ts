@@ -8,7 +8,10 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '../pmccConfig';
 import { heldLongKey } from '../pmccHeldBreakeven';
 import { pairPmccCandidates } from '../pmccPairing';
-import { excludedContractPremiumText, heldLeapOtmTag, selectLongLegBlockerLine } from '../pmccHeldUnderwaterDisplay';
+import { excludedContractPremiumText, heldIncomeSummary, heldLeapOtmTag, selectLongLegBlockerLine } from '../pmccHeldUnderwaterDisplay';
+import { DEFAULT_HELD_PMCC_SHORT_DELTA, DEFAULT_HELD_PMCC_SHORT_DTE, DEFAULT_PMCC_DTE_RANGES, HELD_PMCC_SHORT_DTE_PRESETS } from '../pmccDteRanges';
+import { PMCC_SHORT_DELTA_BOUNDS } from '../pmccConfig';
+import { PMCC_DELTA_PRESETS } from '@/features/screener/components/PmccScanModal';
 import type { PmccChainLeg, PmccPairingCriteria } from '../pmccTypes';
 
 const asOf = new Date('2026-10-27T19:00:00.000Z');
@@ -68,15 +71,39 @@ describe('held OTM LEAP (NFLX, below cost)', () => {
     expect(result.counts.combinationsEvaluated).toBe(2);
   });
 
-  it('still fails the cost-basis floor (0001B owns that control): floor = 70 + 20.85 = 90.85', () => {
+  it('0001B: every call above the LEAP strike qualifies; the cost-basis floor (90.85) is not a gate', () => {
     const result = runNflx({ held: true });
+    expect(result.qualifiedPairs).toHaveLength(2);
+    expect(result.nearMissPairs).toHaveLength(0);
+    result.qualifiedPairs.forEach(pair => expect(pair.failureReasons).toEqual([]));
+  });
+
+  it('rollback switch: enforceHeldCostFloor re-applies the old floor', () => {
+    const long = nflxLong();
+    const shorts = [leg('NFLX', { expiration: '2026-12-04', strike: 72.5, delta: 0.25, bid: 0.60, ask: 0.62 })];
+    const result = pairPmccCandidates({
+      symbol: 'NFLX', underlyingPrice: 62.7, longLegs: [long], shortLegs: shorts, criteria, asOf, marketSession: 'open',
+      heldLongOccSymbols: new Set([heldLongKey(long.occSymbol!)]), heldLongBasis: basisFor(long, 20.85, 1), enforceHeldCostFloor: true,
+    });
     expect(result.qualifiedPairs).toHaveLength(0);
-    expect(result.nearMissPairs).toHaveLength(2);
-    result.nearMissPairs.forEach(pair => expect(pair.failureReasons.map(item => item.code)).toEqual(['SHORT_NOT_ABOVE_HELD_BREAKEVEN']));
+    expect(result.nearMissPairs).toHaveLength(1);
+    expect(result.nearMissPairs[0].failureReasons.map(item => item.code)).toEqual(['SHORT_NOT_ABOVE_HELD_BREAKEVEN']);
+  });
+
+  it('a short strike at or below the LEAP strike still never qualifies (it would be uncovered)', () => {
+    const long = nflxLong();
+    const shorts = [leg('NFLX', { expiration: '2026-12-04', strike: 70, delta: 0.30, bid: 2.4, ask: 2.5 })];
+    const result = pairPmccCandidates({
+      symbol: 'NFLX', underlyingPrice: 62.7, longLegs: [long], shortLegs: shorts, criteria, asOf, marketSession: 'open',
+      heldLongOccSymbols: new Set([heldLongKey(long.occSymbol!)]), heldLongBasis: basisFor(long, 20.85, 1),
+    });
+    expect(result.qualifiedPairs).toHaveLength(0);
+    expect(result.counts.eligibleShortLegs).toBe(1);
+    expect(result.nearMissPairs.concat(result.qualifiedPairs).every(pair => !pair.qualified)).toBe(true);
   });
 
   it('measures economics from cost, not the market ask (Alan)', () => {
-    const pair = runNflx({ held: true }).nearMissPairs.find(item => item.shortLeg.strike === 72.5)!;
+    const pair = runNflx({ held: true }).qualifiedPairs.find(item => item.shortLeg.strike === 72.5)!;
     const metrics = pair.metrics!;
     expect(metrics.costBasisPerShare).toBeCloseTo(20.85, 10);
     expect(metrics.netDebitPerShare).toBeCloseTo(20.25, 10); // 20.85 - 0.60
@@ -91,7 +118,7 @@ describe('held OTM LEAP (NFLX, below cost)', () => {
   });
 
   it('worst-case assignment result equals width minus cost (strike gap + credit - cost)', () => {
-    const pair = runNflx({ held: true }).nearMissPairs.find(item => item.shortLeg.strike === 75)!;
+    const pair = runNflx({ held: true }).qualifiedPairs.find(item => item.shortLeg.strike === 75)!;
     // (75 - 70) + 0.30 - 20.85 = -15.55
     expect(pair.metrics!.widthMinusDebitPerShare).toBeCloseTo(-15.55, 10);
   });
@@ -99,8 +126,9 @@ describe('held OTM LEAP (NFLX, below cost)', () => {
   it('keeps market economics when cost basis is unusable or multi-lot', () => {
     for (const result of [runNflx({ held: true, avgOpen: null }), runNflx({ held: true, quantity: 2 })]) {
       expect(result.counts.eligibleLongLegs).toBe(1);
-      result.nearMissPairs.forEach(pair => {
-        expect(pair.failureReasons.map(item => item.code)).toContain('COST_BASIS_UNAVAILABLE');
+      expect(result.qualifiedPairs).toHaveLength(2);
+      result.qualifiedPairs.forEach(pair => {
+        expect(pair.failureReasons).toEqual([]);
         expect(pair.metrics!.costBasisPerShare).toBeUndefined();
         expect(pair.metrics!.netDebitPerShare).toBeCloseTo(7.4 - pair.shortLeg.executablePrice, 10);
       });
@@ -109,10 +137,8 @@ describe('held OTM LEAP (NFLX, below cost)', () => {
 
   it('keeps market economics when the cost looks mis-scaled (unit guard)', () => {
     const result = runNflx({ held: true, avgOpen: 2085 });
-    result.nearMissPairs.forEach(pair => {
-      expect(pair.failureReasons.map(item => item.code)).toContain('COST_BASIS_UNAVAILABLE');
-      expect(pair.metrics!.costBasisPerShare).toBeUndefined();
-    });
+    expect(result.qualifiedPairs).toHaveLength(2);
+    result.qualifiedPairs.forEach(pair => expect(pair.metrics!.costBasisPerShare).toBeUndefined());
   });
 });
 
@@ -198,5 +224,56 @@ describe('display selectors', () => {
     expect(excludedContractPremiumText({ bid: 0 })).toBe('');
     expect(excludedContractPremiumText({ bid: null })).toBe('');
     expect(excludedContractPremiumText({})).toBe('');
+  });
+});
+
+describe('0001B: income line for a held short call', () => {
+  it('NFLX 72.50 call: collect $60 per contract, percent above price, chance of assignment, assigned outcome', () => {
+    const out = heldIncomeSummary({ shortBid: 0.60, shortStrike: 72.5, shortDelta: 0.25, spot: 62.7, widthMinusCostPerShare: -17.75 });
+    expect(out.collect).toBe('$60 per contract');
+    expect(out.abovePrice).toBe('15.6% above price');
+    expect(out.chanceAssigned).toBe('about 25% chance of assignment');
+    expect(out.assignedOutcome).toBe('If assigned and LEAP exercised: -$17.75/sh (-$1,775 per contract), before fees. Not an expected P/L.');
+  });
+
+  it('positive outcome and missing data degrade quietly', () => {
+    expect(heldIncomeSummary({ shortBid: 0.3, shortStrike: 75, shortDelta: 0.18, spot: 62.7, widthMinusCostPerShare: 27 }).assignedOutcome).toContain('$27.00/sh ($2,700 per contract)');
+    const none = heldIncomeSummary({ shortBid: 0.3, shortStrike: 75, shortDelta: null, spot: null, widthMinusCostPerShare: null });
+    expect(none).toEqual({ collect: '$30 per contract', abovePrice: null, chanceAssigned: null, assignedOutcome: null });
+  });
+
+  it('the held-card income line takes the cost-based outcome from the qualified NFLX pair', () => {
+    const pair = runNflx({ held: true }).qualifiedPairs.find(item => item.shortLeg.strike === 75)!;
+    const out = heldIncomeSummary({ shortBid: pair.shortLeg.executablePrice, shortStrike: 75, shortDelta: pair.shortLeg.delta, spot: 62.7, widthMinusCostPerShare: pair.metrics!.costBasisPerShare != null ? pair.metrics!.widthMinusDebitPerShare : null });
+    expect(out.collect).toBe('$30 per contract');
+    expect(out.assignedOutcome).toContain('-$15.55/sh (-$1,555 per contract)');
+  });
+});
+
+describe('0001B: held scan defaults', () => {
+  it('held scan opens at 7-10 DTE and delta .10-.20; new-entry ranges are unchanged', () => {
+    expect(DEFAULT_HELD_PMCC_SHORT_DTE).toEqual({ min: 7, max: 10 });
+    expect(DEFAULT_HELD_PMCC_SHORT_DELTA).toEqual({ min: 0.1, max: 0.2 });
+    expect(DEFAULT_PMCC_DTE_RANGES.shortMin).toBe(30);
+    expect(DEFAULT_PMCC_DTE_RANGES.shortMax).toBe(45);
+  });
+
+  it('DTE presets include 7-10 and the delta presets include .10-.20, all inside the delta bounds', () => {
+    expect(HELD_PMCC_SHORT_DTE_PRESETS.map(p => p.label)).toEqual(['7–10', '14–21', '21–45', '30–45']);
+    expect(PMCC_DELTA_PRESETS[0]).toMatchObject({ min: 0.1, max: 0.2 });
+    PMCC_DELTA_PRESETS.forEach(p => { expect(p.min).toBeGreaterThanOrEqual(PMCC_SHORT_DELTA_BOUNDS.min); expect(p.max).toBeLessThanOrEqual(PMCC_SHORT_DELTA_BOUNDS.max); });
+  });
+
+  it('a 7-10 DTE short qualifies for a held LEAP when the scan range is 7-10', () => {
+    const long = nflxLong();
+    const shorts = [leg('NFLX', { expiration: '2026-11-06', strike: 75, delta: 0.14, bid: 0.20, ask: 0.22 })];
+    const result = pairPmccCandidates({
+      symbol: 'NFLX', underlyingPrice: 62.7, longLegs: [long], shortLegs: shorts,
+      criteria: { ...criteria, dte: { ...criteria.dte, shortMin: 7, shortMax: 10 }, shortDelta: { min: 0.1, max: 0.2 } },
+      asOf, marketSession: 'open',
+      heldLongOccSymbols: new Set([heldLongKey(long.occSymbol!)]), heldLongBasis: basisFor(long, 20.85, 1),
+    });
+    expect(result.qualifiedPairs).toHaveLength(1);
+    expect(result.qualifiedPairs[0].shortLeg.dte).toBe(10);
   });
 });

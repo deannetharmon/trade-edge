@@ -284,7 +284,7 @@ export async function submitHeldPmccShortCallOrder(userId: string, input: {
   quantity: number;
   limitPrice: number;
   mode: 'dry-run' | 'submit';
-}, shortCriteriaOverride?: { shortDelta?: { min: number; max: number }; shortOiMin?: number; qualifyingSpreadPctMax?: number; shortWidthCeiling?: number }) {
+}, shortCriteriaOverride?: { shortDelta?: { min: number; max: number }; shortDte?: { min: number; max: number }; shortOiMin?: number; qualifyingSpreadPctMax?: number; shortWidthCeiling?: number }) {
   if (!Number.isInteger(input.quantity) || input.quantity < 1 || input.quantity > 100 || !Number.isFinite(input.limitPrice) || input.limitPrice <= 0) throw new Error('Invalid order request');
   const context = await brokerContext(userId);
   try {
@@ -319,6 +319,8 @@ export async function submitHeldPmccShortCallOrder(userId: string, input: {
       // scan already applies at production time (lib/scans/pmccProduction.ts).
       longOiMin: 0,
       shortDelta: shortCriteriaOverride?.shortDelta ?? SERVER_PMCC_CRITERIA.shortDelta,
+      // 0001B: the held scan's short DTE window (default 7-10). Long-leg DTE bounds stay as configured.
+      dte: shortCriteriaOverride?.shortDte ? { ...SERVER_PMCC_CRITERIA.dte, shortMin: shortCriteriaOverride.shortDte.min, shortMax: shortCriteriaOverride.shortDte.max } : SERVER_PMCC_CRITERIA.dte,
       shortOiMin: shortCriteriaOverride?.shortOiMin ?? SERVER_PMCC_CRITERIA.shortOiMin,
       quotePolicy: {
         ...SERVER_PMCC_CRITERIA.quotePolicy,

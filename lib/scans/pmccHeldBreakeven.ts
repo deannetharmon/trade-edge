@@ -129,3 +129,11 @@ export function evaluateHeldBreakevenFloor(input: HeldBreakevenInput): HeldBreak
   }
   return null;
 }
+
+/**
+ * PMCC-HELD-UNDERWATER-0001B (Dean, Ian): the held cost-basis floor is no longer a gate. A held LEAP is used to
+ * sell short calls for income while it recovers, so every call above the LEAP strike qualifies and the
+ * assigned outcome is shown as information. evaluateHeldBreakevenFloor is kept (tests, rollback, cost
+ * classification); flip this to true to make the production scan and the held order review enforce it again.
+ */
+export const HELD_COST_FLOOR_GATE = false;

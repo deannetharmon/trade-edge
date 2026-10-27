@@ -15,6 +15,23 @@ export const DEFAULT_PMCC_DTE_RANGES: PmccDteRanges = {
   longMax: 730,
 };
 
+/**
+ * PMCC-HELD-UNDERWATER-0001B (Dean): the held-LEAP short-call scan opens at 7-10 DTE (weekly income calls).
+ * New-entry PMCC logic keeps DEFAULT_PMCC_DTE_RANGES (30-45). The trader can change the range before each scan.
+ */
+export const DEFAULT_HELD_PMCC_SHORT_DTE = { min: 7, max: 10 } as const;
+
+/** Held-LEAP scan opens at delta .10-.20 (roughly a 10-20% chance of assignment) so the LEAP is rarely called away. */
+export const DEFAULT_HELD_PMCC_SHORT_DELTA = { min: 0.1, max: 0.2 } as const;
+
+/** Quick-select presets for the held-LEAP scan's short DTE range. */
+export const HELD_PMCC_SHORT_DTE_PRESETS = [
+  { label: '7–10', min: 7, max: 10 },
+  { label: '14–21', min: 14, max: 21 },
+  { label: '21–45', min: 21, max: 45 },
+  { label: '30–45', min: 30, max: 45 },
+] as const;
+
 export function isValidPmccDteRanges(ranges: PmccDteRanges): boolean {
   return Object.values(ranges).every(value => Number.isFinite(value) && value >= 0)
     && ranges.shortMin <= ranges.shortMax

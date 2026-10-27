@@ -5,7 +5,7 @@ import { adaptPmccChain, type RawPmccChain } from './pmccChainAdapter';
 import { pairPmccCandidates } from './pmccPairing';
 import type { PmccChainLeg, PmccMarketSession, PmccPairResult, PmccScanSnapshot, PmccSessionResult } from './pmccTypes';
 import { matchHeldPmccLongCandidate, type HeldPmccLongCandidate } from './pmccHeldLeaps';
-import { evaluateHeldBreakevenFloor, heldLongKey, readHeldBasis, type HeldLongBasis } from './pmccHeldBreakeven';
+import { evaluateHeldBreakevenFloor, HELD_COST_FLOOR_GATE, heldLongKey, readHeldBasis, type HeldLongBasis } from './pmccHeldBreakeven';
 import { isNyseHoliday } from './nyseCalendar';
 import { classifyEarningsVsExpiry } from './earningsExpiryZone';
 import { newYorkDateFromAsOf, normalizeEarningsDate } from './pmccEarningsDates';
@@ -292,7 +292,9 @@ export function runPmccProduction(
     const partition = partitionShortsByEarnings(adapted.shortLegs, context.earningsDate, snapshot.asOf, snapshot.criteria.dte);
     const allInRangeRemoved = partition.inRangeCount > 0 && partition.removedInRangeCount === partition.inRangeCount;
     const sample = partition.firstRemovedInRange;
-    const costBasisWins = heldMode && allInRangeRemoved && sample != null && matchedHeldLongs.some(value => {
+    // PMCC-HELD-UNDERWATER-0001B: the held cost-basis floor is retired, so a missing basis no longer blocks a
+    // held short and cannot "win" over the earnings banner.
+    const costBasisWins = HELD_COST_FLOOR_GATE && heldMode && allInRangeRemoved && sample != null && matchedHeldLongs.some(value => {
       const failure = evaluateHeldBreakevenFloor({
         strikeLong: value.leg.strike, strikeShort: sample.strike, shortBid: sample.bid ?? Number.NaN, spot: context.price,
         basis: readHeldBasis(value.candidate.avgOpenPrice), quantity: value.candidate.quantity,
@@ -315,6 +317,7 @@ export function runPmccProduction(
       // for that new-entry floor.
       criteria: matchedHeldLongs.length ? { ...snapshot.criteria, longOiMin: 0 } : snapshot.criteria,
       heldLongOccSymbols: new Set(matchedHeldLongs.map(value => heldLongKey(value.leg.occSymbol ?? ''))),
+      enforceHeldCostFloor: HELD_COST_FLOOR_GATE,
       // PMCC-HELD-BREAKEVEN-0001: the held long's broker cost and lot count, for the short-call floor.
       // Client path: avgOpenPrice is already a number (parseBrokerEntryPremium), so the reader's number branch applies.
       heldLongBasis: new Map<string, HeldLongBasis>(matchedHeldLongs.map(value => [
@@ -341,7 +344,7 @@ export function runPmccProduction(
       pairing.qualifiedPairs = pairing.qualifiedPairs.map(annotate);
       pairing.nearMissPairs = pairing.nearMissPairs.map(annotate);
     }
-    const heldCostBasisUnavailable = heldMode && matchedHeldLongs.some(value => evaluateHeldBreakevenFloor({
+    const heldCostBasisUnavailable = HELD_COST_FLOOR_GATE && heldMode && matchedHeldLongs.some(value => evaluateHeldBreakevenFloor({
       strikeLong: value.leg.strike, strikeShort: 1e9, shortBid: 1, spot: context.price,
       basis: readHeldBasis(value.candidate.avgOpenPrice), quantity: value.candidate.quantity,
     })?.code === 'COST_BASIS_UNAVAILABLE');

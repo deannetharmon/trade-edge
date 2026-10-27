@@ -39,7 +39,7 @@ import {
 } from '@/lib/scans/spread-finder';
 import { findBestCsp, findAllCsp } from '@/lib/scans/csp-finder';
 import { MAX_OCR_IMAGES, extractTickerCandidatesFromImages, describeOcrBatch, describeOcrProgress, progressPercent, type OcrPhase, type OcrStatus } from '@/lib/screener/ocrBatch';
-import { DEFAULT_PMCC_DTE_RANGES, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
+import { DEFAULT_HELD_PMCC_SHORT_DELTA, DEFAULT_HELD_PMCC_SHORT_DTE, DEFAULT_PMCC_DTE_RANGES, isValidPmccDteRanges } from '@/lib/scans/pmccDteRanges';
 import { LEAP_ENTRY_DTE_TARGET, LEAPS_DTE_MAX_CHIPS, LEAPS_DTE_MIN_CHIPS } from '@/lib/scans/leapsEntryTargets';
 import { getPmccChain } from '@/lib/scans/pmccChainClient';
 import { buildCreditSpreadEntryFacts } from '@/lib/entry-context/analysis';
@@ -72,7 +72,7 @@ import { PMCC_DECISION_POLICY_VERSION, pmccDecisionRankEligible, unavailablePmcc
 import { evaluateEventRisk, type EventRiskResult } from '@/lib/scans/eventRisk';
 import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
-import { excludedContractPremiumText, heldLeapOtmTag, selectLongLegBlockerLine } from '@/lib/scans/pmccHeldUnderwaterDisplay';
+import { heldIncomeSummary, excludedContractPremiumText, heldLeapOtmTag, selectLongLegBlockerLine } from '@/lib/scans/pmccHeldUnderwaterDisplay';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { TradeLookupModal } from '@/features/screener/components/TradeLookupModal';
 import { defaultLookupDeps } from '@/lib/tradeLookup/defaultDeps';
@@ -916,6 +916,9 @@ async function deleteFilter(strategy: string, name: string): Promise<void> {
 
 const PMCC_SHORT_DTE_MIN = DEFAULT_PMCC_DTE_RANGES.shortMin;
 const PMCC_SHORT_DTE_MAX = DEFAULT_PMCC_DTE_RANGES.shortMax;
+// PMCC-HELD-UNDERWATER-0001B: the held-LEAP short-call scan opens at 7-10 DTE (new-entry estimates keep the 30-45 constants above).
+const PMCC_HELD_SHORT_DTE_MIN = DEFAULT_HELD_PMCC_SHORT_DTE.min;
+const PMCC_HELD_SHORT_DTE_MAX = DEFAULT_HELD_PMCC_SHORT_DTE.max;
 
 // The LEAPS screen's starting filter is the new-entry target (12 to 18 months), not the wide bounds
 // used to evaluate LEAPS already held (DEFAULT_PMCC_DTE_RANGES.longMin/longMax).
@@ -4722,10 +4725,12 @@ function buildPmccOrderLegs(pair: PmccPairResult): any[] {
 // different enough risk profiles that guarding one component against
 // firing the wrong pricing model is more dangerous than two small,
 // independently-correct components.
-function HeldPmccOrderModal({ result, th, onClose, shortDeltaMin, shortDeltaMax }: {
+function HeldPmccOrderModal({ result, th, onClose, shortDeltaMin, shortDeltaMax, shortDteMin, shortDteMax }: {
   result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void;
   // SCAN-ALIGN-0001F: the scan's short-delta window, so the order-time re-check applies the same hard filter the scan did.
   shortDeltaMin: number; shortDeltaMax: number;
+  // 0001B: the scan's short DTE window, so the order-time re-check matches the scan (held default 7-10).
+  shortDteMin: number; shortDteMax: number;
 }) {
   const pair = result.pmccPair!;
   const [quantity, setQuantity] = useState(1);
@@ -4813,7 +4818,7 @@ function HeldPmccOrderModal({ result, th, onClose, shortDeltaMin, shortDeltaMax 
     return JSON.stringify({
       mode, accountLocator: accountNumber, underlyingSymbol: result.symbol,
       longOccSymbol: pair.longLeg.occSymbol, shortOccSymbol: pair.shortLeg.occSymbol,
-      quantity, limitPrice: entryLimit, shortDeltaMin, shortDeltaMax,
+      quantity, limitPrice: entryLimit, shortDeltaMin, shortDeltaMax, shortDteMin, shortDteMax,
     });
   };
 
@@ -4975,18 +4980,18 @@ function HeldPmccOrderModal({ result, th, onClose, shortDeltaMin, shortDeltaMax 
 // LEAPS is thesis-driven and never gets a mechanical stop, and there is no
 // single "close the whole diagonal" automation since that's a manual,
 // two-leg decision when the trader decides it's time.
-function PmccTradeModal({ result, th, onClose, shortDeltaMin, shortDeltaMax, shortOiMin, maxSpreadPct, shortWidthCeiling }: {
+function PmccTradeModal({ result, th, onClose, shortDeltaMin, shortDeltaMax, shortDteMin, shortDteMax, shortOiMin, maxSpreadPct, shortWidthCeiling }: {
   result: ScreenResult; th: typeof THEMES[Theme]; onClose: () => void;
   // PMCC-ORDER-GATE-LIVE-FILTERS-0001: the live short-call filters from
   // the PMCC scan modal, sent with the order review so the gate that
   // can block an order matches what's actually shown on screen.
-  shortDeltaMin: number; shortDeltaMax: number; shortOiMin: number; maxSpreadPct: number;
+  shortDeltaMin: number; shortDeltaMax: number; shortDteMin: number; shortDteMax: number; shortOiMin: number; maxSpreadPct: number;
   // SCAN-ALIGN-0001C2: short-leg width ceiling from the PMCC scan modal, so the order gate matches the scan.
   shortWidthCeiling: number;
 }) {
   const pair = result.pmccPair!;
   if (pair.entryMode === 'covered-short-call-against-held-leaps') {
-    return <HeldPmccOrderModal result={result} th={th} onClose={onClose} shortDeltaMin={shortDeltaMin} shortDeltaMax={shortDeltaMax} />;
+    return <HeldPmccOrderModal result={result} th={th} onClose={onClose} shortDeltaMin={shortDeltaMin} shortDeltaMax={shortDeltaMax} shortDteMin={shortDteMin} shortDteMax={shortDteMax} />;
   }
   const [quantity, setQuantity] = useState(1);
   const [phase, setPhase] = useState<'confirm' | 'dryrun' | 'placing' | 'done' | 'error'>('confirm');
@@ -5896,6 +5901,21 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
   </span>
 )}</span></div>}
       </div>
+      {heldLong && !heldRejected && !heldOutcome?.notChecked && (() => {
+        // PMCC-HELD-UNDERWATER-0001B (Ian): the plain-English income line. What you collect comes first; the
+        // assigned outcome is information only (it never gates or reorders anything).
+        const income = heldIncomeSummary({
+          shortBid: pair.shortLeg.executablePrice, shortStrike: pair.shortLeg.strike, shortDelta: pair.shortLeg.delta, spot: result.price,
+          widthMinusCostPerShare: metrics?.costBasisPerShare != null ? metrics.widthMinusDebitPerShare : null,
+        });
+        return (
+          <div className="mt-2 rounded border border-emerald-900/60 bg-emerald-500/5 px-3 py-2 text-[11px]" data-testid="held-income-line">
+            <span className="font-bold text-emerald-300">You collect {income.collect}</span>
+            <span className={th.textMuted}>{[income.abovePrice, income.chanceAssigned].filter(Boolean).map(part => ` · ${part}`).join('')}</span>
+            {income.assignedOutcome && <p className={`mt-0.5 text-[10px] ${th.textFaint}`} data-testid="held-assigned-outcome">{income.assignedOutcome}</p>}
+          </div>
+        );
+      })()}
       {pmccDecision.gates.some(gate => gate.status === 'fail' || gate.status === 'unavailable') && (
         <p className="mt-2 text-[10px] text-red-300">
           Blocked because: {pmccDecision.gates.filter(gate => gate.status === 'fail' || gate.status === 'unavailable').map(gate => gate.explanation).join(' · ')}
@@ -9066,10 +9086,10 @@ export default function Home() {
   const togglePmccLeapsSymbol = (symbol: string) => {
     setPmccHiddenLeapsSymbols(prev => prev.includes(symbol) ? prev.filter(s => s !== symbol) : [...prev, symbol]);
   };
-  const [pmccShortDteMin, setPmccShortDteMin] = useState(PMCC_SHORT_DTE_MIN);
-  const [pmccShortDteMax, setPmccShortDteMax] = useState(PMCC_SHORT_DTE_MAX);
-  const [pmccShortDeltaMin, setPmccShortDeltaMin] = useState(DEFAULT_PMCC_SHORT_DELTA_RANGE.min);
-  const [pmccShortDeltaMax, setPmccShortDeltaMax] = useState(DEFAULT_PMCC_SHORT_DELTA_RANGE.max);
+  const [pmccShortDteMin, setPmccShortDteMin] = useState<number>(PMCC_HELD_SHORT_DTE_MIN);
+  const [pmccShortDteMax, setPmccShortDteMax] = useState<number>(PMCC_HELD_SHORT_DTE_MAX);
+  const [pmccShortDeltaMin, setPmccShortDeltaMin] = useState<number>(DEFAULT_HELD_PMCC_SHORT_DELTA.min);
+  const [pmccShortDeltaMax, setPmccShortDeltaMax] = useState<number>(DEFAULT_HELD_PMCC_SHORT_DELTA.max);
   const [pmccShortOiMin, setPmccShortOiMin] = useState(DEFAULT_PMCC_SHORT_OI_MIN);
   const [pmccMaxSpreadPct, setPmccMaxSpreadPct] = useState(DEFAULT_PMCC_QUOTE_POLICY.qualifyingSpreadPctMax);
   // SCAN-ALIGN-0001C2: short-leg absolute width ceiling ($ per share), persisted with the other PMCC modal settings.
@@ -9082,10 +9102,11 @@ export default function Home() {
       const saved = localStorage.getItem(LS_PMCC_DTE);
       if (!saved) return;
       const parsed = JSON.parse(saved);
-      if (Number.isFinite(parsed.shortMin)) setPmccShortDteMin(parsed.shortMin);
-      if (Number.isFinite(parsed.shortMax)) setPmccShortDteMax(parsed.shortMax);
-      if (Number.isFinite(parsed.shortDeltaMin)) setPmccShortDeltaMin(parsed.shortDeltaMin);
-      if (Number.isFinite(parsed.shortDeltaMax)) setPmccShortDeltaMax(parsed.shortDeltaMax);
+      // 0001B: a DTE range saved before the 7-10 default (no rangeV marker) is the old 30-45 default or an old edit; ignore it once.
+      if (parsed.rangeV === 2 && Number.isFinite(parsed.shortMin)) setPmccShortDteMin(parsed.shortMin);
+      if (parsed.rangeV === 2 && Number.isFinite(parsed.shortMax)) setPmccShortDteMax(parsed.shortMax);
+      if (parsed.rangeV === 2 && Number.isFinite(parsed.shortDeltaMin)) setPmccShortDeltaMin(parsed.shortDeltaMin);
+      if (parsed.rangeV === 2 && Number.isFinite(parsed.shortDeltaMax)) setPmccShortDeltaMax(parsed.shortDeltaMax);
       if (Number.isFinite(parsed.shortOiMin)) setPmccShortOiMin(parsed.shortOiMin);
       if (Number.isFinite(parsed.maxSpreadPct)) setPmccMaxSpreadPct(parsed.maxSpreadPct);
       if (Number.isFinite(parsed.widthCeiling) && parsed.widthCeiling >= 0.01) setPmccWidthCeiling(parsed.widthCeiling);
@@ -13389,8 +13410,8 @@ export default function Home() {
                   <LeapsAdvisorPanel
                     th={th}
                     candidates={sorted}
-                    pmccShortDeltaMax={pmccShortDeltaMax}
-                    pmccShortDteMin={pmccShortDteMin}
+                    pmccShortDeltaMax={DEFAULT_PMCC_SHORT_DELTA_RANGE.max}
+                    pmccShortDteMin={PMCC_SHORT_DTE_MIN}
                     filters={{ deltaMin: leapsDeltaMin, deltaMax: leapsDeltaMax, dteMin: leapsDteMin, dteMax: leapsDteMax, oiMin: leapsOiMin, extrinsicPctMax: leapsExtrinsicPctMax }}
                     onClose={() => setShowLeapsAdvisorPanel(false)}
                     onVerify={(occSymbol) => {
@@ -13409,7 +13430,7 @@ export default function Home() {
 
                 {sorted.length > 0 ? <div className="space-y-2">{sorted.map(candidate => (
                   <LeapsResultRow key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}`}
-                    candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax} pmccShortDeltaMax={pmccShortDeltaMax} pmccShortDteMin={pmccShortDteMin}
+                    candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax} pmccShortDeltaMax={DEFAULT_PMCC_SHORT_DELTA_RANGE.max} pmccShortDteMin={PMCC_SHORT_DTE_MIN}
                     onTrade={() => setLeapsTradeCandidate(candidate)}
                     rowRef={candidate.occSymbol ? (el => { leapsRowRefs.current[candidate.occSymbol!] = el; }) : undefined}
                     autoOpenAnalysis={candidate.occSymbol != null && leapsVerifyTarget === candidate.occSymbol}
@@ -13422,7 +13443,7 @@ export default function Home() {
                     <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">INSUFFICIENT DATA — EXCLUDED FROM FILTERS ABOVE</p>
                     <div className="space-y-2">{insufficientCandidates.map(candidate => (
                       <LeapsResultRow key={candidate.occSymbol ?? `${candidate.symbol}-${candidate.expiration}-${candidate.strike}-insufficient`}
-                        candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax} pmccShortDeltaMax={pmccShortDeltaMax} pmccShortDteMin={pmccShortDteMin}
+                        candidate={candidate} th={th} deltaMin={leapsDeltaMin} deltaMax={leapsDeltaMax} dteMin={leapsDteMin} dteMax={leapsDteMax} oiMin={leapsOiMin} extrinsicPctMax={leapsExtrinsicPctMax} pmccShortDeltaMax={DEFAULT_PMCC_SHORT_DELTA_RANGE.max} pmccShortDteMin={PMCC_SHORT_DTE_MIN}
                         onTrade={() => setLeapsTradeCandidate(candidate)} />
                     ))}</div>
                   </div>
@@ -13436,7 +13457,7 @@ export default function Home() {
       {tradeResult?.strategy === 'PMCC' && tradeResult.pmccPair && (
         <PmccTradeModal
           result={tradeResult} th={th} onClose={() => setTradeResult(null)}
-          shortDeltaMin={pmccShortDeltaMin} shortDeltaMax={pmccShortDeltaMax}
+          shortDeltaMin={pmccShortDeltaMin} shortDeltaMax={pmccShortDeltaMax} shortDteMin={pmccShortDteMin} shortDteMax={pmccShortDteMax}
           shortOiMin={pmccShortOiMin} maxSpreadPct={pmccMaxSpreadPct} shortWidthCeiling={pmccWidthCeiling}
         />
       )}
@@ -13570,7 +13591,7 @@ export default function Home() {
             // as the scan's own filter silently not applying. Sync it to
             // match what was just run.
             setFilteredMinOi(request.shortOiMin);
-            try { localStorage.setItem(LS_PMCC_DTE, JSON.stringify({ shortMin: request.shortDteMin, shortMax: request.shortDteMax, shortDeltaMin: request.shortDeltaMin, shortDeltaMax: request.shortDeltaMax, shortOiMin: request.shortOiMin, maxSpreadPct: request.maxSpreadPct, widthCeiling: request.widthCeiling })); } catch {}
+            try { localStorage.setItem(LS_PMCC_DTE, JSON.stringify({ rangeV: 2, shortMin: request.shortDteMin, shortMax: request.shortDteMax, shortDeltaMin: request.shortDeltaMin, shortDeltaMax: request.shortDeltaMax, shortOiMin: request.shortOiMin, maxSpreadPct: request.maxSpreadPct, widthCeiling: request.widthCeiling })); } catch {}
             setShowPmccScanModal(false); void runPMCCScan(request);
           }}
         />

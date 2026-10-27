@@ -42,3 +42,39 @@ export function excludedContractPremiumText(rejection: Pick<PmccLegRejection, 'b
   const bid = rejection.bid;
   return typeof bid === 'number' && Number.isFinite(bid) && bid > 0 ? ` · bid $${bid.toFixed(2)}` : '';
 }
+
+export interface HeldIncomeSummary {
+  /** "$60 per contract": the short bid x 100. */
+  collect: string;
+  /** "16.0% above price" (or "below price"), or null when the stock price is unusable. */
+  abovePrice: string | null;
+  /** "about 18% chance of assignment" from the short delta, or null. */
+  chanceAssigned: string | null;
+  /** "If assigned and LEAP exercised: -$17.75/sh (-$1,775 per contract), before fees." Null without a usable cost basis. */
+  assignedOutcome: string | null;
+}
+
+const usd = (value: number, digits: number): string => `${value < 0 ? '-' : ''}$${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+
+/**
+ * PMCC-HELD-UNDERWATER-0001B (Ian): plain-English income line for a held-LEAP short call. Words only; no
+ * qualification decision lives here. `widthMinusCostPerShare` is the cost-based held figure (null when the
+ * cost basis was unusable), always labeled as the result "if assigned and LEAP exercised", never an expected P/L.
+ */
+export function heldIncomeSummary(input: {
+  shortBid: number; shortStrike: number; shortDelta: number | null | undefined; spot: number | null | undefined;
+  widthMinusCostPerShare: number | null | undefined;
+}): HeldIncomeSummary {
+  const collect = `${usd(Math.round(input.shortBid * 100), 0)} per contract`;
+  const spot = input.spot;
+  const abovePrice = typeof spot === 'number' && Number.isFinite(spot) && spot > 0
+    ? `${Math.abs((input.shortStrike / spot - 1) * 100).toFixed(1)}% ${input.shortStrike >= spot ? 'above' : 'below'} price`
+    : null;
+  const delta = input.shortDelta;
+  const chanceAssigned = typeof delta === 'number' && Number.isFinite(delta) ? `about ${Math.round(Math.abs(delta) * 100)}% chance of assignment` : null;
+  const w = input.widthMinusCostPerShare;
+  const assignedOutcome = typeof w === 'number' && Number.isFinite(w)
+    ? `If assigned and LEAP exercised: ${usd(w, 2)}/sh (${usd(Math.round(w * 100), 0)} per contract), before fees. Not an expected P/L.`
+    : null;
+  return { collect, abovePrice, chanceAssigned, assignedOutcome };
+}

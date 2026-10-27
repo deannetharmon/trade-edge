@@ -3,6 +3,10 @@
 // SCAN-ALIGN-0001F (F2): PMCC short delta is a hard filter. Fixtures are the Alan-approved list
 // (short leg, window 0.20-0.35), the held zero-shorts outcome, and the never-"no short calls found" rule.
 import { describe, expect, it, vi } from 'vitest';
+
+// PMCC-HELD-UNDERWATER-0001B: the held cost-basis floor is retired in production (HELD_COST_FLOOR_GATE=false).
+// This file covers the floor itself and its rollback path, so it runs with the gate switched back on.
+vi.mock('../pmccHeldBreakeven', async importOriginal => ({ ...(await importOriginal<typeof import('../pmccHeldBreakeven')>()), HELD_COST_FLOOR_GATE: true }));
 import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '../pmccConfig';
 import { pairPmccCandidates } from '../pmccPairing';
 import { runPmccProduction } from '../pmccProduction';

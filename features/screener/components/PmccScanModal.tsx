@@ -21,6 +21,7 @@ import { COMPACT_INPUT, FieldHead, StatusLine } from './scanConfig/CompactContro
 import { InfoTip } from './scanConfig/InfoTip';
 import { ScanLegend } from './scanConfig/ScanLegend';
 import { AlwaysAppliedStrip, type StripItem } from './scanConfig/AlwaysAppliedStrip';
+import { HELD_PMCC_SHORT_DTE_PRESETS } from '@/lib/scans/pmccDteRanges';
 
 export interface PmccScanRequest {
   shortDteMin: number;
@@ -40,6 +41,7 @@ export interface PmccHeldCandidateSummary {
 
 // SCAN-ALIGN-0001 F1 (Mock 1): quick-select presets that set BOTH Min and Max delta.
 export const PMCC_DELTA_PRESETS = [
+  { label: 'Δ .10–.20', min: 0.1, max: 0.2 },
   { label: 'Δ .15–.25', min: 0.15, max: 0.25 },
   { label: 'Δ .20–.30', min: 0.2, max: 0.3 },
   { label: 'Δ .25–.35', min: 0.25, max: 0.35 },
@@ -91,6 +93,12 @@ export function PmccScanModal({
   const deltaPills: CriterionPill[] = PMCC_DELTA_PRESETS.map(p => ({
     key: p.label, label: p.label, pressed: matchedDeltaPreset?.label === p.label,
     onSelect: () => setDraft(value => ({ ...value, shortDeltaMin: p.min, shortDeltaMax: p.max })),
+  }));
+  // PMCC-HELD-UNDERWATER-0001B: quick-select DTE presets (the held scan opens at 7-10).
+  const matchedDtePreset = matchRangePreset(draft.shortDteMin, draft.shortDteMax, HELD_PMCC_SHORT_DTE_PRESETS);
+  const dtePills: CriterionPill[] = HELD_PMCC_SHORT_DTE_PRESETS.map(p => ({
+    key: p.label, label: p.label, pressed: matchedDtePreset?.label === p.label,
+    onSelect: () => setDraft(value => ({ ...value, shortDteMin: p.min, shortDteMax: p.max })),
   }));
   const alwaysItems: StripItem[] = [
     { id: 'shortOtm', label: 'Short strike above price', tag: 'GATE · FIXED', attr: { [ATTR]: 'shortOtm' }, tip: <p>The short call must be out of the money: its strike is above the stock price.</p> },
@@ -151,6 +159,7 @@ export function PmccScanModal({
             {num('shortDteMax', 'Max DTE', '1')}
             <span className="text-[10px] text-neutral-500">days</span>
           </div>
+          <CriterionPills th={th} groupLabel="DTE range quick select" pills={dtePills} compact />
         </div>
         <div className="flex min-w-0 flex-col gap-1">
           <FieldHead lifecycle="fetch" fixed={false} rescan name="Delta range" align="right" tip={<><p>Delta range, absolute.</p><p data-testid="pmcc-delta-hint" className="mt-1">Absolute delta of the short call. Lower = further OTM.</p></>} />

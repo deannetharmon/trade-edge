@@ -12,6 +12,10 @@
 // proves the card exposes no order or promote control and that no best-pair callout can name it.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// PMCC-HELD-UNDERWATER-0001B: the held cost-basis floor is retired in production (HELD_COST_FLOOR_GATE=false).
+// This file covers the floor itself and its rollback path, so it runs with the gate switched back on.
+vi.mock('@/lib/scans/pmccHeldBreakeven', async importOriginal => ({ ...(await importOriginal<typeof import('@/lib/scans/pmccHeldBreakeven')>()), HELD_COST_FLOOR_GATE: true }));
 import { render, screen, within, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import ScreenerPage from '../page';

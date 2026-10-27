@@ -1,7 +1,7 @@
 // lib/scans/pmccPairing.ts
 
 import { isOccSymbolMatch } from './candidateIdentity';
-import { evaluateHeldBreakevenFloor, HELD_BREAKEVEN_FLOOR_MESSAGE, heldLongKey, type HeldLongBasisMap } from './pmccHeldBreakeven';
+import { evaluateHeldBreakevenFloor, HELD_BREAKEVEN_FLOOR_MESSAGE, HELD_COST_FLOOR_GATE, heldLongKey, type HeldLongBasisMap } from './pmccHeldBreakeven';
 import { isValidPmccDteRanges } from './pmccDteRanges';
 import {
   isValidPmccDeltaRange,
@@ -275,7 +275,7 @@ function evaluatePair(
   shortLeg: PmccEligibleLeg,
   criteria: PmccPairingCriteria,
   heldLongOccSymbols: ReadonlySet<string> = new Set(),
-  heldFloor?: { basis: HeldLongBasisMap | undefined; spot: number },
+  heldFloor?: { basis: HeldLongBasisMap | undefined; spot: number; enforce?: boolean },
 ): { pair: PmccPairResult; structurallyValid: boolean } {
   const failures: PmccFailureReason[] = [];
   const isHeldLong = heldLongOccSymbols.has(longLeg.candidateId);
@@ -306,7 +306,11 @@ function evaluatePair(
       basis: held?.avgOpen ?? null,
       quantity: held?.quantity,
     });
-    if (failure) failures.push(reason(failure.code, failure.message));
+    // PMCC-HELD-UNDERWATER-0001B (Dean, Ian): the cost-basis floor is RETIRED as a gate for held LEAPs. The
+    // owner sells short calls for income while the LEAP recovers, so every call above the LEAP strike
+    // qualifies (LONG_STRIKE_NOT_BELOW_SHORT above still requires short strike > LEAP strike). The floor and
+    // its reasons stay available behind `enforce` (tests, rollback); production callers do not set it.
+    if (failure && heldFloor?.enforce === true) failures.push(reason(failure.code, failure.message));
     // PMCC-HELD-UNDERWATER-0001A: only a usable, single-lot, unit-sane basis reaches here (every
     // COST_BASIS_UNAVAILABLE case is excluded), so the held economics can be measured from cost.
     if (failure?.code !== 'COST_BASIS_UNAVAILABLE' && typeof held?.avgOpen === 'number' && Number.isFinite(held.avgOpen)) {
@@ -359,6 +363,8 @@ export function pairPmccCandidates(input: {
   heldLongOccSymbols?: ReadonlySet<string>;
   /** PMCC-HELD-BREAKEVEN-0001: per-held-long cost and quantity, keyed by heldLongKey(occSymbol). */
   heldLongBasis?: HeldLongBasisMap;
+  /** PMCC-HELD-UNDERWATER-0001B: overrides HELD_COST_FLOOR_GATE (tests, rollback). Default: the gate constant (off). */
+  enforceHeldCostFloor?: boolean;
 }): PmccSessionResult {
   validateCriteria(input.criteria);
   if (!Number.isFinite(input.underlyingPrice) || input.underlyingPrice <= 0) throw new Error('Invalid PMCC underlying price');
@@ -378,7 +384,7 @@ export function pairPmccCandidates(input: {
   const allQualified: PmccPairResult[] = [];
   const allNearMisses: PmccPairResult[] = [];
 
-  const heldFloor = { basis: input.heldLongBasis, spot: input.underlyingPrice };
+  const heldFloor = { basis: input.heldLongBasis, spot: input.underlyingPrice, enforce: input.enforceHeldCostFloor ?? HELD_COST_FLOOR_GATE };
   outer: for (const longLeg of longs.eligible) {
     for (const shortLeg of shorts.eligible) {
       if (counts.combinationsEvaluated >= input.criteria.limits.maxCombinationsEvaluated) break outer;
@@ -442,6 +448,8 @@ export function evaluatePmccPairOnDemand(input: {
    * Omitted for new-entry lookups, which are unchanged. */
   heldLongOccSymbols?: ReadonlySet<string>;
   heldLongBasis?: HeldLongBasisMap;
+  /** PMCC-HELD-UNDERWATER-0001B: overrides HELD_COST_FLOOR_GATE (tests, rollback). */
+  enforceHeldCostFloor?: boolean;
 }): PmccOnDemandResult {
   const { symbol, underlyingPrice, longChainLeg, shortChainLeg, criteria, asOf, marketSession } = input;
   const heldLongOccSymbols = input.heldLongOccSymbols ?? new Set<string>();
@@ -467,7 +475,7 @@ export function evaluatePmccPairOnDemand(input: {
     };
   }
 
-  const { pair, structurallyValid } = evaluatePair(eligibleLong[0], eligibleShort[0], criteria, heldLongOccSymbols, { basis: input.heldLongBasis, spot: underlyingPrice });
+  const { pair, structurallyValid } = evaluatePair(eligibleLong[0], eligibleShort[0], criteria, heldLongOccSymbols, { basis: input.heldLongBasis, spot: underlyingPrice, enforce: input.enforceHeldCostFloor ?? HELD_COST_FLOOR_GATE });
   if (pair.qualified) {
     return { outcome: 'qualified', pair, longLegRejection: null, shortLegRejection: null, chainMissing };
   }

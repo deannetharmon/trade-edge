@@ -7,6 +7,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// PMCC-HELD-UNDERWATER-0001B: the held cost-basis floor is retired in production (HELD_COST_FLOOR_GATE=false).
+// This file covers the floor itself and its rollback path, so it runs with the gate switched back on.
+vi.mock('@/lib/scans/pmccHeldBreakeven', async importOriginal => ({ ...(await importOriginal<typeof import('@/lib/scans/pmccHeldBreakeven')>()), HELD_COST_FLOOR_GATE: true }));
+
 vi.mock('ioredis', () => ({
   default: class FakeRedis {
     hgetall = vi.fn(async () => ({ refresh_token: 'r', client_secret: 's' }));

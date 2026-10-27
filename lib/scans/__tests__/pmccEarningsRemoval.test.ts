@@ -4,6 +4,10 @@
 // warning tag, held-mode outcome, and the result-count receipt. T = 2026-09-24, X1 = 2026-10-16,
 // X2 = 2026-11-20. Run under TZ=UTC and TZ=America/Los_Angeles with identical results.
 import { describe, expect, it, vi } from 'vitest';
+
+// PMCC-HELD-UNDERWATER-0001B: the held cost-basis floor is retired in production (HELD_COST_FLOOR_GATE=false).
+// This file covers the floor itself and its rollback path, so it runs with the gate switched back on.
+vi.mock('../pmccHeldBreakeven', async importOriginal => ({ ...(await importOriginal<typeof import('../pmccHeldBreakeven')>()), HELD_COST_FLOOR_GATE: true }));
 import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '../pmccConfig';
 import { pairPmccCandidates } from '../pmccPairing';
 import { buildPmccScreenResults, runPmccProduction } from '../pmccProduction';
