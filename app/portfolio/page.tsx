@@ -15,6 +15,7 @@ import Link from 'next/link';
 import { buildTradingViewWidgetUrl } from '@/components/TradingViewChartButton';
 import { recordOrderLifecycleEvent } from '@/lib/order-lifecycle/client';
 import BalancesTab from '@/components/BalancesTab';
+import PnlCalendarTab from '@/features/portfolio/pnl-calendar/PnlCalendarTab';
 import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
@@ -10588,10 +10589,10 @@ export default function PortfolioPage() {
   // 'history' via the `tab` query param -- read once, on initial state
   // construction, so a fresh load of a deep link opens directly into the
   // right tab without an extra render/flash.
-  const [activeTab, setActiveTab] = useState<'todays-priorities' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'>(() => {
+  const [activeTab, setActiveTab] = useState<'todays-priorities' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances' | 'pnl-calendar'>(() => {
     if (typeof window === 'undefined') return 'positions';
     const tab = new URLSearchParams(window.location.search).get('tab');
-    if (tab === 'todays-priorities' || tab === 'briefing' || tab === 'positions' || tab === 'history') return tab;
+    if (tab === 'todays-priorities' || tab === 'briefing' || tab === 'positions' || tab === 'history' || tab === 'pnl-calendar') return tab;
     return 'positions';
   });
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
@@ -11229,7 +11230,9 @@ export default function PortfolioPage() {
             { key: 'priorities', label: 'Priority List', icon: '⚑' },
             { key: 'history', label: 'Decision History', icon: '⏱' },
             { key: 'balances', label: 'Balances', icon: '◉' },
-          ] as { key: 'todays-priorities' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances'; label: string; icon: string }[]).map(tab => (
+            // PNL-CAL-0001: locked-in profit per day, week and month, with a monthly goal.
+            { key: 'pnl-calendar', label: 'P/L Calendar', icon: '▦' },
+          ] as { key: 'todays-priorities' | 'briefing' | 'positions' | 'priorities' | 'history' | 'balances' | 'pnl-calendar'; label: string; icon: string }[]).map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium tracking-wider border-b-2 transition-colors ${
                 activeTab === tab.key
@@ -11260,6 +11263,7 @@ export default function PortfolioPage() {
       )}
 
       {activeTab === 'balances' && <BalancesTab />}
+      {activeTab === 'pnl-calendar' && <PnlCalendarTab />}
 
       {/* WA-0003: Today's Priorities -- the finite, completion-aware open
           queue (lib/todays-priorities-queue, additive over

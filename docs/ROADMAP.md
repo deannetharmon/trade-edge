@@ -7,7 +7,11 @@
 
 # TradeEdge Roadmap (maintained by Paul — update after every major decision)
 
-Last updated: 2026-10-06 (ANALYTICS-0001 go)
+Last updated: 2026-10-27 (PNL-CAL-0001)
+
+## P/L Calendar — 2026-10-27
+
+- **PNL-CAL-0001** — IMPLEMENTED 2026-10-27 (Dean's reference screenshot; Alan, Ian, Quinn, Paul inline). New Portfolio sub tab "P/L Calendar": a Monthly Goal card (locked-in profit against a target percent, default 5, of the month's starting net liquidating value) over a month calendar of locked-in profit per day with week totals and month navigation. Locked-in = the Trade Log's complete, not-excluded closed trades by close date, so the month total equals Performance. Read-only, no order or scoring change. **Next:** PNL-CAL-0001B adds Open (unrealized) and Open CSP premium from the live position model (needs Diane's placement); Dean's live check on production. Ticket: `docs/tickets/PNL-CAL-0001-pnl-calendar-tab.md`.
 
 ## Found and built 2026-10-23: DTE-CSP-CC-0001
 The live engine still shows "roll-soon" for an Income CSP and a covered call at 21 DTE or below, against Dean's 2026-10-17 decision (no 21-DTE rule for CSP and CC). Ticket: docs/tickets/DTE-CSP-CC-0001-no-21-dte-roll-for-csp-and-cc.md. Not built; needs Ian's sign-off (risk logic). Golden test has an `it.todo` waiting for it.
