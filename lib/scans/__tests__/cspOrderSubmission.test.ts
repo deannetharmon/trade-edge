@@ -32,6 +32,16 @@ describe('guardCspOrder', () => {
     expect(guard.allowed).toBe(false); // 23,500 required > 20,000 cash, even though buying power alone would cover it
   });
 
+  it('names the limiting figure and both inputs when blocked', () => {
+    const guard = guardCspOrder(capital({ optionBuyingPower: 10_743.44, cashBalance: 5_032.08 }), { strike: 75, creditPerContract: 295, quantity: 1 });
+    expect(guard.allowed).toBe(false);
+    const reason = !guard.allowed ? guard.reason : '';
+    expect(reason).toContain('$7,500 in cash-secured collateral');
+    expect(reason).toContain('Limited by cash available to withdraw');
+    expect(reason).toContain('$10,743.44');
+    expect(reason).toContain('$5,032.08');
+  });
+
   it('scales required cash with quantity', () => {
     const guard = guardCspOrder(capital({ optionBuyingPower: 100_000, cashBalance: 100_000 }), { ...request, quantity: 3 });
     expect(guard.allowed && guard.requiredCash).toBe(70_500);
