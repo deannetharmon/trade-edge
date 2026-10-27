@@ -51,34 +51,34 @@ describe('SCAN-ALIGN-0001 F1 PMCC delta chips', () => {
 
   it('a chip sets both Min and Max delta', async () => {
     renderModal();
-    await userEvent.click(chip('Δ .20–.30'));
-    expect(minField().value).toBe('0.2');
-    expect(maxField().value).toBe('0.3');
-    await userEvent.click(chip('Δ .25–.35'));
-    expect(minField().value).toBe('0.25');
-    expect(maxField().value).toBe('0.35');
+    await userEvent.click(chip('Δ .05–.20'));
+    expect(minField().value).toBe('0.05');
+    expect(maxField().value).toBe('0.2');
+    await userEvent.click(chip('Δ 0–.15'));
+    expect(minField().value).toBe('0');
+    expect(maxField().value).toBe('0.15');
   });
 
   it('highlights only the chip matching the current fields, and follows chip clicks', async () => {
-    renderModal({ shortDeltaMin: 0.2, shortDeltaMax: 0.3 });
-    expect(chip('Δ .20–.30')).toHaveAttribute('aria-pressed', 'true');
-    expect(chip('Δ .15–.25')).toHaveAttribute('aria-pressed', 'false');
-    expect(chip('Δ .25–.35')).toHaveAttribute('aria-pressed', 'false');
-    await userEvent.click(chip('Δ .15–.25'));
-    expect(chip('Δ .15–.25')).toHaveAttribute('aria-pressed', 'true');
-    expect(chip('Δ .20–.30')).toHaveAttribute('aria-pressed', 'false');
+    renderModal({ shortDeltaMin: 0.2, shortDeltaMax: 0.35 });
+    expect(chip('Δ .20–.35')).toHaveAttribute('aria-pressed', 'true');
+    expect(chip('Δ .10–.25')).toHaveAttribute('aria-pressed', 'false');
+    expect(chip('Δ 0–.15')).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.click(chip('Δ .10–.25'));
+    expect(chip('Δ .10–.25')).toHaveAttribute('aria-pressed', 'true');
+    expect(chip('Δ .20–.35')).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('no chip is highlighted for the default 0.15-0.40 range', () => {
     renderModal();
-    ['Δ .15–.25', 'Δ .20–.30', 'Δ .25–.35'].forEach(n => expect(chip(n)).toHaveAttribute('aria-pressed', 'false'));
+    ['Δ 0–.10', 'Δ 0–.15', 'Δ .05–.20', 'Δ .10–.25', 'Δ .20–.35'].forEach(n => expect(chip(n)).toHaveAttribute('aria-pressed', 'false'));
   });
 
   it('a chip result runs with both values', async () => {
     const onRun = renderModal();
-    await userEvent.click(chip('Δ .25–.35'));
+    await userEvent.click(chip('Δ .20–.35'));
     await userEvent.click(screen.getByRole('button', { name: /RUN PMCC SCAN/ }));
-    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ shortDeltaMin: 0.25, shortDeltaMax: 0.35 }));
+    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ shortDeltaMin: 0.2, shortDeltaMax: 0.35 }));
   });
 
   it('existing validation is unchanged: Max below Min disables Run', () => {
@@ -88,7 +88,7 @@ describe('SCAN-ALIGN-0001 F1 PMCC delta chips', () => {
 });
 
 describe('PMCC delta validation message', () => {
-  const msg = 'Delta must be between 0.10 and 0.40, and Max at least Min.';
+  const msg = 'Delta must be between 0 and 0.40, and Max at least Min.';
   it('is not shown for a valid range', () => {
     renderModal();
     expect(screen.queryByText(msg)).not.toBeInTheDocument();
@@ -98,8 +98,8 @@ describe('PMCC delta validation message', () => {
     expect(screen.getByText(msg)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /run/i, hidden: false })).toBeDisabled();
   });
-  it('shows when a value is outside 0.10-0.40', () => {
-    renderModal({ shortDeltaMin: 0.05, shortDeltaMax: 0.3 });
+  it('shows when a value is outside 0-0.40', () => {
+    renderModal({ shortDeltaMin: -0.05, shortDeltaMax: 0.3 });
     expect(screen.getByText(msg)).toBeInTheDocument();
     cleanup();
     renderModal({ shortDeltaMin: 0.15, shortDeltaMax: 0.45 });
@@ -142,8 +142,8 @@ describe('SCAN-MODAL-UX-0002A PMCC compact layout', () => {
     renderModal();
     expect(screen.getByTestId('pmcc-rule-preview')).toHaveTextContent('20–45d · Δ .15–.40 · ≤10% / $0.50 · OI pref 100');
     expect(screen.getByTestId('pmcc-rule-preview')).toHaveTextContent('1 LEAPS selected');
-    await userEvent.click(chip('Δ .25–.35'));
-    expect(screen.getByTestId('pmcc-rule-preview')).toHaveTextContent('Δ .25–.35');
+    await userEvent.click(chip('Δ .20–.35'));
+    expect(screen.getByTestId('pmcc-rule-preview')).toHaveTextContent('Δ .20–.35');
   });
 
   it('the run request is unchanged', async () => {

@@ -22,8 +22,10 @@ export const PMCC_LONG_DELTA_BOUNDS: PmccDeltaRange = {
   max: 0.90,
 };
 
+// PMCC-HELD-UNDERWATER-0001B: the lower bound is 0 so a held-LEAP owner can look at far-out-of-the-money income
+// calls (a call 12% above the price has a delta of .01-.04). Defaults are unchanged.
 export const PMCC_SHORT_DELTA_BOUNDS: PmccDeltaRange = {
-  min: 0.10,
+  min: 0,
   max: 0.40,
 };
 

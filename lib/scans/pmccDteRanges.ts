@@ -21,13 +21,17 @@ export const DEFAULT_PMCC_DTE_RANGES: PmccDteRanges = {
  */
 export const DEFAULT_HELD_PMCC_SHORT_DTE = { min: 7, max: 10 } as const;
 
-/** Held-LEAP scan opens at delta .10-.20 (roughly a 10-20% chance of assignment) so the LEAP is rarely called away. */
-export const DEFAULT_HELD_PMCC_SHORT_DELTA = { min: 0.1, max: 0.2 } as const;
+/** Held-LEAP scan opens at delta 0-.15 (at most about a 15% chance of assignment) so the LEAP is rarely called away. */
+export const DEFAULT_HELD_PMCC_SHORT_DELTA = { min: 0, max: 0.15 } as const;
 
-/** Quick-select presets for the held-LEAP scan's short DTE range. */
+/**
+ * Quick-select presets for the held-LEAP scan's short DTE range. Every chip overlaps the next one
+ * (7-10 sits inside 7-14, 7-14 meets 10-21 at 10-14, 10-21 meets 21-45 at 21, 21-45 contains 30-45).
+ */
 export const HELD_PMCC_SHORT_DTE_PRESETS = [
   { label: '7–10', min: 7, max: 10 },
-  { label: '14–21', min: 14, max: 21 },
+  { label: '7–14', min: 7, max: 14 },
+  { label: '10–21', min: 10, max: 21 },
   { label: '21–45', min: 21, max: 45 },
   { label: '30–45', min: 30, max: 45 },
 ] as const;

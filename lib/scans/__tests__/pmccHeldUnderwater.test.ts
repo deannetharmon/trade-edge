@@ -252,16 +252,22 @@ describe('0001B: income line for a held short call', () => {
 });
 
 describe('0001B: held scan defaults', () => {
-  it('held scan opens at 7-10 DTE and delta .10-.20; new-entry ranges are unchanged', () => {
+  it('held scan opens at 7-10 DTE and delta 0-.15; new-entry ranges are unchanged', () => {
     expect(DEFAULT_HELD_PMCC_SHORT_DTE).toEqual({ min: 7, max: 10 });
-    expect(DEFAULT_HELD_PMCC_SHORT_DELTA).toEqual({ min: 0.1, max: 0.2 });
+    expect(DEFAULT_HELD_PMCC_SHORT_DELTA).toEqual({ min: 0, max: 0.15 });
     expect(DEFAULT_PMCC_DTE_RANGES.shortMin).toBe(30);
     expect(DEFAULT_PMCC_DTE_RANGES.shortMax).toBe(45);
   });
 
-  it('DTE presets include 7-10 and the delta presets include .10-.20, all inside the delta bounds', () => {
-    expect(HELD_PMCC_SHORT_DTE_PRESETS.map(p => p.label)).toEqual(['7–10', '14–21', '21–45', '30–45']);
-    expect(PMCC_DELTA_PRESETS[0]).toMatchObject({ min: 0.1, max: 0.2 });
+  it('chip sets: each chip overlaps the next, the defaults are chips, and delta chips sit inside the bounds', () => {
+    expect(HELD_PMCC_SHORT_DTE_PRESETS.map(p => p.label)).toEqual(['7–10', '7–14', '10–21', '21–45', '30–45']);
+    expect(PMCC_DELTA_PRESETS.map(p => p.label)).toEqual(['Δ 0–.10', 'Δ 0–.15', 'Δ .05–.20', 'Δ .10–.25', 'Δ .20–.35']);
+    expect(PMCC_SHORT_DELTA_BOUNDS.min).toBe(0);
+    const overlaps = (list: readonly { min: number; max: number }[]) => list.slice(1).every((chip, i) => chip.min <= list[i].max && chip.max >= list[i].min);
+    expect(overlaps(HELD_PMCC_SHORT_DTE_PRESETS)).toBe(true);
+    expect(overlaps(PMCC_DELTA_PRESETS)).toBe(true);
+    expect(HELD_PMCC_SHORT_DTE_PRESETS.some(p => p.min === DEFAULT_HELD_PMCC_SHORT_DTE.min && p.max === DEFAULT_HELD_PMCC_SHORT_DTE.max)).toBe(true);
+    expect(PMCC_DELTA_PRESETS.some(p => p.min === DEFAULT_HELD_PMCC_SHORT_DELTA.min && p.max === DEFAULT_HELD_PMCC_SHORT_DELTA.max)).toBe(true);
     PMCC_DELTA_PRESETS.forEach(p => { expect(p.min).toBeGreaterThanOrEqual(PMCC_SHORT_DELTA_BOUNDS.min); expect(p.max).toBeLessThanOrEqual(PMCC_SHORT_DELTA_BOUNDS.max); });
   });
 
@@ -320,5 +326,23 @@ describe('0001B: best income, trend, and the strike-below-LEAP line', () => {
     expect(heldDecision.gates.find(g => g.code === 'TREND_AGAINST_BULLISH_THESIS')?.status).toBe('warning');
     const newDecision = evaluatePmccDecision({ pair: { ...held, entryMode: 'new-pmcc' }, criteria, marketSession: 'open', trendAgainst: true });
     expect(newDecision.gates.find(g => g.code === 'TREND_AGAINST_BULLISH_THESIS')?.status).toBe('fail');
+  });
+});
+
+describe('0001B: far-out-of-the-money income calls (real NFLX Nov 6 chain)', () => {
+  it('with min delta .01, the $71-73 calls above a $70 LEAP qualify and rank by premium per day', () => {
+    const long = nflxLong();
+    const shorts = [
+      leg('NFLX', { expiration: '2026-11-06', strike: 71, delta: 0.03, bid: 0.05, ask: 0.06, openInterest: 892 }),
+      leg('NFLX', { expiration: '2026-11-06', strike: 72, delta: 0.03, bid: 0.04, ask: 0.05, openInterest: 889 }),
+      leg('NFLX', { expiration: '2026-11-06', strike: 73, delta: 0.02, bid: 0.03, ask: 0.04, openInterest: 2670 }),
+    ];
+    const result = pairPmccCandidates({
+      symbol: 'NFLX', underlyingPrice: 62.52, longLegs: [long], shortLegs: shorts,
+      criteria: { ...criteria, dte: { ...criteria.dte, shortMin: 7, shortMax: 10 }, shortDelta: { min: 0.01, max: 0.2 }, quotePolicy: { ...criteria.quotePolicy } },
+      asOf, marketSession: 'open',
+      heldLongOccSymbols: new Set([heldLongKey(long.occSymbol!)]), heldLongBasis: basisFor(long, 20.85, 1),
+    });
+    expect(result.qualifiedPairs.map(pair => pair.shortLeg.strike)).toEqual([71, 72, 73]);
   });
 });

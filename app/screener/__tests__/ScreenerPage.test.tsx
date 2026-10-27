@@ -702,8 +702,8 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
     // PMCC-HELD-UNDERWATER-0001B: the held-LEAP scan opens at 7-10 DTE and delta .10-.20.
     expect(shortMin.value).toBe('7');
     expect(shortMax.value).toBe('10');
-    expect(deltaMin.value).toBe('0.1');
-    expect(deltaMax.value).toBe('0.2');
+    expect(deltaMin.value).toBe('0');
+    expect(deltaMax.value).toBe('0.15');
     expect(oiMin.value).toBe('100');
     expect(maxSpread.value).toBe('10');
     // SCAN-ALIGN-0001C2: the short-leg width ceiling cell and its static hint.
@@ -728,8 +728,8 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
       rangeV: 2,
       shortMin: 14,
       shortMax: 35,
-      shortDeltaMin: 0.1,
-      shortDeltaMax: 0.2,
+      shortDeltaMin: 0,
+      shortDeltaMax: 0.15,
       shortOiMin: 100,
       maxSpreadPct: 10,
       widthCeiling: 0.5,
@@ -777,8 +777,8 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
 
     await waitFor(() => expect(screen.getByLabelText('Min DTE')).toHaveValue('7'));
     expect(screen.getByLabelText('Max DTE')).toHaveValue('10');
-    expect(screen.getByLabelText('Min Δ')).toHaveValue('0.1');
-    expect(screen.getByLabelText('Max Δ')).toHaveValue('0.2');
+    expect(screen.getByLabelText('Min Δ')).toHaveValue('0');
+    expect(screen.getByLabelText('Max Δ')).toHaveValue('0.15');
     expect(screen.getByLabelText('Short OI pref.')).toHaveValue('150');
     expect(screen.getByLabelText('Width ceiling ($)')).toHaveValue('0.75');
   });

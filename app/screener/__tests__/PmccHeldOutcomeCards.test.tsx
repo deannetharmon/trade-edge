@@ -140,7 +140,8 @@ function renderScreener() {
 /** Held floor-failed and not-checked cards are DISQUALIFIED, so they live in the collapsed near-miss group. */
 async function openNearMissGroup() {
   const toggle = await screen.findByRole('button', { name: /GS.*short-call candidate/i });
-  fireEvent.click(toggle);
+  // 0001B: the held short-call candidates group now opens by default; only click it when it is closed.
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
 }
 
 const NEVER = /no short calls found/i;
@@ -289,7 +290,7 @@ describe('held-LEAP outcome cards (Mock 3c)', () => {
     expect(summaries[0]).toHaveTextContent('GS · 3 held LEAPs · 1 with results · 1 no shorts cleared · 1 not checked');
 
     const nearMiss = screen.queryByRole('button', { name: /GS.*short-call candidate/i });
-    if (nearMiss) fireEvent.click(nearMiss);
+    if (nearMiss && nearMiss.getAttribute('aria-expanded') !== 'true') fireEvent.click(nearMiss);
     const cards = await screen.findAllByTestId('pmcc-result-card');
     const outcomes = cards.map(c => c.getAttribute('data-held-outcome')).filter(Boolean);
     // Input order was not-checked, floor; display order is floor-not-met, then not-checked; one card each.

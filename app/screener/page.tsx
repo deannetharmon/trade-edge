@@ -62,7 +62,7 @@ import { earningsAfterExpiryTag } from '@/lib/scans/earningsExpiryZone';
 import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, isPmccReviewHandoff } from '@/lib/scans/pmccReviewHandoff';
 import { buildNewPmccEntryOrderLegs, buildHeldLeapsShortCallOrderLegs } from '@/lib/scans/pmccOrderIntent';
 import { evaluatePmccPairOnDemand } from '@/lib/scans/pmccPairing';
-import { heldLongKey as pmccHeldLongKey, readHeldBasis as readPmccHeldBasis } from '@/lib/scans/pmccHeldBreakeven';
+import { HELD_COST_FLOOR_GATE, heldLongKey as pmccHeldLongKey, readHeldBasis as readPmccHeldBasis } from '@/lib/scans/pmccHeldBreakeven';
 import { adaptPmccChain } from '@/lib/scans/pmccChainAdapter';
 import { computeLeapsScore } from '@/lib/scans/leapsScore';
 import { evaluateLeapsEntry } from '@/lib/scans/leapsEntryQualification';
@@ -10419,7 +10419,8 @@ export default function Home() {
       // LEAP has a fixable read failure (basis null/zero/unparseable, or held quantity invalid). Multi-lot,
       // unit-suspect (needs spot) and floor-not-met never block here; they render on the card.
       const selectedForBlock = discovery.heldCandidates.filter(c => !pmccHiddenLeapsSymbols.includes(c.underlyingSymbol));
-      const readFailure = buildPreModalReadFailure(selectedForBlock);
+      // PMCC-HELD-UNDERWATER-0001B: with the cost-basis floor retired, an unreadable cost basis no longer blocks the scan.
+      const readFailure = HELD_COST_FLOOR_GATE ? buildPreModalReadFailure(selectedForBlock) : null;
       if (readFailure) {
         setShowPmccScanModal(false);
         setPmccReadFailure(readFailure);
@@ -10498,7 +10499,8 @@ export default function Home() {
       pmccSnapshot,
     });
     if (filteredSort.primary === 'score' || filteredSort.primary === 'pop' || filteredSort.primary === 'creditPct') {
-      setFilteredSort({ primary: 'widthMinusDebitPct', secondary: 'none' });
+      // 0001B: held-LEAP scans sell calls for income, so the default order is the premium collected (Premium $).
+      setFilteredSort({ primary: 'creditDollars', secondary: 'none' });
     }
     const loopSymbols = session.plannedScanSymbols;
 
@@ -12873,7 +12875,7 @@ export default function Home() {
                                   bestWidthMinusDebitPct={bestWidth} bestAnnualizedRoiPct={bestRoi}
                                   itemLabel={heldLeapCandidatesOnly ? 'short-call candidate' : 'near-miss structure'}
                                   summaryLine={heldSummaryOwner.get(symbol) === 'near-miss' ? heldPmccPlan?.summaryBySymbol.get(symbol) : null}
-                                  defaultOpen={false} borderClassName={th.border}>
+                                  defaultOpen={heldLeapCandidatesOnly} borderClassName={th.border}>
                                   {group.map(result => (
                                     <PmccResultCard key={result.candidateId} result={result} th={th} rules={runtimeStockRules}
                                       heldLeapHasResults={result.candidateId != null && heldPmccPlan?.leapHasResultsIds.has(result.candidateId) === true}

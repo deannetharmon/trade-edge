@@ -41,10 +41,12 @@ export interface PmccHeldCandidateSummary {
 
 // SCAN-ALIGN-0001 F1 (Mock 1): quick-select presets that set BOTH Min and Max delta.
 export const PMCC_DELTA_PRESETS = [
-  { label: 'Δ .10–.20', min: 0.1, max: 0.2 },
-  { label: 'Δ .15–.25', min: 0.15, max: 0.25 },
-  { label: 'Δ .20–.30', min: 0.2, max: 0.3 },
-  { label: 'Δ .25–.35', min: 0.25, max: 0.35 },
+  // Every chip overlaps the next one: 0-.10 sits inside 0-.15, 0-.15 meets .05-.20 at .05-.15, and so on up.
+  { label: 'Δ 0–.10', min: 0, max: 0.1 },
+  { label: 'Δ 0–.15', min: 0, max: 0.15 },
+  { label: 'Δ .05–.20', min: 0.05, max: 0.2 },
+  { label: 'Δ .10–.25', min: 0.1, max: 0.25 },
+  { label: 'Δ .20–.35', min: 0.2, max: 0.35 },
 ] as const;
 
 const fmtDelta = (n: number) => n.toFixed(2).replace(/^0/, '');
@@ -83,11 +85,11 @@ export function PmccScanModal({
 
   const valid = useMemo(() => Object.values(draft).every(Number.isFinite)
     && draft.shortDteMin >= 0 && draft.shortDteMax >= draft.shortDteMin
-    && draft.shortDeltaMin >= 0.1 && draft.shortDeltaMax <= 0.4 && draft.shortDeltaMax >= draft.shortDeltaMin
+    && draft.shortDeltaMin >= 0 && draft.shortDeltaMax <= 0.4 && draft.shortDeltaMax >= draft.shortDeltaMin
     && draft.shortOiMin >= 0 && draft.maxSpreadPct >= 0 && draft.widthCeiling >= 0.01
     && !discoveryLoading && selectedCount > 0, [draft, selectedCount, discoveryLoading]);
   // Same delta predicate as `valid` above; surfaced so a disabled Run is never silent.
-  const deltaInvalid = !(draft.shortDeltaMin >= 0.1 && draft.shortDeltaMax <= 0.4 && draft.shortDeltaMax >= draft.shortDeltaMin);
+  const deltaInvalid = !(draft.shortDeltaMin >= 0 && draft.shortDeltaMax <= 0.4 && draft.shortDeltaMax >= draft.shortDeltaMin);
   const num = (key: keyof PmccScanRequest, label: string, step: string, widthClass = COMPACT_INPUT) => <DeferredNumberInput aria-label={label} step={step} value={draft[key]} onValueChange={next => setDraft(value => ({ ...value, [key]: next }))} className={widthClass} />;
   const matchedDeltaPreset = matchRangePreset(draft.shortDeltaMin, draft.shortDeltaMax, PMCC_DELTA_PRESETS);
   const deltaPills: CriterionPill[] = PMCC_DELTA_PRESETS.map(p => ({
@@ -168,7 +170,7 @@ export function PmccScanModal({
             <span aria-hidden="true" className="text-neutral-500">–</span>
             {num('shortDeltaMax', 'Max Δ', '0.01')}
           </div>
-          {deltaInvalid && <StatusLine message="Delta must be between 0.10 and 0.40, and Max at least Min." />}
+          {deltaInvalid && <StatusLine message="Delta must be between 0 and 0.40, and Max at least Min." />}
           <CriterionPills th={th} groupLabel="Delta range quick select" pills={deltaPills} compact />
         </div>
         <div className="flex min-w-0 flex-col gap-1">
