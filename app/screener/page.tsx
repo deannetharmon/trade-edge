@@ -72,7 +72,7 @@ import { PMCC_DECISION_POLICY_VERSION, pmccDecisionRankEligible, unavailablePmcc
 import { evaluateEventRisk, type EventRiskResult } from '@/lib/scans/eventRisk';
 import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
-import { heldIncomeSummary, heldStrikeBelowLeapLine, excludedContractPremiumText, heldLeapOtmTag, selectLongLegBlockerLine } from '@/lib/scans/pmccHeldUnderwaterDisplay';
+import { heldIncomeSummary, heldStrikeBelowLeapLine, excludedContractPremiumText, heldLeapOtmTag, selectLongLegBlockerLine, isUncoveredHeldShort, heldUncoveredSkippedLine } from '@/lib/scans/pmccHeldUnderwaterDisplay';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { TradeLookupModal } from '@/features/screener/components/TradeLookupModal';
 import { defaultLookupDeps } from '@/lib/tradeLookup/defaultDeps';
@@ -12847,7 +12847,14 @@ export default function Home() {
                           count, since an audit-only result (pmccPair ==
                           null) never has metrics to summarize. */}
                       {(() => {
-                        const nearMissResults = filteredDisqualified.filter(result => result.pmccPair != null);
+                        // PMCC-HELD-UNDERWATER-0001B4: uncovered held short calls (strike not above the LEAP strike) are never listed.
+                        const nearMissAll = filteredDisqualified.filter(result => result.pmccPair != null);
+                        const uncoveredSkipped = nearMissAll.filter(result => isUncoveredHeldShort(result.pmccPair));
+                        const nearMissResults = nearMissAll.filter(result => !isUncoveredHeldShort(result.pmccPair));
+                        const uncoveredLongStrike = uncoveredSkipped.length > 0
+                          ? Math.min(...uncoveredSkipped.map(result => result.pmccPair?.longLeg.strike).filter((v): v is number => typeof v === 'number'))
+                          : null;
+                        const qualifiedHeldShown = filteredQualified.some(result => result.pmccPair?.entryMode === 'covered-short-call-against-held-leaps');
                         const nearMissTickerGroups = Array.from(nearMissResults.reduce((groups, result) => {
                           const group = groups.get(result.symbol) ?? [];
                           group.push(result); groups.set(result.symbol, group); return groups;
@@ -12865,8 +12872,15 @@ export default function Home() {
                             ];
                           });
                         const heldLeapCandidatesOnly = nearMissResults.length > 0 && nearMissResults.every(result => result.pmccPair?.entryMode === 'covered-short-call-against-held-leaps');
-                        return nearMissResults.length > 0 && (
+                        const uncoveredNotice = uncoveredSkipped.length > 0 && (
+                          <p className="mb-2 text-[10px] text-amber-200" data-testid="held-uncovered-skipped">
+                            {heldUncoveredSkippedLine(uncoveredSkipped.length, Number.isFinite(uncoveredLongStrike as number) ? uncoveredLongStrike : null, nearMissResults.length === 0 && !qualifiedHeldShown)}
+                          </p>
+                        );
+                        if (nearMissResults.length === 0) return uncoveredNotice || null;
+                        return (
                           <div>
+                            {uncoveredNotice}
                             <p className="mb-2 text-[9px] font-medium tracking-widest text-amber-400">{heldLeapCandidatesOnly ? 'HELD LEAP SHORT-CALL CANDIDATES' : 'PMCC NEAR-MISS STRUCTURES'}</p>
                             <div className="space-y-2">
                               {nearMissTickerGroups.map(([symbol, group, bestWidth, bestRoi]) => (

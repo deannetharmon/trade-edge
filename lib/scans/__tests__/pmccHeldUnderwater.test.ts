@@ -9,7 +9,7 @@ import { DEFAULT_PMCC_PAIRING_LIMITS, DEFAULT_PMCC_QUOTE_POLICY } from '../pmccC
 import { heldLongKey } from '../pmccHeldBreakeven';
 import { pairPmccCandidates } from '../pmccPairing';
 import { evaluatePmccDecision } from '../pmccDecision';
-import { excludedContractPremiumText, heldIncomeSummary, heldLeapOtmTag, heldStrikeBelowLeapLine, selectLongLegBlockerLine } from '../pmccHeldUnderwaterDisplay';
+import { excludedContractPremiumText, heldIncomeSummary, heldLeapOtmTag, heldStrikeBelowLeapLine, heldUncoveredSkippedLine, isUncoveredHeldShort, selectLongLegBlockerLine } from '../pmccHeldUnderwaterDisplay';
 import { DEFAULT_HELD_PMCC_SHORT_DELTA, DEFAULT_HELD_PMCC_SHORT_DTE, DEFAULT_PMCC_DTE_RANGES, HELD_PMCC_SHORT_DTE_PRESETS } from '../pmccDteRanges';
 import { PMCC_SHORT_DELTA_BOUNDS } from '../pmccConfig';
 import { PMCC_DELTA_PRESETS } from '@/features/screener/components/PmccScanModal';
@@ -344,5 +344,20 @@ describe('0001B: far-out-of-the-money income calls (real NFLX Nov 6 chain)', () 
       heldLongOccSymbols: new Set([heldLongKey(long.occSymbol!)]), heldLongBasis: basisFor(long, 20.85, 1),
     });
     expect(result.qualifiedPairs.map(pair => pair.shortLeg.strike)).toEqual([71, 72, 73]);
+  });
+});
+
+describe('PMCC-HELD-UNDERWATER-0001B4 uncovered held calls are skipped, not listed', () => {
+  const held = 'covered-short-call-against-held-leaps';
+  it('flags only held pairs failing LONG_STRIKE_NOT_BELOW_SHORT', () => {
+    expect(isUncoveredHeldShort({ entryMode: held, failureReasons: [{ code: 'LONG_STRIKE_NOT_BELOW_SHORT' }] })).toBe(true);
+    expect(isUncoveredHeldShort({ entryMode: held, failureReasons: [{ code: 'SHORT_SPREAD_TOO_WIDE' }] })).toBe(false);
+    expect(isUncoveredHeldShort({ entryMode: 'new-entry', failureReasons: [{ code: 'LONG_STRIKE_NOT_BELOW_SHORT' }] })).toBe(false);
+    expect(isUncoveredHeldShort(null)).toBe(false);
+  });
+  it('one summary line, with guidance only when nothing else is shown', () => {
+    expect(heldUncoveredSkippedLine(5, 70, false)).toBe('5 calls below your $70 LEAP strike were skipped (not covered).');
+    expect(heldUncoveredSkippedLine(1, 70, false)).toBe('1 call below your $70 LEAP strike was skipped (not covered).');
+    expect(heldUncoveredSkippedLine(5, 70, true)).toContain('No call above your $70 LEAP strike fits');
   });
 });

@@ -84,3 +84,22 @@ export function heldStrikeBelowLeapLine(longStrike: number, shortStrike: number)
   return `This call's $${shortStrike} strike is below your $${longStrike} LEAP strike, so it would not be covered. `
     + `No call above $${longStrike} fits this scan's delta and DTE range. Widen the DTE range or lower the minimum delta to see more.`;
 }
+
+/** A held-LEAP short call whose strike is not above the LEAP strike: not covered, so it is never offered (PMCC-HELD-UNDERWATER-0001B4). */
+export function isUncoveredHeldShort(pair: {
+  entryMode?: string | null;
+  failureReasons: ReadonlyArray<{ code: string }>;
+} | null | undefined): boolean {
+  return !!pair
+    && pair.entryMode === 'covered-short-call-against-held-leaps'
+    && pair.failureReasons.some(item => item.code === 'LONG_STRIKE_NOT_BELOW_SHORT');
+}
+
+/** One line that replaces the skipped uncovered calls. */
+export function heldUncoveredSkippedLine(count: number, longStrike: number | null, nothingElseShown: boolean): string {
+  const strikeText = longStrike != null ? `$${longStrike} ` : '';
+  const base = `${count} ${count === 1 ? 'call' : 'calls'} below your ${strikeText}LEAP strike ${count === 1 ? 'was' : 'were'} skipped (not covered).`;
+  return nothingElseShown
+    ? `${base} No call above your ${strikeText}LEAP strike fits this scan's delta and DTE range. Widen the DTE range or lower the maximum delta toward 0 to see more.`
+    : base;
+}
