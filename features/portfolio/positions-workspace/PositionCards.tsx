@@ -22,11 +22,11 @@ const usd2 = (v: number) => `$${v.toFixed(2)}`;
 
 const EDGE_CLASS: Record<CardBucket, string> = { Close: 'border-l-red-400', Roll: 'border-l-purple-400', Manage: 'border-l-amber-400', Hold: 'border-l-white/20', Unjudged: 'border-l-white/10' };
 const BUCKET_CLASS: Record<CardBucket, string> = {
-  Close: 'border-red-400/60 bg-red-400/10 text-red-200',
-  Roll: 'border-purple-400/60 bg-purple-400/10 text-purple-200',
-  Manage: 'border-amber-400/60 bg-amber-400/10 text-amber-200',
-  Hold: 'border-white/20 bg-white/5 text-white/80',
-  Unjudged: 'border-white/20 bg-white/5 text-white/50',
+  Close: 'text-red-300',
+  Roll: 'text-purple-300',
+  Manage: 'text-amber-300',
+  Hold: 'text-white/80',
+  Unjudged: 'text-white/50',
 };
 const CHIP_CLASS: Record<CardChipTone, string> = {
   bad: 'border-red-400/50 bg-red-400/10 text-red-200',
@@ -80,7 +80,7 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
           <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-white">{p.symbol}<span className="rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">{horizon ?? p.strategy}</span>{p.stockPrice != null && Number.isFinite(p.stockPrice) && p.stockPrice > 0 && <span data-testid="card-stock-price" className={`text-sm font-semibold ${th.textMuted}`} title="Underlying price (the quote behind the OTM and buffer figures)">{usd2(p.stockPrice)}</span>}{renderChart?.(p)}</h3>
           <p className={`mt-0.5 text-xs ${th.textMuted}`}>{detailLine(p)}</p>
           <p className="mt-2 flex flex-wrap items-center gap-2">
-            <span data-testid="card-bucket" className={`rounded-full border px-2.5 py-0.5 text-xs font-bold ${BUCKET_CLASS[card.bucket]}`}>{card.bucket === 'Unjudged' ? 'No verdict' : card.bucket}</span>
+            <span data-testid="card-bucket" className={`text-xs font-bold uppercase tracking-wider ${BUCKET_CLASS[card.bucket]}`}>{card.bucket === 'Unjudged' ? 'No verdict' : card.bucket}</span>
             {card.verdictLabel !== `${card.bucket} Position` && <span className="text-sm font-semibold text-white">{card.verdictLabel}</span>}
             {!p.recommendation && <button type="button" onClick={() => onRefresh?.()} disabled={!onRefresh} className="text-xs underline decoration-dotted underline-offset-2 disabled:opacity-40">Refresh</button>}
           </p>

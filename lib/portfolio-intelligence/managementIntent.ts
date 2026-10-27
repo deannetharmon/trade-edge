@@ -713,7 +713,16 @@ export function selectManagementIntent(evidence: ManagementIntentEvidence): Mana
   // PI-0007A: unchanged filter/sort from PI-0006B -- `candidates` below is
   // simply this same ranked list exposed in full (previously only `winner`
   // and a 3-item slice of the rest were returned).
+  // MGMT-INTENT-CUTLOSS-0001 (Ian/Alan): Cut Losses must be earned by a visible, loss-driven signal. Two guards:
+  //  1. Nudges alone never win. Every other signal adds a small hidden Cut Losses "nudge" next to its Reduce Risk points
+  //     (see decisionQualityMatrix.ts), but a nudge has no reason line, so a lone Net Edge nudge (11) used to beat the Hold
+  //     baseline (10) and print "Cut Losses" with no explanation.
+  //  2. A position in profit is never a Cut Losses, unless a real loss policy fired on the marketable price
+  //     (materialLoss). A profitable put reads Hold, Take Profit or Reduce Risk instead.
+  const cutLossesAllowed = (scored.CUT_LOSSES?.reasons.length ?? 0) > 0
+    && !(typeof evidence.pnlPct === 'number' && evidence.pnlPct > 0 && !evidence.materialLoss);
   const candidates: ManagementIntentCandidate[] = relevant
+    .filter((intent) => intent !== 'CUT_LOSSES' || cutLossesAllowed)
     .filter((intent) => (scored[intent]?.score ?? 0) > 0)
     .map((intent) => ({
       intent,

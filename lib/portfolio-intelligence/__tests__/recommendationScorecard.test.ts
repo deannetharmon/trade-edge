@@ -128,16 +128,15 @@ describe('Scorecard: decision margin and confidence tier', () => {
     expect(result.confidenceTier).toBe('Low');
   });
 
-  it('margin 21 is Medium confidence', () => {
-    // PI-0008B: Net Edge negative weights increased (Reduce Risk 30->42, the
-    // Cut Losses nudge 15->21) as part of increasing Net Edge deterioration's
-    // influence.
+  it('a hidden Net Edge Cut Losses nudge cannot win: Reduce Risk leads, Hold is the runner-up', () => {
+    // MGMT-INTENT-CUTLOSS-0001: the Cut Losses nudge adds score but no visible reason,
+    // so it can no longer be chosen. Reduce Risk 42 vs Hold baseline 10.
     const result = selectManagementIntent({ context: 'credit-spread', netEdgeNegative: true });
     expect(result.intent).toBe('REDUCE_RISK');
     expect(result.winnerScore).toBe(42);
-    expect(result.runnerUpScore).toBe(21);
-    expect(result.margin).toBe(21);
-    expect(result.confidenceTier).toBe('Medium');
+    expect(result.runnerUpScore).toBe(10);
+    expect(result.margin).toBe(32);
+    expect(result.confidenceTier).toBe('High');
   });
 
   it('margin 35 is High confidence -- a concrete example of Health Score becoming supporting evidence, not a dominant driver', () => {

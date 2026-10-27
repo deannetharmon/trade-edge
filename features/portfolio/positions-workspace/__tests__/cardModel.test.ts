@@ -85,6 +85,17 @@ describe('card content', () => {
     expect(c.pnlNote).toBe('unverified quote');
     expect(c.chips.some(x => x.id === 'verify')).toBe(true);
   });
+  it('MGMT-INTENT-CUTLOSS-0001: a wide market alone says "wide market", not "unverified quote"', () => {
+    const p = pos({ closeNowPnl: 40, currentValue: 50, recommendation: rec('hold', 'HOLD_POSITION') } as Partial<Position>);
+    const c = buildPositionCard(p, { pctOfTarget: null });
+    if (c.unverifiedQuote) expect(c.pnlNote).toMatch(/wide market/);
+    expect(c.pnlNote).not.toBe('unverified quote');
+  });
+  it('MGMT-INTENT-CUTLOSS-0001: a Hold with the generic legacy reason says how far to the profit target', () => {
+    const r = { kind: 'hold', label: 'Hold Position', primaryReason: 'Health score is 98; no primary action rule triggered.', managementIntent: { intent: 'HOLD_POSITION', reasons: [] } } as unknown as Position['recommendation'];
+    expect(buildPositionCard(pos({ recommendation: r }), { pctOfTarget: 30 }).reason).toBe('Holding for your profit target · 30% of the way there.');
+    expect(buildPositionCard(pos({ recommendation: r }), { pctOfTarget: null }).reason).toBeNull();
+  });
   it('a normal credit position shows the target percent under P/L', () => {
     expect(buildPositionCard(pos({ closeNowPnl: 40 } as Partial<Position>), { pctOfTarget: 80 }).pnlNote).toBe('if closed now · 80% of target');
   });

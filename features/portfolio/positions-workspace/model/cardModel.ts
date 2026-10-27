@@ -90,6 +90,14 @@ export function pickReason(p: Pick<Position, 'recommendation'>, chips: ReadonlyA
   return all.find(r => !repeats(r)) ?? null;
 }
 
+/** The legacy "no primary action rule triggered" sentence says nothing; a Hold with a profit target says how far along it is. */
+const GENERIC_HOLD_REASON = /no primary action rule triggered/i;
+function holdReasonOf(reason: string | null, bucket: CardBucket, pctOfTarget: number | null): string | null {
+  if (bucket !== 'Hold' || (reason != null && !GENERIC_HOLD_REASON.test(reason))) return reason;
+  if (pctOfTarget != null && pctOfTarget > 0 && pctOfTarget < 100) return `Holding for your profit target · ${pctOfTarget.toFixed(0)}% of the way there.`;
+  return reason != null && GENERIC_HOLD_REASON.test(reason) ? null : reason;
+}
+
 /** Dollars at risk for sorting; null when the capital figure is a share count or unavailable. */
 function dollarsAtRiskOf(p: Position): number | null {
   const capital = buildCapitalViewModel(p);
@@ -118,7 +126,9 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
   const recovery = buildLongOptionRecovery(p);
   const money0 = (v: number) => `$${Math.round(v).toLocaleString('en-US')}`;
   const basis = closeNow != null ? 'if closed now' : 'at mid';
-  const pnlNote = unverifiedQuote ? 'unverified quote'
+  // A wide bid/ask is a real market condition, not a missing quote: say so plainly. Only a verify-pricing verdict means the quote itself is in doubt.
+  const pnlNote = verifyPricing ? 'unverified quote'
+    : wide != null ? `${basis} · wide market`
     : recovery ? `${recovery.remainingPct.toFixed(0)}% of ${money0(recovery.paid)} ${recovery.atOrAbovePaid ? 'of paid' : 'left'}`
     : opts.pctOfTarget != null ? `${basis} · ${opts.pctOfTarget.toFixed(0)}% of target`
     : basis;
@@ -183,7 +193,7 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
     bucket: cardBucketOf(p),
     verdictLabel: p.recommendation?.label ?? 'No recommendation',
     // A reason a chip already says is not repeated as text: Net Edge (−) and Earnings before Exp.
-    reason: pickReason(p, chips),
+    reason: holdReasonOf(pickReason(p, chips), cardBucketOf(p), opts.pctOfTarget),
     pnl,
     pnlNote,
     dollarsAtRisk: dollarsAtRiskOf(p),

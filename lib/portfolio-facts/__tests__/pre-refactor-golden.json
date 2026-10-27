@@ -99,10 +99,10 @@
   },
   "spread: 49% captured|downtrend": {
     "kind": "hold",
-    "label": "Cut Losses",
+    "label": "Reduce Risk",
     "urgency": "low",
-    "primary": "Recent technical trend is running against the position.",
-    "intent": "CUT_LOSSES"
+    "primary": "Health score is 100; no primary action rule triggered.",
+    "intent": "REDUCE_RISK"
   },
   "spread: exactly 50% captured|none": {
     "kind": "close-winner",
@@ -162,10 +162,10 @@
   },
   "spread: exactly 21 DTE|downtrend": {
     "kind": "roll-soon",
-    "label": "Cut Losses",
+    "label": "Reduce Risk",
     "urgency": "medium",
-    "primary": "Recent technical trend is running against the position.",
-    "intent": "CUT_LOSSES"
+    "primary": "21 DTE is inside the standard management window.",
+    "intent": "REDUCE_RISK"
   },
   "spread: 8 DTE (last day of the window)|none": {
     "kind": "roll-soon",
@@ -183,10 +183,10 @@
   },
   "spread: 8 DTE (last day of the window)|downtrend": {
     "kind": "roll-soon",
-    "label": "Cut Losses",
+    "label": "Reduce Risk",
     "urgency": "medium",
-    "primary": "Recent technical trend is running against the position.",
-    "intent": "CUT_LOSSES"
+    "primary": "Gamma risk increases as DTE (8) approaches expiration.",
+    "intent": "REDUCE_RISK"
   },
   "spread: 7 DTE (window over, scoring takes it)|none": {
     "kind": "watch",
@@ -204,10 +204,10 @@
   },
   "spread: 7 DTE (window over, scoring takes it)|downtrend": {
     "kind": "watch",
-    "label": "Cut Losses",
+    "label": "Reduce Risk",
     "urgency": "medium",
-    "primary": "Recent technical trend is running against the position.",
-    "intent": "CUT_LOSSES"
+    "primary": "Gamma risk increases as DTE (7) approaches expiration.",
+    "intent": "REDUCE_RISK"
   },
   "loss just under the 2x-credit stop|none": {
     "kind": "hold",
