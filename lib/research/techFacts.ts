@@ -97,6 +97,21 @@ export function relativeStrength(stock: unknown, benchmark: unknown): { stockPct
   return { stockPct, benchmarkPct, diffPts: stockPct - benchmarkPct };
 }
 
+export const RETURN_WINDOWS = { m1: 21, m3: 63, m6: 126 } as const;
+export interface HorizonReturns { m1: number | null; m3: number | null; m6: number | null }
+
+/** Percent change of the last completed close against the close N completed sessions earlier, for 1, 3 and 6 months (21, 63, 126 sessions). */
+export function horizonReturns(bars: unknown): HorizonReturns {
+  const out: HorizonReturns = { m1: null, m3: null, m6: null };
+  if (!validBars(bars)) return out;
+  const last = bars[bars.length - 1].c;
+  (Object.keys(RETURN_WINDOWS) as (keyof HorizonReturns)[]).forEach(k => {
+    const n = RETURN_WINDOWS[k];
+    if (bars.length > n) out[k] = ((last - bars[bars.length - 1 - n].c) / bars[bars.length - 1 - n].c) * 100;
+  });
+  return out;
+}
+
 export interface StrikeContext {
   pctBelowPrice: number;
   atrsBelowPrice: number | null;

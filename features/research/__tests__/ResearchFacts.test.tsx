@@ -10,6 +10,7 @@ import { THEMES } from '@/lib/theme';
 const facts = {
   symbol: 'AAPL', asOf: 1, price: 100, atr14: 2.5, atrPct: 2.5, volumeRatio: 1.25,
   relativeStrength: { stockPct: 20, benchmarkPct: 8, diffPts: 12 },
+  returns: { m1: 3.7, m3: -8.1, m6: null },
   levels: { supports: [{ price: 93, touches: 2, lastTouchT: 1 }], resistances: [{ price: 110, touches: 1, lastTouchT: 1 }] },
 };
 const broker = { ivRank: 42, ivx30: 31.5, hv30: 25, ivHvDiff: 6.5, earningsExpectedDate: '2099-01-01', liquidityRating: 4 };
@@ -40,6 +41,7 @@ describe('RESEARCH-0002 ResearchFacts', () => {
     expect(s).toHaveTextContent('$2.50 (2.5%)');
     expect(s).toHaveTextContent('1.25×');
     expect(s).toHaveTextContent('+12.0 pts');
+    expect(s).toHaveTextContent('+3.7% · -8.1% · —');
     const lv = screen.getByTestId('facts-levels');
     expect(lv).toHaveTextContent('$93.00 · 2 touches · 7.0% below price');
     expect(lv).toHaveTextContent('$110.00 · 1 touch · 10.0% above price');
@@ -57,11 +59,11 @@ describe('RESEARCH-0002 ResearchFacts', () => {
   it('explains the trend with its component scores and the look-back, and shows the pattern type', async () => {
     const withScores = { ...trend, subtype: 'REVERSAL', scores: { momentum: 6, maAlignment: -12, slope: -18, structure: -22, chop: 0, volatility: 0, total: -46 } };
     render(<ResearchFacts symbol="AAPL" th={THEMES.dark} deps={deps({ loadTrend: async () => withScores as never })} />);
-    expect(await screen.findByTestId('facts-trend')).toHaveTextContent('Trend, last ~4–6 months');
+    expect(await screen.findByTestId('facts-trend')).toHaveTextContent('Trend (screener read)');
     expect(screen.getByTestId('facts-trend')).toHaveTextContent('uptrend · 71% · reversal');
     const why = screen.getByTestId('facts-trend-why');
     expect(why).toHaveTextContent('momentum +6 · averages -12 · slope -18 · structure -22');
-    expect(why).toHaveTextContent('90 to 120 trading days');
+    expect(why).toHaveTextContent('20 to 60 trading days most');
   });
   it('marks an earnings date that has already passed instead of presenting it as upcoming', async () => {
     render(<ResearchFacts symbol="AAPL" th={THEMES.dark} deps={deps({ loadBroker: async () => ({ ...broker, earningsExpectedDate: '2020-10-20' }) })} />);

@@ -1,7 +1,7 @@
 // lib/research/__tests__/techFacts.test.ts
 
 import { describe, expect, it } from 'vitest';
-import { atr14, keyLevels, relativeStrength, strikeContext, volumeRatio, type FactBar } from '../techFacts';
+import { atr14, horizonReturns, keyLevels, relativeStrength, strikeContext, volumeRatio, type FactBar } from '../techFacts';
 import { buildResearchFacts, completedBars } from '../researchFacts';
 
 const DAY = 86_400;
@@ -57,6 +57,18 @@ describe('RESEARCH-0002 techFacts', () => {
     expect(rs.diffPts).toBeCloseTo(20, 8);
     expect(relativeStrength(stock, spy.slice(0, -1))).toBeNull();
     expect(relativeStrength(stock.slice(-100), spy.slice(-100))).toBeNull();
+  });
+  it('horizon returns: 21, 63 and 126 sessions back, null when the history is too short', () => {
+    const closes = Array.from({ length: 130 }, (_, i) => 100 + i); // last = 229
+    const r = horizonReturns(fromCloses(closes));
+    expect(r.m1).toBeCloseTo(((229 - 208) / 208) * 100, 10);
+    expect(r.m3).toBeCloseTo(((229 - 166) / 166) * 100, 10);
+    expect(r.m6).toBeCloseTo(((229 - 103) / 103) * 100, 10);
+    const short = horizonReturns(fromCloses(closes.slice(0, 50)));
+    expect(short.m1).toBeCloseTo(((149 - 128) / 128) * 100, 10);
+    expect(short.m3).toBeNull();
+    expect(short.m6).toBeNull();
+    expect(horizonReturns([])).toEqual({ m1: null, m3: null, m6: null });
   });
   it('strike context: percent and ATRs below price, and the nearest support at or below the strike', () => {
     const levels = { supports: [{ price: 97, touches: 1, lastTouchT: 1 }, { price: 93, touches: 2, lastTouchT: 2 }], resistances: [] };

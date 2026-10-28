@@ -71,7 +71,7 @@ export function ResearchFacts({ symbol, th, deps }: Props) {
       {trend === undefined ? <p className={`mt-1 text-xs ${th.textFaint}`} role="status">Loading…</p>
         : trend === null || trend.trend === 'unknown' ? <p className={`mt-1 text-xs ${th.textFaint}`}>Trend unavailable.</p>
         : <dl className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="facts-trend">
-            <Cell th={th} label="Trend, last ~4–6 months" value={`${trend.trend} · ${trend.confidence.toFixed(0)}%${trend.subtype && trend.subtype !== 'UNKNOWN' ? ` · ${trend.subtype.toLowerCase()}` : ''}`} hint={trend.reason} />
+            <Cell th={th} label="Trend (screener read)" value={`${trend.trend} · ${trend.confidence.toFixed(0)}%${trend.subtype && trend.subtype !== 'UNKNOWN' ? ` · ${trend.subtype.toLowerCase()}` : ''}`} hint={trend.reason} />
             <Cell th={th} label="20 / 50 / 200-day avg" value={`${fixed(trend.ma20, 2)} / ${fixed(trend.ma50, 2)} / ${fixed(trend.ma200 ?? null, 2)}`} />
             <Cell th={th} label="RSI (14)" value={fixed(trend.metrics?.rsi14, 0)} />
             <Cell th={th} label="Price vs 50-day avg" value={fixed(trend.metrics?.distFromMa50 != null ? trend.metrics.distFromMa50 * 100 : null, 1, '%')} />
@@ -79,7 +79,7 @@ export function ResearchFacts({ symbol, th, deps }: Props) {
       {trend && trend.trend !== 'unknown' && (
         <p className={`mt-2 text-xs ${th.textFaint}`} data-testid="facts-trend-why">
           {trend.scores ? <>What drives it: momentum {signedInt(trend.scores.momentum)} · averages {signedInt(trend.scores.maAlignment)} · slope {signedInt(trend.scores.slope)} · structure {signedInt(trend.scores.structure)}. </> : null}
-          The trend reads the last 90 to 120 trading days (about 4 to 6 months), so a recent bounce can sit inside a downtrend, and the reverse. Use the 3M or 1Y chart to compare.
+          This is the screener's trend read: it weighs the last 20 to 60 trading days most, with the last 90 to 120 only as memory. Compare it with the 1M, 3M and 6M returns below.
         </p>
       )}
 
@@ -103,6 +103,7 @@ export function ResearchFacts({ symbol, th, deps }: Props) {
               <Cell th={th} label="ATR (14)" value={facts.atr14 != null ? `${usd(facts.atr14)} (${fixed(facts.atrPct, 1, '%')})` : '—'} hint="Average daily range. A 1-ATR move is the typical day." />
               <Cell th={th} label="Volume, 20d vs 60d" value={facts.volumeRatio != null ? `${facts.volumeRatio.toFixed(2)}×` : '—'} />
               <Cell th={th} label="6-mo vs SPY" value={facts.relativeStrength ? `${facts.relativeStrength.diffPts >= 0 ? '+' : ''}${facts.relativeStrength.diffPts.toFixed(1)} pts` : '—'} hint={facts.relativeStrength ? `Stock ${facts.relativeStrength.stockPct.toFixed(1)}% vs SPY ${facts.relativeStrength.benchmarkPct.toFixed(1)}%` : 'Not enough history'} />
+              <Cell th={th} label="Return 1M · 3M · 6M" value={[facts.returns?.m1, facts.returns?.m3, facts.returns?.m6].map(v => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`)).join(' · ')} hint="Change in the last close over 21, 63 and 126 completed sessions" />
               <Cell th={th} label="Last close" value={usd(facts.price)} />
             </dl>
             {facts.levels ? (
