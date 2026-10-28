@@ -1,7 +1,7 @@
 // lib/research/__tests__/yahooChart.test.ts
 
 import { describe, expect, it } from 'vitest';
-import { RESEARCH_RANGES, RESEARCH_RANGE_ORDER, chartGeometry, dayChange, isResearchRange, normalizeResearchSymbol, parseResearchChart, rangeChange } from '../yahooChart';
+import { RESEARCH_RANGES, RESEARCH_RANGE_ORDER, chartGeometry, chartLevelLines, dayChange, isResearchRange, normalizeResearchSymbol, parseResearchChart, rangeChange } from '../yahooChart';
 
 const payload = {
   chart: { result: [{
@@ -47,5 +47,23 @@ describe('RESEARCH-0001 yahoo chart helpers', () => {
     expect(g.ys[1]).toBe(0);
     expect(g.ys[0]).toBe(50);
     expect(chartGeometry([{ t: 1, c: 1 }], 100, 50)).toBeNull();
+  });
+});
+
+describe('RESEARCH-0007 chart level lines', () => {
+  const pts = [{ t: 1, c: 100 }, { t: 2, c: 200 }];
+  it('puts each level at the same y the price line uses, drops levels off the chart, and merges lines that would overlap', () => {
+    const g = chartGeometry(pts, 800, 260)!;
+    const lines = chartLevelLines(pts, [
+      { price: 100, kind: 'support', label: 'Support' },
+      { price: 150, kind: 'resistance', label: 'Resistance' },
+      { price: 150.5, kind: 'extreme', label: '20-day high' },
+      { price: 226, kind: 'extreme', label: '52-week high' },
+      { price: 90, kind: 'extreme', label: '52-week low' },
+    ], 260);
+    expect(lines.map(l => l.label)).toEqual(['Support', 'Resistance']);
+    expect(lines[0].y).toBeCloseTo(g.ys[0], 10);
+    expect(lines[1].y).toBeCloseTo(130, 10);
+    expect(chartLevelLines([{ t: 1, c: 1 }], [{ price: 1, kind: 'support', label: 'x' }], 260)).toEqual([]);
   });
 });

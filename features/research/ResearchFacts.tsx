@@ -7,6 +7,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { ResearchFacts as Facts } from '@/lib/research/researchFacts';
+import type { ChartLevel } from '@/lib/research/yahooChart';
 import { strikeContext } from '@/lib/research/techFacts';
 import type { TrendResult } from '@/lib/scans/types';
 import type { THEMES, Theme } from '@/lib/theme';
@@ -24,7 +25,25 @@ export interface ResearchFactsDeps {
   loadTrend: (symbol: string) => Promise<TrendResult | null>;
 }
 
-interface Props { symbol: string; th: (typeof THEMES)[Theme]; deps: ResearchFactsDeps }
+interface Props {
+  symbol: string; th: (typeof THEMES)[Theme]; deps: ResearchFactsDeps;
+  /** Called with the levels to draw on the chart (support and resistance first, then the highs and lows); empty while loading or on error. Must be a stable function. */
+  onLevels?: (levels: ChartLevel[]) => void;
+}
+
+/** The chart's level lines, in priority order: key levels first, then the unconfirmed highs and lows. */
+export function chartLevelsOf(f: Facts): ChartLevel[] {
+  const out: ChartLevel[] = [];
+  for (const l of f.levels?.supports ?? []) out.push({ price: l.price, kind: 'support', label: 'Support' });
+  for (const l of f.levels?.resistances ?? []) out.push({ price: l.price, kind: 'resistance', label: 'Resistance' });
+  const e = f.extremes;
+  if (e) {
+    for (const [label, v] of [['20-day high', e.high20], ['20-day low', e.low20], ['52-week high', e.high52w], ['52-week low', e.low52w]] as const) {
+      if (v != null) out.push({ price: v, kind: 'extreme', label });
+    }
+  }
+  return out;
+}
 
 const usd = (v: number | null | undefined) => (v == null ? '—' : `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const fixed = (v: number | null | undefined, d = 1, suffix = '') => (v == null || !Number.isFinite(v) ? '—' : `${v.toFixed(d)}${suffix}`);
@@ -40,12 +59,14 @@ function Cell({ label, value, hint, th }: { label: string; value: string; hint?:
   );
 }
 
-export function ResearchFacts({ symbol, th, deps }: Props) {
+export function ResearchFacts({ symbol, th, deps, onLevels }: Props) {
   const [facts, setFacts] = useState<Facts | null>(null);
   const [factsError, setFactsError] = useState<string | null>(null);
   const [broker, setBroker] = useState<BrokerMetrics | null | undefined>(undefined);
   const [trend, setTrend] = useState<TrendResult | null | undefined>(undefined);
   const [strikeText, setStrikeText] = useState('');
+
+  useEffect(() => { onLevels?.(facts ? chartLevelsOf(facts) : []); }, [facts, onLevels]);
 
   useEffect(() => {
     let live = true;

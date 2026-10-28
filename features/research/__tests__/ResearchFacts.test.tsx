@@ -4,7 +4,7 @@ import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ResearchFacts, type ResearchFactsDeps } from '../ResearchFacts';
+import { ResearchFacts, chartLevelsOf, type ResearchFactsDeps } from '../ResearchFacts';
 import { THEMES } from '@/lib/theme';
 
 const facts = {
@@ -22,6 +22,18 @@ const deps = (over: Partial<ResearchFactsDeps> = {}): ResearchFactsDeps => ({
   loadBroker: async () => broker,
   loadTrend: async () => trend as never,
   ...over,
+});
+
+describe('RESEARCH-0007 chart levels', () => {
+  it('lists support and resistance first, then the highs and lows that have a value', () => {
+    expect(chartLevelsOf(facts as never).map(l => `${l.kind}:${l.price}`)).toEqual(['support:93', 'resistance:110', 'extreme:112', 'extreme:94.5', 'extreme:130']);
+  });
+  it('reports the levels once the facts load', async () => {
+    const seen: number[] = [];
+    render(<ResearchFacts symbol="AAPL" th={THEMES.dark} deps={deps()} onLevels={l => seen.push(l.length)} />);
+    await screen.findByTestId('facts-trend');
+    expect(seen[seen.length - 1]).toBe(5);
+  });
 });
 
 describe('RESEARCH-0002 ResearchFacts', () => {

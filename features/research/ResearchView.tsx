@@ -6,8 +6,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  RESEARCH_RANGE_ORDER, chartGeometry, dayChange, normalizeResearchSymbol, rangeChange,
-  type ResearchChart, type ResearchRange,
+  RESEARCH_RANGE_ORDER, chartGeometry, chartLevelLines, dayChange, normalizeResearchSymbol, rangeChange,
+  type ChartLevel, type ResearchChart, type ResearchRange,
 } from '@/lib/research/yahooChart';
 import type { THEMES, Theme } from '@/lib/theme';
 import { ResearchFacts, type ResearchFactsDeps } from './ResearchFacts';
@@ -49,6 +49,8 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
   const [loading, setLoading] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
   const [listStatus, setListStatus] = useState<'idle' | 'saving' | 'added' | 'exists' | 'error'>('idle');
+  const [levels, setLevels] = useState<ChartLevel[]>([]);
+  const [showLevels, setShowLevels] = useState(true);
   const requestId = useRef(0);
 
   useEffect(() => {
@@ -94,6 +96,7 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
   }, [symbol, doFetch]);
 
   const geometry = useMemo(() => (chart ? chartGeometry(chart.points, W, H) : null), [chart]);
+  const levelLines = useMemo(() => (chart && showLevels ? chartLevelLines(chart.points, levels, H) : []), [chart, levels, showLevels]);
   const meta = chart?.meta ?? null;
   const last = chart && chart.points.length ? chart.points[chart.points.length - 1].c : null;
   const price = meta?.price ?? last;
@@ -149,9 +152,23 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
                   setHover(Math.max(0, Math.min(chart.points.length - 1, idx)));
                 }}>
                 <polyline points={geometry.path} fill="none" strokeWidth={2} vectorEffect="non-scaling-stroke" className={`${lineTone} stroke-current`} />
+                {levelLines.map(l => (
+                  <line key={`${l.kind}-${l.price}`} x1={0} x2={W} y1={l.y} y2={l.y} strokeWidth={1} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" data-testid="chart-level-line"
+                    className={l.kind === 'support' ? 'stroke-emerald-400/70' : l.kind === 'resistance' ? 'stroke-red-400/70' : 'stroke-white/35'} />
+                ))}
                 {hover != null && <line x1={geometry.xs[hover]} x2={geometry.xs[hover]} y1={0} y2={H} strokeWidth={1} vectorEffect="non-scaling-stroke" className="stroke-white/40" />}
               </svg>
             ) : <p className={`py-10 text-center text-sm ${th.textFaint}`}>Chart data unavailable for this range.</p>}
+            {levelLines.length > 0 && (
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-56 sm:h-64" aria-hidden="true">
+                {levelLines.map(l => (
+                  <span key={`${l.kind}-${l.price}`} data-testid="chart-level-label" style={{ top: `${(l.y / H) * 100}%` }}
+                    className={`absolute right-1 -translate-y-full rounded bg-black/50 px-1 text-[10px] leading-4 ${l.kind === 'support' ? 'text-emerald-300' : l.kind === 'resistance' ? 'text-red-300' : 'text-white/60'}`}>
+                    {l.label} {usd(l.price)}
+                  </span>
+                ))}
+              </div>
+            )}
             {loading && <p className={`absolute right-2 top-2 text-xs ${th.textFaint}`} role="status">Loading…</p>}
           </div>
 
@@ -162,6 +179,7 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
                   className={`min-h-8 rounded-md px-3 text-xs font-semibold ${r === range ? 'bg-white/15 text-white' : `${th.textFaint} hover:text-white`}`}>{r}</button>
               ))}
             </div>
+            <button type="button" aria-pressed={showLevels} onClick={() => setShowLevels(s => !s)} className={`min-h-8 rounded-md border px-3 text-xs ${th.border} ${showLevels ? 'text-white' : th.textFaint}`}>Levels</button>
             {move && <span className={`text-xs font-semibold ${lineTone}`} data-testid="research-range-change">{signed(move.amount)} ({pct(move.pct)}) {range}</span>}
           </div>
 
@@ -180,7 +198,7 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
           </dl>
         </section>
       )}
-      {symbol && chart && meta && <ResearchFacts symbol={symbol} th={th} deps={deps} />}
+      {symbol && chart && meta && <ResearchFacts symbol={symbol} th={th} deps={deps} onLevels={setLevels} />}
     </div>
   );
 }

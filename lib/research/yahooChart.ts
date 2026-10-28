@@ -95,6 +95,29 @@ export function chartGeometry(points: readonly ResearchPoint[], width: number, h
   return { path: xs.map((x, i) => `${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' '), xs, ys };
 }
 
+export interface ChartLevel { price: number; kind: 'support' | 'resistance' | 'extreme'; label: string }
+export interface ChartLevelLine extends ChartLevel { y: number }
+
+/**
+ * Horizontal level lines for the chart: each level's y on the SAME price scale chartGeometry uses for these points. A level outside
+ * the visible price range is dropped, and a level within `minGap` of one already kept is dropped (earlier levels win, so pass the
+ * support/resistance levels before the plain highs and lows).
+ */
+export function chartLevelLines(points: readonly ResearchPoint[], levels: readonly ChartLevel[], height: number, pad = 4, minGap = 9): ChartLevelLine[] {
+  if (points.length < 2) return [];
+  const min = Math.min(...points.map(p => p.c));
+  const max = Math.max(...points.map(p => p.c));
+  const span = max - min || 1;
+  const kept: ChartLevelLine[] = [];
+  for (const l of levels) {
+    if (!Number.isFinite(l.price) || l.price < min || l.price > max) continue;
+    const yy = pad + (1 - (l.price - min) / span) * (height - pad * 2);
+    if (kept.some(k => Math.abs(k.y - yy) < minGap)) continue;
+    kept.push({ ...l, y: yy });
+  }
+  return kept;
+}
+
 export interface ResearchBar { t: number; o: number; h: number; l: number; c: number; v?: number }
 
 /** Daily OHLCV bars from Yahoo's chart payload. A bar with any missing OHLC value is dropped (Yahoo pads holidays with nulls); volume is optional. */
