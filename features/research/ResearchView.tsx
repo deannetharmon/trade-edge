@@ -6,11 +6,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  RESEARCH_RANGE_ORDER, chartGeometry, chartLevelLines, dayChange, normalizeResearchSymbol, rangeChange,
+  RESEARCH_RANGE_ORDER, chartGapBoxes, chartGeometry, chartLevelLines, dayChange, normalizeResearchSymbol, rangeChange,
   type ChartLevel, type ResearchChart, type ResearchRange,
 } from '@/lib/research/yahooChart';
 import type { THEMES, Theme } from '@/lib/theme';
 import { ResearchFacts, type ResearchFactsDeps } from './ResearchFacts';
+import type { ResearchFacts as Facts } from '@/lib/research/researchFacts';
 import { defaultResearchFactsDeps } from './defaultFactsDeps';
 
 interface Props {
@@ -50,6 +51,7 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
   const [hover, setHover] = useState<number | null>(null);
   const [listStatus, setListStatus] = useState<'idle' | 'saving' | 'added' | 'exists' | 'error'>('idle');
   const [levels, setLevels] = useState<ChartLevel[]>([]);
+  const [gaps, setGaps] = useState<Facts['gaps']>([]);
   const [showLevels, setShowLevels] = useState(true);
   const requestId = useRef(0);
 
@@ -96,6 +98,8 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
   }, [symbol, doFetch]);
 
   const geometry = useMemo(() => (chart ? chartGeometry(chart.points, W, H) : null), [chart]);
+  // Gap boxes need daily or weekly points; the 1D and 1W charts are intraday, where a daily gap has no place.
+  const gapBoxes = useMemo(() => (chart && showLevels && range !== '1D' && range !== '1W' ? chartGapBoxes(chart.points, gaps, W, H) : []), [chart, gaps, showLevels, range]);
   const levelLines = useMemo(() => (chart && showLevels ? chartLevelLines(chart.points, levels, H) : []), [chart, levels, showLevels]);
   const meta = chart?.meta ?? null;
   const last = chart && chart.points.length ? chart.points[chart.points.length - 1].c : null;
@@ -152,6 +156,10 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
                   setHover(Math.max(0, Math.min(chart.points.length - 1, idx)));
                 }}>
                 <polyline points={geometry.path} fill="none" strokeWidth={2} vectorEffect="non-scaling-stroke" className={`${lineTone} stroke-current`} />
+                {gapBoxes.map(g => (
+                  <rect key={`${g.x}-${g.bottom}`} x={g.x} width={W - g.x} y={Math.min(g.y1, g.y2)} height={Math.max(Math.abs(g.y2 - g.y1), 1)} data-testid="chart-gap-box"
+                    className={g.side === 'above' ? 'fill-red-400/15' : g.side === 'below' ? 'fill-emerald-400/15' : 'fill-amber-300/15'} />
+                ))}
                 {levelLines.map(l => (
                   <line key={`${l.kind}-${l.price}`} x1={0} x2={W} y1={l.y} y2={l.y} strokeWidth={1} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" data-testid="chart-level-line"
                     className={l.kind === 'support' ? 'stroke-emerald-400/70' : l.kind === 'resistance' ? 'stroke-red-400/70' : 'stroke-white/35'} />
@@ -198,7 +206,7 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
           </dl>
         </section>
       )}
-      {symbol && chart && meta && <ResearchFacts symbol={symbol} th={th} deps={deps} onLevels={setLevels} />}
+      {symbol && chart && meta && <ResearchFacts symbol={symbol} th={th} deps={deps} onLevels={setLevels} onGaps={setGaps} />}
     </div>
   );
 }

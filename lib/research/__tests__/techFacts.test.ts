@@ -1,7 +1,7 @@
 // lib/research/__tests__/techFacts.test.ts
 
 import { describe, expect, it } from 'vitest';
-import { atr14, horizonReturns, keyLevels, rangeExtremes, relativeStrength, strikeContext, volumeRatio, type FactBar } from '../techFacts';
+import { atr14, horizonReturns, keyLevels, openGaps, rangeExtremes, relativeStrength, strikeContext, volumeRatio, type FactBar } from '../techFacts';
 import { buildResearchFacts, completedBars } from '../researchFacts';
 
 const DAY = 86_400;
@@ -46,6 +46,19 @@ describe('RESEARCH-0002 techFacts', () => {
     expect(rangeExtremes(bars)).toEqual({ high20: 120, low20: 95, high52w: 120, low52w: 70 });
     expect(rangeExtremes(flat(30, { 5: { h: 150 } }))).toEqual({ high20: 101, low20: 99, high52w: null, low52w: null });
     expect(rangeExtremes([])).toEqual({ high20: null, low20: null, high52w: null, low52w: null });
+  });
+  it('open gaps: a gap up is open until price trades down through it; a partial fill shrinks it; small gaps are ignored', () => {
+    // 60 flat bars (100, range 99-101, ATR 2), then a gap up bar 105-107, then bars that stay above 103 (partial fill to 103)
+    const base = flat(60);
+    const up = [...base, { t: T0 + 60 * DAY, o: 106, h: 107, l: 105, c: 106 }, { t: T0 + 61 * DAY, o: 106, h: 108, l: 103, c: 107 }];
+    expect(openGaps(up)).toEqual([{ bottom: 101, top: 103, t: T0 + 60 * DAY, side: 'below' }]);
+    const filled = [...up, { t: T0 + 62 * DAY, o: 104, h: 105, l: 100, c: 101 }];
+    expect(openGaps(filled)).toEqual([]);
+    const down = [...base, { t: T0 + 60 * DAY, o: 93, h: 95, l: 92, c: 94 }];
+    expect(openGaps(down)).toEqual([{ bottom: 95, top: 99, t: T0 + 60 * DAY, side: 'above' }]);
+    const tiny = [...base, { t: T0 + 60 * DAY, o: 101.4, h: 102.5, l: 101.2, c: 102 }];
+    expect(openGaps(tiny)).toEqual([]);
+    expect(openGaps([])).toEqual([]);
   });
   it('volume ratio: 20-day average over 60-day average; null when volume is missing', () => {
     const bars = flat(60).map((b, i) => ({ ...b, v: i < 40 ? 100 : 200 }));

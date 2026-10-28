@@ -118,6 +118,30 @@ export function chartLevelLines(points: readonly ResearchPoint[], levels: readon
   return kept;
 }
 
+export interface ChartGapBox { x: number; y1: number; y2: number; side: 'above' | 'below' | 'at'; bottom: number; top: number }
+
+/**
+ * Boxes for open gaps on a daily or weekly chart: from the first chart point at or after the gap's time to the right edge, spanning the
+ * zone on the same price scale chartGeometry uses. A zone is clipped to the visible price range and dropped when fully outside it.
+ */
+export function chartGapBoxes(points: readonly ResearchPoint[], gaps: readonly { bottom: number; top: number; t: number; side: 'above' | 'below' | 'at' }[], width: number, height: number, pad = 4): ChartGapBox[] {
+  if (points.length < 2) return [];
+  const min = Math.min(...points.map(p => p.c));
+  const max = Math.max(...points.map(p => p.c));
+  const span = max - min || 1;
+  const yOf = (p: number) => pad + (1 - (p - min) / span) * (height - pad * 2);
+  const out: ChartGapBox[] = [];
+  for (const g of gaps) {
+    const idx = points.findIndex(p => p.t >= g.t);
+    if (idx < 0) continue;
+    const lo = Math.max(g.bottom, min);
+    const hi = Math.min(g.top, max);
+    if (lo >= hi) continue;
+    out.push({ x: (idx / (points.length - 1)) * width, y1: yOf(hi), y2: yOf(lo), side: g.side, bottom: g.bottom, top: g.top });
+  }
+  return out;
+}
+
 export interface ResearchBar { t: number; o: number; h: number; l: number; c: number; v?: number }
 
 /** Daily OHLCV bars from Yahoo's chart payload. A bar with any missing OHLC value is dropped (Yahoo pads holidays with nulls); volume is optional. */

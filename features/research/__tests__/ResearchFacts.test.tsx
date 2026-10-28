@@ -11,6 +11,7 @@ const facts = {
   symbol: 'AAPL', asOf: 1, price: 100, atr14: 2.5, atrPct: 2.5, volumeRatio: 1.25,
   relativeStrength: { stockPct: 20, benchmarkPct: 8, diffPts: 12 },
   returns: { m1: 3.7, m3: -8.1, m6: null },
+  gaps: [{ bottom: 96, top: 98, t: 1_700_000_000, side: 'below' as const }],
   extremes: { high20: 112, low20: 94.5, high52w: 130, low52w: null },
   levels: { supports: [{ price: 93, touches: 2, lastTouchT: 1 }], resistances: [{ price: 110, touches: 1, lastTouchT: 1 }] },
 };
@@ -27,6 +28,13 @@ const deps = (over: Partial<ResearchFactsDeps> = {}): ResearchFactsDeps => ({
 describe('RESEARCH-0007 chart levels', () => {
   it('lists support and resistance first, then the highs and lows that have a value', () => {
     expect(chartLevelsOf(facts as never).map(l => `${l.kind}:${l.price}`)).toEqual(['support:93', 'resistance:110', 'extreme:112', 'extreme:94.5', 'extreme:130']);
+  });
+  it('lists open gaps in the facts panel and reports them to the chart', async () => {
+    const seen: number[] = [];
+    render(<ResearchFacts symbol="AAPL" th={THEMES.dark} deps={deps()} onGaps={g => seen.push(g.length)} />);
+    expect(await screen.findByTestId('facts-gaps')).toHaveTextContent('$96.00 to $98.00');
+    expect(screen.getByTestId('facts-gaps')).toHaveTextContent('below price');
+    expect(seen[seen.length - 1]).toBe(1);
   });
   it('reports the levels once the facts load', async () => {
     const seen: number[] = [];

@@ -29,6 +29,8 @@ interface Props {
   symbol: string; th: (typeof THEMES)[Theme]; deps: ResearchFactsDeps;
   /** Called with the levels to draw on the chart (support and resistance first, then the highs and lows); empty while loading or on error. Must be a stable function. */
   onLevels?: (levels: ChartLevel[]) => void;
+  /** Called with the open gaps to shade on the chart; empty while loading or on error. Must be a stable function. */
+  onGaps?: (gaps: Facts['gaps']) => void;
 }
 
 /** The chart's level lines, in priority order: key levels first, then the unconfirmed highs and lows. */
@@ -59,7 +61,7 @@ function Cell({ label, value, hint, th }: { label: string; value: string; hint?:
   );
 }
 
-export function ResearchFacts({ symbol, th, deps, onLevels }: Props) {
+export function ResearchFacts({ symbol, th, deps, onLevels, onGaps }: Props) {
   const [facts, setFacts] = useState<Facts | null>(null);
   const [factsError, setFactsError] = useState<string | null>(null);
   const [broker, setBroker] = useState<BrokerMetrics | null | undefined>(undefined);
@@ -67,6 +69,7 @@ export function ResearchFacts({ symbol, th, deps, onLevels }: Props) {
   const [strikeText, setStrikeText] = useState('');
 
   useEffect(() => { onLevels?.(facts ? chartLevelsOf(facts) : []); }, [facts, onLevels]);
+  useEffect(() => { onGaps?.(facts?.gaps ?? []); }, [facts, onGaps]);
 
   useEffect(() => {
     let live = true;
@@ -144,6 +147,16 @@ export function ResearchFacts({ symbol, th, deps, onLevels }: Props) {
                   <Cell key={label} th={th} label={label} value={v != null ? usd(v) : '—'} hint={v != null ? `${(Math.abs(facts.price - v) / facts.price * 100).toFixed(1)}% ${v < facts.price ? 'below' : 'above'} price. Needs no confirmation.` : 'Not enough history'} />
                 ))}
               </dl>
+            ) : null}
+            {facts.gaps && facts.gaps.length > 0 ? (
+              <div className="mt-3" data-testid="facts-gaps">
+                <p className={`text-[10px] uppercase tracking-wider ${th.textFaint}`}>Open gaps</p>
+                <ul className="mt-1 space-y-1">
+                  {facts.gaps.map(g => (
+                    <li key={`${g.t}-${g.bottom}`} className={`text-xs ${th.text}`}>{usd(g.bottom)} to {usd(g.top)} <span className={th.textFaint}>· {g.side === 'above' ? 'above price' : g.side === 'below' ? 'below price' : 'price is inside it'} · gapped {new Date(g.t * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span></li>
+                  ))}
+                </ul>
+              </div>
             ) : null}
 
             <div className={`mt-4 rounded-lg border p-3 ${th.border}`}>

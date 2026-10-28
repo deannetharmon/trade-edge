@@ -1,7 +1,7 @@
 // lib/research/__tests__/yahooChart.test.ts
 
 import { describe, expect, it } from 'vitest';
-import { RESEARCH_RANGES, RESEARCH_RANGE_ORDER, chartGeometry, chartLevelLines, dayChange, isResearchRange, normalizeResearchSymbol, parseResearchChart, rangeChange } from '../yahooChart';
+import { RESEARCH_RANGES, RESEARCH_RANGE_ORDER, chartGapBoxes, chartGeometry, chartLevelLines, dayChange, isResearchRange, normalizeResearchSymbol, parseResearchChart, rangeChange } from '../yahooChart';
 
 const payload = {
   chart: { result: [{
@@ -65,5 +65,21 @@ describe('RESEARCH-0007 chart level lines', () => {
     expect(lines[0].y).toBeCloseTo(g.ys[0], 10);
     expect(lines[1].y).toBeCloseTo(130, 10);
     expect(chartLevelLines([{ t: 1, c: 1 }], [{ price: 1, kind: 'support', label: 'x' }], 260)).toEqual([]);
+  });
+});
+
+describe('RESEARCH-0008 chart gap boxes', () => {
+  it('starts at the gap bar, runs to the right edge, clips to the visible price range, and drops zones off the chart', () => {
+    const pts = [{ t: 10, c: 100 }, { t: 20, c: 150 }, { t: 30, c: 200 }];
+    const boxes = chartGapBoxes(pts, [
+      { bottom: 120, top: 130, t: 20, side: 'below' },
+      { bottom: 190, top: 230, t: 10, side: 'above' },
+      { bottom: 250, top: 260, t: 10, side: 'above' },
+    ], 800, 260);
+    expect(boxes).toHaveLength(2);
+    expect(boxes[0].x).toBeCloseTo(400, 10);
+    expect(boxes[0].y1).toBeLessThan(boxes[0].y2);
+    expect(boxes[1].x).toBe(0);
+    expect(boxes[1].y1).toBeCloseTo(4, 10);
   });
 });

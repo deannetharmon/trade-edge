@@ -75,6 +75,45 @@ export function keyLevels(bars: unknown): KeyLevels | null {
   };
 }
 
+export const GAP_MIN_ATR = 0.5;
+export const GAPS_PER_SIDE = 3;
+/** The part of a price gap that has not traded back. `side` is where it sits against the last close. `t` is the gap bar's time. */
+export interface OpenGap { bottom: number; top: number; t: number; side: 'above' | 'below' | 'at' }
+
+/**
+ * Open (unfilled) daily gaps. A gap up is a bar whose low is above the prior bar's high; a gap down is the mirror. A later bar that
+ * trades back into the zone shrinks it, and one that trades through it fills it (dropped). Gaps whose open part is under half an ATR
+ * are dropped, and each side of the last close keeps the nearest three. Facts only: nothing here says a gap will fill.
+ */
+export function openGaps(bars: unknown): OpenGap[] {
+  if (!validBars(bars) || bars.length < 2) return [];
+  const last = bars[bars.length - 1].c;
+  const atr = atr14(bars) ?? last * 0.01;
+  const minSize = atr * GAP_MIN_ATR;
+  const out: OpenGap[] = [];
+  for (let i = 1; i < bars.length; i += 1) {
+    const prev = bars[i - 1];
+    const cur = bars[i];
+    let bottom: number, top: number;
+    if (cur.l > prev.h) {
+      bottom = prev.h; top = cur.l;
+      const lowAfter = Math.min(...bars.slice(i + 1).map(b => b.l), Infinity);
+      if (lowAfter <= bottom) continue;
+      top = Math.min(top, lowAfter);
+    } else if (cur.h < prev.l) {
+      bottom = cur.h; top = prev.l;
+      const highAfter = Math.max(...bars.slice(i + 1).map(b => b.h), -Infinity);
+      if (highAfter >= top) continue;
+      bottom = Math.max(bottom, highAfter);
+    } else continue;
+    if (top - bottom < minSize) continue;
+    out.push({ bottom, top, t: cur.t, side: bottom > last ? 'above' : top < last ? 'below' : 'at' });
+  }
+  const dist = (g: OpenGap) => (g.side === 'above' ? g.bottom - last : g.side === 'below' ? last - g.top : 0);
+  const pick = (side: OpenGap['side']) => out.filter(g => g.side === side).sort((a, b) => dist(a) - dist(b)).slice(0, GAPS_PER_SIDE);
+  return [...pick('above'), ...pick('at'), ...pick('below')];
+}
+
 export const RECENT_RANGE_BARS = 20;
 export const YEAR_RANGE_BARS = 250;
 export interface RangeExtremes { high20: number | null; low20: number | null; high52w: number | null; low52w: number | null }
