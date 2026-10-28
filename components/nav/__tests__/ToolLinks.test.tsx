@@ -22,3 +22,13 @@ describe('TOOL-LINKS-0001', () => {
     expect(screen.getByTestId('tool-links')).toBeInTheDocument();
   });
 });
+
+describe('RESEARCH-0001 header search', () => {
+  it('is a plain GET form to /research with a symbol field', () => {
+    render(<AppHeader />);
+    const form = screen.getByRole('search', { name: 'Look up a stock' });
+    expect(form).toHaveAttribute('action', '/research');
+    expect(form).toHaveAttribute('method', 'get');
+    expect(screen.getByLabelText('Look up a ticker')).toHaveAttribute('name', 'symbol');
+  });
+});

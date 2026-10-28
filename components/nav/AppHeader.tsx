@@ -117,6 +117,12 @@ export function AppHeader({ active, actions, theme, setTheme, accent, setAccent 
               <ThemeControls theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
             )}
           </div>
+          {/* RESEARCH-0001: look up any ticker from any page (a plain GET form, so it needs no router). */}
+          <form action="/research" method="get" role="search" aria-label="Look up a stock" className="flex items-center gap-1">
+            <input name="symbol" aria-label="Look up a ticker" placeholder="Look up ticker" autoCapitalize="characters" maxLength={12}
+              className="h-7 w-28 rounded border border-white/20 bg-black/30 px-2 text-[11px] text-white placeholder:text-white/40 focus:border-white/50 focus:outline-none" />
+            <button type="submit" aria-label="Look up" className="h-7 rounded border border-white/20 px-2 text-[11px] text-white/80 hover:text-white">Go</button>
+          </form>
           {/* TOOL-LINKS-0001: under the theme selector, on every page. */}
           <ToolLinks />
         </div>
