@@ -2,18 +2,19 @@
 
 // RESEARCH-0001: pure helpers for the Research page's price chart. Yahoo's chart JSON in, flat points and headline stats out.
 
-export type ResearchRange = '1D' | '1W' | '1M' | '3M' | '1Y' | '5Y';
+export type ResearchRange = '1D' | '1W' | '1M' | '3M' | '6M' | '1Y' | '5Y';
 
 export const RESEARCH_RANGES: Record<ResearchRange, { range: string; interval: string; ttlSeconds: number }> = {
   '1D': { range: '1d', interval: '5m', ttlSeconds: 60 },
   '1W': { range: '5d', interval: '30m', ttlSeconds: 120 },
   '1M': { range: '1mo', interval: '1d', ttlSeconds: 300 },
   '3M': { range: '3mo', interval: '1d', ttlSeconds: 300 },
+  '6M': { range: '6mo', interval: '1d', ttlSeconds: 300 },
   '1Y': { range: '1y', interval: '1d', ttlSeconds: 300 },
   '5Y': { range: '5y', interval: '1wk', ttlSeconds: 600 },
 };
 
-export const RESEARCH_RANGE_ORDER: ResearchRange[] = ['1D', '1W', '1M', '3M', '1Y', '5Y'];
+export const RESEARCH_RANGE_ORDER: ResearchRange[] = ['1D', '1W', '1M', '3M', '6M', '1Y', '5Y'];
 
 export function isResearchRange(value: unknown): value is ResearchRange {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(RESEARCH_RANGES, value);

@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   const symbol = normalizeResearchSymbol(req.nextUrl.searchParams.get('symbol'));
   if (!symbol) return NextResponse.json({ error: 'A valid symbol is required' }, { status: 400 });
   const rangeParam = req.nextUrl.searchParams.get('range') ?? '1M';
-  if (!isResearchRange(rangeParam)) return NextResponse.json({ error: 'range must be 1D, 1W, 1M, 3M, 1Y or 5Y' }, { status: 400 });
+  if (!isResearchRange(rangeParam)) return NextResponse.json({ error: 'range must be 1D, 1W, 1M, 3M, 6M, 1Y or 5Y' }, { status: 400 });
   const load = (key: ResearchRange) => {
     const spec = RESEARCH_RANGES[key];
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${spec.interval}&range=${spec.range}`;

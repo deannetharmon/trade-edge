@@ -30,6 +30,8 @@ describe('RESEARCH-0001 yahoo chart helpers', () => {
     expect(normalizeResearchSymbol('../etc')).toBeNull();
     expect(normalizeResearchSymbol(undefined)).toBeNull();
     expect(RESEARCH_RANGE_ORDER.every(isResearchRange)).toBe(true);
+    expect(RESEARCH_RANGE_ORDER).toContain('6M');
+    expect(RESEARCH_RANGES['6M']).toMatchObject({ range: '6mo', interval: '1d' });
     expect(isResearchRange('10Y')).toBe(false);
     expect(isResearchRange('toString')).toBe(false);
     expect(RESEARCH_RANGES['1D']).toMatchObject({ range: '1d', interval: '5m' });
