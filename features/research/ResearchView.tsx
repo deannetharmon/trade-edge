@@ -43,7 +43,7 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
   const deps = useMemo(() => factsDeps ?? defaultResearchFactsDeps(doFetch), [factsDeps, doFetch]);
   const [input, setInput] = useState(initialSymbol ?? '');
   const [symbol, setSymbol] = useState<string | null>(normalizeResearchSymbol(initialSymbol ?? ''));
-  const [range, setRange] = useState<ResearchRange>('1M');
+  const [range, setRange] = useState<ResearchRange>('3M');
   const [chart, setChart] = useState<ResearchChart | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);

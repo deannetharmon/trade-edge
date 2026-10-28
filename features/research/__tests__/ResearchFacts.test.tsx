@@ -54,6 +54,19 @@ describe('RESEARCH-0002 ResearchFacts', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('No data for AAPL');
     expect(await screen.findByTestId('facts-trend')).toBeInTheDocument();
   });
+  it('explains the trend with its component scores and the look-back, and shows the pattern type', async () => {
+    const withScores = { ...trend, subtype: 'REVERSAL', scores: { momentum: 6, maAlignment: -12, slope: -18, structure: -22, chop: 0, volatility: 0, total: -46 } };
+    render(<ResearchFacts symbol="AAPL" th={THEMES.dark} deps={deps({ loadTrend: async () => withScores as never })} />);
+    expect(await screen.findByTestId('facts-trend')).toHaveTextContent('Trend, last ~4–6 months');
+    expect(screen.getByTestId('facts-trend')).toHaveTextContent('uptrend · 71% · reversal');
+    const why = screen.getByTestId('facts-trend-why');
+    expect(why).toHaveTextContent('momentum +6 · averages -12 · slope -18 · structure -22');
+    expect(why).toHaveTextContent('90 to 120 trading days');
+  });
+  it('marks an earnings date that has already passed instead of presenting it as upcoming', async () => {
+    render(<ResearchFacts symbol="AAPL" th={THEMES.dark} deps={deps({ loadBroker: async () => ({ ...broker, earningsExpectedDate: '2020-10-20' }) })} />);
+    expect(await screen.findByTestId('facts-options')).toHaveTextContent('2020-10-20 (passed)');
+  });
   it('an unknown trend reads "Trend unavailable"', async () => {
     render(<ResearchFacts symbol="AAPL" th={THEMES.dark} deps={deps({ loadTrend: async () => ({ ...trend, trend: 'unknown' }) as never })} />);
     expect(await screen.findByText('Trend unavailable.')).toBeInTheDocument();

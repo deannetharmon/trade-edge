@@ -37,6 +37,12 @@ describe('RESEARCH-0001 ResearchView', () => {
     expect(stats).toHaveTextContent('$150.00');
     expect(stats).toHaveTextContent('5M');
   });
+  it('opens on the 3M chart, the window the trend label reads', async () => {
+    const { calls } = setup();
+    await screen.findByTestId('research-price');
+    expect(screen.getByRole('button', { name: '3M' })).toHaveAttribute('aria-pressed', 'true');
+    expect(calls.some(c => c.url.includes('range=3M'))).toBe(true);
+  });
   it('a range button refetches with that range', async () => {
     const { calls } = setup();
     await screen.findByTestId('research-price');

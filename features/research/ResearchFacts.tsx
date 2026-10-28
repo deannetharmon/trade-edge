@@ -28,6 +28,7 @@ interface Props { symbol: string; th: (typeof THEMES)[Theme]; deps: ResearchFact
 
 const usd = (v: number | null | undefined) => (v == null ? '—' : `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const fixed = (v: number | null | undefined, d = 1, suffix = '') => (v == null || !Number.isFinite(v) ? '—' : `${v.toFixed(d)}${suffix}`);
+const signedInt = (v: number | undefined) => (v == null || !Number.isFinite(v) ? '—' : `${v > 0 ? '+' : ''}${Math.round(v)}`);
 const dayDiff = (iso: string) => Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())) / 86_400_000);
 
 function Cell({ label, value, hint, th }: { label: string; value: string; hint?: string; th: Props['th'] }) {
@@ -70,11 +71,17 @@ export function ResearchFacts({ symbol, th, deps }: Props) {
       {trend === undefined ? <p className={`mt-1 text-xs ${th.textFaint}`} role="status">Loading…</p>
         : trend === null || trend.trend === 'unknown' ? <p className={`mt-1 text-xs ${th.textFaint}`}>Trend unavailable.</p>
         : <dl className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="facts-trend">
-            <Cell th={th} label="Trend" value={`${trend.trend} · ${trend.confidence.toFixed(0)}%`} hint={trend.reason} />
+            <Cell th={th} label="Trend, last ~4–6 months" value={`${trend.trend} · ${trend.confidence.toFixed(0)}%${trend.subtype && trend.subtype !== 'UNKNOWN' ? ` · ${trend.subtype.toLowerCase()}` : ''}`} hint={trend.reason} />
             <Cell th={th} label="20 / 50 / 200-day avg" value={`${fixed(trend.ma20, 2)} / ${fixed(trend.ma50, 2)} / ${fixed(trend.ma200 ?? null, 2)}`} />
             <Cell th={th} label="RSI (14)" value={fixed(trend.metrics?.rsi14, 0)} />
             <Cell th={th} label="Price vs 50-day avg" value={fixed(trend.metrics?.distFromMa50 != null ? trend.metrics.distFromMa50 * 100 : null, 1, '%')} />
           </dl>}
+      {trend && trend.trend !== 'unknown' && (
+        <p className={`mt-2 text-xs ${th.textFaint}`} data-testid="facts-trend-why">
+          {trend.scores ? <>What drives it: momentum {signedInt(trend.scores.momentum)} · averages {signedInt(trend.scores.maAlignment)} · slope {signedInt(trend.scores.slope)} · structure {signedInt(trend.scores.structure)}. </> : null}
+          The trend reads the last 90 to 120 trading days (about 4 to 6 months), so a recent bounce can sit inside a downtrend, and the reverse. Use the 3M or 1Y chart to compare.
+        </p>
+      )}
 
       <h3 className={`mt-4 text-[11px] font-semibold uppercase tracking-wider ${th.textMuted}`}>Options context</h3>
       {broker === undefined ? <p className={`mt-1 text-xs ${th.textFaint}`} role="status">Loading…</p>
@@ -84,7 +91,7 @@ export function ResearchFacts({ symbol, th, deps }: Props) {
             <Cell th={th} label="IV (30-day)" value={fixed(broker.ivx30, 1, '%')} hint="The broker's 30-day implied volatility" />
             <Cell th={th} label="HV (30-day)" value={fixed(broker.hv30, 1, '%')} hint="Realized volatility, the broker's own measure" />
             <Cell th={th} label="IV minus HV" value={fixed(broker.ivHvDiff, 1, ' pts')} hint="Positive: options price in more movement than the stock has delivered" />
-            <Cell th={th} label="Next earnings" value={broker.earningsExpectedDate ? `${broker.earningsExpectedDate}${earningsDays != null && earningsDays >= 0 ? ` (${earningsDays}d)` : ''}` : '—'} />
+            <Cell th={th} label="Next earnings" value={broker.earningsExpectedDate ? `${broker.earningsExpectedDate}${earningsDays == null ? '' : earningsDays >= 0 ? ` (${earningsDays}d)` : ' (passed)'}` : '—'} hint={earningsDays != null && earningsDays < 0 ? 'The broker still lists a date that has already gone by; the next report date is not yet published.' : undefined} />
             <Cell th={th} label="Options liquidity" value={fixed(broker.liquidityRating, 0, ' / 5')} />
           </dl>}
 
