@@ -94,3 +94,21 @@ export function chartGeometry(points: readonly ResearchPoint[], width: number, h
   const ys = points.map(p => pad + (1 - (p.c - min) / span) * (height - pad * 2));
   return { path: xs.map((x, i) => `${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' '), xs, ys };
 }
+
+export interface ResearchBar { t: number; o: number; h: number; l: number; c: number; v?: number }
+
+/** Daily OHLCV bars from Yahoo's chart payload. A bar with any missing OHLC value is dropped (Yahoo pads holidays with nulls); volume is optional. */
+export function parseResearchBars(data: unknown): ResearchBar[] | null {
+  const result = (data as any)?.chart?.result?.[0];
+  if (!result) return null;
+  const ts: unknown[] = Array.isArray(result.timestamp) ? result.timestamp : [];
+  const q = result.indicators?.quote?.[0] ?? {};
+  const bars: ResearchBar[] = [];
+  for (let i = 0; i < ts.length; i++) {
+    const t = num(ts[i]), o = num(q.open?.[i]), h = num(q.high?.[i]), l = num(q.low?.[i]), c = num(q.close?.[i]);
+    if (t == null || o == null || h == null || l == null || c == null) continue;
+    const v = num(q.volume?.[i]);
+    bars.push(v == null ? { t, o, h, l, c } : { t, o, h, l, c, v });
+  }
+  return bars;
+}

@@ -10,12 +10,16 @@ import {
   type ResearchChart, type ResearchRange,
 } from '@/lib/research/yahooChart';
 import type { THEMES, Theme } from '@/lib/theme';
+import { ResearchFacts, type ResearchFactsDeps } from './ResearchFacts';
+import { defaultResearchFactsDeps } from './defaultFactsDeps';
 
 interface Props {
   th: (typeof THEMES)[Theme];
   /** Symbol to show on first render (from ?symbol=). */
   initialSymbol?: string | null;
   fetchImpl?: typeof fetch;
+  /** Test seam for the facts panel; the page uses the real loaders. */
+  factsDeps?: ResearchFactsDeps;
 }
 
 const usd = (v: number | null | undefined) => (v == null ? '—' : `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
@@ -34,8 +38,9 @@ function formatWhen(t: number, range: ResearchRange): string {
     : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function ResearchView({ th, initialSymbol, fetchImpl }: Props) {
+export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props) {
   const doFetch = fetchImpl ?? fetch;
+  const deps = useMemo(() => factsDeps ?? defaultResearchFactsDeps(doFetch), [factsDeps, doFetch]);
   const [input, setInput] = useState(initialSymbol ?? '');
   const [symbol, setSymbol] = useState<string | null>(normalizeResearchSymbol(initialSymbol ?? ''));
   const [range, setRange] = useState<ResearchRange>('1M');
@@ -175,6 +180,7 @@ export function ResearchView({ th, initialSymbol, fetchImpl }: Props) {
           </dl>
         </section>
       )}
+      {symbol && chart && meta && <ResearchFacts symbol={symbol} th={th} deps={deps} />}
     </div>
   );
 }

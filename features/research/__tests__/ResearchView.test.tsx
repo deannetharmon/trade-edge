@@ -22,7 +22,8 @@ function setup(watchlist: { symbol: string; active: boolean }[] = []) {
     if (u === '/api/watchlist' && init?.method === 'PUT') return json({ success: true });
     return json({ tickers: watchlist });
   }) as unknown as typeof fetch;
-  render(<ResearchView th={THEMES.dark} initialSymbol="AAPL" fetchImpl={fetchImpl} />);
+  const factsDeps = { loadFacts: () => new Promise<never>(() => {}), loadBroker: async () => null, loadTrend: async () => null };
+  render(<ResearchView th={THEMES.dark} initialSymbol="AAPL" fetchImpl={fetchImpl} factsDeps={factsDeps} />);
   return { calls, fetchImpl };
 }
 
