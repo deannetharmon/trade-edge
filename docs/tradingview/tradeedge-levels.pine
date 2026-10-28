@@ -1,5 +1,5 @@
 //@version=5
-// TradeEdge Levels (TV-LEVELS-0006)
+// TradeEdge Levels (TV-LEVELS-0007)
 // Draws the same support, resistance, high/low and open-gap levels the TradeEdge Research page shows, on ANY ticker and ANY chart
 // timeframe, with nothing to paste. The levels are always worked out from DAILY bars (the last year), like the Research page.
 //   dashed green = support, dashed red = resistance, dashed gray = 20-day / 52-week high and low,
@@ -10,6 +10,7 @@
 //   open gap: low above the prior high (or high below the prior low), shrunk by later trading back into it, dropped when filled,
 //   ignored when under a quarter ATR (default) or when its near edge is more than "Max gap distance" ATR from the last close;
 //   nearest three above and three below.
+// High/low labels read "20D high", "20D low", "52W high", "52W low" plus the price (support and resistance show just the price).
 // "Include today's bar": on = matches the Research page after the close; turn off during market hours to match it exactly.
 // Optional: paste the Research page's "Copy levels" text into "Paste levels" to draw exactly that instead.
 indicator("TradeEdge Levels", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
@@ -204,6 +205,8 @@ if barstate.islast
         box.delete(boxes.pop())
 
     items = str.split(levelsText, ";")
+    xNames = array.from("20D high", "20D low", "52W high", "52W low")
+    int xi = 0
     for item in items
         s = str.trim(item)
         if str.length(s) >= 2
@@ -223,6 +226,10 @@ if barstate.islast
                 price = str.tonumber(str.substring(s, 1))
                 if not na(price)
                     col = kind == "S" ? supportColor : kind == "R" ? resistColor : extremeColor
+                    string tagText = str.tostring(price, "#.##")
+                    if kind == "X"
+                        tagText := (xi < 4 ? array.get(xNames, xi) + " " : "") + tagText
+                        xi += 1
                     lines.push(line.new(bar_index, price, bar_index + 1, price, extend = extend.both, color = col, style = lineStyle, width = lineWidth))
                     if showLabels
-                        labels.push(label.new(bar_index + labelOffset, price, str.tostring(price, "#.##"), style = label.style_label_left, color = col, textcolor = color.white, size = size.normal))
+                        labels.push(label.new(bar_index + labelOffset, price, tagText, style = label.style_label_left, color = col, textcolor = color.white, size = size.normal))
