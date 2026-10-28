@@ -16,6 +16,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { AppNav } from '@/components/nav/AppNav';
+import { ToolLinks } from '@/components/nav/ToolLinks';
 import { ACCENTS, THEMES, LS_ACCENT, LS_THEME, applyAccent, type Accent, type Theme } from '@/lib/theme';
 import type { TabId } from '@/lib/nav/tabs';
 
@@ -108,12 +109,16 @@ export function AppHeader({ active, actions, theme, setTheme, accent, setAccent 
             </span>
           </span>
         </Link>
-        <div className="flex flex-wrap items-center justify-end gap-3 min-w-0">
-          {/* The mode + account chips mount here (single render site: GlobalHeaderContextControls). */}
-          <div data-global-header-context className="shrink-0" />
-          {theme && setTheme && accent && setAccent && (
-            <ThemeControls theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
-          )}
+        <div className="flex min-w-0 flex-col items-end gap-1.5">
+          <div className="flex flex-wrap items-center justify-end gap-3 min-w-0">
+            {/* The mode + account chips mount here (single render site: GlobalHeaderContextControls). */}
+            <div data-global-header-context className="shrink-0" />
+            {theme && setTheme && accent && setAccent && (
+              <ThemeControls theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
+            )}
+          </div>
+          {/* TOOL-LINKS-0001: under the theme selector, on every page. */}
+          <ToolLinks />
         </div>
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2 pb-2">{actions}</div>}
