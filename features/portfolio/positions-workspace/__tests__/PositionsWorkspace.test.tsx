@@ -870,6 +870,15 @@ describe('P/L summary strip', () => {
     expect(pills[0]).toHaveTextContent(/^(ITM|OTM|ATM)/);
     cards.getAllByLabelText('Signals').forEach(group => expect(group).not.toHaveTextContent(/^(ITM|OTM|ATM)\b/));
   });
+  it('POS-CARD-IV-0001: the card header line shows IVR', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem('tradeedge:positions-view:v1', JSON.stringify({ setting: 'cards', last: 'cards' }));
+    const withIvr = { ...position, ivr: 42.4 } as unknown as Position;
+    render(<PositionsWorkspace model={{ ...model, analysisRows: [{ id: withIvr.key, position: withIvr, symbol: withIvr.symbol, strategy: withIvr.strategy, needsAttention: false }] } as PositionsWorkspaceModel} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    expect(within(screen.getByTestId('position-cards')).getByText(/· IVR 42$/)).toBeInTheDocument();
+    window.localStorage.removeItem('tradeedge:positions-view:v1');
+  });
   it('STOCK-CHIP: stock holdings count under All and their own Stock chip, and the chip shows only the stocks', async () => {
     const user = userEvent.setup();
     window.localStorage.setItem('tradeedge:positions-view:v1', JSON.stringify({ setting: 'cards', last: 'cards' }));

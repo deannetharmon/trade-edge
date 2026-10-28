@@ -40,7 +40,8 @@ function detailLine(p: Position): string {
   const what = legs.length === 1 ? `${legs[0].strikePrice} ${legs[0].optionType === 'P' ? 'Put' : 'Call'}`
     : legs.length > 1 ? `${legs.map(l => `${l.strikePrice}${l.optionType}`).join('/')}` : p.strategy;
   const qty = `${p.quantity}x`;
-  return `${what} · ${qty} · Exp ${shortDate(p.expDate)} · ${p.dte} DTE`;
+  const ivr = typeof p.ivr === 'number' && Number.isFinite(p.ivr) ? ` · IVR ${p.ivr.toFixed(0)}` : '';
+  return `${what} · ${qty} · Exp ${shortDate(p.expDate)} · ${p.dte} DTE${ivr}`;
 }
 
 export interface PositionCardsProps {

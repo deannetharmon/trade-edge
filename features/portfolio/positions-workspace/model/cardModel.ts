@@ -182,6 +182,16 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
     { label: 'Break-even', value: breakeven.values.length ? breakeven.values.map(v => `$${v.toFixed(2)}`).join(' / ') : 'Unavailable' },
     { label: 'Opened', value: p.entryDate ? shortDate(p.entryDate) + (p.entryDate.slice(0, 4) !== String(new Date().getFullYear()) ? `, ${p.entryDate.slice(0, 4)}` : '') : 'Unavailable' },
   ];
+  // POS-CARD-IV-0001: the table's IV / IVR column, which the cards left out. Facts only, no verdict.
+  const pctText = (v: number | null | undefined, digits = 0) => (finite(v) ? v.toFixed(digits) : null);
+  const ivr = pctText(p.ivr);
+  if (ivr != null) {
+    const atEntry = pctText(p.ivrAtEntry);
+    stats.push({ label: 'IVR', value: atEntry != null ? `${ivr} (opened at ${atEntry})` : ivr });
+  }
+  const iv = pctText(p.iv, 1);
+  const hv = pctText(p.hv30, 1);
+  if (iv != null) stats.push({ label: 'IV / HV30', value: hv != null ? `${iv}% / ${hv}%` : `${iv}%` });
   if (pctOfAccount != null) stats.push({ label: '% of account', value: `${pctOfAccount.toFixed(1)}%` });
 
   return {

@@ -96,6 +96,14 @@ describe('card content', () => {
     expect(buildPositionCard(pos({ recommendation: r }), { pctOfTarget: 30 }).reason).toBe('Holding for your profit target · 30% of the way there.');
     expect(buildPositionCard(pos({ recommendation: r }), { pctOfTarget: null }).reason).toBeNull();
   });
+  it('POS-CARD-IV-0001: the detail stats carry IVR (with the entry value) and IV / HV30 when known, and omit them when not', () => {
+    const c = buildPositionCard(pos({ ivr: 42.4, ivrAtEntry: 55, iv: 31.46, hv30: 25 } as Partial<Position>), { pctOfTarget: null });
+    expect(c.stats.find(x => x.label === 'IVR')?.value).toBe('42 (opened at 55)');
+    expect(c.stats.find(x => x.label === 'IV / HV30')?.value).toBe('31.5% / 25.0%');
+    const bare = buildPositionCard(pos({}), { pctOfTarget: null });
+    expect(bare.stats.some(x => x.label === 'IVR' || x.label === 'IV / HV30')).toBe(false);
+    expect(buildPositionCard(pos({ iv: 30 } as Partial<Position>), { pctOfTarget: null }).stats.find(x => x.label === 'IV / HV30')?.value).toBe('30.0%');
+  });
   it('a normal credit position shows the target percent under P/L', () => {
     expect(buildPositionCard(pos({ closeNowPnl: 40 } as Partial<Position>), { pctOfTarget: 80 }).pnlNote).toBe('if closed now · 80% of target');
   });
