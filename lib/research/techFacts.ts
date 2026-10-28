@@ -77,13 +77,14 @@ export function keyLevels(bars: unknown): KeyLevels | null {
 
 export const GAP_MIN_ATR = 0.5;
 export const GAPS_PER_SIDE = 3;
+export const GAP_MAX_ATR = 3;
 /** The part of a price gap that has not traded back. `side` is where it sits against the last close. `t` is the gap bar's time. */
 export interface OpenGap { bottom: number; top: number; t: number; side: 'above' | 'below' | 'at' }
 
 /**
  * Open (unfilled) daily gaps. A gap up is a bar whose low is above the prior bar's high; a gap down is the mirror. A later bar that
  * trades back into the zone shrinks it, and one that trades through it fills it (dropped). Gaps whose open part is under half an ATR
- * are dropped, and each side of the last close keeps the nearest three. Facts only: nothing here says a gap will fill.
+ * or whose near edge is more than 3 ATR from the last close are dropped, and each side of the last close keeps the nearest three. Facts only: nothing here says a gap will fill.
  */
 export function openGaps(bars: unknown): OpenGap[] {
   if (!validBars(bars) || bars.length < 2) return [];
@@ -107,7 +108,10 @@ export function openGaps(bars: unknown): OpenGap[] {
       bottom = Math.max(bottom, highAfter);
     } else continue;
     if (top - bottom < minSize) continue;
-    out.push({ bottom, top, t: cur.t, side: bottom > last ? 'above' : top < last ? 'below' : 'at' });
+    const side = bottom > last ? 'above' : top < last ? 'below' : 'at';
+    const distance = side === 'above' ? bottom - last : side === 'below' ? last - top : 0;
+    if (distance > atr * GAP_MAX_ATR) continue;
+    out.push({ bottom, top, t: cur.t, side });
   }
   const dist = (g: OpenGap) => (g.side === 'above' ? g.bottom - last : g.side === 'below' ? last - g.top : 0);
   const pick = (side: OpenGap['side']) => out.filter(g => g.side === side).sort((a, b) => dist(a) - dist(b)).slice(0, GAPS_PER_SIDE);

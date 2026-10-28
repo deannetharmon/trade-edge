@@ -58,6 +58,11 @@ describe('RESEARCH-0002 techFacts', () => {
     expect(openGaps(down)).toEqual([{ bottom: 95, top: 99, t: T0 + 60 * DAY, side: 'above' }]);
     const tiny = [...base, { t: T0 + 60 * DAY, o: 101.4, h: 102.5, l: 101.2, c: 102 }];
     expect(openGaps(tiny)).toEqual([]);
+    // a gap price has since left far behind (near edge more than 3 ATR from the last close) is not shown
+    const far = [...base, { t: T0 + 60 * DAY, o: 90, h: 91, l: 89, c: 90 }];
+    for (let k = 1; k <= 40; k += 1) far.push({ t: T0 + (60 + k) * DAY, o: 90 - k, h: 91 - k, l: 89 - k, c: 90 - k });
+    expect(openGaps(far)).toEqual([]);
+    expect(openGaps(far.slice(0, 62))).toHaveLength(1);
     expect(openGaps([])).toEqual([]);
   });
   it('volume ratio: 20-day average over 60-day average; null when volume is missing', () => {

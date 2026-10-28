@@ -1,18 +1,191 @@
 //@version=5
-// TradeEdge Levels (TV-LEVELS-0001)
-// Draws the support, resistance, high/low and open-gap levels that the TradeEdge Research page shows.
-// Use: on the Research page click "Copy levels", then paste into this indicator's "TradeEdge levels" setting.
-// Format (made by TradeEdge, ";" between items):
-//   S193.38   support line        R198.53   resistance line        X226.88   high/low reference line
-//   GB96.00:98.00:1700000000   open gap BELOW price: bottom:top:gap day (unix seconds)
-//   GA..  gap above price      GI..  price inside the gap
+// TradeEdge Levels (TV-LEVELS-0004)
+// Draws the same support, resistance, high/low and open-gap levels the TradeEdge Research page shows, on ANY ticker and ANY chart
+// timeframe, with nothing to paste. The levels are always worked out from DAILY bars (the last year), like the Research page.
+//   dashed green = support, dashed red = resistance, dashed gray = 20-day / 52-week high and low,
+//   shaded box = open gap (red above price, green below, orange when price is inside it).
+// Rules (mirror lib/research/techFacts.ts - change both together):
+//   swing pivots: a high above the 3 bars before and at least the 3 after (mirror for lows), merged when within half an ATR(14);
+//   nearest three supports below and three resistances above the last close;
+//   open gap: low above the prior high (or high below the prior low), shrunk by later trading back into it, dropped when filled,
+//   ignored when under half an ATR or when its near edge is more than "Max gap distance" ATR from the last close;
+//   nearest three above and three below.
+// "Include today's bar": on = matches the Research page after the close; turn off during market hours to match it exactly.
+// Optional: paste the Research page's "Copy levels" text into "Paste levels" to draw exactly that instead.
 indicator("TradeEdge Levels", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
 
-levelsText = input.string("", "TradeEdge levels", tooltip = "Paste what the Research page's Copy levels button copied.")
+pasteText = input.string("", "Paste levels (optional)", tooltip = "Leave empty for automatic levels. Or paste what the Research page's Copy levels button copied.")
+includeToday = input.bool(true, "Include today's bar")
 showLabels = input.bool(true, "Show price labels")
-supportColor = input.color(color.new(color.green, 20), "Support")
-resistColor = input.color(color.new(color.red, 20), "Resistance")
-extremeColor = input.color(color.new(color.gray, 30), "High / low")
+labelOffset = input.int(6, "Label distance past the last candle (bars)", minval = 0, maxval = 60)
+supportColor = input.color(color.new(color.green, 0), "Support")
+resistColor = input.color(color.new(color.red, 0), "Resistance")
+extremeColor = input.color(color.new(color.gray, 0), "High / low")
+maxGapAtr = input.float(3.0, "Max gap distance (ATR)", minval = 0.5, maxval = 20.0, step = 0.5, tooltip = "Hide open gaps whose near edge is further than this many ATR from the last close.")
+lineWidth = input.int(2, "Line width", minval = 1, maxval = 4)
+lineStyleText = input.string("Solid", "Line style", options = ["Solid", "Dashed", "Dotted"])
+lineStyle = lineStyleText == "Solid" ? line.style_solid : lineStyleText == "Dotted" ? line.style_dotted : line.style_dashed
+
+// Runs on DAILY bars (called through request.security). Returns the levels as one text line:
+// S193.38;R198.53;X226.88;GB96:98:1700000000 (G + A/B/I for above/below/inside, bottom:top:unix seconds).
+f_calc(maxAtr) =>
+    atrValue = ta.atr(14)
+    var float[] H = array.new_float()
+    var float[] L = array.new_float()
+    var float[] C = array.new_float()
+    var float[] T = array.new_float()
+    array.push(H, high)
+    array.push(L, low)
+    array.push(C, close)
+    array.push(T, float(time))
+    if array.size(H) > 330
+        array.shift(H)
+        array.shift(L)
+        array.shift(C)
+        array.shift(T)
+    string out = ""
+    if time >= timenow - 430 * 86400000 and not na(atrValue)
+        n = array.size(H)
+        cutoff = timenow - 365 * 86400000
+        int start = n - 1
+        while start > 0 and array.get(T, start - 1) >= cutoff
+            start -= 1
+        last = array.get(C, n - 1)
+        tol = atrValue * 0.5
+
+        // swing pivots
+        float[] piv = array.new_float()
+        if n - 4 >= start + 3
+            for i = start + 3 to n - 4
+                h = array.get(H, i)
+                l = array.get(L, i)
+                hiLeft = math.max(array.get(H, i - 1), math.max(array.get(H, i - 2), array.get(H, i - 3)))
+                hiRight = math.max(array.get(H, i + 1), math.max(array.get(H, i + 2), array.get(H, i + 3)))
+                loLeft = math.min(array.get(L, i - 1), math.min(array.get(L, i - 2), array.get(L, i - 3)))
+                loRight = math.min(array.get(L, i + 1), math.min(array.get(L, i + 2), array.get(L, i + 3)))
+                if h > hiLeft and h >= hiRight
+                    array.push(piv, h)
+                if l < loLeft and l <= loRight
+                    array.push(piv, l)
+        array.sort(piv)
+
+        // merge pivots within half an ATR into levels (ascending)
+        float[] lv = array.new_float()
+        int m = array.size(piv)
+        if m > 0
+            float groupSum = 0.0
+            int groupCount = 0
+            float prev = 0.0
+            for j = 0 to m - 1
+                p = array.get(piv, j)
+                if groupCount > 0 and p - prev > tol
+                    array.push(lv, groupSum / groupCount)
+                    groupSum := 0.0
+                    groupCount := 0
+                groupSum += p
+                groupCount += 1
+                prev := p
+            array.push(lv, groupSum / groupCount)
+
+        int nLv = array.size(lv)
+        int cs = 0
+        if nLv > 0
+            for j = nLv - 1 to 0
+                p = array.get(lv, j)
+                if p < last and cs < 3
+                    out += "S" + str.tostring(p, "#.##") + ";"
+                    cs += 1
+        int cr = 0
+        if nLv > 0
+            for j = 0 to nLv - 1
+                p = array.get(lv, j)
+                if p > last and cr < 3
+                    out += "R" + str.tostring(p, "#.##") + ";"
+                    cr += 1
+
+        // 20-day and 250-day high and low
+        if n >= 20
+            h20 = array.get(H, n - 1)
+            l20 = array.get(L, n - 1)
+            for k = n - 20 to n - 1
+                h20 := math.max(h20, array.get(H, k))
+                l20 := math.min(l20, array.get(L, k))
+            out += "X" + str.tostring(h20, "#.##") + ";X" + str.tostring(l20, "#.##") + ";"
+        if n >= 250
+            h250 = array.get(H, n - 1)
+            l250 = array.get(L, n - 1)
+            for k = n - 250 to n - 1
+                h250 := math.max(h250, array.get(H, k))
+                l250 := math.min(l250, array.get(L, k))
+            out += "X" + str.tostring(h250, "#.##") + ";X" + str.tostring(l250, "#.##") + ";"
+
+        // open gaps, scanning back from the newest bar so "later bars" are known
+        float[] gb = array.new_float()
+        float[] gt = array.new_float()
+        float[] gts = array.new_float()
+        float[] gside = array.new_float()
+        float[] gdist = array.new_float()
+        float lowAfter = 1.0e18
+        float highAfter = -1.0e18
+        if n - 1 >= start + 1
+            for i = n - 1 to start + 1
+                curH = array.get(H, i)
+                curL = array.get(L, i)
+                prevH = array.get(H, i - 1)
+                prevL = array.get(L, i - 1)
+                float bottom = na
+                float top = na
+                if curL > prevH
+                    bottom := prevH
+                    top := curL
+                    if lowAfter <= bottom
+                        bottom := na
+                    else
+                        top := math.min(top, lowAfter)
+                else if curH < prevL
+                    bottom := curH
+                    top := prevL
+                    if highAfter >= top
+                        bottom := na
+                    else
+                        bottom := math.max(bottom, highAfter)
+                if not na(bottom) and top - bottom >= tol
+                    float side = bottom > last ? 0.0 : top < last ? 2.0 : 1.0
+                    float dist = side == 0.0 ? bottom - last : side == 2.0 ? last - top : 0.0
+                    if dist <= maxAtr * atrValue
+                        array.push(gb, bottom)
+                        array.push(gt, top)
+                        array.push(gts, array.get(T, i) / 1000.0)
+                        array.push(gside, side)
+                        array.push(gdist, dist)
+                lowAfter := math.min(lowAfter, curL)
+                highAfter := math.max(highAfter, curH)
+        int nG = array.size(gb)
+        if nG > 0
+            order = array.sort_indices(gdist, order.ascending)
+            int cA = 0
+            int cB = 0
+            int cI = 0
+            for q = 0 to nG - 1
+                idx = array.get(order, q)
+                sd = array.get(gside, idx)
+                string tag = ""
+                if sd == 0.0 and cA < 3
+                    tag := "GA"
+                    cA += 1
+                else if sd == 2.0 and cB < 3
+                    tag := "GB"
+                    cB += 1
+                else if sd == 1.0 and cI < 1
+                    tag := "GI"
+                    cI += 1
+                if tag != ""
+                    out += tag + str.tostring(array.get(gb, idx), "#.##") + ":" + str.tostring(array.get(gt, idx), "#.##") + ":" + str.tostring(math.round(array.get(gts, idx))) + ";"
+    out
+
+autoNow = request.security(syminfo.tickerid, "D", f_calc(maxGapAtr), lookahead = barmerge.lookahead_off)
+autoPrev = request.security(syminfo.tickerid, "D", f_calc(maxGapAtr)[1], lookahead = barmerge.lookahead_on)
+levelsText = pasteText != "" ? pasteText : includeToday ? autoNow : autoPrev
 
 var array<line> lines = array.new<line>()
 var array<label> labels = array.new<label>()
@@ -45,6 +218,6 @@ if barstate.islast
                 price = str.tonumber(str.substring(s, 1))
                 if not na(price)
                     col = kind == "S" ? supportColor : kind == "R" ? resistColor : extremeColor
-                    lines.push(line.new(bar_index, price, bar_index + 1, price, extend = extend.both, color = col, style = line.style_dashed, width = 1))
+                    lines.push(line.new(bar_index, price, bar_index + 1, price, extend = extend.both, color = col, style = lineStyle, width = lineWidth))
                     if showLabels
-                        labels.push(label.new(bar_index + 2, price, str.tostring(price, "#.##"), style = label.style_none, textcolor = col, size = size.small))
+                        labels.push(label.new(bar_index + labelOffset, price, str.tostring(price, "#.##"), style = label.style_label_left, color = col, textcolor = color.white, size = size.normal))
