@@ -57,17 +57,19 @@ export interface PositionCardsProps {
   onRefresh?: () => void;
   /** The same quick-chart link the table has, per ticker. */
   renderChart?: (position: Position) => ReactNode;
+  /** POS-CARD-NOTE-0001: the same note editor the table uses, so one note shows in both views. */
+  renderNote?: (position: Position) => ReactNode;
   th: { textFaint: string; textMuted: string; border: string };
   emptyText: string;
 }
 
-export function PositionCards({ positions, order, pctOfTarget, netLiquidity, getManagementActions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart, th, emptyText }: PositionCardsProps) {
+export function PositionCards({ positions, order, pctOfTarget, netLiquidity, getManagementActions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart, renderNote, th, emptyText }: PositionCardsProps) {
   const cards = useMemo(() => order(positions.map(p => buildPositionCard(p, { pctOfTarget: pctOfTarget(p), netLiquidity }))), [positions, order, pctOfTarget, netLiquidity]);
   if (cards.length === 0) return <p role="status" className={`rounded-xl border ${th.border} p-6 text-center text-sm ${th.textFaint}`}>{emptyText}</p>;
-  return <div data-testid="position-cards" className="grid gap-3 lg:grid-cols-2">{cards.map(card => <CardItem key={card.key} card={card} th={th} actions={getManagementActions?.(card.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} onIntentChange={onIntentChange} onRefresh={onRefresh} renderChart={renderChart} />)}</div>;
+  return <div data-testid="position-cards" className="grid gap-3 lg:grid-cols-2">{cards.map(card => <CardItem key={card.key} card={card} th={th} actions={getManagementActions?.(card.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} onIntentChange={onIntentChange} onRefresh={onRefresh} renderChart={renderChart} renderNote={renderNote} />)}</div>;
 }
 
-function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart }: { card: PositionCard; th: PositionCardsProps['th']; actions: ActionType[]; onExecute?: PositionCardsProps['onExecute']; renderStopControl?: PositionCardsProps['renderStopControl']; onAnalyze?: PositionCardsProps['onAnalyze']; onIntentChange?: PositionCardsProps['onIntentChange']; onRefresh?: () => void; renderChart?: (position: Position) => ReactNode }) {
+function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart, renderNote }: { card: PositionCard; th: PositionCardsProps['th']; actions: ActionType[]; onExecute?: PositionCardsProps['onExecute']; renderStopControl?: PositionCardsProps['renderStopControl']; onAnalyze?: PositionCardsProps['onAnalyze']; onIntentChange?: PositionCardsProps['onIntentChange']; onRefresh?: () => void; renderChart?: (position: Position) => ReactNode; renderNote?: (position: Position) => ReactNode }) {
   const p = card.position;
   const [detailOpen, setDetailOpen] = useState(false);
   const horizon = standaloneLongOptionLabel(p);
@@ -94,7 +96,7 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
           )}
         </div>
         {/* CARD-MONEYNESS-CENTER-0001: ITM / OTM sits at the centre of the card, level with the ticker, where it is not lost among the signals. */}
-        <div className="sm:pt-0.5">{moneyness && <span data-testid="card-moneyness" className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-bold ${CHIP_CLASS[moneyness.tone]}`}>{moneyness.label}</span>}</div>
+        <div className="flex flex-col items-start gap-2 sm:items-center sm:pt-0.5">{moneyness && <span data-testid="card-moneyness" className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-bold ${CHIP_CLASS[moneyness.tone]}`}>{moneyness.label}</span>}{renderNote && <div data-testid="card-note" className="w-44 max-w-full">{renderNote(p)}</div>}</div>
         <div className="sm:max-w-[30rem] sm:justify-self-end sm:text-right">
           <b data-testid="card-pnl" className={`block text-xl ${pnlTone}`}>{usd(card.pnl)}</b>
           <span className={`block text-[11px] ${card.unverifiedQuote ? 'text-amber-300' : th.textFaint}`}>{card.pnlNote}</span>

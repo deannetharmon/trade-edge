@@ -651,6 +651,29 @@ describe('PositionsWorkspace', () => {
     await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
     expect(await screen.findByDisplayValue(note)).toBeInTheDocument();
   });
+
+  it('POS-CARD-NOTE-0001: the card shows the same saved note in its own box under the ITM/OTM pill, and saves edits to the same store', async () => {
+    const itm = { ...position, stockPrice: 45, legs: [{ symbol: 'x', optionType: 'P', strikePrice: 50, direction: 'Short', quantity: 1, avgOpenPrice: 1, currentPrice: 1 }] } as unknown as Position;
+    const key = `${encodeURIComponent(itm.accountNumber || model.accountNumber || '')}::${encodeURIComponent(itm.key)}`;
+    const posts: Record<string, unknown>[] = [];
+    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+      if (init?.method === 'POST') { posts.push(JSON.parse(String(init.body))); return { ok: true, json: async () => ({ ok: true }) } as Response; }
+      return { ok: true, json: async () => ({ notes: { [key]: 'roll if it breaks 44' } }) } as Response;
+    });
+    const user = userEvent.setup();
+    window.localStorage.setItem('tradeedge:positions-view:v1', JSON.stringify({ setting: 'cards', last: 'cards' }));
+    render(<PositionsWorkspace model={{ ...model, analysisRows: [{ id: itm.key, position: itm, symbol: itm.symbol, strategy: itm.strategy, needsAttention: false }] } as PositionsWorkspaceModel} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    const box = within(screen.getByTestId('position-cards')).getByTestId('card-note');
+    const field = await within(box).findByDisplayValue('roll if it breaks 44');
+    // same grid cell as the pill, so it cannot overlap the right-hand signals
+    expect(box.parentElement).toContainElement(screen.getByTestId('card-moneyness'));
+    expect(box.closest('[aria-label="Signals"]')).toBeNull();
+    await user.clear(field);
+    await user.type(field, 'new note{enter}');
+    await waitFor(() => expect(posts.at(-1)).toMatchObject({ positionKey: itm.key, note: 'new note' }));
+    window.localStorage.removeItem('tradeedge:positions-view:v1');
+  });
 });
 
 // ---------------------------------------------------------------------------
