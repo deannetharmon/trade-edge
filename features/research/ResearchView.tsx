@@ -24,6 +24,9 @@ interface Props {
   factsDeps?: ResearchFactsDeps;
 }
 
+/** Guac Tracker's option analyzer; same link for every symbol. */
+const GUAC_ANALYZER_URL = 'https://guactracker.com/option-analyzer';
+
 const usd = (v: number | null | undefined) => (v == null ? '—' : `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const signed = (v: number) => `${v >= 0 ? '+' : '-'}${usd(Math.abs(v))}`;
 const pct = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
@@ -151,6 +154,7 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
                 {listStatus === 'added' ? 'Added to screener list' : listStatus === 'exists' ? 'Already in screener list' : listStatus === 'saving' ? 'Adding…' : 'Add to screener list'}
               </button>
               <a href={buildTradingViewChartUrl(symbol)} target="_blank" rel="noopener noreferrer" className={`flex min-h-9 items-center rounded-lg border px-3 text-xs ${th.border} ${th.text}`}>TradingView ↗</a>
+              <a href={GUAC_ANALYZER_URL} target="_blank" rel="noopener noreferrer" className={`flex min-h-9 items-center rounded-lg border px-3 text-xs ${th.border} ${th.text}`}>Guac Analyzer ↗</a>
             </div>
           </header>
           {listStatus === 'error' && <p role="alert" className="mt-2 text-xs text-amber-300">Could not update your screener list. Try again.</p>}
