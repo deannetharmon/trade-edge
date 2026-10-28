@@ -1,5 +1,5 @@
 //@version=5
-// TradeEdge Levels (TV-LEVELS-0004)
+// TradeEdge Levels (TV-LEVELS-0006)
 // Draws the same support, resistance, high/low and open-gap levels the TradeEdge Research page shows, on ANY ticker and ANY chart
 // timeframe, with nothing to paste. The levels are always worked out from DAILY bars (the last year), like the Research page.
 //   dashed green = support, dashed red = resistance, dashed gray = 20-day / 52-week high and low,
@@ -8,7 +8,7 @@
 //   swing pivots: a high above the 3 bars before and at least the 3 after (mirror for lows), merged when within half an ATR(14);
 //   nearest three supports below and three resistances above the last close;
 //   open gap: low above the prior high (or high below the prior low), shrunk by later trading back into it, dropped when filled,
-//   ignored when under half an ATR or when its near edge is more than "Max gap distance" ATR from the last close;
+//   ignored when under a quarter ATR (default) or when its near edge is more than "Max gap distance" ATR from the last close;
 //   nearest three above and three below.
 // "Include today's bar": on = matches the Research page after the close; turn off during market hours to match it exactly.
 // Optional: paste the Research page's "Copy levels" text into "Paste levels" to draw exactly that instead.
@@ -16,19 +16,23 @@ indicator("TradeEdge Levels", overlay = true, max_lines_count = 500, max_boxes_c
 
 pasteText = input.string("", "Paste levels (optional)", tooltip = "Leave empty for automatic levels. Or paste what the Research page's Copy levels button copied.")
 includeToday = input.bool(true, "Include today's bar")
+showLevels = input.bool(true, "Show support and resistance")
+showExtremes = input.bool(true, "Show 20-day and 52-week high / low")
+showGaps = input.bool(true, "Show open gaps")
+minGapAtr = input.float(0.25, "Min gap size (ATR)", minval = 0.1, maxval = 5.0, step = 0.05, tooltip = "Ignore gaps smaller than this many ATR. 0.25 matches the TradeEdge Research page; lower it to see smaller gaps.")
 showLabels = input.bool(true, "Show price labels")
 labelOffset = input.int(6, "Label distance past the last candle (bars)", minval = 0, maxval = 60)
 supportColor = input.color(color.new(color.green, 0), "Support")
 resistColor = input.color(color.new(color.red, 0), "Resistance")
 extremeColor = input.color(color.new(color.gray, 0), "High / low")
-maxGapAtr = input.float(3.0, "Max gap distance (ATR)", minval = 0.5, maxval = 20.0, step = 0.5, tooltip = "Hide open gaps whose near edge is further than this many ATR from the last close.")
+maxGapAtr = input.float(6.0, "Max gap distance (ATR)", minval = 0.5, maxval = 20.0, step = 0.5, tooltip = "Hide open gaps whose near edge is further than this many ATR from the last close.")
 lineWidth = input.int(2, "Line width", minval = 1, maxval = 4)
 lineStyleText = input.string("Solid", "Line style", options = ["Solid", "Dashed", "Dotted"])
 lineStyle = lineStyleText == "Solid" ? line.style_solid : lineStyleText == "Dotted" ? line.style_dotted : line.style_dashed
 
 // Runs on DAILY bars (called through request.security). Returns the levels as one text line:
 // S193.38;R198.53;X226.88;GB96:98:1700000000 (G + A/B/I for above/below/inside, bottom:top:unix seconds).
-f_calc(maxAtr) =>
+f_calc(maxAtr, minAtr) =>
     atrValue = ta.atr(14)
     var float[] H = array.new_float()
     var float[] L = array.new_float()
@@ -149,7 +153,7 @@ f_calc(maxAtr) =>
                         bottom := na
                     else
                         bottom := math.max(bottom, highAfter)
-                if not na(bottom) and top - bottom >= tol
+                if not na(bottom) and top - bottom >= minAtr * atrValue
                     float side = bottom > last ? 0.0 : top < last ? 2.0 : 1.0
                     float dist = side == 0.0 ? bottom - last : side == 2.0 ? last - top : 0.0
                     if dist <= maxAtr * atrValue
@@ -183,8 +187,8 @@ f_calc(maxAtr) =>
                     out += tag + str.tostring(array.get(gb, idx), "#.##") + ":" + str.tostring(array.get(gt, idx), "#.##") + ":" + str.tostring(math.round(array.get(gts, idx))) + ";"
     out
 
-autoNow = request.security(syminfo.tickerid, "D", f_calc(maxGapAtr), lookahead = barmerge.lookahead_off)
-autoPrev = request.security(syminfo.tickerid, "D", f_calc(maxGapAtr)[1], lookahead = barmerge.lookahead_on)
+autoNow = request.security(syminfo.tickerid, "D", f_calc(maxGapAtr, minGapAtr), lookahead = barmerge.lookahead_off)
+autoPrev = request.security(syminfo.tickerid, "D", f_calc(maxGapAtr, minGapAtr)[1], lookahead = barmerge.lookahead_on)
 levelsText = pasteText != "" ? pasteText : includeToday ? autoNow : autoPrev
 
 var array<line> lines = array.new<line>()
@@ -205,16 +209,17 @@ if barstate.islast
         if str.length(s) >= 2
             kind = str.substring(s, 0, 1)
             if kind == "G"
-                side = str.substring(s, 1, 2)
-                parts = str.split(str.substring(s, 2), ":")
-                if parts.size() == 3
-                    bottom = str.tonumber(parts.get(0))
-                    top = str.tonumber(parts.get(1))
-                    t = str.tonumber(parts.get(2))
-                    if not na(bottom) and not na(top) and not na(t)
-                        fill = side == "A" ? color.new(color.red, 85) : side == "B" ? color.new(color.green, 85) : color.new(color.orange, 85)
-                        boxes.push(box.new(left = int(t * 1000), top = top, right = time, bottom = bottom, xloc = xloc.bar_time, extend = extend.right, border_color = color.new(fill, 40), bgcolor = fill))
-            else
+                if showGaps
+                    side = str.substring(s, 1, 2)
+                    parts = str.split(str.substring(s, 2), ":")
+                    if parts.size() == 3
+                        bottom = str.tonumber(parts.get(0))
+                        top = str.tonumber(parts.get(1))
+                        t = str.tonumber(parts.get(2))
+                        if not na(bottom) and not na(top) and not na(t)
+                            fill = side == "A" ? color.new(color.red, 85) : side == "B" ? color.new(color.green, 85) : color.new(color.orange, 85)
+                            boxes.push(box.new(left = int(t * 1000), top = top, right = time, bottom = bottom, xloc = xloc.bar_time, extend = extend.right, border_color = color.new(fill, 20), border_width = 2, bgcolor = fill))
+            else if (kind == "X" and showExtremes) or ((kind == "S" or kind == "R") and showLevels)
                 price = str.tonumber(str.substring(s, 1))
                 if not na(price)
                     col = kind == "S" ? supportColor : kind == "R" ? resistColor : extremeColor

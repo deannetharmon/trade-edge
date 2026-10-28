@@ -75,9 +75,9 @@ export function keyLevels(bars: unknown): KeyLevels | null {
   };
 }
 
-export const GAP_MIN_ATR = 0.5;
+export const GAP_MIN_ATR = 0.25;
 export const GAPS_PER_SIDE = 3;
-export const GAP_MAX_ATR = 3;
+export const GAP_MAX_ATR = 6;
 /** The part of a price gap that has not traded back. `side` is where it sits against the last close. `t` is the gap bar's time. */
 export interface OpenGap { bottom: number; top: number; t: number; side: 'above' | 'below' | 'at' }
 
