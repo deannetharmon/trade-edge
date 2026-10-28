@@ -117,6 +117,13 @@ export function ResearchFacts({ symbol, th, deps }: Props) {
                 ))}
               </div>
             ) : <p className={`mt-2 text-xs ${th.textFaint}`}>Key levels need at least 60 trading days of history.</p>}
+            {facts.extremes ? (
+              <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="facts-extremes">
+                {([['20-day high', facts.extremes.high20], ['20-day low', facts.extremes.low20], ['52-week high', facts.extremes.high52w], ['52-week low', facts.extremes.low52w]] as const).map(([label, v]) => (
+                  <Cell key={label} th={th} label={label} value={v != null ? usd(v) : '—'} hint={v != null ? `${(Math.abs(facts.price - v) / facts.price * 100).toFixed(1)}% ${v < facts.price ? 'below' : 'above'} price. Needs no confirmation.` : 'Not enough history'} />
+                ))}
+              </dl>
+            ) : null}
 
             <div className={`mt-4 rounded-lg border p-3 ${th.border}`}>
               <label className={`text-xs ${th.textMuted}`}>Check a put strike

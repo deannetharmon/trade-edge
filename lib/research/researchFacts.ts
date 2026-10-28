@@ -2,7 +2,7 @@
 
 // RESEARCH-0002: assemble the price-structure facts for one ticker from its daily bars and the SPY bars. Pure (the clock is a parameter).
 import { completedDailyCloses } from '@/lib/indicators/completedBars';
-import { atr14, horizonReturns, keyLevels, relativeStrength, volumeRatio, type FactBar, type HorizonReturns, type KeyLevels } from './techFacts';
+import { atr14, horizonReturns, keyLevels, rangeExtremes, relativeStrength, volumeRatio, type FactBar, type HorizonReturns, type KeyLevels, type RangeExtremes } from './techFacts';
 
 export interface ResearchFacts {
   symbol: string;
@@ -12,6 +12,8 @@ export interface ResearchFacts {
   atr14: number | null;
   atrPct: number | null;
   levels: KeyLevels | null;
+  /** Highest high / lowest low over the last 20 and 250 completed sessions, unconfirmed by design. */
+  extremes: RangeExtremes;
   volumeRatio: number | null;
   relativeStrength: { stockPct: number; benchmarkPct: number; diffPts: number } | null;
   /** Price change over 1, 3 and 6 months (21, 63, 126 completed sessions). */
@@ -43,6 +45,7 @@ export function buildResearchFacts(symbol: string, stockBars: readonly FactBar[]
     atr14: atr,
     atrPct: atr != null ? (atr / last.c) * 100 : null,
     levels: keyLevels(stock),
+    extremes: rangeExtremes(stock),
     volumeRatio: volumeRatio(stock),
     relativeStrength: spy ? relativeStrength(stock, spy) : null,
     returns: horizonReturns(stock),

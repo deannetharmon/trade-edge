@@ -75,6 +75,28 @@ export function keyLevels(bars: unknown): KeyLevels | null {
   };
 }
 
+export const RECENT_RANGE_BARS = 20;
+export const YEAR_RANGE_BARS = 250;
+export interface RangeExtremes { high20: number | null; low20: number | null; high52w: number | null; low52w: number | null }
+
+/**
+ * Highest high and lowest low of the last 20 and the last 250 completed sessions. Unlike key levels these need no confirmation, so the
+ * ceiling or floor price is pressing right now is never missing. A window without enough bars gives null.
+ */
+export function rangeExtremes(bars: unknown): RangeExtremes {
+  const none: RangeExtremes = { high20: null, low20: null, high52w: null, low52w: null };
+  if (!validBars(bars)) return none;
+  const span = (n: number) => (bars.length >= n ? bars.slice(-n) : null);
+  const w20 = span(RECENT_RANGE_BARS);
+  const w52 = span(YEAR_RANGE_BARS);
+  return {
+    high20: w20 ? Math.max(...w20.map(b => b.h)) : null,
+    low20: w20 ? Math.min(...w20.map(b => b.l)) : null,
+    high52w: w52 ? Math.max(...w52.map(b => b.h)) : null,
+    low52w: w52 ? Math.min(...w52.map(b => b.l)) : null,
+  };
+}
+
 /** Average daily volume of the last 20 completed bars divided by the last 60. Null when any of those 60 bars has no volume. */
 export function volumeRatio(bars: unknown): number | null {
   if (!validBars(bars) || bars.length < VOLUME_LONG) return null;

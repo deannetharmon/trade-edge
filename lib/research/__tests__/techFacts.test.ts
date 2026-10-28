@@ -1,7 +1,7 @@
 // lib/research/__tests__/techFacts.test.ts
 
 import { describe, expect, it } from 'vitest';
-import { atr14, horizonReturns, keyLevels, relativeStrength, strikeContext, volumeRatio, type FactBar } from '../techFacts';
+import { atr14, horizonReturns, keyLevels, rangeExtremes, relativeStrength, strikeContext, volumeRatio, type FactBar } from '../techFacts';
 import { buildResearchFacts, completedBars } from '../researchFacts';
 
 const DAY = 86_400;
@@ -40,6 +40,12 @@ describe('RESEARCH-0002 techFacts', () => {
   it('key levels: pivots in the last 3 bars are not confirmed', () => {
     const lv = keyLevels(flat(80, { 78: { l: 80 } }))!;
     expect(lv.supports).toHaveLength(0);
+  });
+  it('range extremes: 20-day and 250-day high/low need no confirmation; null without enough bars', () => {
+    const bars = flat(300, { 299: { h: 120 }, 100: { l: 70 }, 290: { l: 95 } });
+    expect(rangeExtremes(bars)).toEqual({ high20: 120, low20: 95, high52w: 120, low52w: 70 });
+    expect(rangeExtremes(flat(30, { 5: { h: 150 } }))).toEqual({ high20: 101, low20: 99, high52w: null, low52w: null });
+    expect(rangeExtremes([])).toEqual({ high20: null, low20: null, high52w: null, low52w: null });
   });
   it('volume ratio: 20-day average over 60-day average; null when volume is missing', () => {
     const bars = flat(60).map((b, i) => ({ ...b, v: i < 40 ? 100 : 200 }));

@@ -11,6 +11,7 @@ const facts = {
   symbol: 'AAPL', asOf: 1, price: 100, atr14: 2.5, atrPct: 2.5, volumeRatio: 1.25,
   relativeStrength: { stockPct: 20, benchmarkPct: 8, diffPts: 12 },
   returns: { m1: 3.7, m3: -8.1, m6: null },
+  extremes: { high20: 112, low20: 94.5, high52w: 130, low52w: null },
   levels: { supports: [{ price: 93, touches: 2, lastTouchT: 1 }], resistances: [{ price: 110, touches: 1, lastTouchT: 1 }] },
 };
 const broker = { ivRank: 42, ivx30: 31.5, hv30: 25, ivHvDiff: 6.5, earningsExpectedDate: '2099-01-01', liquidityRating: 4 };
@@ -42,6 +43,10 @@ describe('RESEARCH-0002 ResearchFacts', () => {
     expect(s).toHaveTextContent('1.25×');
     expect(s).toHaveTextContent('+12.0 pts');
     expect(s).toHaveTextContent('+3.7% · -8.1% · —');
+    const ex = screen.getByTestId('facts-extremes');
+    expect(ex).toHaveTextContent('20-day high');
+    expect(ex).toHaveTextContent('$112.00');
+    expect(ex).toHaveTextContent('$130.00');
     const lv = screen.getByTestId('facts-levels');
     expect(lv).toHaveTextContent('$93.00 · 2 touches · 7.0% below price');
     expect(lv).toHaveTextContent('$110.00 · 1 touch · 10.0% above price');
