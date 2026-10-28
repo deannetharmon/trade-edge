@@ -78,6 +78,7 @@ import { TradeLookupModal } from '@/features/screener/components/TradeLookupModa
 import { defaultLookupDeps } from '@/lib/tradeLookup/defaultDeps';
 import { CcTradeModal, type CcOrderInput } from '@/features/screener/components/CcTradeModal';
 import { defaultCcOrderDeps } from '@/lib/scans/ccOrderDeps';
+import { summarizeFailReasons } from '@/lib/screener/failReasonSummary';
 import { ccOrderInputFromScanResult } from '@/lib/scans/ccScanOrderInput';
 import { calculateCspScore } from '@/lib/scans/cspScore';
 import { scoreBand, capScoreBandByReturn, returnCapNote, type ScoreBandFloors } from '@/lib/scans/scoreBands';
@@ -6665,7 +6666,7 @@ const strategyScores = useMemo(() => {
               isn't actually tradeable in the selected account. */}
           {(!result.qualified || (result.bestCandidate?.cspAccountEligibility != null && result.bestCandidate.cspAccountEligibility !== 'ELIGIBLE')) && result.failReasons.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap">
-              <span className={`text-[10px] ${result.qualified ? 'text-amber-500' : 'text-red-500'} font-medium`}>{result.failReasons.slice(0, 2).join(' · ')}</span>
+              <span title={summarizeFailReasons(result.failReasons).title} className={`text-[10px] ${result.qualified ? 'text-amber-500' : 'text-red-500'} font-medium`}>{summarizeFailReasons(result.failReasons).text}</span>
               {hasEarningsBlock && result.earningsDate && <span onClick={e => e.stopPropagation()}><CalendarButton symbol={result.symbol} strategy={result.strategy} earningsDate={result.earningsDate} ivr={result.ivr} th={th} /></span>}
             </div>
           )}
