@@ -1,7 +1,7 @@
 // lib/research/__tests__/yahooChart.test.ts
 
 import { describe, expect, it } from 'vitest';
-import { RESEARCH_RANGES, RESEARCH_RANGE_ORDER, chartGapBoxes, chartGeometry, chartLevelLines, dayChange, isResearchRange, normalizeResearchSymbol, parseResearchChart, rangeChange } from '../yahooChart';
+import { RESEARCH_RANGES, RESEARCH_RANGE_ORDER, chartGapBoxes, chartGeometry, chartLevelLines, dayChange, isResearchRange, normalizeResearchSymbol, parseResearchChart, rangeChange, tradingViewLevelString } from '../yahooChart';
 
 const payload = {
   chart: { result: [{
@@ -83,5 +83,15 @@ describe('RESEARCH-0008 chart gap boxes', () => {
     expect(boxes[0].y1).toBeLessThan(boxes[0].y2);
     expect(boxes[1].x).toBe(0);
     expect(boxes[1].y1).toBeCloseTo(4, 10);
+  });
+});
+
+describe('TV-LEVELS-0001 TradingView level string', () => {
+  it('encodes lines as S/R/X plus price and gaps as G side bottom:top:time, every level included', () => {
+    expect(tradingViewLevelString(
+      [{ price: 193.384, kind: 'support', label: 'Support' }, { price: 198.5, kind: 'resistance', label: 'Resistance' }, { price: 226.88, kind: 'extreme', label: '52-week high' }],
+      [{ bottom: 96, top: 98.256, t: 1700000000, side: 'below' }, { bottom: 300, top: 310, t: 1700086400, side: 'above' }],
+    )).toBe('S193.38;R198.50;X226.88;GB96.00:98.26:1700000000;GA300.00:310.00:1700086400');
+    expect(tradingViewLevelString([], [])).toBe('');
   });
 });

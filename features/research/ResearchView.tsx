@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  RESEARCH_RANGE_ORDER, chartGapBoxes, chartGeometry, chartLevelLines, dayChange, normalizeResearchSymbol, rangeChange,
+  RESEARCH_RANGE_ORDER, chartGapBoxes, chartGeometry, chartLevelLines, dayChange, tradingViewLevelString, normalizeResearchSymbol, rangeChange,
   type ChartLevel, type ResearchChart, type ResearchRange,
 } from '@/lib/research/yahooChart';
 import type { THEMES, Theme } from '@/lib/theme';
@@ -54,6 +54,7 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
   const [levels, setLevels] = useState<ChartLevel[]>([]);
   const [gaps, setGaps] = useState<Facts['gaps']>([]);
   const [showLevels, setShowLevels] = useState(true);
+  const [copied, setCopied] = useState<'idle' | 'ok' | 'failed'>('idle');
   const requestId = useRef(0);
 
   useEffect(() => {
@@ -72,7 +73,15 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
       .finally(() => { if (id === requestId.current) setLoading(false); });
   }, [symbol, range, doFetch]);
 
-  useEffect(() => { setListStatus('idle'); }, [symbol]);
+  useEffect(() => { setListStatus('idle'); setCopied('idle'); }, [symbol]);
+
+  const copyLevels = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(tradingViewLevelString(levels, gaps));
+      setCopied('ok');
+    } catch { setCopied('failed'); }
+    setTimeout(() => setCopied('idle'), 2500);
+  }, [levels, gaps]);
 
   const submit = useCallback((event: React.FormEvent) => {
     event.preventDefault();
@@ -189,6 +198,8 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
               ))}
             </div>
             <button type="button" aria-pressed={showLevels} onClick={() => setShowLevels(s => !s)} className={`min-h-8 rounded-md border px-3 text-xs ${th.border} ${showLevels ? 'text-white' : th.textFaint}`}>Levels</button>
+            <button type="button" onClick={copyLevels} disabled={levels.length === 0 && gaps.length === 0} title="Copy these levels, then paste them into the TradeEdge Levels indicator on TradingView"
+              className={`min-h-8 rounded-md border px-3 text-xs disabled:opacity-40 ${th.border} ${th.text}`}>{copied === 'ok' ? 'Copied' : copied === 'failed' ? 'Copy failed' : 'Copy levels'}</button>
             {move && <span className={`text-xs font-semibold ${lineTone}`} data-testid="research-range-change">{signed(move.amount)} ({pct(move.pct)}) {range}</span>}
           </div>
 

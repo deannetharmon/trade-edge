@@ -1,0 +1,50 @@
+//@version=5
+// TradeEdge Levels (TV-LEVELS-0001)
+// Draws the support, resistance, high/low and open-gap levels that the TradeEdge Research page shows.
+// Use: on the Research page click "Copy levels", then paste into this indicator's "TradeEdge levels" setting.
+// Format (made by TradeEdge, ";" between items):
+//   S193.38   support line        R198.53   resistance line        X226.88   high/low reference line
+//   GB96.00:98.00:1700000000   open gap BELOW price: bottom:top:gap day (unix seconds)
+//   GA..  gap above price      GI..  price inside the gap
+indicator("TradeEdge Levels", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
+
+levelsText = input.string("", "TradeEdge levels", tooltip = "Paste what the Research page's Copy levels button copied.")
+showLabels = input.bool(true, "Show price labels")
+supportColor = input.color(color.new(color.green, 20), "Support")
+resistColor = input.color(color.new(color.red, 20), "Resistance")
+extremeColor = input.color(color.new(color.gray, 30), "High / low")
+
+var array<line> lines = array.new<line>()
+var array<label> labels = array.new<label>()
+var array<box> boxes = array.new<box>()
+
+if barstate.islast
+    while lines.size() > 0
+        line.delete(lines.pop())
+    while labels.size() > 0
+        label.delete(labels.pop())
+    while boxes.size() > 0
+        box.delete(boxes.pop())
+
+    items = str.split(levelsText, ";")
+    for item in items
+        s = str.trim(item)
+        if str.length(s) >= 2
+            kind = str.substring(s, 0, 1)
+            if kind == "G"
+                side = str.substring(s, 1, 2)
+                parts = str.split(str.substring(s, 2), ":")
+                if parts.size() == 3
+                    bottom = str.tonumber(parts.get(0))
+                    top = str.tonumber(parts.get(1))
+                    t = str.tonumber(parts.get(2))
+                    if not na(bottom) and not na(top) and not na(t)
+                        fill = side == "A" ? color.new(color.red, 85) : side == "B" ? color.new(color.green, 85) : color.new(color.orange, 85)
+                        boxes.push(box.new(left = int(t * 1000), top = top, right = time, bottom = bottom, xloc = xloc.bar_time, extend = extend.right, border_color = color.new(fill, 40), bgcolor = fill))
+            else
+                price = str.tonumber(str.substring(s, 1))
+                if not na(price)
+                    col = kind == "S" ? supportColor : kind == "R" ? resistColor : extremeColor
+                    lines.push(line.new(bar_index, price, bar_index + 1, price, extend = extend.both, color = col, style = line.style_dashed, width = 1))
+                    if showLabels
+                        labels.push(label.new(bar_index + 2, price, str.tostring(price, "#.##"), style = label.style_none, textcolor = col, size = size.small))

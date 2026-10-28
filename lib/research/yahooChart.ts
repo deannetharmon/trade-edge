@@ -160,3 +160,19 @@ export function parseResearchBars(data: unknown): ResearchBar[] | null {
   }
   return bars;
 }
+
+/**
+ * The levels as one text line for the TradeEdge Levels indicator on TradingView (docs/tradingview/tradeedge-levels.pine), pasted into
+ * its settings: S/R/X plus price for lines, G{A|B|I}bottom:top:unixSeconds for open gaps. Every level, not only those visible on the chart.
+ */
+export function tradingViewLevelString(
+  levels: readonly ChartLevel[],
+  gaps: readonly { bottom: number; top: number; t: number; side: 'above' | 'below' | 'at' }[],
+): string {
+  const code = { support: 'S', resistance: 'R', extreme: 'X' } as const;
+  const side = { above: 'A', below: 'B', at: 'I' } as const;
+  return [
+    ...levels.map(l => `${code[l.kind]}${l.price.toFixed(2)}`),
+    ...gaps.map(g => `G${side[g.side]}${g.bottom.toFixed(2)}:${g.top.toFixed(2)}:${g.t}`),
+  ].join(';');
+}
