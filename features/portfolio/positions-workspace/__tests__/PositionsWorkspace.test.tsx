@@ -836,6 +836,17 @@ describe('P/L summary strip', () => {
     expect(prices.length).toBeGreaterThan(0);
     expect(prices[0]).toHaveTextContent(/^\$\d[\d,]*\.\d{2}$/);
   });
+  it('CARD-MONEYNESS-CENTER-0001: ITM/OTM shows once, at the centre of the card, and not among the right-hand signals', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem('tradeedge:positions-view:v1', JSON.stringify({ setting: 'cards', last: 'cards' }));
+    const itm = { ...position, stockPrice: 45, legs: [{ symbol: 'x', optionType: 'P', strikePrice: 50, direction: 'Short', quantity: 1, avgOpenPrice: 1, currentPrice: 1 }] } as unknown as Position;
+    render(<PositionsWorkspace model={{ ...model, analysisRows: [{ id: itm.key, position: itm, symbol: itm.symbol, strategy: itm.strategy, needsAttention: false }] } as PositionsWorkspaceModel} th={THEMES.dark} />);
+    await user.click(screen.getByRole('tab', { name: 'Position Analysis' }));
+    const cards = within(screen.getByTestId('position-cards'));
+    const pills = cards.getAllByTestId('card-moneyness');
+    expect(pills[0]).toHaveTextContent(/^(ITM|OTM|ATM)/);
+    cards.getAllByLabelText('Signals').forEach(group => expect(group).not.toHaveTextContent(/^(ITM|OTM|ATM)\b/));
+  });
   it('STOCK-CHIP: stock holdings count under All and their own Stock chip, and the chip shows only the stocks', async () => {
     const user = userEvent.setup();
     window.localStorage.setItem('tradeedge:positions-view:v1', JSON.stringify({ setting: 'cards', last: 'cards' }));

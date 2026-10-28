@@ -72,10 +72,12 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
   const [detailOpen, setDetailOpen] = useState(false);
   const horizon = standaloneLongOptionLabel(p);
   const suggested = p.recommendation ? canonicalRecommendationToAction(p.recommendation.kind) : null;
+  const moneyness = card.chips.find(c => c.id === 'moneyness');
+  const sideChips = card.chips.filter(c => c.id !== 'moneyness');
   const pnlTone = card.pnl == null || Math.abs(card.pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : card.pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative;
   return (
     <article aria-label={`${p.symbol} ${horizon ?? p.strategy} position`} className={`rounded-xl border border-l-4 ${th.border} ${EDGE_CLASS[card.bucket]} bg-white/[0.02] p-4`}>
-      <div className="grid gap-x-4 gap-y-2 sm:grid-cols-[1fr_auto]">
+      <div className="grid gap-x-4 gap-y-2 sm:grid-cols-[1fr_auto_1fr]">
         <div className="min-w-0">
           <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-white">{p.symbol}<span className="rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">{horizon ?? p.strategy}</span>{p.stockPrice != null && Number.isFinite(p.stockPrice) && p.stockPrice > 0 && <span data-testid="card-stock-price" className={`text-sm font-semibold ${th.textMuted}`} title="Underlying price (the quote behind the OTM and buffer figures)">{usd2(p.stockPrice)}</span>}{renderChart?.(p)}</h3>
           <p className={`mt-0.5 text-xs ${th.textMuted}`}>{detailLine(p)}</p>
@@ -91,12 +93,14 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
             </p>
           )}
         </div>
-        <div className="sm:max-w-[30rem] sm:text-right">
+        {/* CARD-MONEYNESS-CENTER-0001: ITM / OTM sits at the centre of the card, level with the ticker, where it is not lost among the signals. */}
+        <div className="sm:pt-0.5">{moneyness && <span data-testid="card-moneyness" className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-bold ${CHIP_CLASS[moneyness.tone]}`}>{moneyness.label}</span>}</div>
+        <div className="sm:max-w-[30rem] sm:justify-self-end sm:text-right">
           <b data-testid="card-pnl" className={`block text-xl ${pnlTone}`}>{usd(card.pnl)}</b>
           <span className={`block text-[11px] ${card.unverifiedQuote ? 'text-amber-300' : th.textFaint}`}>{card.pnlNote}</span>
-          {card.chips.length > 0 && (() => {
-            const last = Math.max(...card.chips.map(c => c.row));
-            return <div aria-label="Signals" className="mt-2 space-y-1.5 sm:flex sm:flex-col sm:items-end">{([1, 2] as const).filter(r => r <= last).map(r => <ul key={r} className="flex min-h-[22px] flex-wrap gap-1.5 sm:justify-end">{card.chips.filter(c => c.row === r).map(chip => <li key={chip.id} className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${CHIP_CLASS[chip.tone]}`}>{chip.label}</li>)}</ul>)}</div>;
+          {sideChips.length > 0 && (() => {
+            const last = Math.max(...sideChips.map(c => c.row));
+            return <div aria-label="Signals" className="mt-2 space-y-1.5 sm:flex sm:flex-col sm:items-end">{([1, 2] as const).filter(r => r <= last && sideChips.some(c => c.row === r)).map(r => <ul key={r} className="flex min-h-[22px] flex-wrap gap-1.5 sm:justify-end">{sideChips.filter(c => c.row === r).map(chip => <li key={chip.id} className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${CHIP_CLASS[chip.tone]}`}>{chip.label}</li>)}</ul>)}</div>;
           })()}
         </div>
       </div>

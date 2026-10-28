@@ -64,6 +64,8 @@ export interface SymbolGroupViewModel {
   strategies: string[];
   capacity: CapacityViewModel;
   needsAttention: boolean;
+  /** Planned-assignment (Wheel/Acquire) put in the money, with nothing else needing action. */
+  assignmentNear?: boolean;
   contextualAction: 'covered-call' | 'short-call' | 'replacement' | null;
   composition: SymbolAssetComposition;
   compositionLabel: string;

@@ -1,3 +1,4 @@
+import { attentionOf } from './attention';
 import { buildSnapshotCapacityReport } from '@/lib/portfolio-snapshot/capacity';
 import type { Position } from '@/lib/portfolio-data/types';
 import { DEFAULT_PMCC_DTE_RANGES } from '@/lib/scans/pmccDteRanges';
@@ -120,7 +121,9 @@ export function buildPositionsWorkspaceModel(input: PositionsWorkspaceInput): Po
     const longHolding = symbolEquities.find(item => item.direction === 'Long');
     const capacity = capacityReport?.status === 'ok' ? capacityReport.bySymbol[symbol] : undefined;
     const availableContracts = capacity?.availableCoveredContracts ?? 0;
-    const needsAttention = options.some(position => Boolean(position.needsClose || position.structureAmbiguous || position.recommendation && position.recommendation.kind !== 'hold'));
+    const attention = options.map(attentionOf);
+    const needsAttention = attention.some(a => a.needsAttention);
+    const assignmentNear = !needsAttention && attention.some(a => a.assignmentNear);
     const optionInstruments = options.map(buildOptionInstrumentViewModel);
     const composition = classifySymbolComposition(symbolEquities, optionInstruments);
     const asOf = snapshot?.quoteAsOf ?? snapshot?.asOf ?? null;
@@ -159,6 +162,7 @@ export function buildPositionsWorkspaceModel(input: PositionsWorkspaceInput): Po
         unallocatedShares,
       },
       needsAttention,
+      assignmentNear,
       contextualAction: capacityReport?.status === 'ok' && availableContracts > 0 ? 'covered-call' : null,
       composition,
       compositionLabel: compositionLabel(composition, symbolEquities, optionInstruments),
@@ -174,7 +178,7 @@ export function buildPositionsWorkspaceModel(input: PositionsWorkspaceInput): Po
     quoteAsOf: snapshot?.quoteAsOf ?? null,
     dataQuality: snapshot?.dataQuality ?? input.snapshotDataQuality,
     symbolGroups,
-    analysisRows: input.positions.map(position => ({ id: position.key, position, symbol: position.symbol, strategy: position.strategy, needsAttention: Boolean(position.needsClose || position.structureAmbiguous || position.recommendation && position.recommendation.kind !== 'hold') })),
+    analysisRows: input.positions.map(position => ({ id: position.key, position, symbol: position.symbol, strategy: position.strategy, needsAttention: attentionOf(position).needsAttention })),
     incomeOpportunities: buildIncomeOpportunities(input),
   };
 }
