@@ -104,7 +104,7 @@ export interface ChartLevelLine extends ChartLevel { y: number }
  * the visible price range is dropped, and a level within `minGap` of one already kept is dropped (earlier levels win, so pass the
  * support/resistance levels before the plain highs and lows).
  */
-export function chartLevelLines(points: readonly ResearchPoint[], levels: readonly ChartLevel[], height: number, pad = 4, minGap = 9): ChartLevelLine[] {
+export function chartLevelLines(points: readonly ResearchPoint[], levels: readonly ChartLevel[], height: number, pad = 4, minGap = 16): ChartLevelLine[] {
   if (points.length < 2) return [];
   const min = Math.min(...points.map(p => p.c));
   const max = Math.max(...points.map(p => p.c));

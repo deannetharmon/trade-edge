@@ -182,7 +182,7 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
                 {levelLines.map(l => (
                   <span key={`${l.kind}-${l.price}`} data-testid="chart-level-label" style={{ top: `${(l.y / H) * 100}%` }}
                     className={`absolute right-1 -translate-y-full rounded bg-black/50 px-1 text-[10px] leading-4 ${l.kind === 'support' ? 'text-emerald-300' : l.kind === 'resistance' ? 'text-red-300' : 'text-white/60'}`}>
-                    {l.label} {usd(l.price)}
+                    {l.kind === 'extreme' ? `${l.label} ${usd(l.price)}` : usd(l.price)}
                   </span>
                 ))}
               </div>
