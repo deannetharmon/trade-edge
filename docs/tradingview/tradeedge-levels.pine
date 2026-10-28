@@ -1,5 +1,5 @@
 //@version=5
-// TradeEdge Levels (TV-LEVELS-0007)
+// TradeEdge Levels (TV-LEVELS-0008)
 // Draws the same support, resistance, high/low and open-gap levels the TradeEdge Research page shows, on ANY ticker and ANY chart
 // timeframe, with nothing to paste. The levels are always worked out from DAILY bars (the last year), like the Research page.
 //   dashed green = support, dashed red = resistance, dashed gray = 20-day / 52-week high and low,
@@ -30,6 +30,8 @@ maxGapAtr = input.float(6.0, "Max gap distance (ATR)", minval = 0.5, maxval = 20
 lineWidth = input.int(2, "Line width", minval = 1, maxval = 4)
 lineStyleText = input.string("Solid", "Line style", options = ["Solid", "Dashed", "Dotted"])
 lineStyle = lineStyleText == "Solid" ? line.style_solid : lineStyleText == "Dotted" ? line.style_dotted : line.style_dashed
+labelSizeText = input.string("Small", "Price tag size", options = ["Tiny", "Small", "Normal"])
+labelSize = labelSizeText == "Tiny" ? size.tiny : labelSizeText == "Normal" ? size.normal : size.small
 
 // Runs on DAILY bars (called through request.security). Returns the levels as one text line:
 // S193.38;R198.53;X226.88;GB96:98:1700000000 (G + A/B/I for above/below/inside, bottom:top:unix seconds).
@@ -232,4 +234,4 @@ if barstate.islast
                         xi += 1
                     lines.push(line.new(bar_index, price, bar_index + 1, price, extend = extend.both, color = col, style = lineStyle, width = lineWidth))
                     if showLabels
-                        labels.push(label.new(bar_index + labelOffset, price, tagText, style = label.style_label_left, color = col, textcolor = color.white, size = size.normal))
+                        labels.push(label.new(bar_index + labelOffset, price, tagText, style = label.style_label_left, color = col, textcolor = color.white, size = labelSize))
