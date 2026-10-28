@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
-import { buildCapitalViewModel, buildMoneynessMovementViewModel, buildMoneynessViewModel, comparisonTone, directionalMovementTone, stopPresentation, stopPresentationForPosition } from '../model/presentation';
+import { buildCapitalViewModel, buildMoneynessMovementViewModel, buildMoneynessViewModel, buildPositionMoneyness, comparisonTone, directionalMovementTone, stopPresentation, stopPresentationForPosition } from '../model/presentation';
 
 const leg = (optionType: 'P' | 'C', strikePrice: number, direction: 'Long' | 'Short'): PositionLeg => ({ symbol: 'X', optionType, strikePrice, direction, quantity: 1, avgOpenPrice: 1, currentPrice: 1 , currentDelta: null});
 
@@ -23,6 +23,16 @@ describe('position analysis presentation', () => {
     const short = leg('P', 100, 'Short'); const long = leg('P', 95, 'Long');
     expect(buildMoneynessViewModel(110, [long, short])?.leg).toBe(short);
     expect(buildMoneynessViewModel(110, [short, long])?.leg).toBe(short);
+  });
+
+  it('MONEYNESS-LEAP-0001: an OTM bought LEAP call is informational, not red; short-dated long options and long puts keep the standard colours', () => {
+    const lc = leg('C', 70, 'Long');
+    const leap = { stockPrice: 62.56, legs: [lc], entryDte: 400, dte: 325 };
+    expect(buildPositionMoneyness(leap)?.tone).toBe('informational');
+    expect(buildPositionMoneyness({ ...leap, stockPrice: 80 })?.tone).toBe('positive');
+    expect(buildPositionMoneyness({ ...leap, stockPrice: 69 })?.tone).toBe('informational');
+    expect(buildPositionMoneyness({ stockPrice: 62.56, legs: [lc], entryDte: 30, dte: 20 })?.tone).toBe('negative');
+    expect(buildPositionMoneyness({ stockPrice: 100, legs: [leg('P', 70, 'Long')], entryDte: 400, dte: 325 })?.tone).toBe('negative');
   });
 
   it('colors moneyness by current state from the position perspective, not price direction', () => {

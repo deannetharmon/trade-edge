@@ -30,7 +30,7 @@ import { PositionCards } from './PositionCards';
 import { assignmentStrip, CARD_SORTS, matchesSymbolSearch, sortCards, updatedLabel, type CardSort, type PositionCard } from './model/cardModel';
 import { isCardsDisabled, loadPositionsViewStored, resolvePositionsView, savePositionsViewStored, type PositionsView } from './model/positionsViewSetting';
 import { DEFAULT_PREFERENCES, loadPreferences, savePreferences } from './model/preferences';
-import { buildCapitalViewModel, buildMoneynessMovementViewModel, buildMoneynessViewModel, comparisonTone, SEMANTIC_TONE_CLASS, stopPresentation, stopPresentationForPosition, type SemanticTone } from './model/presentation';
+import { buildCapitalViewModel, buildMoneynessMovementViewModel, buildPositionMoneyness, comparisonTone, SEMANTIC_TONE_CLASS, stopPresentation, stopPresentationForPosition, type SemanticTone } from './model/presentation';
 import { buildBreakevenViewModel, buildLongOptionOutlook, priceBufferFor, type LongOptionOutlook } from './model/breakeven';
 import { buildLongOptionRecovery } from './model/longOptionRecovery';
 import { SalvageEntry } from './salvage/SalvagePanel';
@@ -778,7 +778,7 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
     return () => observer.disconnect();
   }, []);
   const first = p.snapshotHistory?.[0];
-  const moneyness = buildMoneynessViewModel(p.stockPrice, p.legs);
+  const moneyness = buildPositionMoneyness(p);
   const moneynessMovement = buildMoneynessMovementViewModel(p.stockPriceAtEntry ?? null, p.stockPrice, p.legs);
   const capital = buildCapitalViewModel(p);
   const recovery = buildLongOptionRecovery(p);

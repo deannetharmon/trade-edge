@@ -1,4 +1,5 @@
 import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
+import { standaloneLongOptionLabel } from '@/lib/portfolio/positionStrategyFilter';
 import { evaluateStandaloneLeapsStopEligibility } from '@/lib/portfolio/standaloneLeapsStop';
 
 export type SemanticTone = 'positive' | 'negative' | 'warning' | 'informational' | 'neutral';
@@ -39,7 +40,7 @@ export interface MoneynessMovementViewModel {
   tone: SemanticTone;
 }
 
-export function buildMoneynessViewModel(stockPrice: number | null, legs: readonly PositionLeg[], atmDisplayTolerancePct = 0.05): MoneynessViewModel | null {
+export function buildMoneynessViewModel(stockPrice: number | null, legs: readonly PositionLeg[], atmDisplayTolerancePct = 0.05, longHorizonCall = false): MoneynessViewModel | null {
   if (stockPrice == null || !Number.isFinite(stockPrice) || stockPrice <= 0) return null;
   const leg = relevantLeg(legs);
   if (!leg || !Number.isFinite(leg.strikePrice) || leg.strikePrice <= 0) return null;
@@ -50,11 +51,20 @@ export function buildMoneynessViewModel(stockPrice: number | null, legs: readonl
   // Tone follows the position's risk: short options want to stay OTM (ITM is red, near-OTM yellow, far-OTM green);
   // long options want to be ITM (ITM green, near-OTM yellow, far-OTM red).
   const isShort = leg.direction === 'Short';
-  const tone: SemanticTone = state === 'ATM' ? 'warning'
+  // MONEYNESS-LEAP-0001: a long-dated bought call (LEAP) is not in trouble for being OTM: it has time, and the loss already shows in P/L. ITM is green; otherwise it is information only.
+  const tone: SemanticTone = longHorizonCall && !isShort ? (state === 'ITM' ? 'positive' : 'informational')
+    : state === 'ATM' ? 'warning'
     : state === 'ITM' ? (isShort ? 'negative' : 'positive')
       : distancePct < MONEYNESS_YELLOW_BUFFER_PCT ? 'warning'
         : (isShort ? 'positive' : 'negative');
   return { state, distancePct, tone, leg };
+}
+
+/** Moneyness for a position: a bought LEAP call is judged on its long horizon, everything else by the standard rule. */
+export function buildPositionMoneyness(p: Pick<Position, 'stockPrice' | 'legs' | 'entryDte' | 'dte'>): MoneynessViewModel | null {
+  const legs = p.legs ?? [];
+  const leapCall = legs.length === 1 && legs[0].optionType === 'C' && standaloneLongOptionLabel(p) === 'LEAP';
+  return buildMoneynessViewModel(p.stockPrice, legs, undefined, leapCall);
 }
 
 /**

@@ -12,7 +12,7 @@ import { buildLongOptionRecovery } from './longOptionRecovery';
 import { nextEarningsLine } from './nextEarnings';
 import { profitTargetOrderPct } from './orderPercents';
 import { buildPositionPnlBases, wideMarketNote } from './pnlBases';
-import { buildCapitalViewModel, buildMoneynessViewModel, stopPresentationForPosition } from './presentation';
+import { buildCapitalViewModel, buildMoneynessViewModel, buildPositionMoneyness, stopPresentationForPosition } from './presentation';
 import { structuralChipOf } from './strategyChips';
 import { netEdgeLive } from '@/lib/portfolio-data/acquisition';
 import { parseSymbolList } from './filters';
@@ -134,7 +134,7 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
     : basis;
 
   const chips: CardChip[] = [];
-  const moneyness = buildMoneynessViewModel(p.stockPrice, p.legs);
+  const moneyness = buildPositionMoneyness(p);
   const breakeven = buildBreakevenViewModel(p);
   const structure = structuralChipOf(p);
   const shortSingle = p.legs?.length === 1 && p.legs[0].direction === 'Short';
