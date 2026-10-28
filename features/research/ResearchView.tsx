@@ -10,6 +10,7 @@ import {
   type ChartLevel, type ResearchChart, type ResearchRange,
 } from '@/lib/research/yahooChart';
 import type { THEMES, Theme } from '@/lib/theme';
+import { buildTradingViewChartUrl } from '@/lib/tradingview';
 import { ResearchFacts, type ResearchFactsDeps } from './ResearchFacts';
 import type { ResearchFacts as Facts } from '@/lib/research/researchFacts';
 import { defaultResearchFactsDeps } from './defaultFactsDeps';
@@ -140,7 +141,7 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
               <button type="button" onClick={addToScreener} disabled={listStatus === 'saving' || listStatus === 'added' || listStatus === 'exists'} className="min-h-9 rounded-lg border border-teal-500/60 px-3 text-xs font-semibold text-teal-300 disabled:opacity-60">
                 {listStatus === 'added' ? 'Added to screener list' : listStatus === 'exists' ? 'Already in screener list' : listStatus === 'saving' ? 'Adding…' : 'Add to screener list'}
               </button>
-              <a href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noopener noreferrer" className={`flex min-h-9 items-center rounded-lg border px-3 text-xs ${th.border} ${th.text}`}>TradingView ↗</a>
+              <a href={buildTradingViewChartUrl(symbol)} target="_blank" rel="noopener noreferrer" className={`flex min-h-9 items-center rounded-lg border px-3 text-xs ${th.border} ${th.text}`}>TradingView ↗</a>
             </div>
           </header>
           {listStatus === 'error' && <p role="alert" className="mt-2 text-xs text-amber-300">Could not update your screener list. Try again.</p>}

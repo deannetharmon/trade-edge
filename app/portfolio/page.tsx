@@ -12,7 +12,7 @@ import { redactUnsupportedFigures, PORTFOLIO_AI_STALE_MS, type PortfolioAiSnapsh
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
-import { buildTradingViewWidgetUrl } from '@/components/TradingViewChartButton';
+import { buildTradingViewChartUrl } from '@/lib/tradingview';
 import { recordOrderLifecycleEvent } from '@/lib/order-lifecycle/client';
 import BalancesTab from '@/components/BalancesTab';
 import PnlCalendarTab from '@/features/portfolio/pnl-calendar/PnlCalendarTab';
@@ -8849,7 +8849,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
                     {/* RSI-SPARK-PARITY: same RSI strip as the shared quick chart. */}
                     {!sparkLoading && sparkData && sparkData.length > 1 && <div className="mb-2"><RsiStrip closes={sparkData} th={th} /></div>}
                     <a
-                      href={buildTradingViewWidgetUrl(pos.symbol)}
+                      href={buildTradingViewChartUrl(pos.symbol)}
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={e => e.stopPropagation()}

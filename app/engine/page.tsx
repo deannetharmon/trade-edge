@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { refreshBrowserAccessToken } from '@/lib/tastytrade/browser-token';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
-import { buildTradingViewWidgetUrl } from '@/components/TradingViewChartButton';
+import { buildTradingViewChartUrl } from '@/lib/tradingview';
 
 // ── Font injection ─────────────────────────────────────────────────────────
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -1531,7 +1531,7 @@ function ChartPopup({ symbol, pos, sparkData, sparkLoading, th, onClose }: {
         )}
         {/* RSI-SPARK-PARITY: same RSI strip as the shared quick chart. */}
         {!sparkLoading && sparkData && sparkData.length > 1 && <div className="mb-2"><RsiStrip closes={sparkData} th={th} /></div>}
-        <a href={buildTradingViewWidgetUrl(TV_SYMBOL)}
+        <a href={buildTradingViewChartUrl(TV_SYMBOL)}
           target="_blank"
           rel="noopener noreferrer"
           onClick={e => e.stopPropagation()}

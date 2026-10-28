@@ -7,7 +7,7 @@ import { RsiStrip } from '@/components/RsiStrip';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { buildTradingViewWidgetUrl } from '@/components/TradingViewChartButton';
+import { buildTradingViewChartUrl } from '@/lib/tradingview';
 import { calculateIronCondorCapital, STANDARD_EQUITY_OPTION_MULTIPLIER } from '@/lib/scans/financials';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import { submitRinseRepeatOtocoIfSafe } from '@/lib/rinse-repeat/otocoEntrySafety';
@@ -1011,7 +1011,7 @@ function RRCard({ result, th, existingPositions }: {
                 </div>
                 {/* RSI-SPARK-PARITY: same RSI strip as the shared quick chart. */}
                 {!sparkLoading && sparkData && sparkData.length > 1 && <div className="mb-2"><RsiStrip closes={sparkData} th={th} /></div>}
-                <a href={buildTradingViewWidgetUrl(({'SPX':'CBOE:SPX','SPXW':'CBOE:SPX','NDX':'NASDAQ:NDX','RUT':'TVC:RUT','VIX':'CBOE:VIX','DJX':'TVC:DJI'})[profile.symbol.toUpperCase()] ?? profile.symbol)} target="_blank" rel="noopener noreferrer"
+                <a href={buildTradingViewChartUrl(profile.symbol)} target="_blank" rel="noopener noreferrer"
                   onClick={e => e.stopPropagation()}
                   className="flex items-center justify-center gap-2 w-full py-2 ac-bg-20 ac-hover-bg/30 border ac-border/40 rounded-lg text-[10px] text-blue-400 font-bold tracking-wider transition-colors">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

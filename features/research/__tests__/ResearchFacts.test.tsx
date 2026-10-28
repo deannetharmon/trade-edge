@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ResearchFacts, chartLevelsOf, type ResearchFactsDeps } from '../ResearchFacts';
 import { THEMES } from '@/lib/theme';
@@ -39,8 +39,7 @@ describe('RESEARCH-0007 chart levels', () => {
   it('reports the levels once the facts load', async () => {
     const seen: number[] = [];
     render(<ResearchFacts symbol="AAPL" th={THEMES.dark} deps={deps()} onLevels={l => seen.push(l.length)} />);
-    await screen.findByTestId('facts-trend');
-    expect(seen[seen.length - 1]).toBe(5);
+    await waitFor(() => expect(seen[seen.length - 1]).toBe(5));
   });
 });
 

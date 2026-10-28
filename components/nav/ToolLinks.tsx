@@ -1,8 +1,10 @@
 // components/nav/ToolLinks.tsx
 
+import { TRADINGVIEW_LAYOUT_URL } from '@/lib/tradingview';
+
 // TOOL-LINKS-0001: quick links to the tools Dean uses next to TradeEdge. Rendered by AppHeader under the theme selector, so every page has them.
 export const TOOL_LINKS: ReadonlyArray<{ label: string; href: string }> = [
-  { label: 'TradingView', href: 'https://www.tradingview.com/' },
+  { label: 'TradingView', href: TRADINGVIEW_LAYOUT_URL },
   { label: 'GuacTracker', href: 'https://guactracker.com/' },
   { label: 'Discord', href: 'https://discord.com/' },
   { label: 'Yahoo Finance', href: 'https://finance.yahoo.com/' },
