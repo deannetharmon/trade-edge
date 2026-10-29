@@ -86,4 +86,45 @@ describe('RESEARCH-0001 ResearchView', () => {
     expect(await screen.findByRole('button', { name: 'Already in screener list' })).toBeDisabled();
     expect(calls.some(c => c.init?.method === 'PUT')).toBe(false);
   });
+  describe('RESEARCH-RSI-0001 RSI panel', () => {
+    const longChart = {
+      points: Array.from({ length: 60 }, (_, i) => ({ t: 1700000000 + i * 86400, c: 100 + Math.sin(i / 3) * 5 + i * 0.2 })),
+      meta: chart.meta,
+    };
+    function setupLong() {
+      const fetchImpl = vi.fn((url: RequestInfo | URL) => {
+        const u = String(url);
+        if (u.startsWith('/api/research-chart')) return json(longChart);
+        return json({ tickers: [] });
+      }) as unknown as typeof fetch;
+      const factsDeps = { loadFacts: () => new Promise<never>(() => {}), loadBroker: async () => null, loadTrend: async () => null };
+      render(<ResearchView th={THEMES.dark} initialSymbol="AAPL" fetchImpl={fetchImpl} factsDeps={factsDeps} />);
+      return fetchImpl;
+    }
+
+    it('shows an RSI(14) panel with the latest value on a daily range', async () => {
+      const fetchImpl = setupLong();
+      expect(await screen.findByTestId('research-rsi')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByTestId('research-rsi-value').textContent).toMatch(/^\d+\.\d$/));
+      // 3M borrows a 1Y daily series so RSI has history to warm up on.
+      expect((fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls.some(c => String(c[0]).includes('range=1Y'))).toBe(true);
+    });
+
+    it('the RSI button hides and shows the panel', async () => {
+      setupLong();
+      await screen.findByTestId('research-rsi');
+      await userEvent.click(screen.getByRole('button', { name: 'RSI' }));
+      expect(screen.queryByTestId('research-rsi')).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'RSI' }));
+      expect(await screen.findByTestId('research-rsi')).toBeInTheDocument();
+    });
+
+    it('is not offered on the intraday 1D and 1W ranges', async () => {
+      setupLong();
+      await screen.findByTestId('research-rsi');
+      await userEvent.click(screen.getByRole('button', { name: '1D' }));
+      await waitFor(() => expect(screen.queryByTestId('research-rsi')).not.toBeInTheDocument());
+      expect(screen.queryByRole('button', { name: 'RSI' })).not.toBeInTheDocument();
+    });
+  });
 });
