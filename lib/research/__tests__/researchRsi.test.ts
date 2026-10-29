@@ -2,16 +2,17 @@
 
 import { describe, expect, it } from 'vitest';
 import { rsiSeries } from '@/lib/indicators/rsi';
-import { rsiAvailableForRange, rsiForVisiblePoints, rsiNeedsLongerSource, rsiSegments, rsiY } from '../researchRsi';
+import { rsiBarLabel, rsiForVisiblePoints, rsiNeedsLongerSource, rsiSegments, rsiY } from '../researchRsi';
 
 const day = 86400;
 const makePoints = (n: number, start = 1_700_000_000) => Array.from({ length: n }, (_, i) => ({ t: start + i * day, c: 100 + Math.sin(i / 3) * 5 + i * 0.2 }));
 
 describe('RESEARCH-RSI-0001', () => {
-  it('shows on daily and weekly ranges only', () => {
-    expect(rsiAvailableForRange('1D')).toBe(false);
-    expect(rsiAvailableForRange('1W')).toBe(false);
-    for (const r of ['1M', '3M', '6M', '1Y', '5Y'] as const) expect(rsiAvailableForRange(r)).toBe(true);
+  it('labels what one bar is on the intraday and weekly ranges only', () => {
+    expect(rsiBarLabel('1D')).toBe('5m');
+    expect(rsiBarLabel('1W')).toBe('30m');
+    expect(rsiBarLabel('5Y')).toBe('weekly');
+    for (const r of ['1M', '3M', '6M', '1Y'] as const) expect(rsiBarLabel(r)).toBeNull();
   });
 
   it('borrows a longer source only for the ranges shorter than the warm-up allows', () => {

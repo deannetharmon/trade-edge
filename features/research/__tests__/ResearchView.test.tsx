@@ -119,12 +119,48 @@ describe('RESEARCH-0001 ResearchView', () => {
       expect(await screen.findByTestId('research-rsi')).toBeInTheDocument();
     });
 
-    it('is not offered on the intraday 1D and 1W ranges', async () => {
+    it('also shows on the 1D and 1W ranges, labeled with the bar size', async () => {
       setupLong();
       await screen.findByTestId('research-rsi');
       await userEvent.click(screen.getByRole('button', { name: '1D' }));
-      await waitFor(() => expect(screen.queryByTestId('research-rsi')).not.toBeInTheDocument());
-      expect(screen.queryByRole('button', { name: 'RSI' })).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.getByTestId('research-rsi')).toHaveTextContent('RSI(14) · 5m'));
+      await userEvent.click(screen.getByRole('button', { name: '1W' }));
+      await waitFor(() => expect(screen.getByTestId('research-rsi')).toHaveTextContent('RSI(14) · 30m'));
+      expect(screen.getByRole('button', { name: 'RSI' })).toBeInTheDocument();
+    });
+  });
+
+  describe('RESEARCH-VOL-0001 volume panel', () => {
+    const volChart = {
+      points: Array.from({ length: 30 }, (_, i) => ({ t: 1700000000 + i * 86400, c: 100 + i * 0.3, v: 1_000_000 + i * 10_000 })),
+      meta: chart.meta,
+    };
+    const setupVol = (body: unknown = volChart) => {
+      const fetchImpl = vi.fn((url: RequestInfo | URL) => (String(url).startsWith('/api/research-chart') ? json(body) : json({ tickers: [] }))) as unknown as typeof fetch;
+      const factsDeps = { loadFacts: () => new Promise<never>(() => {}), loadBroker: async () => null, loadTrend: async () => null };
+      render(<ResearchView th={THEMES.dark} initialSymbol="AAPL" fetchImpl={fetchImpl} factsDeps={factsDeps} />);
+    };
+
+    it('shows a volume panel with the latest bar volume', async () => {
+      setupVol();
+      expect(await screen.findByTestId('research-volume')).toBeInTheDocument();
+      expect(screen.getByTestId('research-volume-value')).toHaveTextContent('1.3M');
+    });
+
+    it('the Volume button hides and shows the panel', async () => {
+      setupVol();
+      await screen.findByTestId('research-volume');
+      await userEvent.click(screen.getByRole('button', { name: 'Volume' }));
+      expect(screen.queryByTestId('research-volume')).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'Volume' }));
+      expect(await screen.findByTestId('research-volume')).toBeInTheDocument();
+    });
+
+    it('shows no volume panel or button when the data has no volume', async () => {
+      setupVol(chart);
+      await screen.findByTestId('research-price');
+      expect(screen.queryByTestId('research-volume')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Volume' })).not.toBeInTheDocument();
     });
   });
 });

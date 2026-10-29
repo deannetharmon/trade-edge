@@ -27,7 +27,8 @@ export function normalizeResearchSymbol(input: unknown): string | null {
   return /^[A-Z0-9.^=-]{1,12}$/.test(s) ? s : null;
 }
 
-export interface ResearchPoint { t: number; c: number }
+/** One bar of the chart: time, close, and volume when Yahoo supplied it (RESEARCH-VOL-0001). */
+export interface ResearchPoint { t: number; c: number; v?: number }
 export interface ResearchMeta {
   symbol: string;
   name: string | null;
@@ -48,11 +49,13 @@ export function parseResearchChart(data: unknown, symbol: string): ResearchChart
   if (!result) return null;
   const timestamps: unknown[] = Array.isArray(result.timestamp) ? result.timestamp : [];
   const closes: unknown[] = Array.isArray(result.indicators?.quote?.[0]?.close) ? result.indicators.quote[0].close : [];
+  const volumes: unknown[] = Array.isArray(result.indicators?.quote?.[0]?.volume) ? result.indicators.quote[0].volume : [];
   const points: ResearchPoint[] = [];
   for (let i = 0; i < timestamps.length; i++) {
     const t = num(timestamps[i]);
     const c = num(closes[i]);
-    if (t != null && c != null) points.push({ t, c });
+    const v = num(volumes[i]);
+    if (t != null && c != null) points.push(v != null && v >= 0 ? { t, c, v } : { t, c });
   }
   const m = result.meta ?? {};
   return {

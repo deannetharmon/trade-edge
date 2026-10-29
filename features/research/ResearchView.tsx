@@ -10,8 +10,9 @@ import {
   type ChartLevel, type ResearchChart, type ResearchRange,
 } from '@/lib/research/yahooChart';
 import {
-  RSI_HIGH, RSI_LOW, rsiAvailableForRange, rsiForVisiblePoints, rsiNeedsLongerSource, rsiSegments, rsiY,
+  RSI_HIGH, RSI_LOW, rsiBarLabel, rsiForVisiblePoints, rsiNeedsLongerSource, rsiSegments, rsiY,
 } from '@/lib/research/researchRsi';
+import { hasVolume, volumeBars } from '@/lib/research/researchVolume';
 import type { ResearchPoint } from '@/lib/research/yahooChart';
 import type { THEMES, Theme } from '@/lib/theme';
 import { buildTradingViewChartUrl } from '@/lib/tradingview';
@@ -40,6 +41,7 @@ const tone = (v: number) => (v >= 0 ? 'text-emerald-400' : 'text-red-400');
 const W = 800;
 const H = 260;
 const RSI_H = 90;
+const VOL_H = 80;
 
 function formatWhen(t: number, range: ResearchRange): string {
   const d = new Date(t * 1000);
@@ -64,6 +66,7 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
   const [showLevels, setShowLevels] = useState(true);
   const [copied, setCopied] = useState<'idle' | 'ok' | 'failed'>('idle');
   const [showRsi, setShowRsi] = useState(true);
+  const [showVolume, setShowVolume] = useState(true);
   // RESEARCH-RSI-0001: 1M, 3M and 6M are too short for RSI(14) to warm up, so they borrow a 1Y daily series (same symbol).
   const [rsiSource, setRsiSource] = useState<{ symbol: string; points: ResearchPoint[] } | null>(null);
   const requestId = useRef(0);
@@ -144,7 +147,7 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
   const shown = hover != null && chart ? chart.points[hover] : null;
   const lineTone = move ? tone(move.amount) : 'text-white/70';
 
-  const rsiOn = showRsi && rsiAvailableForRange(range);
+  const rsiOn = showRsi;
   const rsiValues = useMemo(() => {
     if (!chart || !rsiOn) return null;
     const source = rsiNeedsLongerSource(range) ? (rsiSource?.symbol === symbol ? rsiSource.points : null) : chart.points;
@@ -152,6 +155,10 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
   }, [chart, rsiOn, range, rsiSource, symbol]);
   const rsiLines = useMemo(() => (rsiValues ? rsiSegments(rsiValues, W, RSI_H) : []), [rsiValues]);
   const rsiShown = rsiValues ? (hover != null ? rsiValues[hover] : rsiValues[rsiValues.length - 1]) ?? null : null;
+  // RESEARCH-VOL-0001: volume bars on every range (intraday bars carry volume too).
+  const volumeOn = showVolume && !!chart && hasVolume(chart.points);
+  const volBars = useMemo(() => (chart && volumeOn ? volumeBars(chart.points, W, VOL_H) : []), [chart, volumeOn]);
+  const volShown = chart ? (hover != null ? chart.points[hover]?.v : chart.points[chart.points.length - 1]?.v) ?? null : null;
   const hoverFromEvent = (event: React.MouseEvent<SVGSVGElement>) => {
     if (!chart) return;
     const box = event.currentTarget.getBoundingClientRect();
@@ -234,7 +241,7 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
           {rsiOn && geometry && (
             <div className="mt-2" data-testid="research-rsi">
               <div className="mb-1 flex items-center justify-between">
-                <span className={`text-[10px] font-bold tracking-widest ${th.textFaint}`}>RSI(14){range === '5Y' ? ' · weekly' : ''}</span>
+                <span className={`text-[10px] font-bold tracking-widest ${th.textFaint}`}>RSI(14){rsiBarLabel(range) ? ` · ${rsiBarLabel(range)}` : ''}</span>
                 <span className={`text-xs font-semibold ${th.text}`} data-testid="research-rsi-value">{rsiShown == null ? 'RSI n/a' : rsiShown.toFixed(1)}</span>
               </div>
               {rsiValues && rsiLines.length > 0 ? (
@@ -252,6 +259,22 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
             </div>
           )}
 
+          {volumeOn && geometry && (
+            <div className="mt-2" data-testid="research-volume">
+              <div className="mb-1 flex items-center justify-between">
+                <span className={`text-[10px] font-bold tracking-widest ${th.textFaint}`}>VOLUME</span>
+                <span className={`text-xs font-semibold ${th.text}`} data-testid="research-volume-value">{volShown == null ? 'n/a' : compact(volShown)}</span>
+              </div>
+              <svg viewBox={`0 0 ${W} ${VOL_H}`} preserveAspectRatio="none" className="h-16 w-full touch-none" role="img" aria-label={`${symbol} volume, ${range}`}
+                onMouseLeave={() => setHover(null)} onMouseMove={hoverFromEvent}>
+                {volBars.map(b => (
+                  <rect key={b.x} x={b.x} y={b.y} width={b.width} height={b.height} className={b.up ? 'fill-emerald-400/60' : 'fill-red-400/60'} />
+                ))}
+                {hover != null && <line x1={geometry.xs[hover]} x2={geometry.xs[hover]} y1={0} y2={VOL_H} strokeWidth={1} vectorEffect="non-scaling-stroke" className="stroke-white/40" />}
+              </svg>
+            </div>
+          )}
+
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
             <div role="group" aria-label="Chart range" className="flex gap-1">
               {RESEARCH_RANGE_ORDER.map(r => (
@@ -260,7 +283,8 @@ export function ResearchView({ th, initialSymbol, fetchImpl, factsDeps }: Props)
               ))}
             </div>
             <button type="button" aria-pressed={showLevels} onClick={() => setShowLevels(s => !s)} className={`min-h-8 rounded-md border px-3 text-xs ${th.border} ${showLevels ? 'text-white' : th.textFaint}`}>Levels</button>
-            {rsiAvailableForRange(range) && <button type="button" aria-pressed={showRsi} onClick={() => setShowRsi(s => !s)} className={`min-h-8 rounded-md border px-3 text-xs ${th.border} ${showRsi ? 'text-white' : th.textFaint}`}>RSI</button>}
+            {!!chart && hasVolume(chart.points) && <button type="button" aria-pressed={showVolume} onClick={() => setShowVolume(s => !s)} className={`min-h-8 rounded-md border px-3 text-xs ${th.border} ${showVolume ? 'text-white' : th.textFaint}`}>Volume</button>}
+            <button type="button" aria-pressed={showRsi} onClick={() => setShowRsi(s => !s)} className={`min-h-8 rounded-md border px-3 text-xs ${th.border} ${showRsi ? 'text-white' : th.textFaint}`}>RSI</button>
             <button type="button" onClick={copyLevels} disabled={levels.length === 0 && gaps.length === 0} title="Copy these levels, then paste them into the TradeEdge Levels indicator on TradingView"
               className={`min-h-8 rounded-md border px-3 text-xs disabled:opacity-40 ${th.border} ${th.text}`}>{copied === 'ok' ? 'Copied' : copied === 'failed' ? 'Copy failed' : 'Copy levels'}</button>
             {move && <span className={`text-xs font-semibold ${lineTone}`} data-testid="research-range-change">{signed(move.amount)} ({pct(move.pct)}) {range}</span>}

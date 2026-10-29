@@ -11,9 +11,9 @@ import type { ResearchPoint, ResearchRange } from '@/lib/research/yahooChart';
 export const RSI_LOW = RSI_TURN_PARAMS.low;
 export const RSI_HIGH = RSI_TURN_PARAMS.high;
 
-/** Ranges that show RSI. 1D and 1W are intraday bars, where RSI(14) is not the daily indicator the rest of the app uses. */
-export function rsiAvailableForRange(range: ResearchRange): boolean {
-  return range !== '1D' && range !== '1W';
+/** What one bar is, for the panel label: RSI(14) is 14 bars of whatever the chart plots (5-minute on 1D, 30-minute on 1W, weekly on 5Y). */
+export function rsiBarLabel(range: ResearchRange): string | null {
+  return range === '1D' ? '5m' : range === '1W' ? '30m' : range === '5Y' ? 'weekly' : null;
 }
 
 /** Daily ranges shorter than the warm-up allows; they borrow a 1Y daily series. 1Y and 5Y use their own points. */
