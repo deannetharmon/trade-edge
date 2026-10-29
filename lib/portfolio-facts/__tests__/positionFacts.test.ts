@@ -3,13 +3,15 @@
 // RECO-UNIFY-0001A: the facts builder changes no behavior. The verdict the app shows today (scorePortfolioPositionObjective) must equal the
 // verdict the evaluator gives when fed the facts' engineInput, on both layers (the legacy `kind` and the ManagementIntent), for a spread of positions.
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { scorePortfolioPositionObjective } from '@/lib/portfolio-data/acquisition';
 import { evaluatePositionObjective } from '@/lib/portfolio-intelligence';
 import type { Position, PositionLeg } from '@/lib/portfolio-data/types';
 import { buildPositionFacts } from '../positionFacts';
 
 const NOW = new Date('2026-08-10T18:00:00.000Z');
+
+afterEach(() => { vi.useRealTimers(); });
 const shortPut: PositionLeg = { symbol: 'NVDA 260918P00190000', optionType: 'P', strikePrice: 190, direction: 'Short', quantity: 1, avgOpenPrice: 2.0, currentPrice: null } as PositionLeg;
 
 function csp(overrides: Partial<Position> = {}): Position {
@@ -103,6 +105,9 @@ describe('PositionFacts content', () => {
   });
 
   it('is deterministic: same input, same output', () => {
+    // The nested evaluator stamps computedAt from the wall clock; pin it so two calls cannot straddle a millisecond boundary.
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
     const a = buildPositionFacts(csp(), { now: NOW }, 's');
     const b = buildPositionFacts(csp(), { now: NOW }, 's');
     expect(a).toEqual(b);

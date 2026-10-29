@@ -413,8 +413,9 @@ describe('CSP-WORKFLOW-0001 core-correction: BLOCKER-02 production capital wirin
     // Both qualified NKE cards must display the truthful "no account
     // selected" label -- proving the account-ineligible state is visible
     // on the card itself, not merely absent from Best Opportunities.
+    // SCREENER-ROW-REASON-0001: the collapsed row shows a shortened label; the full sentence is the hover title.
     await waitFor(() => {
-      expect(screen.getAllByText(/No active account selected — capital could not be verified\./i).length).toBe(2);
+      expect(screen.getAllByTitle(/No active account selected — capital could not be verified\./i).length).toBe(2);
     });
   });
 });
