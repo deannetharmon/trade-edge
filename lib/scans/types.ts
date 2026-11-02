@@ -108,6 +108,8 @@ export interface SpreadCandidate {
    * Contracts outside the range remain visible for comparison, but are not
    * eligible for the primary recommendation. */
   cspDeltaTargetPassing?: boolean;
+  /** SCAN-SIMPLIFY-0001: rule-independent score inputs captured at scan time so the results view can re-score under a different delta/IVR/OI view without a rescan. */
+  cspScoreInputs?: import('./cspView').CspScoreRawInputs;
   /** Independent of account eligibility — a market-qualified contract can
    * still be account-ineligible (unaffordable/unverified) and must remain
    * visible either way; see cspAccountEligibility. */

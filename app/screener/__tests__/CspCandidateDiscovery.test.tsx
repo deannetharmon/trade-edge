@@ -525,64 +525,66 @@ describe('CSP-WORKFLOW-0001: strategy-aware launch modes', () => {
     expect(screen.getByRole('button', { name: 'FIND CSPs' })).toHaveAttribute('aria-busy', 'false');
   });
 
-  // FILTER-MODE-REMOVAL-0002 (3e8d9491) hid Filter from CSP's own selectable
-  // modes too, but left lastCspMode defaulted to 'filter' -- fixed 2026-09-21
-  // to match Spreads' equivalent coercion (Dean confirmed Filter is not
-  // coming back anywhere). No pending decision remains; this is no longer a
-  // .todo.
-  it('creates a canonical Rank CSP session by default (Filter mode is not offered)', async () => {
+  // SCAN-SIMPLIFY-0001 -- the scan modal has no Rank/Targeted choice: one fetch (tickers + DTE),
+  // and the results screen does the sorting and filtering.
+  it('offers no scan-mode choice and no Targeted gates (SCAN-SIMPLIFY-0001)', async () => {
     getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingCspChain(symbol)));
     renderScreener();
     await addToUniverse('AMD');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
-    expect(screen.queryByRole('radio', { name: /FILTER/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /RANK scan mode, selected/i })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /FILTER|RANK|TARGETED/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'CONFIRM TARGETS' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Minimum DTE')).toBeInTheDocument();
   });
 
-  it.each([
-    ['Rank', 'Ranked Cash-Secured Put Scan'],
-    ['Targeted', 'Targeted Cash-Secured Put Scan'],
-  ])('creates a canonical %s CSP session only after confirmation', async (modeLabel, expectedIdentity) => {
+  it('creates a canonical Ranked CSP session from the DTE-only scan, with the view controls on the results screen', async () => {
     getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingCspChain(symbol)));
     inBandIvr(['NKE']);
     renderScreener();
     await addToUniverse('NKE');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
-    await userEvent.click(screen.getByRole('radio', { name: new RegExp(`^${modeLabel}`, 'i') }));
-    if (modeLabel === 'Targeted') {
-      await userEvent.type(screen.getByLabelText('Minimum estimated POP'), '70');
-      await userEvent.click(screen.getByRole('button', { name: 'CONFIRM TARGETS' }));
-    }
     await userEvent.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
 
-    await waitFor(() => expect(screen.getByText(expectedIdentity)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Ranked Cash-Secured Put Scan')).toBeInTheDocument());
     expect(screen.getByTestId('active-csp-rules')).toBeInTheDocument();
+    expect(screen.getByTestId('csp-view-controls')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Balanced' })).toBeChecked();
     expect(screen.queryByText('QUICK RULE PRESETS:')).not.toBeInTheDocument();
   });
 
-  it('restores the confirmed Rank draft (including its OI preference) when Edit / Run Again reopens the modal -- per-mode draft restoration, not the last-used mode\'s draft', async () => {
+  it('Edit / Run Again reopens the DTE-only modal on the range that was scanned', async () => {
     getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingCspChain(symbol)));
     inBandIvr(['NKE']);
     renderScreener();
     await addToUniverse('NKE');
     await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
-    await userEvent.click(screen.getByRole('radio', { name: /^Rank/i }));
-    // SCAN-MODAL-UX-0001: the secondary sort left the modal; the OI preference stands in as the edited Rank field.
-    await userEvent.clear(screen.getByLabelText('OI pref.'));
-    await userEvent.type(screen.getByLabelText('OI pref.'), '250');
-    await userEvent.click(screen.getByLabelText(/Only show affordable CSPs/i));
-    await userEvent.type(screen.getByLabelText('Cash cap per CSP'), '8000');
+    await userEvent.click(screen.getByRole('button', { name: '21–60 DTE' }));
     await userEvent.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
 
     await waitFor(() => expect(screen.getByText('Ranked Cash-Secured Put Scan')).toBeInTheDocument());
     await userEvent.click(screen.getByRole('button', { name: 'Edit / Run Again' }));
 
-    // The reopened modal must show the SAME confirmed Rank draft -- mode
-    // still Rank, OI preference still 250 -- not a fresh Filter default
-    // and not merely "whatever was last edited."
-    expect(screen.getByRole('radio', { name: /^Rank/i })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByLabelText('OI pref.')).toHaveValue('250');
-    expect(screen.getByLabelText('Cash cap per CSP')).toHaveValue('8000');
+    await waitFor(() => expect(screen.getByLabelText('Minimum DTE')).toHaveValue('21'));
+    expect(screen.getByLabelText('Maximum DTE')).toHaveValue('60');
+  });
+
+  it('changing the results view never fetches a chain again', async () => {
+    getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingCspChain(symbol)));
+    inBandIvr(['NKE']);
+    renderScreener();
+    await addToUniverse('NKE');
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    await userEvent.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
+    await waitFor(() => expect(screen.getByTestId('csp-view-controls')).toBeInTheDocument());
+
+    getChainMock.mockClear();
+    getMarketMetricsMock.mockClear();
+    await userEvent.click(screen.getByRole('radio', { name: 'Conservative' }));
+    await userEvent.click(screen.getByRole('radio', { name: 'More opportunities' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: /Affordable only/i }));
+    expect(getChainMock).not.toHaveBeenCalled();
+    expect(getMarketMetricsMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('radio', { name: 'More opportunities' })).toBeChecked();
   });
 });
 

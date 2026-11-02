@@ -84,6 +84,7 @@ import { calculateCspScore } from '@/lib/scans/cspScore';
 import { scoreBand, capScoreBandByReturn, returnCapNote, type ScoreBandFloors } from '@/lib/scans/scoreBands';
 import { CspScoreBadge, CspScoreBreakdownPanel, SCORE_BAND_BORDER_L } from '@/features/screener/components/CspScoreBreakdown';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
+import { CSP_VIEW_PRESETS, DEFAULT_CSP_VIEW_PRESET, cspScanRules, cspViewFromPreset, detectCspPreset, regradeCspResults, cspWithinViewWindow, type CspView, type CspViewPresetKey } from '@/lib/scans/cspView';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified, classifyCspLiquidity } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
 import { daysUntilNy, earningsOnOrBeforeExpiration, evaluateEarningsPrecheck, EARNINGS_MIN_DAYS_AFTER_EXPIRY } from '@/lib/scans/earningsPrecheck';
@@ -227,6 +228,7 @@ import { pmccScanEntryMode } from '@/lib/scans/pmccActiveRules';
 import { PmccScanModal, type PmccScanRequest } from '@/features/screener/components/PmccScanModal';
 import { LeapsScanModal, type LeapsScanRequest } from '@/features/screener/components/LeapsScanModal';
 import { DeferredNumberInput } from '@/features/screener/components/DeferredNumberInput';
+import { CspViewControls } from '@/features/screener/components/CspViewControls';
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
 import { evaluateCspIvr } from '@/lib/scans/cspIvrPolicy';
 import { summarizeCspResults } from '@/lib/screener/scanConfig/cspRegistry';
@@ -1079,6 +1081,7 @@ const HUNTER_URL = 'https://options-HUNTER-dun.vercel.app';
 const LS_SAVED_FILTERS = 'hunter-saved-filters';
 const LS_GLOBAL_SESSIONS = 'hunter-global-sessions';
 const LS_SCREEN_MODE = 'hunter-screen-mode';
+const LS_CSP_VIEW_PRESET = 'hunter-csp-view-preset';
 const LS_RANK_CONFIG = 'hunter-rank-config';
 const LS_RESULTS_CACHE = 'hunter-results-cache';
 const LS_RAW_SCAN_CACHE = 'hunter-raw-scan-cache'; // legacy localStorage key — no longer written to; rawScanCache now lives in IndexedDB (see idbGet/idbSet below) because full options-chain data can exceed localStorage's quota
@@ -1401,19 +1404,24 @@ function runCspChecklist(
     // put's premium is mostly the cost of near-certain assignment, not real
     // option income, and must not be able to out-score a genuine premium
     // sale by looking artificially "efficient."
-    c.cspScore = calculateCspScore({
+    const cspRawScoreInputs = {
       pop: c.pop ?? null,
       otmPct,
       periodRocPct: Number.isFinite(c.cspExtrinsicRoc ?? NaN) ? (c.cspExtrinsicRoc as number) : null,
       annualizedRocPct: c.cspExtrinsicAnnualizedRoc ?? null,
       liquidityClass: c.cspLiquidityClass ?? null,
       openInterest: Number.isFinite(c.shortOI) ? c.shortOI : null,
-      oiMin: cspRules.OI_MIN,
       technicalFit: trendResult?.scores?.total ?? null,
       ivr: ivrValue ?? null,
+      earningsWithinExpiration: r.earningsWithinExpiration,
+    };
+    // SCAN-SIMPLIFY-0001 — raw inputs ride on the candidate so the results view can re-score.
+    c.cspScoreInputs = cspRawScoreInputs;
+    c.cspScore = calculateCspScore({
+      ...cspRawScoreInputs,
+      oiMin: cspRules.OI_MIN,
       ivrMin: cspRules.IVR_MIN,
       ivrMax: cspRules.IVR_MAX,
-      earningsWithinExpiration: r.earningsWithinExpiration,
     });
 
     const failReasons: string[] = [];
@@ -9168,7 +9176,9 @@ export default function Home() {
   // cached ones. Fix: start at plain defaults here (matches server every
   // time); the real cached values are loaded in the
   // "load cached scan state" useEffect below, strictly post-mount.
-  const [results, setResults] = useState<ScreenResult[]>([]);
+  // SCAN-SIMPLIFY-0001 -- `scanResults` is the scan-time truth (session accounting reads it); `results`
+  // (defined after activeSession) is the same list re-graded for the active CSP view.
+  const [scanResults, setResults] = useState<ScreenResult[]>([]);
   const [rawScanCache, setRawScanCache] = useState<RawScanEntry[]>([]);
   const [resultsCachedAt, setResultsCachedAt] = useState<number | null>(null);
   const [pmccRestoreNotice, setPmccRestoreNotice] = useState<string | null>(null);
@@ -9372,6 +9382,46 @@ export default function Home() {
   const [activeSession, setActiveSession] = useState<ScreenerScanSession | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
 
+  // SCAN-SIMPLIFY-0001 -- the CSP scan only fetches (tickers + DTE). Delta/IVR/OI/DTE window/return/
+  // affordability are a view over the fetched contracts: changing them re-grades in place, never rescans.
+  // The preset chosen last is the saved default; every new scan starts back on it.
+  const [cspSavedPreset, setCspSavedPreset] = useState<CspViewPresetKey>(DEFAULT_CSP_VIEW_PRESET);
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(LS_CSP_VIEW_PRESET);
+      if (v === 'conservative' || v === 'balanced' || v === 'opportunity') setCspSavedPreset(v);
+    } catch {}
+  }, []);
+  const [cspViewOverride, setCspViewOverride] = useState<CspView | null>(null);
+  const [cspAffordableOnly, setCspAffordableOnly] = useState(false);
+  const cspSnapshot = activeSession?.requestedStrategy === 'csp' ? activeSession.ruleSnapshot ?? null : null;
+  // Only sessions scanned by the simplified flow (preset 'view') are re-graded; older saved sessions display as scanned.
+  const cspViewActive = cspSnapshot?.preset === 'view';
+  const cspView: CspView | null = useMemo(() => {
+    if (!cspSnapshot || !cspViewActive) return null;
+    return cspViewOverride ?? cspViewFromPreset(cspSavedPreset, cspSnapshot.dteMin, cspSnapshot.dteMax);
+  }, [cspSnapshot, cspViewActive, cspViewOverride, cspSavedPreset]);
+  const results = useMemo(
+    () => (cspView ? regradeCspResults(scanResults, cspView) : scanResults),
+    [scanResults, cspView],
+  );
+  // Exports and the order/lookup context describe the VIEW the trader is looking at, not the wide scan rules.
+  const viewSession = useMemo(
+    () => (activeSession && cspView && activeSession.ruleSnapshot
+      ? {
+          ...activeSession,
+          ruleSnapshot: {
+            ...activeSession.ruleSnapshot,
+            preset: cspView.preset,
+            deltaMin: cspView.deltaMin, deltaMax: cspView.deltaMax,
+            ivrMin: cspView.ivrMin, ivrMax: cspView.ivrMax,
+            oiMin: cspView.oiMin, dteMin: cspView.dteMin, dteMax: cspView.dteMax,
+          },
+        }
+      : activeSession),
+    [activeSession, cspView],
+  );
+
   // Starts a new session, immediately superseding whatever session was
   // still 'running' (if any) via the canonical stopSession('SUPERSEDED')
   // transition — never left dangling, never silently dropped. Sets the ref
@@ -9420,6 +9470,8 @@ export default function Home() {
       setFilterHiddenSymbols([]);
       setCspMinOi(0);
       setCcMinOi(0);
+      setCspViewOverride(null);
+      setCspAffordableOnly(false);
     }
     const session = createScanSession(sessionArgs);
     activeSessionIdRef.current = session.sessionId;
@@ -10022,7 +10074,7 @@ export default function Home() {
       return;
     }
     if (activeSession?.requestedStrategy === 'csp') {
-      const blob = new Blob([buildCspCsv(results, activeSession)], { type: 'text/csv' });
+      const blob = new Blob([buildCspCsv(results, viewSession ?? activeSession)], { type: 'text/csv' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `csp-screen-${new Date().toISOString().split('T')[0]}.csv`; a.click();
       return;
     }
@@ -10809,7 +10861,15 @@ export default function Home() {
   // CSP results are appended to the existing results list, so they render
   // through the exact same result-card UI as BPS/BCS/IC/PMCC (same look
   // and feel, per DR-0001 §10). TE-0007: no separate CSP-only ticker list.
-  const runCspScan = async (request: CspScanRequest) => {
+  const runCspScan = async (incoming: CspScanRequest) => {
+    // SCAN-SIMPLIFY-0001 -- the scan only fetches: tickers + DTE range. Grading rules are wide, there is no
+    // Targeted mode, and affordability is a results-view control. Delta/IVR/OI/return become the view.
+    const request: CspScanRequest = {
+      ...incoming,
+      mode: 'rank', preset: 'view',
+      rules: cspScanRules(incoming.rules.DTE_MIN, incoming.rules.DTE_MAX),
+      popMin: null, otmMin: null, rocMin: null, affordableOnly: false,
+    };
     clearResultsCache();
     const csp = opportunityUniverse;
     if (!csp.length) {
@@ -11293,9 +11353,11 @@ export default function Home() {
   // wins. Falls back to true Any when the session has no delta band to
   // default to (e.g. Rank/Targeted sessions, which don't use this control).
   const cspDefaultDeltaRange: [number, number] | null =
-    activeSession?.requestedStrategy === 'csp' && activeSession.ruleSnapshot
-      ? [activeSession.ruleSnapshot.deltaMin, activeSession.ruleSnapshot.deltaMax]
-      : null;
+    cspView
+      ? [cspView.deltaMin, cspView.deltaMax]
+      : activeSession?.requestedStrategy === 'csp' && activeSession.ruleSnapshot
+        ? [activeSession.ruleSnapshot.deltaMin, activeSession.ruleSnapshot.deltaMax]
+        : null;
   const effectiveCspDeltaRange = filterCspDeltaTouched ? filterCspDeltaRange : cspDefaultDeltaRange;
 
   const applyFilterModeChips = (list: ScreenResult[]) => list.filter(r => {
@@ -11311,6 +11373,8 @@ export default function Home() {
     const c = r.bestCandidate;
     if (c) {
       if (activeSession?.requestedStrategy === 'csp' && filterDteMin > 0 && c.dte < filterDteMin) return false;
+      if (cspView && !cspWithinViewWindow(r, cspView)) return false;
+      if (cspView && cspAffordableOnly && c.cspAccountEligibility !== 'ELIGIBLE') return false;
       if (activeSession?.requestedStrategy === 'csp' && effectiveCspDeltaRange) {
         const delta = Math.abs(c.shortDelta);
         if (delta < effectiveCspDeltaRange[0] || delta > effectiveCspDeltaRange[1]) return false;
@@ -11556,7 +11620,7 @@ export default function Home() {
     });
     const report = screenMode === 'leaps'
       ? buildLeapsExportReport(scope === 'full' ? leapsResults : visibleLeaps, scope, leapsScanCompletedAt, opportunityUniverse, leapsPdfLayout, { deltaMin: leapsDeltaMin, deltaMax: leapsDeltaMax, dteMin: leapsDteMin, dteMax: leapsDteMax, oiMin: leapsOiMin, extrinsicPctMax: leapsExtrinsicPctMax, hiddenSymbols: leapsHiddenSymbols })
-      : activeSession ? buildScanExportReport(activeSession, scope, currentPdfViewResults) : null;
+      : viewSession ? buildScanExportReport(viewSession, scope, currentPdfViewResults) : null;
     if (!report) return;
     if (!printScanPdfReport(report)) setError('Your browser blocked the print window. Allow pop-ups for TradeEdge and try Export PDF again.');
     setShowPdfExportMenu(false);
@@ -12186,10 +12250,10 @@ export default function Home() {
 
               {activeSession?.requestedStrategy === 'csp' && activeSession.ruleSnapshot && (
                 <ActiveCspRules
-                  snapshot={activeSession.ruleSnapshot}
+                  snapshot={(viewSession ?? activeSession).ruleSnapshot!}
                   counts={summarizeCspResults(results)}
                   capital={{
-                    affordableOnly: cspRequestsByMode[activeSession.ruleSnapshot.mode]?.affordableOnly ?? false,
+                    affordableOnly: cspView ? cspAffordableOnly : (cspRequestsByMode[activeSession.ruleSnapshot.mode]?.affordableOnly ?? false),
                     capitalLimit: cspRequestsByMode[activeSession.ruleSnapshot.mode]?.capitalLimit ?? null,
                   }}
                   onEdit={() => {
@@ -12260,6 +12324,29 @@ export default function Home() {
                         was a missing UI, not missing logic. Strategy
                         toggle hidden: a CSP-only scan page has no other
                         strategy's results to toggle. */}
+                    {cspView && (
+                      <CspViewControls
+                        view={cspView}
+                        th={th}
+                        affordableOnly={cspAffordableOnly}
+                        setAffordableOnly={setCspAffordableOnly}
+                        onPreset={key => {
+                          setCspViewOverride(cspViewFromPreset(key, cspView.dteMin, cspView.dteMax));
+                          setCspSavedPreset(key);
+                          try { localStorage.setItem(LS_CSP_VIEW_PRESET, key); } catch {}
+                          setFilterCspDeltaRangeRaw(null);
+                          setFilterCspDeltaTouched(false);
+                        }}
+                        onChange={patch => {
+                          const next = { ...cspView, ...patch };
+                          setCspViewOverride({ ...next, preset: detectCspPreset(next) });
+                          if ('deltaMin' in patch || 'deltaMax' in patch) {
+                            setFilterCspDeltaRangeRaw(null);
+                            setFilterCspDeltaTouched(false);
+                          }
+                        }}
+                      />
+                    )}
                     <FilteredResultControls
                       results={results}
                       qualifiedTotal={qualified.length}
