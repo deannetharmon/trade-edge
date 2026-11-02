@@ -169,6 +169,11 @@ export function FilteredResultControls({
   }
 
   const hasActiveFilters = activeChips.length > 0;
+  // SCAN-RESET-0001 -- when result filters are hiding qualified candidates, say
+  // so plainly (count + one-click way out) instead of leaving only the quiet
+  // "Showing X of Y" line, so a filtered view is never mistaken for a scan gap.
+  const hiddenQualifiedCount = Math.max(0, qualifiedTotal - filteredQualifiedCount);
+  const showHiddenBanner = hasActiveFilters && hiddenQualifiedCount > 0;
 
   function resetAll() {
     setPopMin(0);
@@ -285,6 +290,25 @@ export function FilteredResultControls({
 
       {/* Removable filter-chip summary + single reset action + narrowing
           indicator, per the ticket's "Controls and filters" requirements. */}
+      {showHiddenBanner && (
+        <div
+          role="status"
+          data-testid="hidden-by-filters-banner"
+          className="flex items-center justify-between flex-wrap gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1"
+        >
+          <p className="text-[10px] font-bold text-amber-300">
+            {hiddenQualifiedCount} of {qualifiedTotal} qualified candidates hidden by result filters
+          </p>
+          <button
+            type="button"
+            onClick={resetAll}
+            className="text-[9px] px-2 py-0.5 rounded border border-amber-500 text-amber-300 font-bold hover:bg-amber-500/20"
+          >
+            Show all hidden results
+          </button>
+        </div>
+      )}
+
       {(hasActiveFilters || qualifiedTotal > 0) && (
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-1.5 flex-wrap">

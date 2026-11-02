@@ -156,4 +156,33 @@ describe('FilteredResultControls', () => {
     expect(screen.queryByRole('button', { name: '45d' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '0.15–0.25' })).not.toBeInTheDocument();
   });
+
+  // SCAN-RESET-0001: a filtered view must never be mistaken for a scan gap.
+  it('shows a hidden-by-filters banner with the hidden count when active filters hide qualified candidates', () => {
+    renderControls({ qualifiedTotal: 5, filteredQualifiedCount: 2, dteMin: 21, setDteMin: vi.fn() });
+    expect(screen.getByTestId('hidden-by-filters-banner')).toHaveTextContent('3 of 5 qualified candidates hidden by result filters');
+  });
+
+  it('the banner button clears every active filter, same as the single reset action', () => {
+    const setDteMin = vi.fn();
+    const { setPopMin } = renderControls({ dteMin: 21, setDteMin });
+    fireEvent.click(screen.getByRole('button', { name: 'Show all hidden results' }));
+    expect(setDteMin).toHaveBeenCalledWith(0);
+    expect(setPopMin).toHaveBeenCalledWith(0);
+  });
+
+  it('shows no banner when filters are active but hide nothing', () => {
+    renderControls({ qualifiedTotal: 5, filteredQualifiedCount: 5 });
+    expect(screen.queryByTestId('hidden-by-filters-banner')).not.toBeInTheDocument();
+  });
+
+  it('shows no banner when nothing is hidden because no filter is active', () => {
+    renderControls({ popMin: 0, strategies: [], hiddenSymbols: [], qualifiedTotal: 5, filteredQualifiedCount: 5 });
+    expect(screen.queryByTestId('hidden-by-filters-banner')).not.toBeInTheDocument();
+  });
+
+  it('keeps the existing "Showing X of Y" narrowing indicator alongside the banner', () => {
+    renderControls({ qualifiedTotal: 5, filteredQualifiedCount: 2 });
+    expect(screen.getByTestId('narrowing-indicator')).toHaveTextContent('Showing 2 of 5 qualified candidates');
+  });
 });

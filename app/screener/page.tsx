@@ -9387,6 +9387,9 @@ export default function Home() {
     ruleSnapshot?: ReturnType<typeof buildCspRuleSnapshot>;
     pmccSnapshot?: PmccScanSnapshot;
     targetedSnapshot?: TargetedScanLaunchSnapshot;
+    // SCAN-RESET-0001 -- only a re-grade of an already-scanned result set (the
+    // Filter-mode applyRules path) opts out of the post-scan filter reset.
+    keepResultFilters?: boolean;
   }): ScreenerScanSession => {
     setActiveSession(prev => {
       if (prev && prev.status === 'running') {
@@ -9398,7 +9401,27 @@ export default function Home() {
       }
       return prev;
     });
-    const session = createScanSession(args);
+    const { keepResultFilters, ...sessionArgs } = args;
+    // SCAN-RESET-0001 -- post-scan result filters narrow what a scan returned;
+    // they must never silently carry over into a NEW scan (a leftover "DTE >= 21d"
+    // chip hid every 18-DTE contract from a 7-60 DTE scan). Every new scan starts
+    // with all result filters open. The CSP delta chip returns to its default (the
+    // scan's own preferred band, CSP-DEFAULT-DELTA-0001) by clearing "touched".
+    if (!keepResultFilters) {
+      setFilterPopMin(0);
+      setFilterOtmMin(0);
+      setFilterCreditRatioMin(0);
+      setFilterIvrMin(0);
+      setFilterIvxMin(0);
+      setFilterDteMin(0);
+      setFilterCspDeltaRangeRaw(null);
+      setFilterCspDeltaTouched(false);
+      setFilterStrategies(['BPS', 'BCS', 'IC', 'CSP', 'CC', 'PMCC']);
+      setFilterHiddenSymbols([]);
+      setCspMinOi(0);
+      setCcMinOi(0);
+    }
+    const session = createScanSession(sessionArgs);
     activeSessionIdRef.current = session.sessionId;
     setActiveSession(session);
     return session;
@@ -10040,7 +10063,7 @@ export default function Home() {
     const priorSession = activeSession;
     if (!priorSession || priorSession.mode !== 'filter' || priorSession.requestedStrategy !== 'spreads') return;
 
-    let session = beginScanSession({ mode: 'filter', requestedStrategy: 'spreads', scope: priorSession.scope });
+    let session = beginScanSession({ mode: 'filter', requestedStrategy: 'spreads', scope: priorSession.scope, keepResultFilters: true });
     const rawBySymbol = new Map(rawScanCache.map(entry => [entry.symbol, entry]));
     for (const symbol of session.plannedScanSymbols) {
       const entry = rawBySymbol.get(symbol);
