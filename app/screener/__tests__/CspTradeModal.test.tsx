@@ -111,6 +111,37 @@ describe('CSP-ORDERS-0001: the CSP result card offers real trade placement', () 
     await waitFor(() => expect(within(modal).getByText('$47,000')).toBeInTheDocument());
   });
 
+  // CSP-STOP-0001 (Ian): a CSP has no stop unless the trader opts in; assignment is an acceptable outcome.
+  it('starts with no stop: the opt-in is unchecked, the stop controls are hidden, and the no-stop note shows', async () => {
+    await runCspScan();
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await screen.findByText('PLACE CSP ORDER — MRVL');
+
+    const modal = screen.getByText('PLACE CSP ORDER — MRVL').closest('div[class*="rounded-2xl"]') as HTMLElement;
+    expect(within(modal).getByTestId('csp-stop-toggle')).not.toBeChecked();
+    expect(within(modal).getByTestId('csp-no-stop-note')).toBeInTheDocument();
+    expect(within(modal).queryByTestId('csp-stop-controls')).not.toBeInTheDocument();
+    expect(within(modal).getByText('Close for a loss instead of taking assignment')).toBeInTheDocument();
+  });
+
+  it('opting in shows the stop slider, the trigger/limit, and the stock-price breakeven (not an order); opting out hides them again', async () => {
+    await runCspScan();
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await screen.findByText('PLACE CSP ORDER — MRVL');
+
+    const modal = screen.getByText('PLACE CSP ORDER — MRVL').closest('div[class*="rounded-2xl"]') as HTMLElement;
+    await userEvent.click(within(modal).getByTestId('csp-stop-toggle'));
+    expect(within(modal).getByTestId('csp-stop-controls')).toBeInTheDocument();
+    expect(within(modal).queryByTestId('csp-no-stop-note')).not.toBeInTheDocument();
+    expect(within(modal).getByText(/Trigger \$\d+\.\d{2} · Limit \$\d+\.\d{2}/)).toBeInTheDocument();
+    // strike 235 minus the ~7.25 mid: a stock price in the 220s.
+    expect(within(modal).getByTestId('csp-breakeven').textContent).toMatch(/^\$22\d\.\d{2}$/);
+
+    await userEvent.click(within(modal).getByTestId('csp-stop-toggle'));
+    expect(within(modal).queryByTestId('csp-stop-controls')).not.toBeInTheDocument();
+    expect(within(modal).getByTestId('csp-no-stop-note')).toBeInTheDocument();
+  });
+
   it('closes without side effects', async () => {
     await runCspScan();
     await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));

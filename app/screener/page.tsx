@@ -154,7 +154,7 @@ import { invalidateAccessToken, isTokenRejection, sendWithTokenRetry } from '@/l
 import BuyingPowerLine from '@/features/screener/components/BuyingPowerLine';
 import MarketLinksMenu from '@/features/screener/components/MarketLinksMenu';
 import { buildCspOrderLeg, computeCspMaxLoss } from '@/lib/scans/cspOrderMath';
-import { cspEntryLimitPerShare, cspPerShareToContractDollars, buildCspEntryPayload } from '@/lib/scans/cspEntryUnits';
+import { cspEntryLimitPerShare, cspPerShareToContractDollars, cspBreakevenPerShare, buildCspEntryPayload } from '@/lib/scans/cspEntryUnits';
 import { guardCspOrder } from '@/lib/scans/cspOrderSubmission';
 import type {
   SortField, SecondarySortField, SortSpec, SortableMetrics, OiEligibilityResult,
@@ -2842,6 +2842,8 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
   useEffect(() => { setEntryLimit(v => snapEntryCredit(v, tickTable)); }, [tickTable]);
   const [gtcPct, setGtcPct] = useState(50); // Ian, 2026-09-22: same defaults as spreads -- no CSP-specific default needed.
   const [stopMultiple, setStopMultiple] = useState(2);
+  // CSP-STOP-0001: a cash-secured put has NO stop unless the trader opts in (assignment is acceptable, DECIDE-0001).
+  const [stopEnabled, setStopEnabled] = useState(false);
 
   useEffect(() => {
     if (!quoteValidation) return;
@@ -2859,7 +2861,7 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
 
   const buildOtocoPayload = () => {
     if (!legBuild.ok) throw new Error(legBuild.reason);
-    return buildCspEntryPayload({ entryPerShare: entryLimit, gtcPct, stopMultiple, quantity, leg: legBuild.leg, tickTable });
+    return buildCspEntryPayload({ entryPerShare: entryLimit, gtcPct, stopMultiple, quantity, leg: legBuild.leg, tickTable, stopEnabled });
   };
 
   const refreshExecutionQuote = async (expectedCredit?: number) => {
@@ -2904,7 +2906,7 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
       // A dry run places nothing, so the retry is safe; a live order is never resent automatically.
       const healed = await postWithTickHeal({
         root: tickRoot, chainTable: chainTickTable, entry: entryLimit,
-        build: (entry, table) => buildCspEntryPayload({ entryPerShare: entry, gtcPct, stopMultiple, quantity, leg: dryRunLeg, tickTable: table }),
+        build: (entry, table) => buildCspEntryPayload({ entryPerShare: entry, gtcPct, stopMultiple, quantity, leg: dryRunLeg, tickTable: table, stopEnabled }),
         post: async payload => {
           // TOKEN-0001: a token the broker refuses is replaced and this dry run is sent once more (a dry run places nothing).
           const { response } = await sendWithTokenRetry(async tk => {
@@ -2958,7 +2960,8 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
       if (!capitalOk) throw new Error('Collateral is no longer sufficient for this order. Refresh and try a smaller quantity.');
       const accountNumber = await getAccountNumber();
       const walkLeg = legBuild.leg;
-      const buildPayload = (price: number) => buildCreditEntryOtoco({ ...bracketForPrice(price, gtcPct, stopMultiple, tickTable), quantity, legs: [walkLeg] });
+      // CSP-STOP-0001: the walk uses the same builder as the normal and dry-run paths, so it cannot attach a stop on its own.
+      const buildPayload = (price: number) => buildCspEntryPayload({ entryPerShare: price, gtcPct, stopMultiple, quantity, leg: walkLeg, tickTable, stopEnabled });
       // Same Trade Log note as the normal path, re-saved for each new order id so the live order always has its verdict.
       const saveNote = async (response: any) => {
         const id = String(response?.data?.['complex-order']?.id ?? response?.data?.order?.id ?? 'submitted');
@@ -3149,9 +3152,20 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
           <p className={`text-[10px] font-bold ${th.textMuted} uppercase tracking-wider`}>GTC Profit Target</p>
           <input type="range" min={10} max={90} step={5} value={gtcPct} onChange={e => setGtcPct(Number(e.target.value))} className="w-full" />
           <div className="flex justify-between text-[10px]"><span className={th.textFaint}>{gtcPct}% of credit</span><span className={th.text}>Buyback ${gtcBuyback.toFixed(2)}</span></div>
-          <p className={`text-[10px] font-bold ${th.textMuted} uppercase tracking-wider pt-2`}>Stop Loss</p>
-          <input type="range" min={1.5} max={4} step={0.5} value={stopMultiple} onChange={e => setStopMultiple(Number(e.target.value))} className="w-full" />
-          <div className="flex justify-between text-[10px]"><span className={th.textFaint}>{stopMultiple}× credit</span><span className={th.text}>Trigger ${stopTrigger.toFixed(2)} · Limit ${stopLimit.toFixed(2)}</span></div>
+          {/* CSP-STOP-0001 (Ian): no stop by default; the stop is an explicit opt-in to close for a loss instead of taking assignment. */}
+          <label className="flex items-center gap-2 pt-2 cursor-pointer">
+            <input type="checkbox" data-testid="csp-stop-toggle" checked={stopEnabled} onChange={e => setStopEnabled(e.target.checked)} disabled={phase === 'placing'} />
+            <span className={`text-[10px] font-bold ${th.textMuted} uppercase tracking-wider`}>Close for a loss instead of taking assignment</span>
+          </label>
+          {!stopEnabled && <p className={`text-[10px] ${th.textFaint}`} data-testid="csp-no-stop-note">No stop on this order. If the put finishes in the money you take assignment.</p>}
+          {stopEnabled && (
+            <div data-testid="csp-stop-controls" className="space-y-2">
+              <input type="range" min={1.5} max={4} step={0.5} value={stopMultiple} onChange={e => setStopMultiple(Number(e.target.value))} className="w-full" />
+              <div className="flex justify-between text-[10px]"><span className={th.textFaint}>{stopMultiple}× credit</span><span className={th.text}>Trigger ${stopTrigger.toFixed(2)} · Limit ${stopLimit.toFixed(2)}</span></div>
+              <div className="flex justify-between text-[10px]"><span className={th.textFaint}>Breakeven (stock price, not an order)</span><span className={th.text} data-testid="csp-breakeven">${cspBreakevenPerShare(c.shortStrike, entryLimit).toFixed(2)}</span></div>
+              <p className="text-[10px] text-amber-300">This stop closes the put at a loss if the option reaches ${stopTrigger.toFixed(2)}. You will not take assignment.</p>
+            </div>
+          )}
         </div>
 
         {phase === 'confirm' && dryRunResult && bpEffect && (
