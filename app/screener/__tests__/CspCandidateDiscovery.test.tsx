@@ -568,6 +568,23 @@ describe('CSP-WORKFLOW-0001: strategy-aware launch modes', () => {
     expect(screen.getByLabelText('Maximum DTE')).toHaveValue('60');
   });
 
+  it('SCAN-TOP-0001: CSP results have no Best Opportunities strip, and each card boxes its expiration, DTE and strike', async () => {
+    getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingCspChain(symbol)));
+    inBandIvr(['NKE']);
+    renderScreener();
+    await addToUniverse('NKE');
+    await userEvent.click(await screen.findByRole('button', { name: 'FIND CSPs' }));
+    await userEvent.click(screen.getByRole('button', { name: 'RUN CSP SCAN →' }));
+    await waitFor(() => expect(screen.getByText('Ranked Cash-Secured Put Scan')).toBeInTheDocument());
+
+    expect(screen.queryByTestId('best-opportunities-shortlist')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Jump to full card ↓' })).not.toBeInTheDocument();
+    const box = screen.getAllByTestId('contract-box')[0];
+    expect(box).toHaveTextContent(/Exp\s*\d{4}-\d{2}-\d{2}/);
+    expect(box).toHaveTextContent(/\(\d+d\)/);
+    expect(box).toHaveTextContent(/Put\s*\d+/);
+  });
+
   it('changing the results view never fetches a chain again', async () => {
     getChainMock.mockImplementation((symbol: string) => Promise.resolve(qualifyingCspChain(symbol)));
     inBandIvr(['NKE']);

@@ -228,6 +228,7 @@ import { pmccScanEntryMode } from '@/lib/scans/pmccActiveRules';
 import { PmccScanModal, type PmccScanRequest } from '@/features/screener/components/PmccScanModal';
 import { LeapsScanModal, type LeapsScanRequest } from '@/features/screener/components/LeapsScanModal';
 import { DeferredNumberInput } from '@/features/screener/components/DeferredNumberInput';
+import { WhyRanksHerePanel } from '@/features/screener/components/WhyRanksHerePanel';
 import { CspViewControls } from '@/features/screener/components/CspViewControls';
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
 import { evaluateCspIvr } from '@/lib/scans/cspIvrPolicy';
@@ -2731,13 +2732,13 @@ function StrikesDisplay({ c, th }: { c: SpreadCandidate; th: typeof THEMES[Theme
     return (
       <div className="text-xs shrink-0">
         <span className={th.label}>Long </span>
-        <span className={th.text}>{c.longStrike}C</span>
+        <span className={`${th.text} font-medium`}>{c.longStrike}C</span>
         <span className="text-[10px] text-emerald-400 font-sans ml-0.5">
           (Δ{c.longDelta != null ? c.longDelta.toFixed(2) : '—'})
         </span>
         <span className={`${th.textFaint} mx-1`}>→</span>
         <span className={th.label}>Short </span>
-        <span className={th.text}>{c.shortStrike}C</span>
+        <span className={`${th.text} font-medium`}>{c.shortStrike}C</span>
         <span className="text-[10px] text-amber-400 font-sans ml-0.5">
           (Δ{c.shortDelta != null ? c.shortDelta.toFixed(2) : '—'})
         </span>
@@ -2748,10 +2749,10 @@ function StrikesDisplay({ c, th }: { c: SpreadCandidate; th: typeof THEMES[Theme
     return (
       <div className="text-xs shrink-0">
         <span className={th.label}>Strikes </span>
-        <span className={th.text}>{c.shortStrike}/{c.longStrike}</span>
+        <span className={`${th.text} font-medium`}>{c.shortStrike}/{c.longStrike}</span>
         {widthTag(c.spreadWidth)}
         <br />
-        <span className={th.text}>{c.shortCallStrike}/{c.longCallStrike}</span>
+        <span className={`${th.text} font-medium`}>{c.shortCallStrike}/{c.longCallStrike}</span>
         {widthTag(c.callWidth ?? c.spreadWidth)}
       </div>
     );
@@ -6538,8 +6539,12 @@ const strategyScores = useMemo(() => {
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <div className={`text-xs ${th.label} w-20 shrink-0`}>IVR <span className={result.ivr != null && result.ivr >= 30 ? 'text-emerald-500 font-bold' : 'text-red-500 font-bold'}>{result.ivr != null ? `${result.ivr.toFixed(1)}%` : 'N/A'}</span></div>
           {c && <>
-            <div className="text-xs shrink-0 w-36"><span className={th.label}>Exp </span><span className={`${th.text} font-medium`}>{c.expiration}</span><span className={`ml-1 font-medium ${c.dte <= dteCloseTarget ? 'text-red-500' : c.dte <= dteAlertThreshold ? 'text-yellow-500' : th.textFaint}`}>({c.dte}d)</span></div>
-            <div className={`${c.strategy === 'IC' ? 'w-44' : 'w-28'} shrink-0`}><StrikesDisplay c={c} th={th} /></div>
+            {/* SCAN-TOP-0001 -- expiration, DTE and strike are the contract's identity and the hardest thing to
+                find in a row of grey text. One bordered, bold box (every strategy shares this header). */}
+            <div data-testid="contract-box" className={`flex items-center gap-3 shrink-0 rounded-md border border-slate-400/60 px-2.5 py-1 [&_.font-medium]:font-bold ${c.strategy === 'IC' ? 'w-[22.5rem]' : 'w-[18.5rem]'}`}>
+              <div className="text-xs shrink-0 w-36"><span className={th.label}>Exp </span><span className={`${th.text} font-medium`}>{c.expiration}</span><span className={`ml-1 font-medium ${c.dte <= dteCloseTarget ? 'text-red-500' : c.dte <= dteAlertThreshold ? 'text-yellow-500' : th.text}`}>({c.dte}d)</span></div>
+              <div className={`${c.strategy === 'IC' ? 'w-44' : 'w-28'} shrink-0`}><StrikesDisplay c={c} th={th} /></div>
+            </div>
             {c.strategy === 'CSP' && <CspReturnThisCycleRow candidate={c} />}
             {c.strategy === 'PMCC' ? <>
               <div className="text-xs shrink-0 w-24"><span className={th.label}>Net Debit </span><span className="text-red-400 font-bold">${c.netDebit?.toFixed(2) ?? '—'}</span></div>
@@ -12639,7 +12644,8 @@ export default function Home() {
                   meaningless/misleading empty state if wired to either
                   Best-Opportunities component -- it is deliberately
                   excluded, not merely deferred. */}
-              {!activePmccSession && (results.length > 0 || hasCompletedScanForCurrentMode) && (screenMode === 'filter' || activeSession?.requestedStrategy === 'csp') && (
+              {/* SCAN-TOP-0001 -- CSP has no Best Opportunities strip: the ranked qualified cards below are the list, with a "Best opportunity" badge on the earned top picks and a collapsed "Why this ranks here" panel on each card. Spreads/CC/PMCC keep the strip until SCAN-TOP-0002 moves them over. */}
+              {!activePmccSession && activeSession?.requestedStrategy !== 'csp' && (results.length > 0 || hasCompletedScanForCurrentMode) && (screenMode === 'filter') && (
                 <BestOpportunitiesShortlist
                   rows={buildBestOpportunityRows(filteredQualified, excludeHiddenSymbols(opportunityRecommendations, filterHiddenSymbols))}
                   borderClassName={th.border}
@@ -12651,6 +12657,7 @@ export default function Home() {
               {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && rankDisplayWidth != null && (
                 <p className={`mb-3 text-xs ${th.textFaint}`}>Best Opportunities uses the full scan. The selected-width results below have their own candidate scores; show all scanned widths to see the full-scan shortlist.</p>
               )}
+
               {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && activeSession?.requestedStrategy !== 'csp' && rankDisplayWidth == null && (
                 <BestOpportunitiesShortlist
                   rows={buildBestOpportunityRows(results.filter(r => r.qualified && !rankHiddenSymbols.includes(r.symbol)), excludeHiddenSymbols(opportunityRecommendations, rankHiddenSymbols))}
@@ -12706,6 +12713,12 @@ export default function Home() {
                 const topOpportunityResultKeys = new Set(
                   topOpportunityRows.filter(row => topOpportunityIds.has(row.candidateId)).map(row => row.resultKey),
                 );
+                // SCAN-TOP-0001 -- badge number = the row's position among the earned top picks; the reasoning
+                // panel is keyed the same way (rows only exist for candidates the advisor actually evaluated).
+                const topOpportunityRankByKey = new Map(
+                  topOpportunityRows.map((row, index) => [row.resultKey, index + 1] as const).filter(([key]) => topOpportunityResultKeys.has(key)),
+                );
+                const whyRowByKey = new Map(topOpportunityRows.map(row => [row.resultKey, row] as const));
                 const renderQualifiedCandidate = (r: ScreenResult) => {
                   const resultKey = r.candidateId ?? `${r.symbol}-${r.strategy}`;
                   const isTopOpportunity = topOpportunityResultKeys.has(resultKey);
@@ -12716,10 +12729,11 @@ export default function Home() {
                       ref={el => { qualifiedCardRefs.current[resultKey] = el; }}
                       className={isJumpHighlighted ? 'transition-colors duration-500 ring-2 ring-cyan-400 rounded-xl' : 'transition-colors duration-500'}
                     >
-                      {isTopOpportunity && <p className="mb-1 text-[9px] font-bold text-emerald-400" data-testid="top-opportunity-marker">★ Top opportunity — see Best Opportunities above</p>}
+                      {isTopOpportunity && <p className="mb-1 text-[9px] font-bold text-emerald-400" data-testid="top-opportunity-marker">{activeSession?.requestedStrategy === 'csp' ? `★ Best opportunity #${topOpportunityRankByKey.get(resultKey)}` : '★ Top opportunity — see Best Opportunities above'}</p>}
                       <ResultCard hideLeapNotes={r.pmccPair?.entryMode === 'covered-short-call-against-held-leaps' && filteredQualified.find(q => q.symbol === r.symbol && q.pmccPair?.entryMode === 'covered-short-call-against-held-leaps') !== r} result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} onTradeCsp={setCspTradeResult} onTradeCc={openCcFromScan} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions}
                         pmccBestFit={pmccBestFitWinner?.result === r ? { profile: pmccBestFitProfile, score: pmccBestFitWinner.score, runnerUp: pmccBestFitRanked[1]?.result ?? null, earningsBlocksRecommendation: pmccEarningsBlocksBestFit(r) } : undefined} />
                       {(filteredOiByResult.get(r)?.protectiveLegWarnings ?? []).map((w, wi) => <p key={wi} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">⚠ {w}</p>)}
+                      {activeSession?.requestedStrategy === 'csp' && whyRowByKey.get(resultKey) && <WhyRanksHerePanel row={whyRowByKey.get(resultKey)!} borderClassName={th.border} textFaintClassName={th.textFaint} textMutedClassName={th.textMuted} />}
                     </div>
                   );
                 };
@@ -12926,7 +12940,7 @@ export default function Home() {
                           return (
                           <div key={resultKey}>
                             {isTopOpportunity && (
-                              <p className="text-[9px] font-bold text-emerald-400 mb-1" data-testid="top-opportunity-marker">★ Top opportunity — see Best Opportunities above</p>
+                              <p className="text-[9px] font-bold text-emerald-400 mb-1" data-testid="top-opportunity-marker">{activeSession?.requestedStrategy === 'csp' ? `★ Best opportunity #${topOpportunityRankByKey.get(resultKey)}` : '★ Top opportunity — see Best Opportunities above'}</p>
                             )}
                             {trendAligned && (
                               <p className="text-[9px] text-emerald-400 mb-1" title="Trend aligned" data-testid="trend-aligned-marker">↑✓ Trend aligned</p>
@@ -12949,6 +12963,7 @@ export default function Home() {
                                 ⚠ {w}
                               </p>
                             ))}
+                            {activeSession?.requestedStrategy === 'csp' && whyRowByKey.get(resultKey) && <WhyRanksHerePanel row={whyRowByKey.get(resultKey)!} borderClassName={th.border} textFaintClassName={th.textFaint} textMutedClassName={th.textMuted} />}
                           </div>
                           );
                         })}
