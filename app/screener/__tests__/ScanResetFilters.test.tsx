@@ -12,6 +12,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import ScreenerPage from '../page';
+import { getQuote } from '@/lib/scans/tastytrade-client';
 import { CommandProvider } from '@/components/commands/CommandProvider';
 import { TaskProvider } from '@/components/tasks/TaskProvider';
 import { warmScreenerPage, WARM_HOOK_TIMEOUT_MS, WARM_FLOW_TIMEOUT_MS } from './helpers/warmScreenerPage';
@@ -138,5 +139,16 @@ describe('SCAN-RESET-0001: result filters do not carry over into a new scan', ()
 
     await waitFor(() => expect(screen.getByText('Showing 3 of 3 qualified candidates')).toBeInTheDocument());
     expect(screen.queryByTestId('hidden-by-filters-banner')).not.toBeInTheDocument();
+  });
+
+  it('an OTM >= chip keeps CSPs that are far enough out of the money and hides closer ones', async () => {
+    vi.mocked(getQuote).mockResolvedValue(477.85);
+    await firstAmdCspScan();
+    await waitFor(() => expect(screen.getByText('Showing 2 of 3 qualified candidates')).toBeInTheDocument());
+    // Price 477.85: strike 405 is ~15% OTM, 420 is ~12%, so OTM >= 12% keeps both; 16% keeps neither.
+    await userEvent.click(screen.getByRole('button', { name: '12%' }));
+    await waitFor(() => expect(screen.getByText('Showing 2 of 3 qualified candidates')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: '16%' }));
+    await waitFor(() => expect(screen.getByText('Showing 0 of 3 qualified candidates')).toBeInTheDocument());
   });
 });

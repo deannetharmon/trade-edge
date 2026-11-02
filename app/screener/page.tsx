@@ -11384,8 +11384,10 @@ export default function Home() {
       if (filterOtmMin > 0) {
         const price = r.price;
         if (price == null || price <= 0) return false;
-        const otmPct = c.strategy === 'BPS' ? ((price - c.shortStrike) / price) * 100
-          : c.strategy === 'BCS' ? ((c.shortStrike - price) / price) * 100
+        // CSP is a short put (OTM below price, like BPS); CC is a short call (like BCS). Both were
+        // missing here, so any OTM >= chip hid every CSP/CC result.
+        const otmPct = (c.strategy === 'BPS' || c.strategy === 'CSP') ? ((price - c.shortStrike) / price) * 100
+          : (c.strategy === 'BCS' || c.strategy === 'CC') ? ((c.shortStrike - price) / price) * 100
           : c.strategy === 'IC' && c.shortCallStrike != null
             ? Math.min(((price - c.shortStrike) / price) * 100, ((c.shortCallStrike - price) / price) * 100)
             : null;
