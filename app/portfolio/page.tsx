@@ -11426,11 +11426,10 @@ export default function PortfolioPage() {
                 </div>
               )}
               {/* GREEKS-V2-0001: portfolio-wide Greeks (always unfiltered) were legacy-view only. */}
-              <div className="px-4 pt-4 sm:px-6 sm:pt-6">
-                <PortfolioGreeksDashboard positions={positions} th={th} />
-              </div>
+              {/* PORT-HEADLINE-0001: rendered inside the workspace, between the headline strip and the strategy tiles. */}
               <SalvageDepsProvider value={salvageDeps}>
               <PositionsWorkspace
+                greeks={<div className="mb-4"><PortfolioGreeksDashboard positions={positions} th={th} /></div>}
                 model={positionsWorkspaceModel}
                 pendingOrders={pendingOrders}
                 cashBalance={balances?.cashBalance ?? null}

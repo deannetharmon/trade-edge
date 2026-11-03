@@ -117,6 +117,16 @@ describe('PortfolioSummaryStrip headline', () => {
     for (const el of capital) expect(el.className).toContain('font-bold');
   });
 
+  it('order: headline strip, then the Greeks panel, then the strategy tiles', () => {
+    const summary = buildPortfolioSummary({ rows: [{ position: csp('AAA'), needsAttention: false }], equities: [], pendingOrders: [], cashBalance: 20000, netLiquidity: 25000, nowMs: NOW });
+    render(<PortfolioSummaryStrip summary={summary} selected={null} onSelect={() => {}} afterHeadline={<div data-testid="greeks" />} />);
+    const headline = screen.getByTestId('portfolio-headline');
+    const greeks = screen.getByTestId('greeks');
+    const tiles = screen.getByLabelText('P/L by position type');
+    expect(headline.compareDocumentPosition(greeks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(greeks.compareDocumentPosition(tiles) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('each headline tile carries a hover definition', () => {
     strip();
     const titled = Array.from(screen.getByTestId('portfolio-headline').querySelectorAll('[title]'));

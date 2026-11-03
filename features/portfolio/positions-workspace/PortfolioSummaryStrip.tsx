@@ -7,6 +7,7 @@
 
 'use client';
 
+import type { ReactNode } from 'react';
 import type { PortfolioHeadline, PortfolioSummary, SummaryGroupKey, SummaryTile, SummedFigure } from './model/portfolioSummary';
 
 const signedMoney = (v: number) => `${v >= 0 ? '+' : '-'}$${Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
@@ -109,8 +110,10 @@ function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
   );
 }
 
-export function PortfolioSummaryStrip({ summary, selected, onSelect, onSelectSymbol, onSelectSymbols }: {
+export function PortfolioSummaryStrip({ summary, selected, onSelect, onSelectSymbol, onSelectSymbols, afterHeadline }: {
   summary: PortfolioSummary;
+  /** Rendered between the headline strip and the strategy tiles (the portfolio Greeks panel). */
+  afterHeadline?: ReactNode;
   selected: SummaryGroupKey | null;
   onSelect: (group: SummaryGroupKey | null) => void;
   onSelectSymbol?: (symbol: string) => void;
@@ -123,6 +126,7 @@ export function PortfolioSummaryStrip({ summary, selected, onSelect, onSelectSym
   return (
     <>
     <HeadlineStrip headline={summary.headline} />
+    {afterHeadline}
     <section aria-label="P/L by position type" className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">
       <div className={tileClass(selected == null)}>
         <button type="button" aria-pressed={selected == null} onClick={() => onSelect(null)} className="block w-full text-left focus:outline-none">
