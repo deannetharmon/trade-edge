@@ -105,7 +105,7 @@ beforeAll(() => warmScreenerPage(async () => {
   await userEvent.click(await screen.findByRole('button', { name: 'FIND SPREADS' }));
   await userEvent.click(await screen.findByRole('radio', { name: /RANK/ }));
   await userEvent.click(await screen.findByRole('button', { name: /RUN SCREENER/ }));
-  await screen.findByTestId('best-opportunities-shortlist', undefined, { timeout: WARM_FLOW_TIMEOUT_MS });
+  await screen.findByTestId('ranked-list-header', undefined, { timeout: WARM_FLOW_TIMEOUT_MS });
 }), WARM_HOOK_TIMEOUT_MS);
 
 beforeEach(() => {
@@ -148,8 +148,8 @@ describe('SCREENER-UX-0001 corrective pass: production hierarchy order (Ranked)'
     expect(isBefore(scanIdentity, accounting)).toBe(true);
     expect(screen.getByTestId('scan-identity-header')).toHaveTextContent('Ranked Spread Scan');
 
-    await waitFor(() => expect(screen.getByTestId('best-opportunities-shortlist')).toBeInTheDocument());
-    const bestOpps = screen.getByTestId('best-opportunities-shortlist');
+    await waitFor(() => expect(screen.getByTestId('ranked-list-header')).toBeInTheDocument());
+    const bestOpps = screen.getByTestId('ranked-list-header');
     expect(isBefore(accounting, bestOpps)).toBe(true);
   });
 });

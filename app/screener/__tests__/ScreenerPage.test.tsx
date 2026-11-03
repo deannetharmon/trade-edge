@@ -267,6 +267,9 @@ function makeScreenResult(overrides: Partial<ScreenResult> = {}): ScreenResult {
 // -> completeSession(recordSymbolEvaluated(...)) -> kv.set(
 // SCAN_SESSION_CACHE_KEY, ...)), generalized to any symbol/result set
 // instead of one hardcoded case.
+/** SCAN-TOP-0002: text of every ranked qualified card (the strip is gone, so the cards are the list). */
+const rankedCardText = (): string => screen.queryAllByTestId('ranked-card').map(el => el.textContent ?? '').join('\n');
+
 function seedCompletedSession(results: ScreenResult[]): void {
   let session = createScanSession({
     mode: 'filter', // matches renderScreenerPage()'s default screenMode ('filter')
@@ -848,12 +851,12 @@ describe('WA-0005 /screener: Initial/not-yet-run state', () => {
 
     await waitFor(() => expect(screen.getByText(/ADD TICKERS AND RUN HUNTER/)).toBeInTheDocument());
     expect(screen.queryByText(/EMPTY UNIVERSE/)).not.toBeInTheDocument();
-    expect(screen.queryByTestId('best-opportunities-shortlist')).toBeNull();
+    expect(screen.queryByTestId('ranked-list-header')).toBeNull();
   });
 });
 
 describe('WA-0005 /screener: evaluable-results gating and section order (AC-3/AC-4/AC-6/AC-9/AC-10)', () => {
-  it('renders Ranked Opportunities above the disqualified/full-results section once a scan has produced results, with the best-opportunities-shortlist testid present exactly once', async () => {
+  it('renders Ranked Opportunities above the disqualified/full-results section once a scan has produced results, with the ranked-list-header testid present exactly once', async () => {
     // TE-0007D corrective — "All Scan Results" as a distinct heading was
     // replaced by SCREENER-UX-0001's real 6-section hierarchy (Scan
     // Identity -> Accounting -> Filter Controls -> Best Opportunities ->
@@ -882,10 +885,10 @@ describe('WA-0005 /screener: evaluable-results gating and section order (AC-3/AC
 
     renderScreenerPage();
 
-    await waitFor(() => expect(screen.queryByTestId('best-opportunities-shortlist')).not.toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('ranked-list-header')).not.toBeNull());
     await waitFor(() => expect(screen.queryByTestId('disqualified-section')).not.toBeNull());
 
-    const rankedSection = screen.getByTestId('best-opportunities-shortlist');
+    const rankedSection = screen.getByTestId('ranked-list-header');
     const disqualifiedSection = screen.getByTestId('disqualified-section');
 
     // Document order: Best Opportunities' DOM node must precede the
@@ -895,15 +898,15 @@ describe('WA-0005 /screener: evaluable-results gating and section order (AC-3/AC
     const position = rankedSection.compareDocumentPosition(disqualifiedSection);
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // AC-10: exactly one best-opportunities-shortlist and no duplicate ids on this page.
-    expect(document.querySelectorAll('[data-testid="best-opportunities-shortlist"]')).toHaveLength(1);
+    // AC-10: exactly one ranked-list-header and no duplicate ids on this page.
+    expect(document.querySelectorAll('[data-testid="ranked-list-header"]')).toHaveLength(1);
     expect(document.querySelectorAll('#best-opportunity')).toHaveLength(0);
   });
 
   it('AC-6: does not render Ranked Opportunities before a scan has produced evaluable results (results.length === 0)', async () => {
     renderScreenerPage();
     await waitFor(() => expect(screen.getByText(/ADD TICKERS AND RUN HUNTER/)).toBeInTheDocument());
-    expect(screen.queryByTestId('best-opportunities-shortlist')).toBeNull();
+    expect(screen.queryByTestId('ranked-list-header')).toBeNull();
   });
 
   it('AC-5: the results view retains the existing CSV export control', async () => {
@@ -915,7 +918,7 @@ describe('WA-0005 /screener: evaluable-results gating and section order (AC-3/AC
     seedCompletedSession([makeScreenResult()]);
     renderScreenerPage();
 
-    await waitFor(() => expect(screen.queryByTestId('best-opportunities-shortlist')).not.toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('ranked-list-header')).not.toBeNull());
     expect(screen.getByRole('button', { name: /CSV/i })).toBeInTheDocument();
   });
 });
@@ -945,7 +948,7 @@ describe('WA-0005 /screener: state 2 vs. state 5 (AC-18/AC-18a)', () => {
     await waitFor(() =>
       expect(screen.getByText('Recommendation evaluation completed without candidate analyses.')).toBeInTheDocument(),
     );
-    expect(screen.queryByText(/last successfully published ranked opportunities remain visible/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Ranking was not updated: any Best opportunity tab/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Candidates were analyzed, but none could be adapted or ranked.')).not.toBeInTheDocument();
     expect(screen.getByText('Recommendation evaluation completed without candidate analyses.').closest('[role="alert"]')).not.toBeNull();
   });
@@ -983,21 +986,20 @@ describe('WA-0005 /screener: successful evaluation renders canonical compact car
 
     renderScreenerPage();
 
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
-    const ranked = within(screen.getByTestId('best-opportunities-shortlist'));
-    expect(ranked.getByText('#1')).toBeInTheDocument();
-    expect(ranked.getByText(/Score/)).toBeInTheDocument();
-    expect(ranked.getByText(/Confidence \d+/)).toBeInTheDocument();
-    expect(ranked.getByText(/POP/)).toBeInTheDocument();
-    expect(ranked.getByText(/OTM/)).toBeInTheDocument();
-    expect(ranked.getByText(/ROC/)).toBeInTheDocument();
-    expect(ranked.queryByText('TRADE THIS')).not.toBeInTheDocument();
+    await waitFor(() => expect(rankedCardText()).toContain('AAPL'));
+    // SCAN-TOP-0002: the strip row is gone. The card itself carries the gold tab (earned top pick) and the reasoning
+    // panel, which is collapsed by default and opens in place; no execution control appears in either.
+    const marker = await screen.findByTestId('top-opportunity-marker');
+    expect(marker).toHaveTextContent('BEST OPPORTUNITY #1');
+    const frame = screen.getByTestId('top-opportunity-frame');
+    expect(frame).toContainElement(marker);
+    expect(within(frame).queryByText('TRADE THIS')).not.toBeInTheDocument();
 
-    const toggle = ranked.getByRole('button', { name: 'View details' });
+    const toggle = within(frame).getByRole('button', { name: /Why this ranks here/ });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(toggle);
-    expect(ranked.getByRole('button', { name: 'Hide details' })).toHaveAttribute('aria-expanded', 'true');
-    expect(ranked.queryByText('TRADE THIS')).not.toBeInTheDocument();
+    expect(within(frame).getByRole('button', { name: /Why this ranks here/ })).toHaveAttribute('aria-expanded', 'true');
+    expect(within(frame).queryByText('TRADE THIS')).not.toBeInTheDocument();
   });
 
   it('restores an active canonical PMCC session and renders every retained pair without generic controls or scoring', async () => {
@@ -1246,7 +1248,7 @@ describe('WA-0005 /screener: first-scan failure (AC-19)', () => {
 
     await waitFor(() => expect(screen.getByText('Recommendation engine unavailable.')).toBeInTheDocument());
     // AC-30: no execution/order affordance anywhere.
-    const rankedSection = screen.getByTestId('best-opportunities-shortlist');
+    const rankedSection = screen.getByTestId('ranked-list-header');
     expect(within(rankedSection).queryByText(/execute|submit order|place order/i)).not.toBeInTheDocument();
   });
 });
@@ -1266,9 +1268,9 @@ describe('WA-0005 /screener: no execution affordance anywhere on the page (AC-30
     });
 
     renderScreenerPage();
-    await waitFor(() => expect(screen.queryByTestId('best-opportunities-shortlist')).not.toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('ranked-list-header')).not.toBeNull());
 
-    const rankedSection = screen.getByTestId('best-opportunities-shortlist');
+    const rankedSection = screen.getByTestId('ranked-list-header');
     for (const forbidden of ['Execute Trade', 'Submit Order', 'Place Order', 'Auto-Trade']) {
       expect(within(rankedSection).queryByText(forbidden)).not.toBeInTheDocument();
     }
@@ -1313,7 +1315,7 @@ describe('WA-0005 /screener: capital-limitation notice renders in states 2 and 5
     await waitFor(() =>
       expect(screen.getByText('Recommendation evaluation completed without candidate analyses.')).toBeInTheDocument(),
     );
-    expect(screen.queryByText(/last successfully published ranked opportunities remain visible/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Ranking was not updated: any Best opportunity tab/i)).not.toBeInTheDocument();
   });
 });
 
@@ -1341,7 +1343,7 @@ describe('WA-0005 /screener: partial-evaluation disclosure (Finding 3)', () => {
 
     renderScreenerPage();
 
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(rankedCardText()).toContain('AAPL'));
     expect(screen.getByText(/Partial evaluation: 1 of 2 scan results could not be evaluated/)).toBeInTheDocument();
   });
 
@@ -1357,7 +1359,7 @@ describe('WA-0005 /screener: partial-evaluation disclosure (Finding 3)', () => {
 
     renderScreenerPage();
 
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(rankedCardText()).toContain('AAPL'));
     expect(screen.queryByText(/Partial evaluation/)).not.toBeInTheDocument();
   });
 });
@@ -1382,7 +1384,7 @@ describe('WA-0005 /screener: session-supersession staleness via the canonical jo
     });
 
     renderScreenerPage();
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(rankedCardText()).toContain('AAPL'));
     expect(screen.queryByText(/Superseded by a newer scan/)).not.toBeInTheDocument();
 
     startScreenerJob({ kind: 'filter', label: 'Filter Scan' });
@@ -1392,9 +1394,8 @@ describe('WA-0005 /screener: session-supersession staleness via the canonical jo
     // Superseded output remains inspectable, never hidden -- and genuinely
     // interactive, not just textually present: the Detailed-tier toggle for
     // the stale candidate is still a real, enabled control.
-    const rankedSection = screen.getByTestId('best-opportunities-shortlist');
-    expect(within(rankedSection).getByText('AAPL')).toBeInTheDocument();
-    const toggle = within(rankedSection).getByRole('button', { name: 'View details' });
+    expect(rankedCardText()).toContain('AAPL');
+    const toggle = screen.getByRole('button', { name: /Why this ranks here/ });
     expect(toggle).toBeEnabled();
   });
 
@@ -1409,7 +1410,7 @@ describe('WA-0005 /screener: session-supersession staleness via the canonical jo
     });
 
     renderScreenerPage();
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(rankedCardText()).toContain('AAPL'));
 
     startScreenerJob({ kind: 'targeted', label: 'Targeted Scan' });
     completeScreenerJob({ resultCount: 5 });
@@ -1526,12 +1527,12 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     // happens for a real ranked-scan task. Confirmed via direct read of
     // both files, not assumed.
     await waitFor(() => expect(screen.getAllByText(/Running/i).length).toBeGreaterThan(0));
-    expect(screen.queryByTestId('best-opportunities-shortlist')).toBeNull();
+    expect(screen.queryByTestId('ranked-list-header')).toBeNull();
 
     // Complete it so the rest of the suite's assumption (a real scan can
     // reach completion through this harness) is also demonstrated here.
     act(() => { manager.completeTask(task.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(rankedCardText()).toContain('AAPL'));
   });
 
   // PO corrective round 5 (WA-0005 Defect 1): round 4's version of the next
@@ -1561,7 +1562,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     let taskA: any;
     act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A', input: { activeSymbols: ['AAPL'] } }); });
     act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(rankedCardText()).toContain('AAPL'));
 
     // The refresh itself: only runRankedScan() (the actual TastyTrade-bound
     // scan work) is mocked, via a controllable deferred promise -- every
@@ -1586,8 +1587,8 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     // (section-gate fix reverted), or "AAPL" would be gone (effect fix
     // reverted).
     await waitFor(() => expect(runRankedScan).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.queryByTestId('best-opportunities-shortlist')).not.toBeNull());
-    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId('ranked-list-header')).not.toBeNull());
+    expect(rankedCardText()).toContain('AAPL');
     // TE-0007D corrective — "Results shown" (a user-configurable result
     // count) was removed by the real redesign; BestOpportunitiesShortlist
     // is a fixed top-3 shortlist by design (confirmed via its own file
@@ -1628,7 +1629,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     let taskA: any;
     act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A', input: { activeSymbols: ['AAPL'] } }); });
     act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(rankedCardText()).toContain('AAPL'));
 
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
@@ -1664,12 +1665,12 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     await waitFor(() => expect(runRankedScan).toHaveBeenCalledTimes(1));
 
     // Refresh in progress: prior AAPL results remain visible underneath.
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(rankedCardText()).toContain('AAPL'));
 
     act(() => { deferred.resolve({ results: [makeScreenResult({ symbol: 'MSFT' })], rawScanCache: ['MSFT'].map(makeRawScanEntry) }); });
 
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('MSFT')).toBeInTheDocument());
-    expect(within(screen.getByTestId('best-opportunities-shortlist')).queryByText('AAPL')).not.toBeInTheDocument();
+    await waitFor(() => expect(rankedCardText()).toContain('MSFT'));
+    expect(rankedCardText()).not.toContain('AAPL');
     expect(screen.queryByText(/Superseded by a newer scan/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Refreshing ranked opportunities/)).not.toBeInTheDocument();
   });
@@ -1687,7 +1688,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     let taskA: any;
     act(() => { taskA = manager.createTask({ kind: 'ranked-scan', title: 'Ranked screener scan A', input: { activeSymbols: ['AAPL'] } }); });
     act(() => { manager.completeTask(taskA.id, { results: [makeScreenResult({ symbol: 'AAPL' })], rawScanCache: ['AAPL'].map(makeRawScanEntry) }); });
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(rankedCardText()).toContain('AAPL'));
 
     (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url === '/api/autopilot/recommendations') {
@@ -1704,7 +1705,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     // Refresh in progress: prior AAPL results remain visible underneath,
     // never deleted by the refresh's own dispatch (Defect 1).
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(rankedCardText()).toContain('AAPL'));
 
     // The refresh's own raw scan succeeds; its recommendations fetch (the
     // real /api/autopilot/recommendations call) is what fails.
@@ -1712,7 +1713,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     await waitFor(() => expect(screen.getByText('Recommendation engine unavailable.')).toBeInTheDocument());
     // Prior valid results remain visible -- never blanked by the failure.
-    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument();
+    expect(rankedCardText()).toContain('AAPL');
     // The failure is disclosed via role="alert" (Finding 6's convention),
     // genuinely distinguishable from the stale banner's role="status".
     expect(screen.getByText('Recommendation engine unavailable.').closest('[role="alert"]')).not.toBeNull();
@@ -1778,7 +1779,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
         },
       });
     });
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('MSFT')).toBeInTheDocument());
+    await waitFor(() => expect(rankedCardText()).toContain('MSFT'));
     // Job B's own recommendations are now correctly paired with job B's own
     // id (recommendationsJobId === latestResultsAffectingJobId, both job
     // B's), so the presentation is NOT marked stale -- proving the pairing
@@ -1793,9 +1794,8 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     // land, then assert it did not.
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    const rankedSection = screen.getByTestId('best-opportunities-shortlist');
-    expect(within(rankedSection).getByText('MSFT')).toBeInTheDocument();
-    expect(within(rankedSection).queryByText('AAPL')).not.toBeInTheDocument();
+    expect(rankedCardText()).toContain('MSFT');
+    expect(rankedCardText()).not.toContain('AAPL');
     // Critically, job A's late-arriving response must not have corrupted
     // the recommendationsJobId back to job A's id either -- if it had, this
     // page would now (incorrectly) show B's MSFT results marked "stale"
@@ -1910,9 +1910,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     await waitFor(() => expect(getCurrentRecommendations().analyses).toHaveLength(2));
     expect(submittedSymbols).toEqual(['AAPL', 'MSFT']);
-    const rankedSection = screen.getByTestId('best-opportunities-shortlist');
-    expect(within(rankedSection).getByText('AAPL')).toBeInTheDocument();
-    expect(within(rankedSection).getByText('MSFT')).toBeInTheDocument();
+    await waitFor(() => { expect(rankedCardText()).toContain('AAPL'); expect(rankedCardText()).toContain('MSFT'); });
     expect(screen.queryByText('Scan results existed, but the evaluation service produced no candidate analyses.')).not.toBeInTheDocument();
     expect(consoleInfo).not.toHaveBeenCalledWith(
       '[WA-0005] ranked-opportunities evaluation summary',
@@ -1966,9 +1964,10 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     await waitFor(() => expect(screen.getByText(/completed without candidate analyses/)).toBeInTheDocument());
     expect(getCurrentRecommendations().analyses[0]?.subject.symbol).toBe('AAPL');
-    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument();
+    // SCAN-TOP-0002: the new scan's MSFT card was never ranked, so it carries no gold tab.
+    expect(screen.queryByTestId('top-opportunity-marker')).toBeNull();
     expect(screen.getByText(/completed without candidate analyses/).closest('[role="alert"]')).not.toBeNull();
-    expect(screen.getByText(/last successfully published ranked opportunities remain visible/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ranking was not updated: any Best opportunity tab or reasoning shown below is from the last successful evaluation/i)).toBeInTheDocument();
   });
 
   it('reports a first no-canonical-candidate evaluation without inventing prior publication', async () => {
@@ -2003,7 +2002,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     await waitFor(() =>
       expect(screen.getByText('Recommendation evaluation produced no canonical candidates.')).toBeInTheDocument(),
     );
-    expect(screen.queryByText(/last successfully published ranked opportunities remain visible/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Ranking was not updated: any Best opportunity tab/i)).not.toBeInTheDocument();
     expect((globalThis.fetch as any).mock.calls.filter(
       ([url]: [string]) => url === '/api/autopilot/recommendations',
     )).toHaveLength(0);
@@ -2095,8 +2094,8 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     await waitFor(() => expect(getCurrentRecommendations().analyses).toHaveLength(2));
     expect(publishedAnalysisCounts).toEqual([2]);
-    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument();
-    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('MSFT')).toBeInTheDocument();
+    expect(rankedCardText()).toContain('AAPL');
+    expect(rankedCardText()).toContain('MSFT');
     unsubscribe();
   });
 
@@ -2162,7 +2161,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     expect(refreshCall).toBe(2);
     expect(getCurrentRecommendations().analyses).toHaveLength(1);
     expect(getCurrentRecommendations().analyses[0].subject.symbol).toBe('AAPL');
-    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument();
+    expect(screen.queryByTestId('top-opportunity-marker')).toBeNull();
     expect(screen.getByText('Second recommendation batch failed.').closest('[role="alert"]')).not.toBeNull();
   });
 
@@ -2292,8 +2291,8 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     });
     expect(getCurrentRecommendations().analyses).toHaveLength(1);
     expect(getCurrentRecommendations().analyses[0].subject.symbol).toBe('AAPL');
-    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument();
-    expect(within(screen.getByTestId('best-opportunities-shortlist')).queryByText('MSFT')).not.toBeInTheDocument();
+    // The discarded batch never ranked MSFT, so its card carries no gold tab.
+    expect(screen.queryByTestId('top-opportunity-marker')).toBeNull();
   });
 
   it('a newer evaluation retries an old server lock, publishes the newer result, and ignores the older late response', async () => {
@@ -2386,8 +2385,8 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     expect(getCurrentRecommendations().analyses).toHaveLength(1);
     expect(getCurrentRecommendations().analyses[0].subject.symbol).toBe('MSFT');
-    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('MSFT')).toBeInTheDocument();
-    expect(within(screen.getByTestId('best-opportunities-shortlist')).queryByText('AAPL')).not.toBeInTheDocument();
+    expect(rankedCardText()).toContain('MSFT');
+    expect(rankedCardText()).not.toContain('AAPL');
     expect((globalThis.fetch as any).mock.calls.some(
       ([url, init]: [string, RequestInit]) => (
         url === '/api/autopilot/recommendations'
@@ -2407,7 +2406,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
     });
 
     renderScreenerPage();
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(rankedCardText()).toContain('AAPL'));
 
     // A real Targeted Scan job (kind: 'targeted') completing through the
     // exact same exported screenerJobStore functions runScreen/
@@ -2421,7 +2420,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     expect(screen.queryByText(/Superseded by a newer scan/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Refreshing ranked opportunities/)).not.toBeInTheDocument();
-    expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument();
+    expect(rankedCardText()).toContain('AAPL');
   });
 
   it('hard reload / IndexedDB cache-restore (no live job has run this session): renders the honest, non-stale, non-failure state -- no job identity exists yet to compare against', async () => {
@@ -2440,7 +2439,7 @@ describe('WA-0005 /screener: real Ranked Scan orchestration (PO corrective round
 
     renderScreenerPage();
 
-    await waitFor(() => expect(within(screen.getByTestId('best-opportunities-shortlist')).getByText('AAPL')).toBeInTheDocument());
+    await waitFor(() => expect(rankedCardText()).toContain('AAPL'));
     // Honest: not stale, not a failure, not a refresh -- just the
     // evaluation this session's cache-restore itself triggered.
     expect(screen.queryByText(/Superseded by a newer scan/)).not.toBeInTheDocument();
