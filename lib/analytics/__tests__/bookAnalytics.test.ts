@@ -136,7 +136,8 @@ describe('test 9: period filter', () => {
 describe('capital and groups', () => {
   it('test 3: matches the Positions page summary for the same moment', () => {
     const b = run();
-    const s = buildPortfolioSummary({ rows: ROWS, equities: [equity()], pendingOrders: [], cashBalance: 50000, nowMs: NOW });
+    // PORT-HEADLINE-0001: the summary now also carries the headline (Portfolio Value), so both sides get the same net liquidity.
+    const s = buildPortfolioSummary({ rows: ROWS, equities: [equity()], pendingOrders: [], cashBalance: 50000, netLiquidity: 100000, nowMs: NOW });
     expect(b.summary).toEqual(s);
     expect(b.capitalDeployed).toEqual(s.total.capital);
     expect(b.capitalDeployed.value).toBe(68430);
