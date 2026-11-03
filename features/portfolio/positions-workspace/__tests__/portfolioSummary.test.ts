@@ -142,10 +142,36 @@ describe('1W change (daily snapshots)', () => {
 describe('cash to deploy (no margin)', () => {
   const order = (o: Partial<PendingOrder>): PendingOrder => ({ id: 'o', legs: [], limitPrice: null, priceEffect: null, ...o } as unknown as PendingOrder);
 
-  it('cash minus short-put collateral, spread max loss and opening orders', () => {
+  it('cash minus FULL short-put collateral, FULL spread width and opening orders (premium kept counts toward the collateral)', () => {
     const opening = order({ legs: [{ symbol: 's', action: 'Sell to Open', optionType: 'P', strikePrice: 50, quantity: 1 }] });
     const s = buildPortfolioSummary({ rows: [row(csp('A')), row(bps('B'))], equities: [], pendingOrders: [opening], cashBalance: 20000, nowMs: NOW });
-    expect(s.cashToDeploy).toMatchObject({ value: 20000 - 12000 - 350 - 5000, usingMargin: false, excluded: 0 });
+    // CSP: max risk 12,000 + 540 credit kept = 12,540. Spread: max risk 350 + 150 credit = 500 (the 5-point width x 100). Order: 5,000.
+    expect(s.cashToDeploy).toMatchObject({ value: 20000 - 12540 - 500 - 5000, usingMargin: false, excluded: 0, premiumUnverified: 0 });
+  });
+
+  it('CASH-FREE-0001 golden: the premium kept on open puts no longer overstates free cash (Dean 2026-11-02 shape)', () => {
+    // Cash 10,000 includes a 200 credit. Put strike 50 = 5,000 to secure. Max risk is 4,800 (5,000 less the credit).
+    const put = csp('G', { maxRisk: 4800, entryCredit: 200 });
+    const s = buildPortfolioSummary({ rows: [row(put)], equities: [], pendingOrders: [], cashBalance: 10000, nowMs: NOW });
+    expect(s.cashToDeploy.value).toBe(5000); // not 5,200
+  });
+
+  it('a short put with no verified entry credit holds its max risk and is flagged, never silently trusted', () => {
+    const put = csp('H', { maxRisk: 4800, entryCredit: null as unknown as number, entryEconomicsComplete: false });
+    const s = buildPortfolioSummary({ rows: [row(put)], equities: [], pendingOrders: [], cashBalance: 10000, nowMs: NOW });
+    expect(s.cashToDeploy).toMatchObject({ value: 5200, premiumUnverified: 1 });
+  });
+
+  it('with full collateral held, the headline bridge leaves only what open P&L cannot explain (premium no longer in "other")', () => {
+    // Cash 10,200 (10,000 + 200 credit). Short put 50 strike: credit 200, now costs 500 to buy back -> pnl -300, max risk 4,800.
+    // Long call: cost 1,000, now worth 900 -> pnl -100. Cash after the call purchase is already inside cash.
+    const put = csp('P', { maxRisk: 4800, entryCredit: 200, pnl: -300 });
+    const call = leap('C', { entryCredit: 1000, maxRisk: 1000, pnl: -100 });
+    const cash = 10200;
+    const netLiq = cash - 500 + 900; // cash less the buyback liability plus the long call's value
+    const s = buildPortfolioSummary({ rows: [row(put), row(call)], equities: [], pendingOrders: [], cashBalance: cash, netLiquidity: netLiq, nowMs: NOW });
+    expect(s.headline.bridge).not.toBeNull();
+    expect(s.headline.bridge!.other).toBeCloseTo(0, 2);
   });
 
   it('closing orders do not hold cash', () => {
@@ -162,7 +188,7 @@ describe('cash to deploy (no margin)', () => {
 
   it('negative means relying on margin', () => {
     const s = buildPortfolioSummary({ rows: [row(csp('A'))], equities: [], pendingOrders: [], cashBalance: 5000, nowMs: NOW });
-    expect(s.cashToDeploy).toMatchObject({ value: -7000, usingMargin: true });
+    expect(s.cashToDeploy).toMatchObject({ value: 5000 - 12000 - 540, usingMargin: true });
   });
 
   it('a missing cash balance is Unavailable, never $0', () => {

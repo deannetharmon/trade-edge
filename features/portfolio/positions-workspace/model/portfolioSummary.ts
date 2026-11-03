@@ -127,6 +127,8 @@ export interface CashToDeploy {
   usingMargin: boolean;
   /** Short calls and unrecognised opening orders cannot be cash-secured; they are listed, not guessed. */
   excluded: number;
+  /** CASH-FREE-0001: short puts or spreads with no verified entry credit; their collateral is held net of premium, so free cash may be overstated. */
+  premiumUnverified?: number;
   reason: string | null;
 }
 
@@ -141,7 +143,7 @@ export interface HeadlineBridge {
   gap: number;
   /** Open P&L of the held positions (negative when down). */
   openPnl: number;
-  /** gap + openPnl: the part of the gap open P&L does not explain (premium marks, fees, money moved, rounding). */
+  /** gap + openPnl: what is left once open P&L is counted (fees, rounding, money moved). Premium kept on open shorts no longer lands here: Cash to deploy holds full collateral (CASH-FREE-0001). */
   other: number;
 }
 
@@ -341,10 +343,17 @@ export function buildPortfolioSummary(input: PortfolioSummaryInput): PortfolioSu
   const weekSinceDates = members.map(m => m.weekSince).filter((d): d is string => d != null).sort();
 
   // Cash to deploy (no margin): cash minus what cash-secured positions and opening orders already hold.
-  let held = 0, excluded = 0;
+  // CASH-FREE-0001: a cash-secured put or spread ties up its full strike amount or width. Position capital is max risk, which is
+  // that amount LESS the premium already kept, and that premium is already inside the cash balance, so the reservation is
+  // capital + entry credit. Holding only max risk overstates what is free by exactly the premium collected.
+  let held = 0, excluded = 0, premiumUnverified = 0;
   for (const m of members) {
     if (m.group === 'SHORT_PUTS' || m.group === 'SPREADS') {
-      if (m.capital == null) excluded += 1; else held += m.capital;
+      if (m.capital == null) excluded += 1;
+      else {
+        held += m.capital + (m.basisAmount ?? 0);
+        if (m.basisAmount == null) premiumUnverified += 1;
+      }
     }
     if (m.group === 'SHORT_CALLS' && m.capital != null) excluded += 1; // naked short calls: not cash-securable
   }
@@ -358,6 +367,7 @@ export function buildPortfolioSummary(input: PortfolioSummaryInput): PortfolioSu
     value: deploy,
     usingMargin: deploy != null && deploy < 0,
     excluded,
+    premiumUnverified,
     reason: cash == null ? 'Cash balance unavailable' : null,
   };
 

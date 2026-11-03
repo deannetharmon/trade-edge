@@ -73,7 +73,7 @@ function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
           <span className="mt-1 block text-2xl font-bold text-white" data-testid="headline-portfolio-value">{headline.portfolioValue == null ? unavailable : money(headline.portfolioValue)}</span>
           <span className="mt-1 block text-[11px] text-white/50">Net liquidating value</span>
         </div>
-        <div className={HEADLINE_TILE} title="Cash balance minus full short-put collateral, spread max loss and cash held by working opening orders. Margin buying power is not counted. Option Buying Power is the broker's margin-based figure and is shown for comparison only.">
+        <div className={HEADLINE_TILE} title="Cash balance minus the full strike amount of each short put, the full width of each credit spread and cash held by working opening orders. The premium you kept is already in your cash and counts toward that collateral. Margin buying power is not counted. Option Buying Power is the broker's margin-based figure and is shown for comparison only.">
           <span className="block text-[10px] uppercase tracking-widest text-white/50">Cash to deploy</span>
           <span className={`mt-1 block text-2xl font-bold ${headline.usingMargin ? 'text-amber-400' : 'text-white'}`} data-testid="headline-cash-to-deploy">
             {headline.cashToDeploy == null ? unavailable : headline.usingMargin ? `-${money(headline.cashToDeploy)}` : money(headline.cashToDeploy)}
@@ -83,14 +83,14 @@ function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
             Cash balance {headline.cashBalance == null ? 'unavailable' : money(headline.cashBalance)} · Option Buying Power {headline.optionBuyingPower == null ? 'unavailable' : money(headline.optionBuyingPower)} (broker margin figure)
           </span>
         </div>
-        <div className={HEADLINE_TILE} title="Capital you have put to work: short-put and spread collateral at full value, long options and shares at cost. Can exceed Portfolio Value when open positions are down.">
+        <div className={HEADLINE_TILE} title="Capital you have put to work: short-put and spread max risk (collateral less the premium you kept), long options and shares at cost. Can exceed Portfolio Value when open positions are down.">
           <span className="block text-[10px] uppercase tracking-widest text-white/50">Deployed Capital</span>
           <span className="mt-1 block text-2xl font-bold text-white" data-testid="headline-deployed">
             {headline.deployed == null ? unavailable : money(headline.deployed)}
             {headline.deployedPartial && <span className="text-[11px] font-normal text-white/50"> partial</span>}
           </span>
           <span className="mt-1 block text-[11px] text-white/50">
-            {fundedPct != null && bridge ? `${fundedPct}% of ${money(bridge.funded)} funded · ` : ''}at cost, full collateral
+            {fundedPct != null && bridge ? `${fundedPct}% of ${money(bridge.funded)} funded · ` : ''}at cost, puts net of premium kept
           </span>
           {headline.reserve && (
             <span className={`mt-2 block border-t border-white/10 pt-2 text-[11px] ${reserveTone(headline.reserve.tone)}`} data-testid="headline-reserve"
@@ -103,7 +103,7 @@ function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
       {bridge && (
         <p className="mt-2 rounded-md border border-dashed border-teal-400/50 px-3 py-2 text-[12px] text-white/80" data-testid="headline-bridge">
           How it adds up: Deployed {money(headline.deployed as number)} + Cash to deploy {headline.cashToDeploy != null && headline.cashToDeploy < 0 ? '-' : ''}{money(headline.cashToDeploy as number)} = <b>{money(bridge.funded)} funded</b>.
-          {' '}Portfolio Value {money(bridge.portfolioValue)} is {money(bridge.gap)} {bridge.gap >= 0 ? 'below' : 'above'} that: open P&amp;L {signedMoney(bridge.openPnl)}{bridge.other === 0 ? '' : <>, other {signedMoney(-bridge.other)}</>}.
+          {' '}Portfolio Value {money(bridge.portfolioValue)} is {money(bridge.gap)} {bridge.gap >= 0 ? 'below' : 'above'} that: open P&amp;L {signedMoney(bridge.openPnl)}{bridge.other === 0 ? '' : <>, other (fees, rounding) {signedMoney(-bridge.other)}</>}.
         </p>
       )}
     </section>
@@ -132,12 +132,13 @@ export function PortfolioSummaryStrip({ summary, selected, onSelect, onSelectSym
         <button type="button" aria-pressed={selected == null} onClick={() => onSelect(null)} className="block w-full text-left focus:outline-none">
           <TileBody tile={summary.total} weekSince={summary.weekSince} />
         </button>
-        <span className="mt-2 block border-t border-white/10 pt-2 text-[11px]" title="Cash balance minus full short-put collateral, spread max loss and cash held by working opening orders. Margin buying power is not counted. A negative figure is an estimate that your cash-secured collateral exceeds cash, not a margin loan reported by the broker.">
+        <span className="mt-2 block border-t border-white/10 pt-2 text-[11px]" title="Cash balance minus the full strike amount of each short put, the full width of each credit spread and cash held by working opening orders. The premium you kept is already in your cash and counts toward that collateral. Margin buying power is not counted. A negative figure is an estimate that your cash-secured collateral exceeds cash, not a margin loan reported by the broker.">
           <span className="text-white/50">Cash to deploy (no margin) </span>
           {cashToDeploy.value == null
             ? <span className="text-white/50">Unavailable</span>
             : <span className={`font-bold ${cashToDeploy.usingMargin ? 'text-amber-400' : 'text-white'}`}>{cashToDeploy.usingMargin ? `-${money(cashToDeploy.value)} · short-put collateral exceeds cash` : money(cashToDeploy.value)}</span>}
           {cashToDeploy.excluded > 0 && <span className="text-white/50">{` · ${cashToDeploy.excluded} not cash-securable, excluded`}</span>}
+          {(cashToDeploy.premiumUnverified ?? 0) > 0 && <span className="text-white/50" data-testid="cash-premium-unverified">{` · ${cashToDeploy.premiumUnverified} without a verified entry credit, may overstate`}</span>}
         </span>
         {largest && (
           <button type="button" onClick={() => onSelectSymbol?.(largest.symbol)} title={`Largest single-underlying share of capital. Amber from 15%, red from ${largest.limitPct}%.`}
