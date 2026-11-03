@@ -943,7 +943,7 @@ function NetOptionsValueFooter({ positions, th }: { positions: Position[]; th: t
   </p>;
 }
 
-export function PositionsWorkspace({ model: fullModel, th, getManagementActions, onExecute, renderStopControl, onAnalyze, onAnalyzeStock, renderStockConversation, renderAnalysisConversation, onFindPmccShortCall, onIntentChange, onRefresh, sellDeps, pendingOrders = [], cashBalance = null, netLiquidity = null }: { netLiquidity?: number | null; model: PositionsWorkspaceModel; th: typeof THEMES[Theme]; sellDeps?: SellStockDialogDeps; pendingOrders?: PendingOrder[]; cashBalance?: number | null } & ManagementActionProps) {
+export function PositionsWorkspace({ model: fullModel, th, getManagementActions, onExecute, renderStopControl, onAnalyze, onAnalyzeStock, renderStockConversation, renderAnalysisConversation, onFindPmccShortCall, onIntentChange, onRefresh, sellDeps, pendingOrders = [], cashBalance = null, netLiquidity = null, optionBuyingPower = null }: { optionBuyingPower?: number | null; netLiquidity?: number | null; model: PositionsWorkspaceModel; th: typeof THEMES[Theme]; sellDeps?: SellStockDialogDeps; pendingOrders?: PendingOrder[]; cashBalance?: number | null } & ManagementActionProps) {
   // PORTFOLIO-SUMMARY-0001: one strip above both tabs; always the whole portfolio. A tile (or the largest-exposure line)
   // narrows both lists below; the strip's own numbers never change with the filter.
   const [summaryGroup, setSummaryGroup] = useState<SummaryGroupKey | null>(null);
@@ -953,8 +953,10 @@ export function PositionsWorkspace({ model: fullModel, th, getManagementActions,
     equities: fullModel.symbolGroups.flatMap(group => group.equities),
     pendingOrders,
     cashBalance,
+    netLiquidity,
+    optionBuyingPower,
     nowMs: Date.now(),
-  }), [fullModel, pendingOrders, cashBalance]);
+  }), [fullModel, pendingOrders, cashBalance, netLiquidity, optionBuyingPower]);
   const model = useMemo<PositionsWorkspaceModel>(() => {
     if (summaryGroup == null && summarySymbols == null) return fullModel;
     const keep = (position: Position) => (summarySymbols == null || summarySymbols.includes(position.symbol)) && positionInSummaryGroup(position, summaryGroup);

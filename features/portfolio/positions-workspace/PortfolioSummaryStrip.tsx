@@ -7,7 +7,7 @@
 
 'use client';
 
-import type { PortfolioSummary, SummaryGroupKey, SummaryTile, SummedFigure } from './model/portfolioSummary';
+import type { PortfolioHeadline, PortfolioSummary, SummaryGroupKey, SummaryTile, SummedFigure } from './model/portfolioSummary';
 
 const signedMoney = (v: number) => `${v >= 0 ? '+' : '-'}$${Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 const money = (v: number) => `$${Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
@@ -41,7 +41,9 @@ function TileBody({ tile, weekSince }: { tile: SummaryTile; weekSince: string | 
         {tile.pnl.value != null && tile.pnl.included < tile.pnl.of && <span className="text-white/50">{` · ${tile.pnl.included} of ${tile.pnl.of} priced`}</span>}
       </span>
       <span className="mt-0.5 block text-[11px] text-white/50">
-        {tile.capital.value != null ? `Capital ${money(tile.capital.value)}${tile.key !== 'TOTAL' && tile.capitalSharePct != null ? ` · ${tile.capitalSharePct}%` : ''}${partial(tile.capital)}` : 'Capital unavailable'}
+        {tile.capital.value != null
+          ? <span className="text-[13px] font-bold text-white" data-testid="tile-capital">{`Capital ${money(tile.capital.value)}${tile.key !== 'TOTAL' && tile.capitalSharePct != null ? ` · ${tile.capitalSharePct}%` : ''}${partial(tile.capital)}`}</span>
+          : 'Capital unavailable'}
         {tile.thetaPerDay.value != null && ` · θ ${signedMoney(tile.thetaPerDay.value)}/day`}
       </span>
       <span className="mt-0.5 block text-[11px]" title={`1D: change since the previous close (legs opened today: since their open).${tile.dayMissing.length ? ` Not included: ${tile.dayMissing.map(d => `${d.symbol} (${d.reason})`).join('; ')}.` : ''} 1W: change since the snapshot of ${weekSince ?? 'a week ago'}, same positions only; a position opened since counts from entry; closed positions are in the Trade Log.`}>
@@ -51,6 +53,59 @@ function TileBody({ tile, weekSince }: { tile: SummaryTile; weekSince: string | 
       </span>
       {tile.needsAttention > 0 && <span className="mt-1 block text-[11px] font-semibold text-amber-400">{tile.needsAttention} need attention</span>}
     </>
+  );
+}
+
+const HEADLINE_TILE = 'rounded-lg border border-teal-400/60 bg-slate-950 p-3';
+const reserveTone = (t: 'good' | 'watch' | 'bad') => (t === 'bad' ? 'text-red-400' : t === 'watch' ? 'text-amber-400' : 'text-emerald-400');
+
+/** PORT-HEADLINE-0001: Portfolio Value, Cash to deploy and Deployed Capital, with a line showing how they tie together. */
+function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
+  const { bridge } = headline;
+  const fundedPct = bridge && headline.deployed != null && bridge.funded > 0 ? Math.round((headline.deployed / bridge.funded) * 100) : null;
+  const unavailable = <span className="text-white/50">Unavailable</span>;
+  return (
+    <section aria-label="Portfolio headline" data-testid="portfolio-headline" className="mb-2">
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+        <div className={HEADLINE_TILE} title="Net liquidating value of the account: what everything is worth right now, as reported by the broker.">
+          <span className="block text-[10px] uppercase tracking-widest text-white/50">Portfolio Value</span>
+          <span className="mt-1 block text-2xl font-bold text-white" data-testid="headline-portfolio-value">{headline.portfolioValue == null ? unavailable : money(headline.portfolioValue)}</span>
+          <span className="mt-1 block text-[11px] text-white/50">Net liquidating value</span>
+        </div>
+        <div className={HEADLINE_TILE} title="Cash balance minus full short-put collateral, spread max loss and cash held by working opening orders. Margin buying power is not counted. Option Buying Power is the broker's margin-based figure and is shown for comparison only.">
+          <span className="block text-[10px] uppercase tracking-widest text-white/50">Cash to deploy</span>
+          <span className={`mt-1 block text-2xl font-bold ${headline.usingMargin ? 'text-amber-400' : 'text-white'}`} data-testid="headline-cash-to-deploy">
+            {headline.cashToDeploy == null ? unavailable : headline.usingMargin ? `-${money(headline.cashToDeploy)}` : money(headline.cashToDeploy)}
+          </span>
+          <span className="mt-1 block text-[11px] text-white/50">{headline.usingMargin ? 'Short-put collateral exceeds cash' : 'Cash balance minus full CSP collateral (no margin)'}</span>
+          <span className="mt-2 block border-t border-white/10 pt-2 text-[11px] text-white/50">
+            Cash balance {headline.cashBalance == null ? 'unavailable' : money(headline.cashBalance)} · Option Buying Power {headline.optionBuyingPower == null ? 'unavailable' : money(headline.optionBuyingPower)} (broker margin figure)
+          </span>
+        </div>
+        <div className={HEADLINE_TILE} title="Capital you have put to work: short-put and spread collateral at full value, long options and shares at cost. Can exceed Portfolio Value when open positions are down.">
+          <span className="block text-[10px] uppercase tracking-widest text-white/50">Deployed Capital</span>
+          <span className="mt-1 block text-2xl font-bold text-white" data-testid="headline-deployed">
+            {headline.deployed == null ? unavailable : money(headline.deployed)}
+            {headline.deployedPartial && <span className="text-[11px] font-normal text-white/50"> partial</span>}
+          </span>
+          <span className="mt-1 block text-[11px] text-white/50">
+            {fundedPct != null && bridge ? `${fundedPct}% of ${money(bridge.funded)} funded · ` : ''}at cost, full collateral
+          </span>
+          {headline.reserve && (
+            <span className={`mt-2 block border-t border-white/10 pt-2 text-[11px] ${reserveTone(headline.reserve.tone)}`} data-testid="headline-reserve"
+              title="Option Buying Power as a share of Portfolio Value, against your reserve rule (never below 10%, 20-30% preferred).">
+              Reserve {Math.round(headline.reserve.pct)}% · {headline.reserve.label}
+            </span>
+          )}
+        </div>
+      </div>
+      {bridge && (
+        <p className="mt-2 rounded-md border border-dashed border-teal-400/50 px-3 py-2 text-[12px] text-white/80" data-testid="headline-bridge">
+          How it adds up: Deployed {money(headline.deployed as number)} + Cash to deploy {headline.cashToDeploy != null && headline.cashToDeploy < 0 ? '-' : ''}{money(headline.cashToDeploy as number)} = <b>{money(bridge.funded)} funded</b>.
+          {' '}Portfolio Value {money(bridge.portfolioValue)} is {money(bridge.gap)} {bridge.gap >= 0 ? 'below' : 'above'} that: open P&amp;L {signedMoney(bridge.openPnl)}{bridge.other === 0 ? '' : <>, other {signedMoney(-bridge.other)}</>}.
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -66,6 +121,8 @@ export function PortfolioSummaryStrip({ summary, selected, onSelect, onSelectSym
   const { cashToDeploy, largest, leveragedCluster } = summary;
   const tierClass = (tier: 'normal' | 'amber' | 'red') => tier === 'red' ? 'font-semibold text-red-400' : tier === 'amber' ? 'font-semibold text-amber-400' : 'text-white/50';
   return (
+    <>
+    <HeadlineStrip headline={summary.headline} />
     <section aria-label="P/L by position type" className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">
       <div className={tileClass(selected == null)}>
         <button type="button" aria-pressed={selected == null} onClick={() => onSelect(null)} className="block w-full text-left focus:outline-none">
@@ -97,5 +154,6 @@ export function PortfolioSummaryStrip({ summary, selected, onSelect, onSelectSym
         </button>
       ))}
     </section>
+    </>
   );
 }

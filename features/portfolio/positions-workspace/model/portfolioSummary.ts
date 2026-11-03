@@ -18,6 +18,7 @@ import { splitOptionLegs } from '@/lib/portfolio/positionLifecycle';
 import { toWholePositionThetaDollars } from '@/lib/portfolio/positionMetrics';
 import { buildCapitalViewModel } from './presentation';
 import { isLeveragedEtf } from '@/lib/leveragedEtfs';
+import { buildReserveStatus, type ReserveStatus } from '@/lib/portfolio/reserveStatus';
 
 export const DEFAULT_EXPOSURE_LIMIT_PCT = 25;
 /** CONCENTRATION-TIERS-0001: muted below this, amber from here, red from the exposure limit. */
@@ -129,6 +130,35 @@ export interface CashToDeploy {
   reason: string | null;
 }
 
+/**
+ * PORT-HEADLINE-0001: how the headline figures tie together. Funded = Deployed + Cash to deploy; Funded minus Portfolio Value is
+ * the shortfall; open P&L explains part of it and the rest is shown as its own line, never rounded away.
+ */
+export interface HeadlineBridge {
+  funded: number;
+  portfolioValue: number;
+  /** Funded minus Portfolio Value (positive when the account is below what was funded). */
+  gap: number;
+  /** Open P&L of the held positions (negative when down). */
+  openPnl: number;
+  /** gap + openPnl: the part of the gap open P&L does not explain (premium marks, fees, money moved, rounding). */
+  other: number;
+}
+
+export interface PortfolioHeadline {
+  portfolioValue: number | null;
+  cashToDeploy: number | null;
+  usingMargin: boolean;
+  /** Total capital at cost with full collateral; null when no position contributes. */
+  deployed: number | null;
+  /** Some positions have no capital figure, so Deployed is a partial sum. */
+  deployedPartial: boolean;
+  cashBalance: number | null;
+  optionBuyingPower: number | null;
+  reserve: ReserveStatus | null;
+  bridge: HeadlineBridge | null;
+}
+
 export interface LargestExposure { symbol: string; capital: number; sharePct: number; overLimit: boolean; limitPct: number; tier: ExposureTier }
 
 /** Leveraged and inverse ETF positions taken together (one macro bet across several tickers). */
@@ -139,6 +169,7 @@ export interface PortfolioSummary {
   groups: SummaryTile[];
   weekSince: string | null;
   cashToDeploy: CashToDeploy;
+  headline: PortfolioHeadline;
   largest: LargestExposure | null;
   leveragedCluster: LeveragedCluster | null;
 }
@@ -166,8 +197,44 @@ export interface PortfolioSummaryInput {
   equities: ReadonlyArray<EquityHolding>;
   pendingOrders: ReadonlyArray<PendingOrder>;
   cashBalance: number | null | undefined;
+  /** Net liquidating value of the same account the positions come from. */
+  netLiquidity?: number | null;
+  /** Broker option buying power (shown as a margin figure and for the reserve check only). */
+  optionBuyingPower?: number | null;
   nowMs: number;
   exposureLimitPct?: number;
+}
+
+const finiteOrNull = (v: number | null | undefined): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** PORT-HEADLINE-0001: pure; every input already exists on the page. Unavailable inputs stay null, never zero. */
+export function buildPortfolioHeadline(args: {
+  netLiquidity: number | null | undefined;
+  cashBalance: number | null | undefined;
+  optionBuyingPower: number | null | undefined;
+  cashToDeploy: CashToDeploy;
+  totalCapital: SummedFigure;
+  totalPnl: SummedFigure;
+}): PortfolioHeadline {
+  const portfolioValue = finiteOrNull(args.netLiquidity);
+  const cashBalance = finiteOrNull(args.cashBalance);
+  const optionBuyingPower = finiteOrNull(args.optionBuyingPower);
+  const deployed = args.totalCapital.value;
+  const deployedPartial = args.totalCapital.included < args.totalCapital.of;
+  const cash = args.cashToDeploy.value;
+  const pnlComplete = args.totalPnl.value != null && args.totalPnl.included === args.totalPnl.of;
+  let bridge: HeadlineBridge | null = null;
+  if (portfolioValue != null && cash != null && deployed != null && !deployedPartial && pnlComplete) {
+    const funded = round2(deployed + cash);
+    const gap = round2(funded - portfolioValue);
+    const openPnl = args.totalPnl.value as number;
+    bridge = { funded, portfolioValue, gap, openPnl, other: round2(gap + openPnl) };
+  }
+  return {
+    portfolioValue, cashToDeploy: cash, usingMargin: args.cashToDeploy.usingMargin, deployed, deployedPartial,
+    cashBalance, optionBuyingPower, reserve: buildReserveStatus(optionBuyingPower, portfolioValue), bridge,
+  };
 }
 
 function optionMember(position: Position, attention: boolean, nowMs: number): Member {
@@ -318,7 +385,12 @@ export function buildPortfolioSummary(input: PortfolioSummaryInput): PortfolioSu
     }
   }
 
-  return { total, groups, weekSince: weekSinceDates[0] ?? null, cashToDeploy, largest, leveragedCluster };
+  const headline = buildPortfolioHeadline({
+    netLiquidity: input.netLiquidity, cashBalance: input.cashBalance, optionBuyingPower: input.optionBuyingPower,
+    cashToDeploy, totalCapital: total.capital, totalPnl: total.pnl,
+  });
+
+  return { total, groups, weekSince: weekSinceDates[0] ?? null, cashToDeploy, headline, largest, leveragedCluster };
 }
 
 /** Rows and symbol groups narrowed to one summary group (the tile filter). */
