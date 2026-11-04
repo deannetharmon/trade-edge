@@ -93,10 +93,12 @@ export function ccLegRejection(leg: WheelChainLeg, dte: number, p: CcEligibility
   if (!Number.isFinite(leg.strikePrice)) return 'BAD_STRIKE'; // keeps NaN out of the ranking comparator
   if (ccOpenInterestRejection(leg.openInterest) != null) return 'BAD_OI';
 
+  // The strike floor is checked BEFORE the delta window, so a leg that fails both is counted as below the floor:
+  // the floor is the safety rule, and the exclusion report should show how much of the chain it alone rules out.
+  if (p.minStrike != null && leg.strikePrice < p.minStrike) return 'BELOW_FLOOR';
+
   const absDelta = Math.abs(leg.delta);
   if (absDelta < p.deltaTarget.min || absDelta > p.deltaTarget.max) return 'DELTA_WINDOW';
-
-  if (p.minStrike != null && leg.strikePrice < p.minStrike) return 'BELOW_FLOOR';
 
   // TE-0007C corrective round: strict two-sided, non-crossed, finite quote —
   // replaces the old `bid <= 0 && ask <= 0` check, which accepted a

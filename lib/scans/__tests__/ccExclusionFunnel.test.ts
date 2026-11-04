@@ -74,6 +74,15 @@ describe('diagnoseCcExclusions', () => {
   });
 });
 
+describe('rule order', () => {
+  it('a leg below the floor AND outside the delta window counts as below the floor', () => {
+    const both = { expirations: [NEAR], chains: { [NEAR]: [leg(NEAR, 60, 0.9, 3, 3.1)] } };
+    const r = diagnoseCcExclusions(both, params);
+    expect(r.rejected.BELOW_FLOOR).toBe(1);
+    expect(r.rejected.DELTA_WINDOW).toBe(0);
+  });
+});
+
 describe('formatCcExclusionSummary', () => {
   it('names each rule and the best delta at the floor in one line', () => {
     const text = formatCcExclusionSummary(diagnoseCcExclusions(chain, params), RULES);
