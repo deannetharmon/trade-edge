@@ -97,6 +97,7 @@ import {
 } from '@/lib/screener/opportunityUniverse';
 // TE-0007C — Covered Call as a first-class Screener strategy.
 import { findBestCoveredCall } from '@/lib/scans/covered-call-finder';
+import { ccStrikeFloor, ccStrikeFloorMessage } from '@/lib/scans/ccStrikeFloor';
 import { buildCcOiCheck } from '@/lib/scans/ccOiDisplay';
 import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
 import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
@@ -1548,7 +1549,11 @@ function runCcChecklist(
       earningsCheck = { status: 'fail', value: `${earningsDate} · expires ${bestCandidate.expiration}`, reason: earningsGapAfterExpiry(earningsDate, bestCandidate.expiration) > 0 ? `Earnings ${earningsDate} is only ${earningsGapAfterExpiry(earningsDate, bestCandidate.expiration)}d after this ${bestCandidate.dte}d expiry, inside the ${EARNINGS_MIN_DAYS_AFTER_EXPIRY}-day buffer (earnings dates are estimates and can move earlier).` : `Earnings ${earningsDate} falls on or before this ${bestCandidate.dte}d expiry: assignment risk into a binary event.` };
     }
   }
-  if (!bestCandidate && !failReasons.length) failReasons.push(earningsCheck.reason.includes('no eligible expiration')
+  // CC-WHEEL-0001 S1: the finder fails closed when the cost basis (or price) is unknown; say so instead of
+  // the generic "no qualifying call" text, which would read as a delta/DTE problem.
+  const ccFloor = ccStrikeFloor(price, capacity.costBasis);
+  if (!bestCandidate && !failReasons.length && ccFloor.floor === null) failReasons.push(ccStrikeFloorMessage(ccFloor.missing));
+  else if (!bestCandidate && !failReasons.length) failReasons.push(earningsCheck.reason.includes('no eligible expiration')
     ? earningsCheck.reason
     : `No qualifying call found in delta ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} / DTE ${ccRules.DTE_MIN}-${ccRules.DTE_MAX} window above stock price / cost basis`);
   if (earningsCheck.status === 'fail') failReasons.push(earningsCheck.reason);

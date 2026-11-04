@@ -40,6 +40,7 @@
 // symbols as scannable while an unattributed short option lurks unseen.
 
 import { resolveOptionType, resolveUnderlyingSymbol } from '@/lib/optionSymbol';
+import { isWorkingOrderStatus } from '@/lib/scans/workingOrderStatus';
 
 // ── Input shapes (structural — deliberately narrow, mirrors only the raw
 //    broker fields this module reads) ────────────────────────────────────
@@ -236,11 +237,9 @@ export interface WorkingCallReservationResult {
 function normalizeToken(raw: string | null | undefined): string {
   return String(raw ?? '').trim().toLowerCase();
 }
-const OPEN_ORDER_STATUSES = new Set(['live', 'working']);
 const SELL_TO_OPEN_ACTION = 'sell to open';
 
-// Only orders whose status is (case/whitespace-insensitively) 'Live' or
-// 'Working' reserve capacity — filled, cancelled, rejected, and expired
+// Only orders whose status is still working (see lib/scans/workingOrderStatus.ts) reserve capacity — filled, cancelled, rejected, and expired
 // orders never do (they're either already reflected in positions, or never
 // happened). Only 'Sell to Open' call legs reserve NEW capacity; 'Buy to
 // Close' legs (closing an existing short call) and every other action never
@@ -254,7 +253,7 @@ export function normalizeWorkingCallReservations(rawOrders: RawOrderLike[]): Wor
   let hasUnattributableExposure = false;
 
   for (const order of rawOrders) {
-    if (!OPEN_ORDER_STATUSES.has(normalizeToken(order.status))) continue;
+    if (!isWorkingOrderStatus(order.status)) continue;
 
     for (const leg of order.legs ?? []) {
       if (normalizeToken(leg.action) !== SELL_TO_OPEN_ACTION) continue;

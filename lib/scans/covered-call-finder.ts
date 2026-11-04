@@ -25,6 +25,7 @@ import type { CcRulesType } from './constants';
 import type { CoveredCallCapacity } from './covered-call-capacity';
 import type { EligibilityDecision } from '@/lib/decision/types';
 import { buildCandidateId } from './candidateIdentity';
+import { ccStrikeFloor } from './ccStrikeFloor';
 import { assessOiLiquidity } from './oiLiquidity';
 import { evaluateHybridSpread } from './hybridSpread';
 import { earningsOnOrBeforeExpiration, EARNINGS_MIN_DAYS_AFTER_EXPIRY } from './earningsPrecheck';
@@ -56,7 +57,7 @@ export interface CcSelectedContract {
 interface CcEligibilityParams {
   deltaTarget: { min: number; max: number };
   dteTarget: { min: number; max: number };
-  minStrike: number | null; // max(stockPrice, costBasis) — call must sit at/above this
+  minStrike: number | null; // max(stockPrice, costBasis) from ccStrikeFloor — call must sit at/above this
   oiMin: number;
   /** Reject percent of mid (hybrid rule; $0.05 floor always applies). */
   widthPctMax: number;
@@ -340,8 +341,11 @@ export function findBestCoveredCall(
   // quote/strike gate and (in the old flow) suppress the whole search.
   const price = params.stockPrice;
   const costBasis = params.capacity.costBasis;
-  const candidateMins = [price, costBasis].filter((v): v is number => v != null);
-  const minStrike = candidateMins.length > 0 ? Math.max(...candidateMins) : null;
+  // CC-WHEEL-0001 S1: the floor needs both the stock price and a known cost basis. Unknown means no
+  // candidates (fail closed), never a floor built from whichever number happens to be present.
+  const strikeFloor = ccStrikeFloor(price, costBasis);
+  if (strikeFloor.floor === null) return null;
+  const minStrike = strikeFloor.floor;
 
   // CC-EARNINGS-SEARCH-0002 — filter by each candidate's OWN dte before
   // selecting the best, not a pre-candidate estimate. selectAllEligibleCc-
@@ -422,8 +426,10 @@ export function findAllCoveredCalls(
 
   const price = params.stockPrice;
   const costBasis = params.capacity.costBasis;
-  const candidateMins = [price, costBasis].filter((v): v is number => v != null);
-  const minStrike = candidateMins.length > 0 ? Math.max(...candidateMins) : null;
+  // CC-WHEEL-0001 S1: same fail-closed floor as findBestCoveredCall.
+  const strikeFloor = ccStrikeFloor(price, costBasis);
+  if (strikeFloor.floor === null) return { results: [] };
+  const minStrike = strikeFloor.floor;
 
   // CC-EARNINGS-SEARCH-0002 — same per-candidate filter as
   // findBestCoveredCall: a candidate expiring before earnings is excluded

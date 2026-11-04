@@ -117,12 +117,10 @@ describe('minimum strike is fixed: at or above the stock price, and above cost b
     expect(find(chain, { capacity: highBasis })?.shortStrike).toBe(112);
   });
 
-  it('with an unknown cost basis, only the stock price applies and the call is flagged', () => {
+  it('with an unknown cost basis, nothing is offered (fail closed, CC-WHEEL-0001 S1)', () => {
     const chain = chainOf([{ dte: 30, calls: [good(105)] }]);
     const unknownBasis = computeCoveredCallCapacity(500, 0, 0, null);
-    const candidate = find(chain, { capacity: unknownBasis });
-    expect(candidate?.shortStrike).toBe(105);
-    expect(candidate?.ccAssignmentWarning).toMatch(/cost basis unavailable/i);
+    expect(find(chain, { capacity: unknownBasis })).toBeNull();
   });
 });
 

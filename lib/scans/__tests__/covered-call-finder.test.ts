@@ -1,7 +1,7 @@
 // lib/scans/__tests__/covered-call-finder.test.ts
 // TE-0007C — candidate-selection tests (ticket "Testing" §2, cases 1–10).
 import { describe, it, expect } from 'vitest';
-import { findBestCoveredCall } from '../covered-call-finder';
+import { findBestCoveredCall, findAllCoveredCalls } from '../covered-call-finder';
 import { computeCoveredCallCapacity } from '../covered-call-capacity';
 import type { CcRulesType } from '../constants';
 import type { WheelChainResult, WheelChainLeg } from '@/lib/wheel/chainSearch';
@@ -139,15 +139,17 @@ describe('findBestCoveredCall: ticket cases 1-10', () => {
     expect(candA?.shortStrike).toBe(candB?.shortStrike);
   });
 
-  it('10. missing cost basis remains null and creates a warning without fabricated math', () => {
+  it('10. missing cost basis fails closed: no candidate, never a floor from the stock price alone', () => {
     const chain = chainWithDte(30, { strike: 105 });
     const capacityNoBasis = computeCoveredCallCapacity(500, 0, 0, null);
-    const cand = findBestCoveredCall(chain, { rules: RULES, capacity: capacityNoBasis, stockPrice: 100 });
-    expect(cand).not.toBeNull();
-    expect(cand!.ccCostBasis).toBeNull();
-    expect(cand!.ccStrikeVsCostBasisPct).toBeNull();
-    expect(cand!.ccMaxUpsideIfCalledAway).toBeNull();
-    expect(cand!.ccAssignmentWarning).toMatch(/cost basis unavailable/i);
+    expect(findBestCoveredCall(chain, { rules: RULES, capacity: capacityNoBasis, stockPrice: 100 })).toBeNull();
+    expect(findAllCoveredCalls(chain, { rules: RULES, capacity: capacityNoBasis, stockPrice: 100, underlyingSymbol: 'TEST' }).results).toEqual([]);
+  });
+
+  it('10b. missing stock price fails closed too', () => {
+    const chain = chainWithDte(30, { strike: 105 });
+    expect(findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: null })).toBeNull();
+    expect(findAllCoveredCalls(chain, { rules: RULES, capacity: fullCapacity, stockPrice: null, underlyingSymbol: 'TEST' }).results).toEqual([]);
   });
 
   it('zero available capacity -> no candidate, no naked-call recommendation', () => {
