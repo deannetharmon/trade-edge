@@ -31,7 +31,10 @@ import { calculatePmccCapital } from '@/lib/scans/financials';
 
 export const dynamic = 'force-dynamic';
 
-const SCREENER_TRANSPORT_STRATEGIES = new Set(['BPS', 'BCS', 'IC', 'CSP', 'PMCC']);
+// CC is supported: the screener adapter (screenerCandidateAdapter.ts) and the engine both handle covered calls. The
+// compact schema omitted it, so a qualified covered-call scan failed with "candidates must be an array of
+// structurally valid recommendation candidates."
+const SCREENER_TRANSPORT_STRATEGIES = new Set(['BPS', 'BCS', 'IC', 'CSP', 'CC', 'PMCC']);
 const MARKET_TRENDS = new Set(['uptrend', 'downtrend', 'sideways', 'unknown']);
 const ENGINE_BUSY_MESSAGE = 'Autopilot recommendation engine is already running.';
 const CANDIDATE_OPTIONAL_NUMBER_FIELDS = [

@@ -362,6 +362,36 @@ describe('POST /api/autopilot/recommendations compact transport', () => {
     });
   });
 
+  it('accepts a covered call: one short call leg (qualified covered-call scans reach the engine)', async () => {
+    const ccCandidate: AutopilotCandidate = {
+      ...candidate,
+      id: 'screen_TQQQ_CC_2026-12-18_85',
+      sourceResultId: 'source-TQQQ-CC-2026-12-18-85',
+      strategy: 'CC',
+      symbol: 'TQQQ',
+      underlyingPrice: 62.28,
+      legs: [{
+        symbol: 'TQQQ  261218C00085000',
+        underlyingSymbol: 'TQQQ',
+        assetType: 'option',
+        direction: 'short',
+        optionType: 'call',
+        strike: 85,
+        expiration: '2026-12-18',
+        quantity: 1,
+      }],
+      estimatedCredit: 0.38,
+      theoreticalMaxLoss: 6190,
+    };
+    const response = await POST(request({ candidates: [ccCandidate] }));
+
+    expect(response.status).toBe(200);
+    expect(runRecommendationEngine).toHaveBeenCalledWith('user-1', {
+      source: 'screener',
+      candidates: [ccCandidate],
+    });
+  });
+
   it('accepts a canonical two-expiration PMCC and retains both leg contracts', async () => {
     const response = await POST(request({ candidates: [pmccCandidate] }));
 
@@ -476,7 +506,7 @@ describe('POST /api/autopilot/recommendations compact transport', () => {
   });
 
   it.each([
-    ['unsupported strategy', { strategy: 'CC' }],
+    ['unsupported strategy', { strategy: 'XYZ' as never }],
     ['missing price', { underlyingPrice: undefined }],
     ['invalid price', { underlyingPrice: 0 }],
     ['invalid max loss', { theoreticalMaxLoss: -1 }],

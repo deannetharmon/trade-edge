@@ -13,7 +13,9 @@ export function DeferredNumberInput({ value, onValueChange, className, step, min
   'aria-label': string;
 }) {
   const [text, setText] = useState(String(value));
-  useEffect(() => setText(String(value)), [value]);
+  // A committed value echoes back through `value`. Keep what the trader is typing when it already means that number:
+  // typing ".05" commits 0 at ".0", and resetting the text to "0" there would swallow the leading "." (".05" became "05").
+  useEffect(() => setText(prev => (prev !== '' && prev !== '.' && Number(prev) === value ? prev : String(value))), [value]);
   const commit = (raw: string) => {
     if (raw === '' || raw === '.') { setText(String(value)); return; }
     const parsed = Number(raw);
