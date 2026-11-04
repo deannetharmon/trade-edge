@@ -59,6 +59,23 @@ import { matchRangePreset } from '@/lib/screener/scanConfig/presets';
 
 export interface CcScanRequest {
   rules: CcRulesType;
+  /** CC-RESEARCH-0001: scan these tickers as if the shares were owned. Absent means the normal owned-positions scan. */
+  research?: { tickers: string[]; entryPrice: number | null };
+}
+
+const MAX_RESEARCH_TICKERS = 10;
+
+/** Parses "tqqq, soxl" into unique upper-case symbols; anything that is not a plausible ticker is reported, not dropped silently. */
+export function parseResearchTickers(text: string): { tickers: string[]; invalid: string[] } {
+  const tickers: string[] = [];
+  const invalid: string[] = [];
+  for (const part of text.split(/[\s,]+/)) {
+    const t = part.trim().toUpperCase();
+    if (!t) continue;
+    if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(t)) { invalid.push(part.trim()); continue; }
+    if (!tickers.includes(t)) tickers.push(t);
+  }
+  return { tickers, invalid };
 }
 
 export interface CcEligibleHoldingSummary {
@@ -88,6 +105,15 @@ const ATTR = 'data-cc-criterion';
 export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, onToggleSymbol, holdingsLoading, initial, onClose, onRun }: Props) {
   const [draft, setDraft] = useState<CcScanRequest>(initial);
   const [error, setError] = useState('');
+  // CC-RESEARCH-0001: the scope switch. 'owned' is the long-standing behavior and stays the default.
+  const [scope, setScope] = useState<'owned' | 'research'>('owned');
+  const [researchText, setResearchText] = useState('');
+  const [entryText, setEntryText] = useState('');
+  const parsedResearch = useMemo(() => parseResearchTickers(researchText), [researchText]);
+  const entryNumber = entryText.trim() === '' ? null : Number(entryText);
+  const entryValid = entryNumber === null || (Number.isFinite(entryNumber) && entryNumber > 0);
+  const researchValid = parsedResearch.tickers.length > 0 && parsedResearch.tickers.length <= MAX_RESEARCH_TICKERS
+    && parsedResearch.invalid.length === 0 && entryValid && (parsedResearch.tickers.length === 1 || entryNumber === null);
 
   const selected = useMemo(
     () => holdings.filter(h => h.availableCoveredContracts > 0 && !hiddenSymbols.includes(h.symbol)),
@@ -98,8 +124,8 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
 
   const errors = useMemo(() => ccFieldErrors(draft.rules), [draft.rules]);
   const valid = useMemo(
-    () => Object.keys(errors).length === 0 && !holdingsLoading && selectedCount > 0,
-    [errors, selectedCount, holdingsLoading],
+    () => Object.keys(errors).length === 0 && (scope === 'research' ? researchValid : !holdingsLoading && selectedCount > 0),
+    [errors, selectedCount, holdingsLoading, scope, researchValid],
   );
   const values: CcConfigValues = useMemo(
     () => ({ rules: draft.rules, positionsSelected: holdingsLoading ? null : selectedCount, contractsAvailable: holdingsLoading ? null : contractsAvailable }),
@@ -214,7 +240,43 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
       <div className="flex flex-col gap-3">
         <ScanLegend lifecycles={['fetch', 'advisory']} afterScan={{ attr: { [ATTR]: afterScan.id }, hint: afterScan.hint }} />
 
-        {holdingsLoading ? (
+        <div role="radiogroup" aria-label="Scan scope" data-testid="cc-scope" className="flex flex-wrap items-center gap-4 text-[11px] text-neutral-300">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Scan</span>
+          <label className="flex items-center gap-1.5">
+            <input type="radio" name="cc-scope" checked={scope === 'owned'} onChange={() => setScope('owned')} />
+            My open positions
+          </label>
+          <label className="flex items-center gap-1.5">
+            <input type="radio" name="cc-scope" checked={scope === 'research'} onChange={() => setScope('research')} />
+            Any ticker (research)
+          </label>
+        </div>
+
+        {scope === 'research' && (
+          <div data-testid="cc-research-fields" className="flex flex-col gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-2">
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="flex flex-col gap-1 text-[10px] text-neutral-400">
+                Ticker (up to {MAX_RESEARCH_TICKERS}, comma separated)
+                <input aria-label="Research tickers" value={researchText} onChange={e => setResearchText(e.target.value)} placeholder="TQQQ"
+                  className="w-56 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-white" />
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] text-neutral-400">
+                Entry price (optional, one ticker)
+                <input aria-label="Research entry price" value={entryText} inputMode="decimal" onChange={e => setEntryText(e.target.value)} placeholder="82.00"
+                  className="w-24 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-white" />
+              </label>
+            </div>
+            <p className="text-[10px] leading-snug text-cyan-300">
+              Research only: results are labeled, cannot be ordered, and stay out of Best Opportunities. Entry price: what you type, else your own position&apos;s cost basis if you hold it, else the current price (assumed).
+            </p>
+            {parsedResearch.invalid.length > 0 && <p role="alert" className="text-[10px] text-red-400">Not a ticker: {parsedResearch.invalid.join(', ')}</p>}
+            {parsedResearch.tickers.length > MAX_RESEARCH_TICKERS && <p role="alert" className="text-[10px] text-red-400">Up to {MAX_RESEARCH_TICKERS} tickers.</p>}
+            {!entryValid && <p role="alert" className="text-[10px] text-red-400">Entry price must be a positive number.</p>}
+            {entryValid && entryNumber !== null && parsedResearch.tickers.length > 1 && <p role="alert" className="text-[10px] text-red-400">An entry price applies to one ticker. Clear it, or scan one ticker.</p>}
+          </div>
+        )}
+
+        {scope === 'research' ? null : holdingsLoading ? (
           <p className="text-[11px] text-neutral-400">Loading eligible holdings...</p>
         ) : holdings.length === 0 ? (
           <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] font-medium leading-relaxed text-amber-400">
@@ -260,7 +322,7 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
 
         <AlwaysAppliedStrip th={th} items={alwaysItems} />
 
-        {!holdingsLoading && holdings.length > 0 && selectedCount === 0 && (
+        {scope === 'owned' && !holdingsLoading && holdings.length > 0 && selectedCount === 0 && (
           <p role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs font-medium leading-relaxed text-amber-400">
             ⚠ Select at least one eligible holding before running.
           </p>
@@ -291,11 +353,13 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
                   setError('Correct the covered call ranges before running.');
                   return;
                 }
-                onRun(draft);
+                onRun(scope === 'research'
+                  ? { ...draft, research: { tickers: parsedResearch.tickers, entryPrice: entryNumber } }
+                  : { rules: draft.rules });
               }}
               className="rounded-lg border border-amber-400 bg-amber-400 px-4 py-2 text-xs font-bold text-black disabled:cursor-not-allowed disabled:opacity-40"
             >
-              RUN CC SCAN →
+              {scope === 'research' ? 'RUN RESEARCH SCAN →' : 'RUN CC SCAN →'}
             </button>
           </div>
         </div>

@@ -11,6 +11,7 @@ import type { ScreenResult } from './types';
 export function ccOrderInputFromScanResult(result: ScreenResult): CcOrderInput | null {
   const c = result.bestCandidate;
   if (!c || c.strategy !== 'CC') return null;
+  if (c.ccResearch) return null; // research scans carry no coverage proof and can never become an order
   const mid = c.ccPremiumPerShare;
   if (typeof mid !== 'number' || !Number.isFinite(mid) || mid <= 0) return null;
   if (!c.shortOccSymbol || !(c.shortStrike > 0) || !c.expiration) return null;

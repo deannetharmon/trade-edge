@@ -98,6 +98,7 @@ import {
 // TE-0007C — Covered Call as a first-class Screener strategy.
 import { findBestCoveredCall, diagnoseCcExclusions, formatCcExclusionSummary } from '@/lib/scans/covered-call-finder';
 import { ccStrikeFloor, ccStrikeFloorMessage } from '@/lib/scans/ccStrikeFloor';
+import { resolveResearchEntry, buildResearchCapacity, researchEntryLabel } from '@/lib/scans/ccResearch';
 import { buildCcOiCheck } from '@/lib/scans/ccOiDisplay';
 import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
 import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
@@ -6930,6 +6931,7 @@ const strategyScores = useMemo(() => {
                 <div><span className={th.label}>IVR / IVx: </span><span className={th.text}>{result.ivr != null ? `${result.ivr.toFixed(0)}%` : '—'} / {result.ivx != null ? `${result.ivx.toFixed(1)}%` : '—'}</span></div>
               </div>
               {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
+              {c.ccResearch && <p className="text-[9px] text-cyan-300 font-bold pt-1">RESEARCH — not an order, and not counted in Best Opportunities. Entry price: {researchEntryLabel(c.ccEntrySource ?? null)}.</p>}
               {c.ccLiquidityWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccLiquidityWarning}</p>}
               {c.ccHasUnclassifiedExposure && (
                 // TE-0007C final corrective pass: same disclosure as the
@@ -9944,6 +9946,7 @@ export default function Home() {
     const qualifiedResults = activeSession.results.filter(r => {
       if (!r.qualified) return false;
       const c = r.bestCandidate;
+      if (c?.ccResearch) return false; // CC-RESEARCH-0001: research results never feed Best Opportunities
       if (c?.cspMarketQualification === undefined) return true; // non-CSP strategy, unchanged
       return isBestOpportunitiesEligible(
         c.cspMarketQualification,
@@ -11124,7 +11127,7 @@ export default function Home() {
     }
   };
 
-  const runCcScan = async (bypassUniverse = false, rules: CcRulesType = ccRules) => {
+  const runCcScan = async (bypassUniverse = false, rules: CcRulesType = ccRules, research?: { tickers: string[]; entryPrice: number | null }) => {
     clearResultsCache();
     setError('');
     setScreenMode('filter');
@@ -11156,7 +11159,9 @@ export default function Home() {
 
       pushStatus('Loading eligible holdings...');
       const { ok, eligibleHoldings, bySymbol: capacityBySymbolMap, reason: capacityFailReason } = await loadCcCapacity();
-      if (!ok || !capacityBySymbolMap) {
+      // CC-RESEARCH-0001: a research scan reads holdings only to learn what you already own (shares, basis); it does not
+      // need coverage to work, so a failed or partial capacity read does not stop it.
+      if ((!ok || !capacityBySymbolMap) && !research) {
         const reason = capacityFailReason
           ?? 'Could not load covered-call capacity — holdings or working-order data unavailable.';
         setError(reason);
@@ -11170,20 +11175,20 @@ export default function Home() {
       // capacity-available holding is simply never in `eligibleHoldings`
       // to begin with, so there's nothing to add here even if we wanted to.
       const allScannable = eligibleHoldings.filter(h => h.availableCoveredContracts > 0 && !ccHiddenSymbols.includes(h.symbol));
-      const eligibleSymbols = allScannable.map(h => h.symbol);
+      const eligibleSymbols = research ? research.tickers : allScannable.map(h => h.symbol);
 
       // An empty selected-ticker list means the account is the scope. The
       // launcher makes this explicit by passing bypassUniverse=true; direct
       // callers retain the guard so they cannot widen a selected list by
       // accident.
-      if (!bypassUniverse && opportunityUniverse.length === 0) {
+      if (!research && !bypassUniverse && opportunityUniverse.length === 0) {
         const msg = 'Your Opportunity Universe is empty. Add tickers to it, or use "Scan all eligible holdings" to scan every covered-call-eligible holding.';
         setError(msg);
         failScreenerJob(msg);
         return;
       }
 
-      const universeSymbols = bypassUniverse ? eligibleSymbols : opportunityUniverse;
+      const universeSymbols = research ? research.tickers : bypassUniverse ? eligibleSymbols : opportunityUniverse;
       const scannable = normalizeSymbols(universeSymbols).filter(s => new Set(eligibleSymbols).has(s));
 
       if (!scannable.length) {
@@ -11205,7 +11210,7 @@ export default function Home() {
       // now expressed through the canonical model instead of an ad-hoc
       // "no eligible holdings" message that couldn't distinguish WHY a
       // given selected symbol didn't make it into the plan).
-      const capacityBySymbol = capacityBySymbolMap;
+      const capacityBySymbol = capacityBySymbolMap ?? {};
       const scopeExclusionReasonCode = (symbol: string): ScreenerReasonCode => {
         if (ccHiddenSymbols.includes(symbol)) return 'CC_HIDDEN_BY_TRADER';
         const capacity = capacityBySymbol[symbol];
@@ -11251,8 +11256,26 @@ export default function Home() {
           // no need to reconstruct it field-by-field from the flattened
           // eligibleHoldings array (that reconstruction was dead weight left
           // over from the old server-route response shape).
-          const capacity: CoveredCallCapacity = capacityBySymbolMap[symbol];
-          const result = runCcChecklist(symbol, chainData, price, metrics, rules, capacity, trendResult);
+          let result: ScreenResult;
+          if (research) {
+            // CC-RESEARCH-0001: hypothetical capacity (the shares you hold, else one contract). The entry price is what
+            // you typed, else your own position's cost basis, else the current price (labeled assumed).
+            const held: CoveredCallCapacity | undefined = capacityBySymbolMap?.[symbol];
+            const heldBasis = held && held.costBasisComplete && held.costBasis != null && held.costBasis > 0
+              ? { basis: held.costBasis, source: 'broker' as const } : null;
+            const entry = resolveResearchEntry({
+              typedForScan: research.tickers.length === 1 ? research.entryPrice : null,
+              position: heldBasis, stockPrice: price,
+            });
+            const researchCapacity = buildResearchCapacity(held?.sharesOwned ?? null, entry.entry);
+            const raw = runCcChecklist(symbol, chainData, price, metrics, rules, researchCapacity, trendResult);
+            result = raw.bestCandidate
+              ? { ...raw, bestCandidate: { ...raw.bestCandidate, ccResearch: true, ccEntrySource: entry.source ?? undefined } }
+              : raw;
+          } else {
+            const capacity: CoveredCallCapacity = capacityBySymbolMap![symbol];
+            result = runCcChecklist(symbol, chainData, price, metrics, rules, capacity, trendResult);
+          }
           s = recordSymbolEvaluated(s, symbol, [result]);
         } catch (e: any) {
           s = recordSymbolFailed(s, symbol, 'MARKET_DATA_REQUEST_FAILED');
@@ -13785,7 +13808,7 @@ export default function Home() {
           onRun={(request) => {
             setShowCcScanModal(false);
             setCcRules(request.rules);
-            void runCcScan(ccBypassUniverse, request.rules);
+            void runCcScan(ccBypassUniverse, request.rules, request.research);
           }}
         />
       )}

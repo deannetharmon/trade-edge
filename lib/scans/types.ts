@@ -171,6 +171,10 @@ export interface SpreadCandidate {
   ccBidAskWidth?: number;
   ccLiquidityWarning?: string | null;
   ccAssignmentWarning?: string | null;
+  // CC-RESEARCH-0001 -- a research scan (any ticker, as if the shares were owned). Never orderable, never sent to
+  // Best Opportunities. ccEntrySource says where the entry price came from (see lib/scans/ccResearch.ts).
+  ccResearch?: boolean;
+  ccEntrySource?: 'typed-for-scan' | 'position-typed' | 'position-broker' | 'price-assumed';
   // TE-0007C final corrective pass — mirrors CoveredCallCapacity.
   // hasUnclassifiedExposure: true when some (attributable) option exposure
   // for this symbol could not be classified call/put and was conservatively
