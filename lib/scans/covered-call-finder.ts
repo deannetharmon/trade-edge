@@ -54,7 +54,7 @@ export interface CcSelectedContract {
   occSymbol: string;
 }
 
-interface CcEligibilityParams {
+export interface CcEligibilityParams {
   deltaTarget: { min: number; max: number };
   dteTarget: { min: number; max: number };
   minStrike: number | null; // max(stockPrice, costBasis) from ccStrikeFloor — call must sit at/above this
@@ -81,43 +81,40 @@ export function ccOpenInterestRejection(openInterest: unknown): 'INSUFFICIENT_DA
     : 'INSUFFICIENT_DATA';
 }
 
-function isEligibleCcLeg(leg: WheelChainLeg, dte: number, p: CcEligibilityParams): boolean {
-  if (leg.optionType !== 'C') return false;
-  if (leg.delta == null || !Number.isFinite(leg.delta)) return false;
-  if (!Number.isFinite(leg.strikePrice)) return false; // keeps NaN out of the ranking comparator
-  if (ccOpenInterestRejection(leg.openInterest) != null) return false;
+// CC-WHEEL-0001: the first rule that removes a leg, in the order the rules are applied. `isEligibleCcLeg` is
+// exactly "no rejection", so the exclusion report (ccExclusionFunnel.ts) can never drift from the real gate.
+export type CcLegRejection =
+  | 'NOT_CALL' | 'NO_DELTA' | 'BAD_STRIKE' | 'BAD_OI' | 'DELTA_WINDOW' | 'BELOW_FLOOR' | 'BAD_QUOTE' | 'CROSSED_QUOTE' | 'WIDTH';
+
+export function ccLegRejection(leg: WheelChainLeg, dte: number, p: CcEligibilityParams): CcLegRejection | null {
+  void dte;
+  if (leg.optionType !== 'C') return 'NOT_CALL';
+  if (leg.delta == null || !Number.isFinite(leg.delta)) return 'NO_DELTA';
+  if (!Number.isFinite(leg.strikePrice)) return 'BAD_STRIKE'; // keeps NaN out of the ranking comparator
+  if (ccOpenInterestRejection(leg.openInterest) != null) return 'BAD_OI';
 
   const absDelta = Math.abs(leg.delta);
-  if (absDelta < p.deltaTarget.min || absDelta > p.deltaTarget.max) return false;
+  if (absDelta < p.deltaTarget.min || absDelta > p.deltaTarget.max) return 'DELTA_WINDOW';
 
-  if (p.minStrike != null && leg.strikePrice < p.minStrike) return false;
+  if (p.minStrike != null && leg.strikePrice < p.minStrike) return 'BELOW_FLOOR';
 
   // TE-0007C corrective round: strict two-sided, non-crossed, finite quote —
   // replaces the old `bid <= 0 && ask <= 0` check, which accepted a
   // one-sided quote (e.g. bid 0, ask > 0) and computed a midpoint off it.
-  if (!Number.isFinite(leg.bid) || !Number.isFinite(leg.ask)) return false;
-  if (!(leg.bid > 0) || !(leg.ask > 0)) return false;
-  if (leg.ask < leg.bid) return false; // crossed market
+  if (!Number.isFinite(leg.bid) || !Number.isFinite(leg.ask)) return 'BAD_QUOTE';
+  if (!(leg.bid > 0) || !(leg.ask > 0)) return 'BAD_QUOTE';
+  if (leg.ask < leg.bid) return 'CROSSED_QUOTE';
 
   // SCAN-ALIGN-0001C2 -- hybrid width rule + $0.50-style ceiling via the shared function (the
   // same one evaluatePmccQuoteQuality uses for the PMCC short leg). The old fixed dollar cap is gone.
-  if (evaluateHybridSpread(leg.bid, leg.ask, { rejectPct: p.widthPctMax, warnPct: CC_WARN_PCT_UNUSED, ceiling: p.widthCeiling }).reject) return false;
-  // OI-LIQUIDITY-CHOICE-0001, Phase 2 -- OI *below the minimum* deliberately
-  // removed from this gate (SCAN-ALIGN-0001C1 re-added only a missing/invalid
-  // OI check, above). Every other condition above is a genuine data-integrity or
-  // structural requirement (no delta at all, a crossed market, strikes
-  // outside the target range) -- a leg failing one of those literally
-  // cannot be evaluated. Thin OI is different: it's a real, disclosable
-  // liquidity concern, not missing data, and a covered call carries less
-  // stake in that concern than a credit spread would (the position is
-  // already fully collateralized by shares already owned -- no new
-  // capital risk from a harder fill). Silently excluding a thin-OI
-  // candidate here was stricter than spreads without a principled
-  // reason. Disclosed instead, at the point a candidate is actually
-  // selected -- see ccLiquidityWarning below, now built on the same
-  // assessOiLiquidity used everywhere else in this app.
+  if (evaluateHybridSpread(leg.bid, leg.ask, { rejectPct: p.widthPctMax, warnPct: CC_WARN_PCT_UNUSED, ceiling: p.widthCeiling }).reject) return 'WIDTH';
+  // OI-LIQUIDITY-CHOICE-0001, Phase 2 -- OI *below the minimum* is deliberately NOT a gate: it is disclosed by
+  // ccLiquidityWarning at the point a candidate is selected (see buildCcSpreadCandidate).
+  return null;
+}
 
-  return true;
+function isEligibleCcLeg(leg: WheelChainLeg, dte: number, p: CcEligibilityParams): boolean {
+  return ccLegRejection(leg, dte, p) === null;
 }
 
 // Filters the FULL chain for every hard eligibility condition (call leg, DTE
@@ -366,6 +363,85 @@ export function findBestCoveredCall(
   if (!best) return null;
 
   return buildCcSpreadCandidate(best, params, price, costBasis);
+}
+
+// ── CC-WHEEL-0001: why did nothing qualify? ─────────────────────────────
+// Counts, for one symbol's chain, how many calls each rule removed (the FIRST rule that removed each leg, in the
+// order ccLegRejection applies them), using the same gate and the same floor as findBestCoveredCall. Pure.
+export interface CcExclusionReport {
+  floor: number | null;
+  callsTotal: number;
+  outsideDte: number;
+  inWindow: number;
+  rejected: Record<CcLegRejection, number>;
+  eligible: number;
+  removedByEarnings: number;
+  /** Highest |delta| among in-window calls at or above the floor, ignoring the delta window. */
+  bestDeltaAtFloor: { delta: number; strike: number; expiration: string } | null;
+}
+
+export function diagnoseCcExclusions(
+  chain: { expirations: string[]; chains: Record<string, WheelChainLeg[]> },
+  params: CcFindParams,
+): CcExclusionReport {
+  const strikeFloor = ccStrikeFloor(params.stockPrice, params.capacity.costBasis, { allowBelowBasis: params.allowBelowBasis });
+  const eligibility: CcEligibilityParams = {
+    deltaTarget: { min: params.rules.DELTA_MIN, max: params.rules.DELTA_MAX },
+    dteTarget: { min: params.rules.DTE_MIN, max: params.rules.DTE_MAX },
+    minStrike: strikeFloor.floor,
+    oiMin: params.rules.OI_MIN,
+    widthPctMax: params.rules.WIDTH_PCT_MAX,
+    widthCeiling: params.rules.WIDTH_CEILING,
+  };
+  const rejected: Record<CcLegRejection, number> = {
+    NOT_CALL: 0, NO_DELTA: 0, BAD_STRIKE: 0, BAD_OI: 0, DELTA_WINDOW: 0, BELOW_FLOOR: 0, BAD_QUOTE: 0, CROSSED_QUOTE: 0, WIDTH: 0,
+  };
+  let callsTotal = 0;
+  let outsideDte = 0;
+  let eligible = 0;
+  let removedByEarnings = 0;
+  let bestDeltaAtFloor: CcExclusionReport['bestDeltaAtFloor'] = null;
+
+  for (const expDate of chain.expirations) {
+    const dte = daysUntil(expDate);
+    const inDte = dte >= eligibility.dteTarget.min && dte <= eligibility.dteTarget.max;
+    for (const leg of chain.chains[expDate] ?? []) {
+      if (leg.optionType !== 'C') continue;
+      callsTotal += 1;
+      if (!inDte) { outsideDte += 1; continue; }
+      if (strikeFloor.floor !== null && Number.isFinite(leg.strikePrice) && leg.strikePrice >= strikeFloor.floor
+        && leg.delta != null && Number.isFinite(leg.delta)) {
+        const d = Math.abs(leg.delta);
+        if (!bestDeltaAtFloor || d > bestDeltaAtFloor.delta) bestDeltaAtFloor = { delta: d, strike: leg.strikePrice, expiration: expDate };
+      }
+      const reason = ccLegRejection(leg, dte, eligibility);
+      if (reason) { rejected[reason] += 1; continue; }
+      if (isEarningsSafeForExpiration(params.earningsDate, expDate)) eligible += 1; else removedByEarnings += 1;
+    }
+  }
+  return { floor: strikeFloor.floor, callsTotal, outsideDte, inWindow: callsTotal - outsideDte, rejected, eligible, removedByEarnings, bestDeltaAtFloor };
+}
+
+/** One readable line: which rule removed how many calls. Plain text for the scan's "why nothing qualified" row. */
+export function formatCcExclusionSummary(r: CcExclusionReport, rules: CcRulesType): string {
+  if (r.callsTotal === 0) return 'The chain returned no calls.';
+  const parts: string[] = [];
+  const add = (n: number, label: string) => { if (n > 0) parts.push(`${label} ${n}`); };
+  add(r.rejected.BELOW_FLOOR, r.floor !== null ? `strike below $${r.floor.toFixed(2)} floor` : 'strike below floor');
+  add(r.rejected.DELTA_WINDOW, `delta outside ${rules.DELTA_MIN}-${rules.DELTA_MAX}`);
+  add(r.rejected.BAD_QUOTE + r.rejected.CROSSED_QUOTE, 'no usable quote');
+  add(r.rejected.WIDTH, 'bid/ask too wide');
+  add(r.rejected.NO_DELTA + r.rejected.BAD_STRIKE + r.rejected.BAD_OI, 'missing data');
+  add(r.removedByEarnings, 'earnings too close');
+  let line = `${r.callsTotal} calls: ${r.outsideDte} outside DTE ${rules.DTE_MIN}-${rules.DTE_MAX}`;
+  line += parts.length ? `; of ${r.inWindow} in range, removed by ${parts.join(', ')}.` : `; ${r.inWindow} in range.`;
+  if (r.bestDeltaAtFloor) {
+    const b = r.bestDeltaAtFloor;
+    line += ` Highest delta at or above the floor: ${b.delta.toFixed(2)} (strike $${b.strike}, ${b.expiration}).`;
+  } else if (r.floor !== null) {
+    line += ' No call at or above the floor has a delta.';
+  }
+  return line;
 }
 
 // ── SQ-0001A foundation gate + multi-candidate discovery ────────────────

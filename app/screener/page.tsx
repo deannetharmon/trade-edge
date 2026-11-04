@@ -96,7 +96,7 @@ import {
   hasCanonicalUniverse, migratePrimaryTickers,
 } from '@/lib/screener/opportunityUniverse';
 // TE-0007C — Covered Call as a first-class Screener strategy.
-import { findBestCoveredCall } from '@/lib/scans/covered-call-finder';
+import { findBestCoveredCall, diagnoseCcExclusions, formatCcExclusionSummary } from '@/lib/scans/covered-call-finder';
 import { ccStrikeFloor, ccStrikeFloorMessage } from '@/lib/scans/ccStrikeFloor';
 import { buildCcOiCheck } from '@/lib/scans/ccOiDisplay';
 import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
@@ -1555,7 +1555,7 @@ function runCcChecklist(
   if (!bestCandidate && !failReasons.length && ccFloor.floor === null) failReasons.push(ccStrikeFloorMessage(ccFloor.missing));
   else if (!bestCandidate && !failReasons.length) failReasons.push(earningsCheck.reason.includes('no eligible expiration')
     ? earningsCheck.reason
-    : `No qualifying call found in delta ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} / DTE ${ccRules.DTE_MIN}-${ccRules.DTE_MAX} window above stock price / cost basis`);
+    : `No qualifying call found in delta ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} / DTE ${ccRules.DTE_MIN}-${ccRules.DTE_MAX} window above stock price / cost basis. ${formatCcExclusionSummary(diagnoseCcExclusions(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate }), ccRules)}`);
   if (earningsCheck.status === 'fail') failReasons.push(earningsCheck.reason);
 
   const oiCheck: CheckResult = !bestCandidate
