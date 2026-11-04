@@ -199,6 +199,8 @@ export interface CcFindParams {
   capacity: CoveredCallCapacity; // availableCoveredContracts caps quantity; never exceeded
   stockPrice: number | null;
   earningsDate?: string | null;
+  /** CC-WHEEL-0001 S2a: the trader opted in, for this position, to strikes below the cost basis. */
+  allowBelowBasis?: boolean;
 }
 
 // CC-EARNINGS-SEARCH-0002 (Ian/Paul approved) — earnings safety is now
@@ -343,7 +345,7 @@ export function findBestCoveredCall(
   const costBasis = params.capacity.costBasis;
   // CC-WHEEL-0001 S1: the floor needs both the stock price and a known cost basis. Unknown means no
   // candidates (fail closed), never a floor built from whichever number happens to be present.
-  const strikeFloor = ccStrikeFloor(price, costBasis);
+  const strikeFloor = ccStrikeFloor(price, costBasis, { allowBelowBasis: params.allowBelowBasis });
   if (strikeFloor.floor === null) return null;
   const minStrike = strikeFloor.floor;
 
@@ -427,7 +429,7 @@ export function findAllCoveredCalls(
   const price = params.stockPrice;
   const costBasis = params.capacity.costBasis;
   // CC-WHEEL-0001 S1: same fail-closed floor as findBestCoveredCall.
-  const strikeFloor = ccStrikeFloor(price, costBasis);
+  const strikeFloor = ccStrikeFloor(price, costBasis, { allowBelowBasis: params.allowBelowBasis });
   if (strikeFloor.floor === null) return { results: [] };
   const minStrike = strikeFloor.floor;
 

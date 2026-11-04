@@ -146,6 +146,20 @@ describe('findBestCoveredCall: ticket cases 1-10', () => {
     expect(findAllCoveredCalls(chain, { rules: RULES, capacity: capacityNoBasis, stockPrice: 100, underlyingSymbol: 'TEST' }).results).toEqual([]);
   });
 
+  it('10c. opt-in allows a strike below the basis (not below the stock price); without it the basis floor holds', () => {
+    const basis82 = computeCoveredCallCapacity(500, 0, 0, 82);
+    const chain = chainWithDte(30, { strike: 105 });
+    expect(findBestCoveredCall(chain, { rules: RULES, capacity: basis82, stockPrice: 100 })).not.toBeNull(); // 105 >= 82
+    const above = computeCoveredCallCapacity(500, 0, 0, 120);
+    expect(findBestCoveredCall(chain, { rules: RULES, capacity: above, stockPrice: 100 })).toBeNull();
+    const optedIn = findBestCoveredCall(chain, { rules: RULES, capacity: above, stockPrice: 100, allowBelowBasis: true });
+    expect(optedIn).not.toBeNull();
+    expect(optedIn!.ccStrikeVsCostBasisPct!).toBeLessThan(0);
+    const itm = chainWithDte(30, { strike: 95 });
+    expect(findBestCoveredCall(itm, { rules: RULES, capacity: above, stockPrice: 100, allowBelowBasis: true })).toBeNull(); // never in the money
+    expect(findBestCoveredCall(chain, { rules: RULES, capacity: computeCoveredCallCapacity(500, 0, 0, null), stockPrice: 100, allowBelowBasis: true })).toBeNull(); // opt-in does not excuse a missing basis
+  });
+
   it('10b. missing stock price fails closed too', () => {
     const chain = chainWithDte(30, { strike: 105 });
     expect(findBestCoveredCall(chain, { rules: RULES, capacity: fullCapacity, stockPrice: null })).toBeNull();

@@ -21,6 +21,8 @@ export interface CcOrderRequest {
   entryPerShare: number;
   /** The trader acknowledged the below-cost-basis assignment note. */
   belowCostBasisAcknowledged: boolean;
+  /** CC-WHEEL-0001 S2a: the per-share basis the trader typed for this symbol. Wins over the broker's when valid. */
+  costBasisOverride?: number | null;
 }
 
 export type CcOrderGuardResult =
@@ -65,7 +67,11 @@ export function guardCcOrder(reports: CoverageReports | null, request: CcOrderRe
     // The share cost basis only describes assignment when SHARES cover the call. A LEAP-covered call is a PMCC: the
     // assignment is settled by exercising or selling the LEAP, so a share cost basis would be the wrong yardstick
     // (and could demand a meaningless acknowledgment).
-    costBasis: coverage.status === 'covered_by_shares' ? costBasisFromReports(reports, request.symbol) : null,
+    costBasis: coverage.status === 'covered_by_shares'
+      ? (typeof request.costBasisOverride === 'number' && Number.isFinite(request.costBasisOverride) && request.costBasisOverride > 0
+          ? request.costBasisOverride
+          : costBasisFromReports(reports, request.symbol))
+      : null,
     quantity: request.quantity,
   });
   if (assignment.belowCostBasis && !request.belowCostBasisAcknowledged) {

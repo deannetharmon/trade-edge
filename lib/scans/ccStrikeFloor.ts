@@ -17,13 +17,23 @@ function isPositive(n: number | null | undefined): n is number {
   return typeof n === 'number' && Number.isFinite(n) && n > 0;
 }
 
+export interface CcStrikeFloorOptions {
+  /**
+   * The trader opted in, for this position, to strikes below the cost basis (a loss if called). The floor then
+   * drops to the stock price (never in the money). The basis must still be known: opting in does not excuse
+   * a missing basis.
+   */
+  allowBelowBasis?: boolean;
+}
+
 export function ccStrikeFloor(
   stockPrice: number | null | undefined,
   costBasis: number | null | undefined,
+  options: CcStrikeFloorOptions = {},
 ): CcStrikeFloor {
   if (!isPositive(stockPrice)) return { floor: null, missing: 'NO_STOCK_PRICE' };
   if (!isPositive(costBasis)) return { floor: null, missing: 'NO_COST_BASIS' };
-  return { floor: Math.max(stockPrice, costBasis), missing: null };
+  return { floor: options.allowBelowBasis === true ? stockPrice : Math.max(stockPrice, costBasis), missing: null };
 }
 
 export function ccStrikeFloorMessage(missing: CcStrikeFloorMissing): string {

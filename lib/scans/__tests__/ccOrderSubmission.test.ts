@@ -121,6 +121,31 @@ describe('submitCcOrderIfSafe', () => {
   });
 });
 
+describe('guardCcOrder: typed cost basis override (CC-WHEEL-0001 S2a)', () => {
+  it('uses the typed basis instead of the broker basis, so a strike below it needs the acknowledgment', () => {
+    // broker basis 14 and strike 16 would not need one; a typed basis of 20 does
+    const g = guardCcOrder(reports({ basis: 14 }), req({ strike: 16, costBasisOverride: 20 }));
+    expect(g.allowed).toBe(false);
+    const ok = guardCcOrder(reports({ basis: 14 }), req({ strike: 16, costBasisOverride: 20, belowCostBasisAcknowledged: true }));
+    expect(ok.allowed).toBe(true);
+    if (ok.allowed) expect(ok.assignment.belowCostBasis).toBe(true);
+  });
+  it('fills an unknown broker basis, so the below-basis check still runs', () => {
+    const g = guardCcOrder(reports({ basis: null }), req({ strike: 16, costBasisOverride: 20 }));
+    expect(g.allowed).toBe(false);
+  });
+  it('ignores an invalid override and falls back to the broker basis', () => {
+    for (const bad of [0, -3, Number.NaN, null, undefined]) {
+      const g = guardCcOrder(reports({ basis: 14 }), req({ strike: 16, costBasisOverride: bad as number | null | undefined }));
+      expect(g.allowed).toBe(true);
+    }
+  });
+  it('a LEAP-covered call still ignores any share basis', () => {
+    const g = guardCcOrder(reports({ shares: 0, leap: { exp: '2027-01-15', avail: 1 } }), req({ strike: 12, costBasisOverride: 20 }));
+    expect(g.allowed).toBe(true);
+  });
+});
+
 describe('costBasisFromReports', () => {
   it('reads the basis only when it is complete and the report is ok', () => {
     expect(costBasisFromReports(reports({ basis: 14 }), 'BITX')).toBe(14);

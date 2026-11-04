@@ -26,4 +26,11 @@ describe('ccStrikeFloor', () => {
     expect(ccStrikeFloorMessage('NO_COST_BASIS')).toMatch(/cost basis unavailable/i);
     expect(ccStrikeFloorMessage('NO_STOCK_PRICE')).toMatch(/stock price unavailable/i);
   });
+
+  it('opt-in drops the floor to the stock price but still needs a known basis', () => {
+    expect(ccStrikeFloor(62.85, 82, { allowBelowBasis: true })).toEqual({ floor: 62.85, missing: null });
+    expect(ccStrikeFloor(62.85, null, { allowBelowBasis: true })).toEqual({ floor: null, missing: 'NO_COST_BASIS' });
+    expect(ccStrikeFloor(null, 82, { allowBelowBasis: true })).toEqual({ floor: null, missing: 'NO_STOCK_PRICE' });
+    expect(ccStrikeFloor(62.85, 82, { allowBelowBasis: false }).floor).toBe(82);
+  });
 });
