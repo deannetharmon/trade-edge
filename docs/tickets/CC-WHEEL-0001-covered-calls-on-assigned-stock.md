@@ -1,66 +1,86 @@
-# CC-WHEEL-0001 — Covered calls on assigned stock: adjusted basis, strike floor, RSI gate
+# CC-WHEEL-0001 — Covered calls on assigned stock: cost basis, strike floor, RSI chip, strike grid
 
-**Status:** DRAFT v2 (2026-11-04), independent review folded in; for team review. No build before Ian, Paul, Alan and Diane approve. Quinn reviews testability.
-**Raised by:** Dean, asking when a covered call is worth selling after a CSP assignment (example: TQQQ assigned at $80, trading near $62).
-**Related:** SCAN-ALIGN-0001, CC-ORDERS-0001, STOCKS-0001, RSI-ENTRY-0001, RSI-CALL-GATE-0001 (drafted, not in repo), PMCC-HELD-UNDERWATER-0001 (the recovery-list pattern), WHEEL-SYSTEM-0001..0003, DECIDE-0001.
+**Status:** v3 (2026-11-04). Team consensus reached (Ian, Paul, Diane, Alan, Quinn); Dean's three defaults confirmed by team ruling. Build is gated per slice (see Gates). Frank facilitates.
+**Raised by:** Dean, asking when a covered call is worth selling after a CSP assignment (example: TQQQ assigned at $80 or $82, trading near $62).
+**Related:** SCAN-ALIGN-0001, CC-ORDERS-0001, STOCKS-0001, RSI-ENTRY-0001, RSI-CALL-GATE-0001 (drafted, not in repo), PMCC-HELD-UNDERWATER-0001 (recovery-list pattern), WHEEL-SYSTEM-0001..0003, DECIDE-0001. Audit: project docs `CC-FLOW-AUDIT-0001` and its addendum (the other tool's analyzer).
 
 ## Problem (verified against main, 5c91e35)
 
-1. **Cost basis is the broker's `average-open-price`** (`lib/scans/covered-call-capacity.ts`). After a put assignment that is the strike, not the strike less the put premium. No premium-adjusted basis exists anywhere (WHEEL-SYSTEM W3 "true cost basis" was never started).
-2. **The Covered Call scan hard-floors the strike at max(stock price, broker basis)** (`lib/scans/covered-call-finder.ts`, `minStrike`). With TQQQ at $62 and basis $80 only strikes of $80 or more can qualify; those have tiny deltas. The default delta window is 0.20 to 0.35 (`lib/scans/constants.ts`). Alan's estimate for TQQQ at $62, $80 strike, 45 DTE, IV about 65%: sigma x sqrt(t) = 0.65 x sqrt(45/365) = 0.228; ln(80/62) = 0.255; d1 = (-0.255 + 0.026) / 0.228 = -1.0, so delta is about 0.16, under 0.20. The scan almost certainly returns nothing. Estimate only; not reproduced with a live run.
-3. **The scan and the order dialog disagree.** The scan never shows a strike below basis. `CcTradeModal` allows one if the trader acknowledges the loss (`ccOrderMath.ts`, `ccOrderSubmission.ts`). Dean's 2026-10-23 ruling (never recommend a strike below cost basis unless he opts in per position) has no per-position opt-in in the code.
-4. **Two different RSI ideas for covered calls.** Dean's 2026-10-30 rule is a level: do not sell a call unless daily RSI is 50 or above. `RSI_ENTRY_PARAMS.CC` (`lib/indicators/rsiEntryGate.ts`) is a turn-from-a-peak gate (peak at or above 60, then turning down). It is not wired to any screen: `getRsiEntryGate` and `evaluateRsiEntryGate` have no production caller (RSI-ENTRY slice A2 was never wired); only `rsiEntryForSymbol.ts` and tests use them. A turn-gate PASS needs a peak of 60 or more and latest RSI above 50, so it is a stricter subset of the level rule; the two disagree only where the level rule says Ready and the turn gate says Wait. Only one rule may run on a screen.
-5. **The stock row says nothing about timing.** `StockHoldings` shows covered-call capacity only.
+1. **Cost basis is the broker's `average-open-price`** (`lib/scans/covered-call-capacity.ts`): after a put assignment that is the strike, not the strike less premium. No premium-adjusted basis exists.
+2. **The scan fails open when basis is unknown** (CCAUD-01). `covered-call-finder.ts` computes `minStrike = max(price, costBasis)` with nulls dropped (two sites); with no basis the floor is just the stock price, so a strike that locks in a loss can qualify.
+3. **With basis known, the scan almost certainly returns nothing for TQQQ.** Floor $80 at price $62: Alan's estimate of delta is about 0.16 (sigma x sqrt(t) = 0.228, ln(80/62) = 0.255, d1 = -1.0), under the 0.20 delta floor. Estimate only; not reproduced live.
+4. **One contract per stock.** `findBestCoveredCall` returns a single contract; `findAllCoveredCalls` has no production caller. No yield or score.
+5. **Scan and order dialog disagree.** The scan never shows a strike below basis; `CcTradeModal` allows one with an acknowledgment. Dean's 2026-10-23 ruling (no strike below cost basis unless he opts in per position) has no per-position opt-in.
+6. **Two RSI ideas.** Dean's level rule (daily RSI at or above 50) versus the turn-from-peak gate `RSI_ENTRY_PARAMS.CC`, which has no production caller (`getRsiEntryGate` unused). The turn gate is a stricter subset of the level rule.
+7. **Three conflicting "when to sell" ideas:** the scan, the Income Engine (`app/engine/page.tsx` line 879 suggests `ceil(basis x 1.03 / 5) x 5` with 28 DTE and no chain data), and the AI analysis, whose prompt carries no chain, premium, IV, RSI or trend.
+8. **Working-order statuses differ:** `covered-call-capacity.ts` line 239 counts live and working; `existingGtcReplacement.ts` line 248 counts Received, Routed, In Flight, Live, Contingent. A pending buy-to-close can be missed.
+9. **The stock row says nothing about timing** (`StockHoldings`).
 
-## Dean's direction (2026-11-04)
+## Decisions (team consensus 2026-11-04)
 
-- Wants the most robust model, shown as simply as possible; Ian, Paul and Diane to weigh in.
-- The RSI cutoff must be adjustable without a code change.
-- Team-supplied guidance (the trading group's Assigned Stock framework): no single hard minimum; look for RSI 50 to 70 on the daily or weekly chart; below 40 to 50, hold off or sell very wide out-of-the-money calls. Treated as input, not as Dean's tested rule.
-- Taking a loss is the last thing he wants (2026-10-29); assignment, rolls and holding come first.
+**D1. Strike floor.** Never recommend a strike below cost basis. The floor is a hard filter ("trust the qualified realm"). A per-position opt-in allows strikes below it; the order dialog's loss acknowledgment stays.
 
-## Proposed design (one name per concept, Diane and Ian)
+**D2. Recovery list.** When price is below cost basis, show only far-OTM, low-delta calls (delta 0.10 to 0.20, Ian), best premium first, with the loss if called. Never auto-picked, never recommended.
 
-**Three numbers per wheel stock:** broker basis, adjusted basis, current price. Distance to adjusted basis is shown as a percent.
+**D3. RSI.** Level rule on daily RSI, default cutoff 50, per-user setting editable without code. Wilder 14 on completed daily bars only (no partial bar). Below the cutoff the chip reads Wait (soft gate; the Recovery and grid views stay reachable behind the warning). The turn-from-peak CC branch is retired. No AI recommends the cutoff.
 
-**Two states:**
-- **At or above adjusted basis:** the normal covered-call scan. Strike floor = adjusted basis.
-- **Below adjusted basis (Recovery):** a held-LEAP-style list (PMCC-HELD-UNDERWATER-0001): far-OTM, low-delta calls, best premium first, with strike, expiry, premium per contract, % above price, delta and P/L if called. Never auto-picked; no call is recommended below basis.
+**D4. One "cost basis" concept with a source label.** The screen shows one number, "Cost basis", labeled by source: *typed* (the user's own figure), *adjusted* (proven from assignment history), or *broker* (fallback). Precedence: typed, then adjusted, then broker. If none is available the scan fails closed (no results, with a message), never open.
 
-**One chip on each stock row:** Ready (green: RSI at or above the cutoff and a qualifying strike exists), Recovery (amber: price below adjusted basis), Wait (RSI below the cutoff, with the RSI value on click). Wait is a soft gate: the far-OTM list stays reachable behind the warning. Detail is collapsed; two columns when expanded (Dean's layout rule).
+**D5. Strike grid replaces "one best contract".** Expiration columns by strike rows. Each cell: premium, delta, total if called, and the "not called" line (premium kept, shares kept, cost per share lowered). Three named goals map to the existing delta presets (Ian): Upside .10-.20, Balanced .20-.35 (default), Income .30-.40. Cells below the floor are shaded and read "locks in loss"; they need the opt-in. A 7-14 DTE weekly preset is added. Delta comes from the broker quote, not an estimate.
 
-## Slices
+**D6. Total formulas (Alan).** Called away: (strike - cost basis) x 100 + premium x 100, where cost basis already includes earlier premiums; never count a premium twice. Not called: premium kept, effective cost basis lowered by the premium per share.
 
-**A. Adjusted basis (Alan validates; Ian approves the definition).** New pure module. Adjusted basis per share = lot cost less premium received (net of fees) on the short puts that ended in assignment into the lot and on covered calls sold since.
+## Slices (Paul's order; each ships alone)
 
-*Feasibility (review 2026-11-04):* no assignment linkage exists today. `lib/tradeLog/reconstructTrades.ts` (lines 31-36) states it does not do assignment lifecycle linkage. The put comes out as a closed trade with `closureMechanism: 'ASSIGNED'`, and `equityRealized.ts` builds the share lot separately from the Receive/Deliver row; nothing joins them by id. `cycleHistory.ts` cannot tell a covered call from a PMCC short call, and rolls are guessed from same-day dates. The Trade Log covers only the active account and 12 months. So this slice must first **build the linkage**, with a stated matching rule (symbol, assignment date, share quantity equals contracts x 100, one-to-one) that Alan approves before any code.
+**S1. Fail-closed floor (safety fix).** Remove the fail-open `minStrike` in both finder sites; no basis means no results with a clear in-modal message. One shared floor helper used by the finder, `ccOrderMath.ts`, `lib/tradeLookup/flags.ts` and the engine page. Unify working-order statuses in one shared constant. Quinn tests below.
 
-*Fail-closed:* show broker basis, labeled "broker basis", and never a guessed adjusted figure, whenever any of these is true: any share lot on the symbol opened before the window; an unmatched closure on the symbol; shares not fully explained by assignments plus buys; any partial assignment or two assignments into one lot (until the rule handles them); a PMCC long call on the same underlying; the same symbol held in more than one account. A call that expired, was bought back or was rolled is counted at its realized amount; a rolled put's credit is carried only if the roll can be proven, otherwise fail closed.
+**S2. Typed cost basis + per-position opt-in.** Per-position typed basis and opt-in stored per user (Redis per user, nav-config pattern). Source label shown. Resolves the "no basis" case for the user immediately, with no history linkage.
 
-**B. Strike floor mode.** Floor = adjusted basis by default, and it stays a hard filter (trust the qualified realm), not a warning. When adjusted basis is unavailable the floor is broker basis (the more conservative choice), labeled. A per-position opt-in allows strikes below the floor, storing the choice per position, and the order dialog's loss acknowledgment stays. Scan, dialog, Trade Lookup and the engine page use one shared rule. Recovery list per the design above; because it widens below the default delta 0.20, it needs its own delta bounds (Ian rules).
+**S3. RSI chip and setting.** Daily RSI from `lib/indicators/rsi.ts`; chip Ready / Recovery / Wait on `StockHoldings`; setting on the Profile page and in the CC scan modal for one run. Data panel (deterministic; counts and sample size shown, thin samples labeled; Ian and Alan check leveraged-ETF behavior before the default is trusted). Optional later: weekly RSI beside daily, information only.
 
-**C. Stock-row chip and drill-in.** `features/portfolio/positions-workspace/StockHoldings.tsx`. Diane's mock first; no UI before approval.
+**S4. Strike grid and goals.** Per D5, multi-candidate results, Recovery list, weekly preset. Fixes the one-contract-per-stock gap.
 
-**D. RSI cutoff.** Daily RSI from the existing `lib/indicators/rsi.ts` and completed daily bars. Setting stored per user (same Redis-per-user pattern as `app/api/nav-config/route.ts`; the shared setting is edited on the Profile page, with the same control in the CC scan modal for a single run). Default 50. Retire the CC branch of the turn gate (it has no production caller, so no screen changes; `rsiEntryGate.test.ts` and `rsiEntryForSymbol.test.ts` CC cases are updated) so one rule applies (Ian rules; RSI-ENTRY-0001 stays for CSP).
- - **D2. Data panel (no AI).** Next to the setting: for the user's tickers, the share of the last year's days that would read Ready at each cutoff, and how entries on those days did afterward. Deterministic, built on stored daily bars. Ian and Alan check leveraged-ETF behavior before the default is trusted; a per-ticker cutoff is only considered if the data shows it is needed.
- - **D3 (optional, later). Weekly RSI shown beside daily for information only.** Not computed anywhere today; it would be derived from daily closes. The gate stays on daily.
+**S5. Adjusted basis from assignment history (last).** Needs new linkage; none exists today (`reconstructTrades.ts` lines 31-36; `equityRealized.ts` builds the lot separately; Trade Log covers the active account and 12 months). Matching rule (Alan, proposed): symbol, assignment date, shares equal to contracts x 100, one-to-one. Fail closed (show typed or broker basis) when: any lot opened before the window; an unmatched closure; shares not fully explained; partial assignment or two assignments into one lot; a PMCC long call on the same underlying; the same symbol in more than one account; a roll that cannot be proven; a possible broker wash-sale adjustment (check first so premium is not subtracted twice). **Alan's gate: golden fixtures for every case, including fees, approved before any code.**
+
+**S6. Income Engine and AI analysis aligned.** The engine page uses the shared floor and real chain data or says it has none; the AI prompt (`lib/portfolio/stockAnalysis.ts`) receives the chip state, cost basis with source, and the top grid candidates, so it no longer guesses.
+
+## Gates
+
+- **Ian:** approved D1 to D5 with conditions (hard floor stays hard; recovery bounds 0.10-0.20 shown before the scan; RSI default 50 validated on TQQQ and similar by the data panel, else per-ticker setting).
+- **Paul:** approved scope and the slice order.
+- **Alan:** approved the formulas (D6) and RSI definition; **S5 blocked until golden fixtures are approved.** Delta must be the broker's quote.
+- **Diane:** mock approved for the shape below; the final mock is attached to the PR for S3 and S4 before UI code.
+- **Quinn:** approved test list below.
+
+## Diane's mock (shape)
+
+Stock row: `TQQQ  100 sh  Cost basis $82.00 (typed)  Price $62.85  -23%   [Recovery]`. The chip is one of Ready (green), Recovery (amber), Wait (grey, RSI value on click).
+Expanded panel, two columns, collapsed by default:
+- Left: Cost basis with source, broker basis, price, distance %, RSI vs cutoff, goal selector (Upside / Balanced / Income).
+- Right: grid, expirations across (7, 9, 12, 14 DTE or the standard presets), strikes down. Each cell: `$75  +$29  d.12`, then `called: -$671 (-8.2%)` and `not called: cost $81.71`. Below-floor cells shaded amber with "locks in loss". No donut, no chart in the first version (entry and strike lines on the chart are later, lower priority).
 
 ## Out of scope
 
-Rolls and roll recommendations; PMCC short calls (PMCC flow owns them); the options bot; ex-dividend handling; an AI recommendation of the cutoff (decided no, 2026-11-04: it would add a second source that can disagree with the data panel).
-
-## Open items
-
-1. Dean confirms: default floor is adjusted basis with per-position opt-in below it; recovery shows only far-OTM low-delta calls, never auto-picked; default RSI cutoff 50 (not 60).
-2. Ian to rule on replacing the CC turn gate (finding 4) and on the exact "far-OTM, low delta" bounds for Recovery (reuse the held-LEAP defaults: 7 to 10 DTE, delta range selectable before the scan).
-3. Alan: approve the assignment-matching rule and fail-closed list in slice A (review verdict on v1: reject as written; v2 rewrites it). Also dividends and broker basis adjustments after wash sales.
-4. Reproduce finding 2 with a live scan on a below-basis holding before slice B changes the finder.
-5. Independent review 2026-11-04 (advice, not approval; no tests, tsc or live scan were run): Ian approve with changes, Alan reject slice A as written, Quinn approve with changes. v2 applies the changes.
+Rolls and roll recommendations; PMCC short calls; the options bot; ex-dividend handling; an AI recommendation of the cutoff (decided no); percent-above-price strikes (the other tool's method).
 
 ## Tests (Quinn)
 
-Adjusted basis: single assignment; two assignments in one lot; rolled put before assignment; calls expired, bought back and rolled; partial assignment (fails closed); a lot bought before the window mixed with an assigned lot (fails closed); a PMCC long call on the same symbol (fails closed); the same symbol in two accounts (fails closed); history window too short (falls back to broker basis, labeled); fees. The engine-page strike agrees with the shared helper. Floor: default blocks below adjusted basis; opt-in allows it and the dialog still requires acknowledgment; scan and dialog agree on one fixture. Chip: Ready, Recovery and Wait each with a fixed fixture; RSI exactly at the cutoff; RSI unavailable fails closed to Wait. Setting: persists per user; defaults to 50; invalid values rejected. Data panel: deterministic output on a fixed bar series.
+- **S1:** no basis returns no results and a message (regression for the fail-open); strike below basis is excluded; the finder, order math, flags and engine agree on one fixture; one working-order status constant used everywhere; capacity ignores a statuses mismatch.
+- **S2:** typed basis precedence over broker; opt-in per position allows below-floor and the dialog still requires acknowledgment; opt-in does not leak to other positions.
+- **S3:** Ready, Recovery, Wait each with a fixed fixture; RSI exactly at the cutoff; RSI unavailable fails closed to Wait; partial bar excluded; setting persists per user, defaults to 50, rejects invalid values; data panel deterministic on a fixed bar series.
+- **S4:** grid cell math for called and not called (including the -$671 / -$1,190 / -$1,502 style cases at an $82 basis); delta from the quote; Recovery bounds; weekly preset.
+- **S5:** single assignment; two assignments into one lot; rolled put; calls expired, bought back and rolled; partial assignment; pre-window lot; PMCC long call on the same symbol; two accounts; short window falls back and is labeled; fees; wash-sale case.
+- **S6:** the AI prompt contains chip, basis source and candidates; engine strike agrees with the shared helper.
 
-## Sibling check to do before build
+## Sibling check before each build
 
-Every site that reads `ccCostBasis`, `costBasis`, `averageOpenPrice` or `minStrike` must use the same basis helper: `lib/scans/covered-call-capacity.ts`, `lib/scans/covered-call-finder.ts` (two `minStrike` sites), `lib/portfolio-snapshot/normalizeEquity.ts` (a second copy of the basis logic), `lib/portfolio-snapshot/capacity.ts`, `features/portfolio/positions-workspace/model/stockHoldings.ts`, `lib/scans/ccOrderMath.ts`, `lib/tradeLookup/flags.ts` and `loadLookup.ts` (below-basis flag), `lib/screener/scanConfig/ccRegistry.ts` (minStrike hint and chip text), `app/screener/page.tsx` (`ccCostBasis` passed to the dialog, around lines 6915 and 12433; grep, do not read in full), `app/wheel/page.tsx` and `app/api/wheel-candidates/route.ts` (basis typed in by hand), `app/engine/page.tsx` (recommends its own strike as ceil(basis x 1.03 / 5) x 5), `lib/market/holdings.ts`. The `long-book` page's `costBasis` is the LEAP debit and is unrelated. After the change, and Cut Losses availability (`lib/portfolio/cutLossesAvailability.ts`) must keep treating wheel and acquisition calls as "assignment is the plan".
+Every site that reads `ccCostBasis`, `costBasis`, `averageOpenPrice` or `minStrike` must use the shared helper: `lib/scans/covered-call-capacity.ts`, `lib/scans/covered-call-finder.ts` (two sites), `lib/portfolio-snapshot/normalizeEquity.ts` (second copy of the basis logic), `lib/portfolio-snapshot/capacity.ts`, `features/portfolio/positions-workspace/model/stockHoldings.ts`, `lib/scans/ccOrderMath.ts`, `lib/scans/ccOrderSubmission.ts`, `lib/tradeLookup/flags.ts` and `loadLookup.ts`, `lib/tradeLookup/coverage.ts`, `lib/screener/scanConfig/ccRegistry.ts`, `app/screener/page.tsx` (`ccCostBasis` around lines 6915 and 12433; grep, do not read in full), `app/wheel/page.tsx`, `app/api/wheel-candidates/route.ts`, `app/engine/page.tsx` (lines 430 and 879), `lib/market/holdings.ts`, `lib/portfolio/stockAnalysis.ts`, `lib/portfolio/existingGtcReplacement.ts`. `long-book` `costBasis` is the LEAP debit and unrelated. Cut Losses availability (`lib/portfolio/cutLossesAvailability.ts`) must keep treating wheel and acquisition calls as "assignment is the plan".
+
+## Open items
+
+1. Reproduce the empty TQQQ scan live before S1 changes the finder.
+2. Verify real working-order statuses from broker payloads.
+3. Confirm multi-account behavior (the capacity report reads the active account only).
+4. Find which screens read `evaluateCcThesis` (`lib/decision/strategy-thesis/cc.ts` treats bullish evidence as high call-away risk).
+5. Phase 2 of the audit (managing an open covered call: take profit, roll, called away; trade log treatment) may add items; it does not block S1 to S3.
+6. Alan: golden fixtures for S5.
