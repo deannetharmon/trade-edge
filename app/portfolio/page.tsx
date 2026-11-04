@@ -11428,6 +11428,7 @@ export default function PortfolioPage() {
               {/* GREEKS-V2-0001: portfolio-wide Greeks (always unfiltered) were legacy-view only. */}
               {/* PORT-HEADLINE-0001: rendered inside the workspace, between the headline strip and the strategy tiles. */}
               <SalvageDepsProvider value={salvageDeps}>
+              <ExitWalkProvider pendingOrders={pendingOrders} dryRun={dryRunMode} onDone={fetchPositions}>
               <PositionsWorkspace
                 greeks={<div className="mb-4"><PortfolioGreeksDashboard positions={positions} th={th} /></div>}
                 model={positionsWorkspaceModel}
@@ -11458,6 +11459,7 @@ export default function PortfolioPage() {
                 onIntentChange={handleIntentChange}
                 onRefresh={fetchPositions}
               />
+              </ExitWalkProvider>
               </SalvageDepsProvider>
             </>
           ) : (
