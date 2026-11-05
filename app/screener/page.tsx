@@ -167,6 +167,10 @@ import MarketLinksMenu from '@/features/screener/components/MarketLinksMenu';
 import { buildCspOrderLeg, computeCspMaxLoss } from '@/lib/scans/cspOrderMath';
 import { cspEntryLimitPerShare, cspPerShareToContractDollars, cspBreakevenPerShare, buildCspEntryPayload } from '@/lib/scans/cspEntryUnits';
 import { guardCspOrder } from '@/lib/scans/cspOrderSubmission';
+import AssignmentCashPanel from '@/features/screener/components/AssignmentCashPanel';
+import { evaluateAssignmentCash, guardAssignmentCash, type AssignmentCashResult, type ProposedOrder } from '@/lib/scans/assignmentCash';
+import { loadAssignmentCashSnapshot } from '@/lib/scans/assignmentCashLoader';
+import { loadAssignmentCashSettings, type AssignmentCashSettings } from '@/lib/scans/assignmentCashSettings';
 import type {
   SortField, SecondarySortField, SortSpec, SortableMetrics, OiEligibilityResult,
 } from '@/lib/screener/screenerResultOrdering';
@@ -2839,6 +2843,15 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
   const [quoteValidation, setQuoteValidation] = useState<{ at: number; executableCredit: number } | null>(null);
   const [validationNow, setValidationNow] = useState(Date.now());
   const [freshCapital, setFreshCapital] = useState<{ label: string; ok: boolean } | null>(null);
+  // ASSIGN-CASH-0001: total assignment obligation against usable cash. The panel reports its evaluation here so the Place
+  // button can wait on it; until the first evaluation arrives the order is treated as unverified.
+  const [assignmentCash, setAssignmentCash] = useState<{ result: AssignmentCashResult; settings: AssignmentCashSettings } | null>(null);
+  const [assignmentAck, setAssignmentAck] = useState(false);
+  const [assignmentBorrowOk, setAssignmentBorrowOk] = useState(false);
+  const onAssignmentEvaluation = useCallback((result: AssignmentCashResult, settings: AssignmentCashSettings) => setAssignmentCash({ result, settings }), []);
+  const proposedAssignment = useMemo<ProposedOrder>(() => ({ opens: [{ strike: c.shortStrike, contracts: quantity }], closes: [] }), [c.shortStrike, quantity]);
+  const assignmentGate = assignmentCash ? guardAssignmentCash(assignmentCash.result, { acknowledged: assignmentAck, borrowingConfirmed: assignmentBorrowOk }) : null;
+  const assignmentGateBlocking = !assignmentGate || !assignmentGate.allowed;
   // ENTRY-WALK-0001: opt-in per order, off by default.
   const [walkOn, setWalkOn] = useState(false);
   const walk = useEntryWalk();
@@ -2927,8 +2940,27 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
     const token = await getAccessToken();
     const capital = await getCspCapitalContext(token);
     const guard = guardCspOrder(capital, { strike: c.shortStrike, creditPerContract, quantity });
-    setFreshCapital({ label: guard.allowed ? `$${guard.requiredCash.toLocaleString()} available and reserved` : guard.reason, ok: guard.allowed });
-    return guard.allowed;
+    if (!guard.allowed) {
+      setFreshCapital({ label: guard.reason, ok: false });
+      return false;
+    }
+    // ASSIGN-CASH-0001: the cumulative check, re-fetched here at submit time and never trusted from the panel's snapshot.
+    // Cash, open positions and working orders are loaded again; any source that fails to load blocks the order.
+    const assignmentSnapshot = await loadAssignmentCashSnapshot();
+    const assignmentSettings = loadAssignmentCashSettings();
+    const assignmentResult = evaluateAssignmentCash({
+      cashBalance: assignmentSnapshot.cashBalance, reserve: assignmentSettings.reserve,
+      positions: assignmentSnapshot.positions, pendingOrders: assignmentSnapshot.pendingOrders,
+      proposed: { opens: [{ strike: c.shortStrike, contracts: quantity }], closes: [] },
+      marginBackedEnabled: assignmentSettings.marginBackedEnabled,
+    });
+    const assignmentGuard = guardAssignmentCash(assignmentResult, { acknowledged: assignmentAck, borrowingConfirmed: assignmentBorrowOk });
+    if (!assignmentGuard.allowed) {
+      setFreshCapital({ label: assignmentGuard.reason, ok: false });
+      return false;
+    }
+    setFreshCapital({ label: `$${guard.requiredCash.toLocaleString()} available and reserved`, ok: true });
+    return true;
   };
 
   const runDryRun = async () => {
@@ -3166,6 +3198,13 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
             <span className={th.text}>${requiredCash.toLocaleString()}</span>
           </div>
           <BuyingPowerLine required={requiredCash} labelClass={th.textFaint} valueClass={th.text} />
+          <AssignmentCashPanel
+            proposed={proposedAssignment} labelClass={th.textFaint} valueClass={th.text}
+            disabled={phase === 'placing' || phase === 'dryrun'}
+            acknowledged={assignmentAck} onAcknowledgedChange={setAssignmentAck}
+            borrowingConfirmed={assignmentBorrowOk} onBorrowingConfirmedChange={setAssignmentBorrowOk}
+            onEvaluation={onAssignmentEvaluation}
+          />
           <div className="flex justify-between text-xs">
             <span className={th.textFaint}>Max Loss if assigned</span>
             <span className="text-amber-300">${maxLoss.toLocaleString()}</span>
@@ -3231,11 +3270,11 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
           </button>
           {phase !== 'done' && (
             <button
-              disabled={!legBuild.ok || phase === 'placing' || phase === 'dryrun' || qualGateBlocking}
+              disabled={!legBuild.ok || phase === 'placing' || phase === 'dryrun' || qualGateBlocking || assignmentGateBlocking}
               onClick={() => (dryRunResult ? placeOrder() : runDryRun())}
               className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold tracking-widest disabled:opacity-50"
             >
-              {phase === 'placing' ? 'PLACING...' : phase === 'dryrun' ? 'VALIDATING...' : qualGateBlocking ? 'ACKNOWLEDGE TO CONTINUE' : dryRunResult ? 'PLACE + GTC' : 'DRY RUN'}
+              {phase === 'placing' ? 'PLACING...' : phase === 'dryrun' ? 'VALIDATING...' : qualGateBlocking ? 'ACKNOWLEDGE TO CONTINUE' : assignmentGateBlocking ? 'FUNDING CHECK' : dryRunResult ? 'PLACE + GTC' : 'DRY RUN'}
             </button>
           )}
         </div>

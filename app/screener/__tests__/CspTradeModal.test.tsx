@@ -7,7 +7,7 @@
 // calls (covered instead by the pure unit tests in
 // lib/scans/__tests__/cspOrderMath.test.ts and cspOrderSubmission.test.ts).
 
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
@@ -33,6 +33,15 @@ vi.mock('@/lib/scans/tastytrade-client', async () => {
     getCspCapitalContext: (...args: any[]) => getCspCapitalContextMock(...args),
   };
 });
+
+// ASSIGN-CASH-0001: the funding snapshot the new assignment-cash panel loads. Default: ample cash, nothing open.
+const shortPutPosition = (strike: number, quantity: number) => ({ legs: [{ symbol: 'X', optionType: 'P' as const, strikePrice: strike, direction: 'Short' as const, quantity }] });
+const assignmentSnapshotMock = vi.fn();
+const AMPLE_FUNDING = { cashBalance: 1_000_000, positions: [] as any[], pendingOrders: [] as any[] };
+vi.mock('@/lib/scans/assignmentCashLoader', () => ({
+  loadAssignmentCashSnapshot: (...args: any[]) => assignmentSnapshotMock(...args),
+}));
+beforeEach(() => { assignmentSnapshotMock.mockReset(); assignmentSnapshotMock.mockResolvedValue(AMPLE_FUNDING); });
 
 function expDate(): string { const d = new Date(); d.setDate(d.getDate() + 32); return d.toISOString().slice(0, 10); }
 
@@ -140,6 +149,55 @@ describe('CSP-ORDERS-0001: the CSP result card offers real trade placement', () 
     await userEvent.click(within(modal).getByTestId('csp-stop-toggle'));
     expect(within(modal).queryByTestId('csp-stop-controls')).not.toBeInTheDocument();
     expect(within(modal).getByTestId('csp-no-stop-note')).toBeInTheDocument();
+  });
+
+  // ASSIGN-CASH-0001
+  it('shows the three assignment-cash labels verbatim with the order added to what is already committed', async () => {
+    assignmentSnapshotMock.mockResolvedValue({ cashBalance: 1_000_000, positions: [shortPutPosition(100, 10)], pendingOrders: [] });
+    await runCspScan();
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await screen.findByText('PLACE CSP ORDER — MRVL');
+    const modal = screen.getByText('PLACE CSP ORDER — MRVL').closest('div[class*="rounded-2xl"]') as HTMLElement;
+    expect(within(modal).getByText('Assignment cash after this trade')).toBeInTheDocument();
+    expect(within(modal).getByText('Usable cash after reserve')).toBeInTheDocument();
+    expect(within(modal).getByText('Funding surplus/shortfall')).toBeInTheDocument();
+    // 100 x 100 x 10 already open + 235 x 100 x 1 for this order; 5% default reserve on 1,000,000.
+    await waitFor(() => expect(within(modal).getByTestId('assignment-cash-after')).toHaveTextContent('$123,500.00'));
+    expect(within(modal).getByTestId('assignment-usable-cash')).toHaveTextContent('$950,000.00');
+    expect(within(modal).getByTestId('assignment-surplus')).toHaveTextContent('Surplus $826,500.00');
+  });
+
+  it('blocks the order when assignment cash would exceed usable cash, and says by how much', async () => {
+    assignmentSnapshotMock.mockResolvedValue({ cashBalance: 1_000_000, positions: [shortPutPosition(9400, 1)], pendingOrders: [] });
+    await runCspScan();
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await screen.findByText('PLACE CSP ORDER — MRVL');
+    const modal = screen.getByText('PLACE CSP ORDER — MRVL').closest('div[class*="rounded-2xl"]') as HTMLElement;
+    // 940,000 + 23,500 = 963,500 against 950,000 usable: short 13,500.
+    expect(await within(modal).findByTestId('assignment-blocked')).toHaveTextContent('$13,500.00');
+    expect(within(modal).getByRole('button', { name: 'FUNDING CHECK' })).toBeDisabled();
+  });
+
+  it('between 90% and 100% the order waits for an explicit acknowledgment', async () => {
+    assignmentSnapshotMock.mockResolvedValue({ cashBalance: 1_000_000, positions: [shortPutPosition(9000, 1)], pendingOrders: [] });
+    await runCspScan();
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await screen.findByText('PLACE CSP ORDER — MRVL');
+    const modal = screen.getByText('PLACE CSP ORDER — MRVL').closest('div[class*="rounded-2xl"]') as HTMLElement;
+    const ack = await within(modal).findByTestId('assignment-acknowledge');
+    expect(within(modal).getByRole('button', { name: 'FUNDING CHECK' })).toBeDisabled();
+    await userEvent.click(within(ack).getByRole('checkbox'));
+    await waitFor(() => expect(within(modal).getByRole('button', { name: 'DRY RUN' })).toBeEnabled());
+  });
+
+  it('fails closed: if funding data cannot be loaded the order cannot proceed', async () => {
+    assignmentSnapshotMock.mockResolvedValue({ cashBalance: null, positions: null, pendingOrders: null });
+    await runCspScan();
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await screen.findByText('PLACE CSP ORDER — MRVL');
+    const modal = screen.getByText('PLACE CSP ORDER — MRVL').closest('div[class*="rounded-2xl"]') as HTMLElement;
+    expect(await within(modal).findByTestId('assignment-cannot-verify')).toBeInTheDocument();
+    expect(within(modal).getByRole('button', { name: 'FUNDING CHECK' })).toBeDisabled();
   });
 
   it('closes without side effects', async () => {
