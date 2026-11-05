@@ -10,6 +10,9 @@ import { DEFAULT_CC_RSI_CUTOFF, sanitizeCcRsiCutoff } from '@/lib/scans/ccRsiChi
 const KEY = 'te-cc-rsi-cutoff';
 const EVENT = 'te-cc-rsi-cutoff-change';
 
+/** The current cutoff, read directly (for code that is not a component). */
+export function readCcRsiCutoff(): number { return read(); }
+
 function read(): number {
   try { return sanitizeCcRsiCutoff(window.localStorage.getItem(KEY)); } catch { return DEFAULT_CC_RSI_CUTOFF; }
 }

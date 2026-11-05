@@ -102,7 +102,8 @@ import { resolveResearchEntry, buildResearchCapacity, researchEntryLabel } from 
 import { CcStrikeGrid } from '@/features/screener/components/CcStrikeGrid';
 import type { CcGridCell } from '@/lib/scans/ccGridTypes';
 import { ccRsiChip } from '@/lib/scans/ccRsiChip';
-import { useCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
+import { useCcRsiCutoff, readCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
+import { ccRankValue } from '@/lib/scans/ccRank';
 import { CcRsiCutoffControl } from '@/features/screener/components/CcRsiCutoffControl';
 import { buildCcOiCheck } from '@/lib/scans/ccOiDisplay';
 import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
@@ -6210,6 +6211,14 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
   </article>;
 }
 
+// CC-WHEEL-0001: the gold "Best opportunity" tab on a covered call needs the Ready timing chip. A stock below the RSI cutoff,
+// or priced under the cost basis, can still be listed; it just does not earn the crown.
+function ccCrownEligible(result: ScreenResult | undefined): boolean {
+  if (!result || result.strategy !== 'CC') return true;
+  const c = result.bestCandidate;
+  return ccRsiChip({ rsi: result.trendResult?.metrics?.rsi14 ?? null, price: result.price, costBasis: c?.ccCostBasis ?? null, cutoff: readCcRsiCutoff() }).state === 'ready';
+}
+
 function ResultCard(props: ResultCardProps) {
   return props.result.strategy === 'PMCC' ? <PmccResultCard {...props} /> : <GenericResultCard {...props} />;
 }
@@ -6505,7 +6514,7 @@ const strategyScores = useMemo(() => {
         {/* Col 2: Badges — fixed width */}
         <div className="w-52 shrink-0 flex items-center gap-1 flex-wrap">
           {qualDerivation && <QualificationBadge derivation={qualDerivation} checks={qualChecks} />}
-          {isRankMode && result.strategy !== 'CSP' && scored && tierLight && (
+          {isRankMode && result.strategy !== 'CSP' && result.strategy !== 'CC' && scored && tierLight && (
             <span className={`text-[9px] px-2 py-0.5 border rounded shrink-0 font-bold ${tierLight.color} ${tierLight.border} ${tierLight.bg}`}>
               {disqualifiedHere ? `Score ${scored.score} · not eligible` : `${tierLight.emoji} ${scored.score} — ${tierLight.label}`}
             </span>
@@ -6536,7 +6545,7 @@ const strategyScores = useMemo(() => {
                   {result.strategy}
                   {result.strategy === 'CSP'
                     ? <span className="font-bold text-[9px]">{cspScore ?? '—'}</span>
-                    : primary?.score != null && <span className="font-bold text-[9px]">{primary.score}</span>}
+                    : result.strategy !== 'CC' && primary?.score != null && <span className="font-bold text-[9px]">{primary.score}</span>}
                 </span>}
                 {alternates.map(s => (
                   <span
@@ -6554,7 +6563,7 @@ const strategyScores = useMemo(() => {
   cspScoreBadge ?? <span className={`text-[10px] px-2 py-0.5 border rounded-md shrink-0 font-bold ${stratBadge} flex items-center gap-1`}>
     {result.strategy}{result.strategy === 'CSP'
       ? <span className="font-bold text-[9px]">{cspScore ?? '—'}</span>
-      : scored && <span className="font-bold text-[9px]">{scored.score}</span>}
+      : result.strategy !== 'CC' && scored && <span className="font-bold text-[9px]">{scored.score}</span>}
   </span>
 )}
         </div>
@@ -11649,6 +11658,9 @@ export default function Home() {
         ? pmccScore
         : c?.strategy === 'CSP'
         ? (c.cspScore?.scoreStatus === 'AVAILABLE' ? c.cspScore.total : null)
+        : c?.strategy === 'CC'
+        // CC-WHEEL-0001: a covered call is ranked by annualized yield (tight spreads first), not the spread score.
+        ? ccRankValue(c, r.ccGrid?.cells.find(g => g.expiration === c.expiration && g.strike === c.shortStrike)?.wide ?? false)
         : (strat ? scoreCandidate(r, rankConfig)?.score ?? null : null),
       pop: c?.pop ?? null,
       creditDollars: c?.credit ?? null,
@@ -12564,7 +12576,7 @@ export default function Home() {
                       showStrategyToggle={false}
                       showCreditRatio={false}
                       oiAndSortControls={part => (
-                        <OiAndSortControls part={part} th={th} minOi={ccMinOi} setMinOi={setCcMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Call OI" oiHelper="Open interest on the short call. Missing OI does not pass a positive floor." sortLabels={{ relevantLegOI: 'Call OI' }} />
+                        <OiAndSortControls part={part} th={th} minOi={ccMinOi} setMinOi={setCcMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Call OI" oiHelper="Open interest on the short call. Missing OI does not pass a positive floor." sortLabels={{ score: 'Yield', relevantLegOI: 'Call OI' }} />
                       )}
                     />
                   </section>
@@ -12794,7 +12806,8 @@ export default function Home() {
                   )}
                 </>
               ) : screenMode === 'filter' || activeSession?.requestedStrategy === 'csp' ? (() => {
-                const topOpportunityRows = buildBestOpportunityRows(filteredQualified, excludeHiddenSymbols(opportunityRecommendations, filterHiddenSymbols));
+                const topOpportunityRows = buildBestOpportunityRows(filteredQualified, excludeHiddenSymbols(opportunityRecommendations, filterHiddenSymbols))
+                  .filter(row => row.strategy !== 'CC' || ccCrownEligible(filteredQualified.find(q => (q.candidateId ?? `${q.symbol}-${q.strategy}`) === row.resultKey)));
                 const topOpportunityIds = pickTopOpportunityIds(topOpportunityRows);
                 // CSP-WORKFLOW-0001 — match back to the ScreenResult being
                 // rendered via each row's `resultKey` (the ScreenResult's
@@ -13188,7 +13201,8 @@ export default function Home() {
                 );
               })() : (() => {
                 // SCAN-TOP-0002 -- same earned-pick rule as the filter list: top 3 advisor rows get the gold tab; any card with a row gets the reasoning panel.
-                const rankTopRows = buildBestOpportunityRows(results.filter(r => r.qualified && !rankHiddenSymbols.includes(r.symbol)), excludeHiddenSymbols(opportunityRecommendations, rankHiddenSymbols));
+                const rankTopRows = buildBestOpportunityRows(results.filter(r => r.qualified && !rankHiddenSymbols.includes(r.symbol)), excludeHiddenSymbols(opportunityRecommendations, rankHiddenSymbols))
+                  .filter(row => row.strategy !== 'CC' || ccCrownEligible(results.find(q => (q.candidateId ?? `${q.symbol}-${q.strategy}`) === row.resultKey)));
                 const rankTopIds = pickTopOpportunityIds(rankTopRows);
                 const rankTopRankByKey = new Map(rankTopRows.map((row, index) => [row.resultKey, index + 1] as const).filter(([, n]) => rankTopRows[n - 1] != null && rankTopIds.has(rankTopRows[n - 1].candidateId)));
                 const rankTopRowByKey = new Map(rankTopRows.map(row => [row.resultKey, row] as const));
