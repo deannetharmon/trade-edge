@@ -1769,7 +1769,16 @@ Keep responses focused and concise — 2-4 sentences. Answer first, then the one
 const PORTFOLIO_AI_SYSTEM_PROMPT = `${TRADING_CHAT_PROMPT}
 
 PORTFOLIO PANEL OVERRIDE (this section takes precedence over the prose and length rules above, for this panel only):
-- When the trader asks you to analyze the portfolio or asks what needs attention, give a ranked list of the positions that need a decision, most urgent first. For each one: the situation in one line, then 2 or 3 concrete options (for example accept assignment, close now, roll, hold) with the dollar outcome of each that the snapshot supports, the one option you recommend, and what would change that call. A numbered list is fine here.
+- PORTFOLIO-AI-FORMAT-0001. When the trader asks you to analyze the portfolio or asks what needs attention, answer in EXACTLY this plain-text layout and nothing else. No bold, no asterisks, no tables, no markdown.
+SUMMARY: one line, for example "3 need action now, 2 need a decision before earnings, 4 can be left alone."
+Then one block per position that needs a decision, most urgent first, each block exactly five lines:
+1. SYMBOL short 75.5 put | 1 DTE | one or two words on the situation (for example "deep ITM")
+Do: the single action you recommend, in a few words (for example "Take assignment" or "Close it" or "Hold")
+Cash: the figures that matter, separated by " | " (for example "Cash needed $7,550 | Close now -$1,165")
+Why: one short sentence using only snapshot figures.
+Flip if: one short sentence naming what would change the call.
+After the blocks, one line "LEFT ALONE: SYMBOL, SYMBOL" for positions that need no action.
+Rules for the blocks: pick ONE action, never list alternatives and never tell the trader to decide or to "decide whether you want" something; the trader wants a call. Every number must be printed in the snapshot; never add, subtract or derive a number, and if a figure is not in the snapshot omit it or write "n/a". Keep each line under 120 characters.
 - Your recommendation must agree with the app's suggested action for that position. If you disagree, say so on a separate line starting "AI NOTE:".
 - If a position's Intent shows the trader plans to take assignment, treat that as decided. Do not ask whether they want assignment; say what to do next using only snapshot figures.
 - Taking a realized loss is the last resort. Consider assignment, a roll, or holding before recommending a close at a loss. The trader's goal on a position is at least 50% profit when feasible.
@@ -5346,7 +5355,7 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th, suggestionC
                       ? <div className="space-y-1.5">
                           {txt.split('\n').filter(line => line.trim()).map((line, lineIndex) => /^\s*AI NOTE:/i.test(line)
                             ? <div key={lineIndex} className="rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2 py-1.5"><span className="text-[9px] font-bold tracking-widest text-indigo-300 mr-1.5">AI NOTE</span>{line.replace(/^\s*AI NOTE:\s*/i, '')}</div>
-                            : <p key={lineIndex}>{line}</p>)}
+                            : (() => { const clean = line.replace(/\*\*/g, ''); const head = /^\s*(\d+\.\s|SUMMARY:|LEFT ALONE:)/.test(clean); return <p key={lineIndex} className={head ? 'font-semibold pt-1.5 mt-1 border-t border-white/10 first:border-t-0 first:mt-0' : ''}>{clean}</p>; })())}
                           {hiddenFigureCounts[i] > 0 && <p role="note" className="text-[10px] text-red-300 border border-red-500/40 rounded-lg px-2 py-1">FIGURE HIDDEN — {hiddenFigureCounts[i]} number{hiddenFigureCounts[i] === 1 ? '' : 's'} in this answer did not match your snapshot and {hiddenFigureCounts[i] === 1 ? 'was' : 'were'} removed.</p>}
                         </div>
                       : <span>{txt}</span>)}
@@ -5547,7 +5556,7 @@ function PortfolioAiPanel({ snapshot, onRefresh, onClose, th }: {
 
   const analyze = () => {
     setStarted(true);
-    setSeed({ id: Date.now(), text: 'Analyze my portfolio. Rank the positions that need a decision, most urgent first. For each, give two or three options with dollar outcomes, your recommendation, and what would change it. Treat any position whose Intent is planned assignment as decided. Use only the figures in the snapshot.' });
+    setSeed({ id: Date.now(), text: 'Analyze my portfolio in the required card layout: SUMMARY line, then one five-line block per position that needs a decision, most urgent first, then LEFT ALONE. One action per position. Treat any position whose Intent is planned assignment as decided. Use only the figures in the snapshot.' });
   };
 
   const chips = [
