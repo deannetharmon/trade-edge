@@ -7033,9 +7033,10 @@ const strategyScores = useMemo(() => {
             </div>
           )}
 
-          {result.failReasons.length > 0 && (
+          {/* CSP-CAP-DUP-0001: the capital reason is already shown next to Cash Required (c.capitalWarning), so it is not repeated here. */}
+          {result.failReasons.filter((r) => !r.startsWith('Insufficient CSP capacity')).length > 0 && (
             <div className={`pt-2 border-t ${th.border}`}>
-              <p className="text-[10px] text-red-500 font-medium">{result.failReasons.join(' · ')}</p>
+              <p className="text-[10px] text-red-500 font-medium">{result.failReasons.filter((r) => !r.startsWith('Insufficient CSP capacity')).join(' · ')}</p>
             </div>
           )}
 
