@@ -20,19 +20,19 @@ const stopEvidence = (o: Partial<StopOrderEvidence> = {}): StopOrderEvidence => 
 const assessment = (order: StopOrderEvidence) => ({ evidenceComplete: true, matchedOrderId: order.orderId, rawEvidence: { orders: [order] } }) as unknown as StopAssessment;
 
 const input = (o: Record<string, unknown> = {}) => ({ orderId: 'T1', complexOrderId: null as string | null, originalPrice: 1.06, stopAssessment: null as StopAssessment | null, legSymbols: [SYM], ...o });
-const deps = (live: unknown = null, cancel = vi.fn().mockResolvedValue({})) => ({ readComplexOrder: vi.fn().mockResolvedValue(live), cancel });
+const deps = (live: unknown = null, cancel = vi.fn().mockResolvedValue({})) => ({ readComplexOrder: vi.fn().mockResolvedValue(live), readOrder: vi.fn().mockResolvedValue(null), cancel });
 
 describe('cancelWorkingCloseForWalk', () => {
   it('cancels a simple working close through /orders and returns the price to put back', async () => {
     const d = deps();
-    await expect(cancelWorkingCloseForWalk(input(), d)).resolves.toEqual({ originalPrice: 1.06 });
+    await expect(cancelWorkingCloseForWalk(input(), d)).resolves.toEqual({ originalPrice: 1.06, cancelled: true });
     expect(d.cancel).toHaveBeenCalledWith('T1');
     expect(d.readComplexOrder).not.toHaveBeenCalled();
   });
 
   it('cancels a leftover envelope\'s plain order after a live re-read proves no other order can work', async () => {
     const d = deps(envelope([profit(), stop({ status: 'Cancelled' })]));
-    await expect(cancelWorkingCloseForWalk(input({ complexOrderId: '8688606', stopAssessment: assessment(stopEvidence({ status: 'Cancelled' })) }), d)).resolves.toEqual({ originalPrice: 1.06 });
+    await expect(cancelWorkingCloseForWalk(input({ complexOrderId: '8688606', stopAssessment: assessment(stopEvidence({ status: 'Cancelled' })) }), d)).resolves.toEqual({ originalPrice: 1.06, cancelled: true });
     expect(d.readComplexOrder).toHaveBeenCalledWith('8688606');
     expect(d.cancel).toHaveBeenCalledWith('T1');
   });
@@ -64,7 +64,7 @@ describe('cancelWorkingCloseForWalk', () => {
   });
 
   it('refuses when the live re-read fails', async () => {
-    const d = { readComplexOrder: vi.fn().mockRejectedValue(new Error('network')), cancel: vi.fn() };
+    const d = { readComplexOrder: vi.fn().mockRejectedValue(new Error('network')), readOrder: vi.fn().mockResolvedValue(null), cancel: vi.fn() };
     await expect(cancelWorkingCloseForWalk(input({ complexOrderId: '8688606' }), d)).rejects.toThrow(LIVE_BRACKET_WALK_REFUSAL);
     expect(d.cancel).not.toHaveBeenCalled();
   });
@@ -109,5 +109,14 @@ describe('buildRestoreCloseOrder', () => {
   it('a debit-opened position puts back a credit sell', () => {
     const long = { symbol: 'MRNA', legs: [{ symbol: 'MRNA  261120P00140000', direction: 'Long', quantity: 2 }] } as unknown as Pick<Position, 'symbol' | 'legs'>;
     expect(buildRestoreCloseOrder(long, 8.5, 'sell')).toMatchObject({ 'time-in-force': 'GTC', price: '8.50', 'price-effect': 'Credit' });
+  });
+});
+
+describe('signedDollars', () => {
+  it('signs profit and loss', async () => {
+    const { signedDollars } = await import('../panelModel');
+    expect(signedDollars(120.4)).toBe('+$120');
+    expect(signedDollars(-85.6)).toBe('-$86');
+    expect(signedDollars(0.2)).toBe('$0');
   });
 });

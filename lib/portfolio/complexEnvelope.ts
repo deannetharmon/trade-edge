@@ -54,7 +54,8 @@ export interface StaleEnvelopeInput {
   }>;
 }
 
-export type StaleEnvelopeVerdict = { ok: true } | { ok: false; reason: string };
+/** ok: the target is a plain order. `alreadyGone`: it is also no longer working at the broker, so there is nothing to cancel. */
+export type StaleEnvelopeVerdict = { ok: true; alreadyGone?: boolean } | { ok: false; reason: string };
 
 const compact = (s: unknown) => String(s ?? '').replace(/\s+/g, '');
 
@@ -71,7 +72,6 @@ export function staleEnvelopeVerdict(input: StaleEnvelopeInput): StaleEnvelopeVe
   if (!targetOrderId) return { ok: false, reason: 'The existing GTC order ID is unavailable.' };
   const target = envelopeOrders(liveEnvelope).find(o => String(o?.id) === String(targetOrderId));
   if (!target) return { ok: false, reason: 'The existing GTC was not found in its envelope at TastyTrade.' };
-  if (isDeadOrderStatus(target.status)) return { ok: false, reason: 'The existing GTC is no longer working at TastyTrade.' };
   const aliveSiblings = aliveOrdersInEnvelope(liveEnvelope).filter(o => String(o?.id) !== String(targetOrderId));
   if (aliveSiblings.length > 0) return { ok: false, reason: 'Another order in the envelope can still work.' };
   const symbols = new Set(positionSymbols.map(compact));
@@ -82,5 +82,5 @@ export function staleEnvelopeVerdict(input: StaleEnvelopeInput): StaleEnvelopeVe
     o.legs.some(l => symbols.has(compact(l.symbol))),
   );
   if (standaloneStop) return { ok: false, reason: 'A stop order is still working on the same contract.' };
-  return { ok: true };
+  return isDeadOrderStatus(target.status) ? { ok: true, alreadyGone: true } : { ok: true };
 }

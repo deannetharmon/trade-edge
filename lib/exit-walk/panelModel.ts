@@ -19,7 +19,15 @@ export interface PanelRow {
   vsMid: string;
   /** Time into the walk, m:ss, at the configured dwell. */
   at: string;
+  /** Whole-position profit (+) or loss (-) in dollars if the close fills at this step's price (centsRaw: price in cents). */
+  priceCents: number;
   status: 'Done' | 'Now' | 'Next' | 'Floor' | 'Ceiling';
+}
+
+/** "+$120" / "-$85" / "$0" for a P/L in dollars. */
+export function signedDollars(v: number): string {
+  const r = Math.round(v);
+  return r === 0 ? '$0' : `${r > 0 ? '+' : '-'}$${Math.abs(r).toLocaleString('en-US')}`;
 }
 
 export function clock(ms: number): string {
@@ -56,6 +64,7 @@ export function planRows(plan: Plan, nowIndex: number): PanelRow[] {
       price: dollars(price),
       vsMid: i === 0 ? 'mid' : `${sell ? '-' : '+'}${diff}c`,
       at: clock(plan.steps[i].index * plan.steps[i].dwellMs),
+      priceCents: price,
       status,
     };
   });
@@ -72,7 +81,7 @@ export function rowsWithLog(plan: Plan, tried: number[], running: boolean): Pane
   return planRows(plan, nowIndex).map((row, i) => {
     if (i >= tried.length) return row;
     const diff = Math.round(sell ? mid_c - tried[i] : tried[i] - mid_c);
-    return { ...row, price: dollars(tried[i]), vsMid: i === 0 ? 'mid' : `${sell ? '-' : '+'}${diff}c`, status: row.status === 'Now' ? 'Now' : 'Done' };
+    return { ...row, priceCents: tried[i], price: dollars(tried[i]), vsMid: i === 0 ? 'mid' : `${sell ? '-' : '+'}${diff}c`, status: row.status === 'Now' ? 'Now' : 'Done' };
   });
 }
 

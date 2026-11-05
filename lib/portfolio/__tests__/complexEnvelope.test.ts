@@ -41,7 +41,8 @@ describe('staleEnvelopeVerdict', () => {
   it('refuses when a sibling can still work', () => expect(staleEnvelopeVerdict({ ...base, liveEnvelope: envelope([profit(), stop()]) })).toMatchObject({ ok: false }));
   it('refuses when the sibling status is unknown', () => expect(staleEnvelopeVerdict({ ...base, liveEnvelope: envelope([profit(), stop({ status: undefined })]) })).toMatchObject({ ok: false }));
   it('refuses when the target is not in the envelope', () => expect(staleEnvelopeVerdict({ ...base, targetOrderId: 'ZZ', liveEnvelope: dead })).toMatchObject({ ok: false }));
-  it('refuses when the target itself is no longer working', () => expect(staleEnvelopeVerdict({ ...base, liveEnvelope: envelope([profit({ status: 'Filled' }), stop({ status: 'Cancelled' })]) })).toMatchObject({ ok: false }));
+  it('reports alreadyGone when the target itself is no longer working', () => expect(staleEnvelopeVerdict({ ...base, liveEnvelope: envelope([profit({ status: 'Cancelled' }), stop({ status: 'Cancelled' })]) })).toEqual({ ok: true, alreadyGone: true }));
+  it('still refuses a dead target while a sibling can work', () => expect(staleEnvelopeVerdict({ ...base, liveEnvelope: envelope([profit({ status: 'Cancelled' }), stop({ status: 'Live' })]) })).toMatchObject({ ok: false }));
   it('refuses when there is no target id', () => expect(staleEnvelopeVerdict({ ...base, targetOrderId: null, liveEnvelope: dead })).toMatchObject({ ok: false }));
   it('refuses when a standalone stop is still working on the same contract', () => {
     expect(staleEnvelopeVerdict({ ...base, liveEnvelope: dead, knownOrders: [known()] })).toMatchObject({ ok: false });

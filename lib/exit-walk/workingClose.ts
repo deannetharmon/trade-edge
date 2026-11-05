@@ -7,7 +7,7 @@
 // Reuses the GTC-REPLACE-0001 cancel helper and the GTC-STALE-COMPLEX-0001 envelope check; no second implementation.
 
 import { cancelExistingGtcForReplacement } from '@/lib/portfolio/existingGtcReplacement';
-import { staleEnvelopeVerdict } from '@/lib/portfolio/complexEnvelope';
+import { isDeadOrderStatus, staleEnvelopeVerdict } from '@/lib/portfolio/complexEnvelope';
 import type { StopAssessment } from '@/lib/portfolio/stopLossPolicy';
 
 export interface WorkingCloseInput {
@@ -20,6 +20,8 @@ export interface WorkingCloseInput {
 }
 
 export interface WorkingCloseDeps {
+  /** GET /accounts/{acct}/orders/{id}: the broker's `data` object, or null when the read failed. */
+  readOrder(orderId: string): Promise<any | null>;
   /** GET /accounts/{acct}/complex-orders/{id}: the broker's `data` object, or null when the read failed. */
   readComplexOrder(complexOrderId: string): Promise<any | null>;
   /** DELETE the order: through its complex-order endpoint when a complex id is given, else /orders/{id}. */
@@ -28,6 +30,8 @@ export interface WorkingCloseDeps {
 
 export interface WorkingCloseCancellation {
   originalPrice: number;
+  /** True when this call cancelled the order. False: it was already gone at the broker, so there is nothing to put back. */
+  cancelled: boolean;
 }
 
 export const LIVE_BRACKET_WALK_REFUSAL =
@@ -56,7 +60,12 @@ export async function cancelWorkingCloseForWalk(input: WorkingCloseInput, deps: 
     if (!verdict.ok) {
       throw new Error(`${LIVE_BRACKET_WALK_REFUSAL} (${verdict.reason})`);
     }
+    if (verdict.alreadyGone) return { originalPrice, cancelled: false };
     envelopeId = input.complexOrderId;
+  } else {
+    // A plain order: if the broker already shows it dead (cancelled in TastyTrade, filled), there is nothing to cancel.
+    const live = await deps.readOrder(orderId).catch(() => null);
+    if (live && isDeadOrderStatus(live.status)) return { originalPrice, cancelled: false };
   }
 
   await cancelExistingGtcForReplacement(
@@ -72,5 +81,5 @@ export async function cancelWorkingCloseForWalk(input: WorkingCloseInput, deps: 
       }
     },
   );
-  return { originalPrice };
+  return { originalPrice, cancelled: true };
 }

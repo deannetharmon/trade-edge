@@ -13,7 +13,6 @@ import { SEMANTIC_TONE_CLASS } from './model/presentation';
 import { standaloneLongOptionLabel } from '@/lib/portfolio/positionStrategyFilter';
 import { canonicalRecommendationToAction } from '@/lib/portfolio/canonicalRecommendationPresentation';
 import { CONTROL_RADIUS } from './ui/chipStyle';
-import { ExitWalkLauncher } from '@/components/portfolio/ExitWalkPanel';
 import type { ActionType, Position, PositionIntent } from '@/lib/portfolio-data/types';
 
 const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take Profit Now', PLACE_GTC: 'Set Profit Target', CUT_LOSSES: 'Cut Losses' };
@@ -124,8 +123,6 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
             </span>
           ) : <button key={action} type="button" onClick={() => onExecute?.(p, action)} className={`min-h-9 ${CONTROL_RADIUS} border px-3 text-xs focus:ring-2 focus:ring-teal-400 ${isSuggested ? `${mark} text-white` : action === 'CUT_LOSSES' ? 'border-amber-500/50 text-amber-300' : 'border-white/20 text-white'}`}>{ACTION_LABELS[action] ?? action}</button>;
         })}
-        {/* EXIT-WALK-CANCEL-0001: the same Walk the price button as the Table view, in the same place (after Close / Roll). */}
-        <ExitWalkLauncher pos={p} className={`min-h-9 ${CONTROL_RADIUS} px-3 text-xs focus:ring-2 focus:ring-teal-400`} />
         {!stopNotExpected(p) && renderStopControl?.(p)}
         <SalvageEntry position={p} />
         <button type="button" aria-expanded={detailOpen} onClick={() => setDetailOpen(open => !open)} className="ml-auto text-xs text-white/70 underline decoration-dotted underline-offset-2 hover:text-white">{detailOpen ? 'Hide detail' : 'Show detail'}</button>

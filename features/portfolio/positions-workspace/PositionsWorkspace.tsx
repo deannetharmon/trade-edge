@@ -27,7 +27,6 @@ import { activeFilterCount, DEFAULT_FILTERS, matchesAnalysisFilters } from './mo
 import { matchesStrategyChip, STRATEGY_CHIPS, strategyChipCounts } from './model/strategyChips';
 import { chipClass, chipCountClass, CONTROL_RADIUS } from './ui/chipStyle';
 import { PositionCards } from './PositionCards';
-import { ExitWalkLauncher } from '@/components/portfolio/ExitWalkPanel';
 import { assignmentStrip, CARD_SORTS, matchesSymbolSearch, sortCards, updatedLabel, type CardSort, type PositionCard } from './model/cardModel';
 import { isCardsDisabled, loadPositionsViewStored, resolvePositionsView, savePositionsViewStored, type PositionsView } from './model/positionsViewSetting';
 import { DEFAULT_PREFERENCES, loadPreferences, savePreferences } from './model/preferences';
@@ -915,8 +914,6 @@ function AnalysisRow({ onIntentChange, position: p, columns, th, actions, onExec
             {p.recommendation && canonicalRecommendationToAction(p.recommendation.kind) === action && <span className={`text-[9px] whitespace-nowrap ${th.textFaint}`}>← suggested</span>}
           </span>
         ))}
-        {/* EXIT-WALK-CANCEL-0001: the same Walk the price button as the Cards view, in the same place (after Close / Roll). */}
-        <ExitWalkLauncher pos={p} className="min-h-8 rounded border px-2 text-[10px] focus:ring-2 focus:ring-teal-400" />
       </span>
     </>,
   };

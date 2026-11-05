@@ -23,6 +23,7 @@ import {
   buildRestoreCloseOrder,
   checkExitWalkEligibility,
   exitWalkGateRefusal,
+  expectedClosePnlDollars,
   type ExitWalkEligibility,
 } from '@/lib/exit-walk/closeOrder';
 import {
@@ -31,7 +32,7 @@ import {
   exitQuoteFromLegs,
   type BrowserExitWalkConfig,
 } from '@/lib/exit-walk/browserDeps';
-import { outcomeLine, planChips, refusalText, rowsWithLog, walkTitle, type PanelChip } from '@/lib/exit-walk/panelModel';
+import { outcomeLine, planChips, refusalText, rowsWithLog, signedDollars, walkTitle, type PanelChip } from '@/lib/exit-walk/panelModel';
 import { checkWalkStart, runExitWalk, type ExitWalkLogEntry, type ExitWalkOutcome } from '@/lib/exit-walk/run';
 import type { ExitSide, ExitWalkResult, Quote } from '@/lib/exit-walk/types';
 
@@ -231,6 +232,7 @@ function ExitWalkDialog({ pos, ctx, onClose }: { pos: Position; ctx: ExitWalkCon
             },
             {
               readComplexOrder: id => ttFetch(`/accounts/${pos.accountNumber}/complex-orders/${id}`, token).then((r: any) => r?.data ?? null),
+              readOrder: id => ttFetch(`/accounts/${pos.accountNumber}/orders/${encodeURIComponent(id)}`, token).then((r: any) => r?.data ?? null),
               cancel: async (orderId, complexOrderId) => {
                 const res = await fetch(
                   complexOrderId ? `${BASE}/accounts/${pos.accountNumber}/complex-orders/${complexOrderId}` : `${BASE}/accounts/${pos.accountNumber}/orders/${orderId}`,
@@ -242,9 +244,15 @@ function ExitWalkDialog({ pos, ctx, onClose }: { pos: Position; ctx: ExitWalkCon
               },
             },
           );
-          cancelledPrice = cancelled.originalPrice;
-          setCancelledOriginal(cancelled.originalPrice);
-          await new Promise(r => setTimeout(r, 800));
+          if (cancelled.cancelled) {
+            cancelledPrice = cancelled.originalPrice;
+            setCancelledOriginal(cancelled.originalPrice);
+            await new Promise(r => setTimeout(r, 800));
+          } else {
+            // Already gone at TastyTrade (cancelled there): nothing to cancel or put back. Reload so the card matches.
+            ctx.onDone();
+            setNotice('The working close order was already gone at TastyTrade, so nothing was cancelled. Walking now.');
+          }
         } catch (error) {
           setNotice(error instanceof Error ? error.message : 'The working order could not be cancelled. Nothing was changed.');
           return;
@@ -324,6 +332,7 @@ function ExitWalkDialog({ pos, ctx, onClose }: { pos: Position; ctx: ExitWalkCon
                   <th scope="col" className="py-1 px-1.5 border-b border-neutral-800">Step</th>
                   <th scope="col" className="py-1 px-1.5 border-b border-neutral-800 text-right">Price</th>
                   <th scope="col" className="py-1 px-1.5 border-b border-neutral-800 text-right">vs mid</th>
+                  <th scope="col" className="py-1 px-1.5 border-b border-neutral-800 text-right">P/L</th>
                   <th scope="col" className="py-1 px-1.5 border-b border-neutral-800 text-right">At</th>
                   <th scope="col" className="py-1 px-1.5 border-b border-neutral-800" />
                 </tr>
@@ -334,6 +343,10 @@ function ExitWalkDialog({ pos, ctx, onClose }: { pos: Position; ctx: ExitWalkCon
                     <td className="py-1.5 px-1.5 border-b border-neutral-900">{row.step}</td>
                     <td className="py-1.5 px-1.5 border-b border-neutral-900 text-right">{row.price}</td>
                     <td className="py-1.5 px-1.5 border-b border-neutral-900 text-right">{row.vsMid}</td>
+                    {(() => {
+                      const pl = pos.identity ? expectedClosePnlDollars(pos.identity, ready.side, row.priceCents / 100) : null;
+                      return <td data-testid="walk-row-pl" className={`py-1.5 px-1.5 border-b border-neutral-900 text-right font-semibold ${pl == null ? '' : pl < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{pl == null ? '–' : signedDollars(pl)}</td>;
+                    })()}
                     <td className="py-1.5 px-1.5 border-b border-neutral-900 text-right">{row.at}</td>
                     <td className="py-1.5 px-1.5 border-b border-neutral-900">{row.status}</td>
                   </tr>
@@ -361,7 +374,7 @@ function ExitWalkDialog({ pos, ctx, onClose }: { pos: Position; ctx: ExitWalkCon
               Put the original order back at ${(cancelledOriginal as number).toFixed(2)}
             </button>
           ) : null}
-          <button type="button" onClick={() => void refresh()} disabled={running}
+          <button type="button" onClick={() => { ctx.onDone(); void refresh(); }} disabled={running}
             className="min-h-[44px] px-4 rounded-lg border border-neutral-700 text-slate-300 text-sm disabled:opacity-40">
             Refresh
           </button>

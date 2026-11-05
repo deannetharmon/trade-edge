@@ -264,7 +264,7 @@ import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, type PmccReviewHandoff } from '@/lib/s
 // with assertLiveContextReady -- defense in depth, not reliance on the
 // render-level gate alone (§3.3).
 import { usePortfolioMode } from '@/components/portfolio-mode/PortfolioModeProvider';
-import { ExitWalkHost, ExitWalkLauncher, ExitWalkProvider } from '@/components/portfolio/ExitWalkPanel';
+import { ExitWalkHost, ExitWalkProvider } from '@/components/portfolio/ExitWalkPanel';
 import { PortfolioModeGateNotice } from '@/components/portfolio-mode/PortfolioModeGateNotice';
 import { assertLiveContextReady } from '@/lib/portfolio-mode/guardrails';
 import { classifyTrendFromCloses } from '@/lib/portfolio/trendClassification';
@@ -3588,6 +3588,7 @@ function BatchConfirmModal({
             // that can refuse runs here, BEFORE anything is cancelled.
             let gtcComplexId = (item.pos as any).gtcComplexOrderId as string | undefined;
             let staleEnvelopeId: string | undefined;
+            let gtcAlreadyGone = false;
             let pairedResolution = gtcComplexId ? resolvePairedLeg(item.pos.stopAssessment, gtcComplexId) : null;
             if (gtcComplexId) {
               // GTC-STALE-COMPLEX-0001: the bracket's stop may be gone at the broker (cancelled there) while the old
@@ -3602,6 +3603,8 @@ function BatchConfirmModal({
                 positionSymbols: item.pos.legs.map(l => l.symbol),
                 knownOrders: item.pos.stopAssessment?.rawEvidence.orders ?? [],
               });
+              // The old close order is already gone at the broker (cancelled in TastyTrade): nothing to cancel, submit the new close.
+              if (stale.ok && stale.alreadyGone) gtcAlreadyGone = true;
               if (stale.ok) {
                 console.log(`STALE ENVELOPE: ${item.pos.symbol} complexId=${gtcComplexId} has no other working order; treating GTC ${item.pos.gtcOrderId} as a plain order`);
                 staleEnvelopeId = gtcComplexId;
@@ -3621,7 +3624,7 @@ function BatchConfirmModal({
               const liveRefusal = liveStopRefusal(live?.data, pairedLeg);
               if (liveRefusal) throw new Error(liveRefusal);
             }
-            try {
+            if (!gtcAlreadyGone) try {
               const cancellation = await cancelExistingGtcForReplacement(
                 {
                   hasGtc: item.pos.hasGtc,
@@ -9466,8 +9469,7 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
               </span>
             );
           })}
-          {/* EXIT-WALK-0001B: Walk the price (its own panel; never touches the batch close modal) */}
-          <ExitWalkLauncher pos={pos} />
+          {/* EXIT-WALK-ONEPATH-0001: Walk the price is offered only inside the Close / Take Profit dialog (one path everywhere). */}
           {/* Extend Profit — only show when profit ≥50% AND DTE ≥ 14 */}
           {(() => {
             const pnlPct = entryPnlPct(pos);
@@ -11497,8 +11499,6 @@ export default function PortfolioPage() {
               {/* GREEKS-V2-0001: portfolio-wide Greeks (always unfiltered) were legacy-view only. */}
               {/* PORT-HEADLINE-0001: rendered inside the workspace, between the headline strip and the strategy tiles. */}
               <SalvageDepsProvider value={salvageDeps}>
-              {/* EXIT-WALK-CANCEL-0001: the same Walk the price button in the Table and Cards views needs the walk's context here. */}
-              <ExitWalkProvider pendingOrders={pendingOrders} dryRun={dryRunMode} onDone={fetchPositions}>
               <PositionsWorkspace
                 greeks={<div className="mb-4"><PortfolioGreeksDashboard positions={positions} th={th} /></div>}
                 model={positionsWorkspaceModel}
@@ -11529,7 +11529,6 @@ export default function PortfolioPage() {
                 onIntentChange={handleIntentChange}
                 onRefresh={fetchPositions}
               />
-              </ExitWalkProvider>
               </SalvageDepsProvider>
             </>
           ) : (
