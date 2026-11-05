@@ -106,6 +106,10 @@ describe('selectCcGridWindow', () => {
     expect(v.expirations).toHaveLength(4);
     expect(v.moreExpirations).toBe(2);
     expect(selectCcGridWindow(many, 'balanced', { ...base, allExpirations: true }).expirations).toHaveLength(6);
+    // the selected trade's expiration stays visible even when it is past the first four
+    const sel = selectCcGridWindow(many, 'balanced', { ...base, selected: { expiration: exps[5].expiration, strike: 90 } });
+    expect(sel.expirations.map(e => e.expiration)).toContain(exps[5].expiration);
+    expect(sel.anchor?.expiration).toBe(exps[5].expiration);
   });
 });
 

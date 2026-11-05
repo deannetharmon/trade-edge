@@ -100,6 +100,7 @@ import { findBestCoveredCall, diagnoseCcExclusions, formatCcExclusionSummary, bu
 import { ccStrikeFloor, ccStrikeFloorMessage } from '@/lib/scans/ccStrikeFloor';
 import { resolveResearchEntry, buildResearchCapacity, researchEntryLabel } from '@/lib/scans/ccResearch';
 import { CcStrikeGrid } from '@/features/screener/components/CcStrikeGrid';
+import type { CcGridCell } from '@/lib/scans/ccGridTypes';
 import { ccRsiChip } from '@/lib/scans/ccRsiChip';
 import { useCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
 import { CcRsiCutoffControl } from '@/features/screener/components/CcRsiCutoffControl';
@@ -5636,7 +5637,7 @@ type ResultCardProps = {
   // CspTradeModal (single-leg), never the multi-leg TradeModal.
   onTradeCsp?: (result: ScreenResult) => void;
   // CC-ORDERS-0001E: a covered call opens CcTradeModal, which proves share/LEAP coverage from the broker itself.
-  onTradeCc?: (result: ScreenResult) => void;
+  onTradeCc?: (result: ScreenResult, order?: CcOrderInput) => void;
   // PMCC-HELD-BREAKEVEN-0001B-1: held-LEAP outcome card. False/undefined = this pair's LEAP has no short
   // that cleared the floor. Refresh action reuses the page's existing refreshPortfolioRef path.
   heldLeapHasResults?: boolean;
@@ -6227,6 +6228,7 @@ function CspReturnThisCycleRow({ candidate }: { candidate: SpreadCandidate }) {
 }
 
 function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade, onTradeCsp, onTradeCc, cachedEntry, existingPositions }: ResultCardProps) {
+  const [pickedCcCell, setPickedCcCell] = useState<CcGridCell | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [showBestFinder, setShowBestFinder] = useState(false);
   const [showCspScore, setShowCspScore] = useState(false);
@@ -6960,7 +6962,7 @@ const strategyScores = useMemo(() => {
                 <div><span className={th.label}>IVR / IVx: </span><span className={th.text}>{result.ivr != null ? `${result.ivr.toFixed(0)}%` : '—'} / {result.ivx != null ? `${result.ivx.toFixed(1)}%` : '—'}</span></div>
               </div>
               {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
-              {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} />}
+              {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} initial={c.expiration ? { expiration: c.expiration, strike: c.shortStrike } : null} onAnchorChange={setPickedCcCell} />}
               {c.ccOutsideRangeNote && <p className="text-[9px] text-yellow-400 font-medium pt-1">⚠ {c.ccOutsideRangeNote}</p>}
               {c.ccResearch && <p className="text-[9px] text-cyan-300 font-bold pt-1">RESEARCH — not an order, and not counted in Best Opportunities. Entry price: {researchEntryLabel(c.ccEntrySource ?? null)}.</p>}
               {c.ccLiquidityWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccLiquidityWarning}</p>}
@@ -7055,12 +7057,32 @@ const strategyScores = useMemo(() => {
               // CC-ORDERS-0001E: ordering is enabled through CcTradeModal, which re-proves coverage from a fresh
               // broker read at open, before the dry run and inside the submit gate (TE-0007C's "proof of share
               // coverage at execution time" requirement).
-              <button
-                onClick={(e) => { e.stopPropagation(); onTradeCc(result); }}
-                className="flex-1 py-2.5 rounded-xl text-xs tracking-widest transition-colors bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
-              >
-                {'\u26A1'} TRADE THIS
-              </button>
+              // SELL-CC-0001: the button trades the call the grid summary describes (the scan's pick until a cell is clicked).
+              (() => {
+                const base = ccOrderInputFromScanResult(result)!;
+                const cell = pickedCcCell;
+                const isScanPick = !cell || (cell.expiration === base.expiration && cell.strike === base.strike);
+                if (!isScanPick && cell && cell.belowFloor) {
+                  return (
+                    <p data-testid="cc-trade-blocked" className="flex-1 py-2.5 text-center text-[10px] font-medium text-amber-300">
+                      ${cell.strike} is below your cost basis, so it cannot be ordered from here. Pick a strike at or above it.
+                    </p>
+                  );
+                }
+                const order: CcOrderInput | undefined = isScanPick || !cell ? undefined : {
+                  symbol: result.symbol, occSymbol: cell.occSymbol, strike: cell.strike, expiration: cell.expiration, dte: cell.dte,
+                  delta: cell.delta, midPerShare: parseFloat(cell.premiumPerShare.toFixed(2)), isIndex: result.underlyingType === 'index',
+                  initialQuantity: base.initialQuantity, stockPrice: base.stockPrice,
+                };
+                return (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onTradeCc(result, order); }}
+                    className="flex-1 py-2.5 rounded-xl text-xs tracking-widest transition-colors bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                  >
+                    {'\u26A1'} TRADE THIS{cell ? ` · $${cell.strike} CALL · ${cell.expiration.slice(5)}` : ''}
+                  </button>
+                );
+              })()
             ) : (
               <p className={`flex-1 text-[9px] ${th.textFaint} italic py-2.5 text-center`}>
                 Analysis only — this call cannot be ordered from here
@@ -9290,7 +9312,7 @@ export default function Home() {
     lookupOrderPlacedRef.current = false;
     setShowTradeLookup(false); setTradeLookupOrderOpen(false); setCcLookupOrder(null);
   };
-  const openCcFromScan = (r: ScreenResult) => { const order = ccOrderInputFromScanResult(r); if (order) setCcLookupOrder(order); };
+  const openCcFromScan = (r: ScreenResult, picked?: CcOrderInput) => { const order = picked ?? ccOrderInputFromScanResult(r); if (order) setCcLookupOrder(order); };
   const [leapsResults, setLeapsResults] = useState<Array<{
     symbol: string; expiration: string; dte: number; strike: number; delta: number | null;
     openInterest: number | null; bid: number | null; ask: number | null; occSymbol: string | null;

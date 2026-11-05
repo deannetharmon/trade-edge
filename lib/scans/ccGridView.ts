@@ -60,7 +60,10 @@ export function selectCcGridWindow(grid: CcGrid, goal: CcGoal, opts: CcGridWindo
   const hiddenBelowFloor = opts.showBelowFloor ? 0 : grid.cells.filter(c => c.belowFloor).length;
   const visible = grid.cells.filter(c => opts.showBelowFloor || !c.belowFloor);
   const shownExpirations = grid.expirations.filter(e => visible.some(c => c.expiration === e.expiration));
-  const expirations = opts.allExpirations ? shownExpirations : shownExpirations.slice(0, CC_GRID_DEFAULT_EXPIRATIONS);
+  // The selected trade's expiration is always shown, even when it is past the first few.
+  const expirations = opts.allExpirations
+    ? shownExpirations
+    : shownExpirations.filter((e, i) => i < CC_GRID_DEFAULT_EXPIRATIONS || e.expiration === opts.selected?.expiration);
   const moreExpirations = shownExpirations.length - expirations.length;
   const inShown = visible.filter(c => expirations.some(e => e.expiration === c.expiration));
   const byKey = new Map(inShown.map(c => [`${c.expiration}|${c.strike}`, c] as const));

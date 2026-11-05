@@ -7,19 +7,25 @@
 // (Upside, Balanced, Income) picks the starting trade and outlines the cells in its delta range; nothing is removed by it.
 // Strikes below the cost basis are hidden until the switch is turned on.
 
-import { useMemo, useState } from 'react';
-import type { CcGrid } from '@/lib/scans/ccGridTypes';
+import { useEffect, useMemo, useState } from 'react';
+import type { CcGrid, CcGridCell } from '@/lib/scans/ccGridTypes';
 import { CC_GOALS, DEFAULT_CC_GOAL, ccGridSummary, cellInGoal, selectCcGridWindow, type CcGoal } from '@/lib/scans/ccGridView';
 
 interface Theme { border: string; text: string; textMuted: string; textFaint: string }
 
 const signed = (n: number) => `${n < 0 ? '-' : '+'}$${Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
-export function CcStrikeGrid({ grid, th, symbol }: { grid: CcGrid; th: Theme; symbol?: string }) {
+export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange }: {
+  grid: CcGrid; th: Theme; symbol?: string;
+  /** The trade the scan picked: the grid starts on it, so the grid and the Trade button agree from the first frame. */
+  initial?: { expiration: string; strike: number } | null;
+  /** Called with the trade the summary describes whenever it changes, so the card's Trade button orders exactly that. */
+  onAnchorChange?: (cell: CcGridCell | null) => void;
+}) {
   const [goal, setGoal] = useState<CcGoal>(DEFAULT_CC_GOAL);
   const [showBelowFloor, setShowBelowFloor] = useState(false);
   const [allExpirations, setAllExpirations] = useState(false);
-  const [selected, setSelected] = useState<{ expiration: string; strike: number } | null>(null);
+  const [selected, setSelected] = useState<{ expiration: string; strike: number } | null>(initial ?? null);
   const [extraAbove, setExtraAbove] = useState(0);
   const [extraBelow, setExtraBelow] = useState(0);
 
@@ -27,6 +33,9 @@ export function CcStrikeGrid({ grid, th, symbol }: { grid: CcGrid; th: Theme; sy
     () => selectCcGridWindow(grid, goal, { showBelowFloor, allExpirations, selected, extraAbove, extraBelow }),
     [grid, goal, showBelowFloor, allExpirations, selected, extraAbove, extraBelow],
   );
+
+  const anchorKey = view.anchor ? `${view.anchor.expiration}|${view.anchor.strike}` : '';
+  useEffect(() => { onAnchorChange?.(view.anchor); }, [anchorKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (grid.cells.length === 0) {
     return <p className={`text-[10px] ${th.textFaint}`}>No calls passed the safety checks for the strike grid.</p>;
@@ -36,7 +45,7 @@ export function CcStrikeGrid({ grid, th, symbol }: { grid: CcGrid; th: Theme; sy
   const anchor = view.anchor;
 
   return (
-    <section aria-label="Covered call strike grid" data-testid="cc-strike-grid" className={`mt-2 border-t ${th.border} pt-2`}>
+    <section aria-label="Covered call strike grid" data-testid="cc-strike-grid" className={`mt-2 border-t ${th.border} pt-2 cursor-default`} onClick={e => e.stopPropagation()}>
       <div className="mb-1.5 flex flex-wrap items-center gap-2">
         <span className={`text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>Strike grid</span>
         <div role="group" aria-label="Goal" className="flex gap-1">
