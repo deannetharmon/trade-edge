@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildCcGrid } from '../covered-call-finder';
 import { computeCoveredCallCapacity } from '../covered-call-capacity';
-import { selectCcGridWindow, cellInGoal, ccGridSummary, ccCellNumbers, ccStockMovePct, ccChanceCalledPct, pickDefaultAnchor, pickCellForSellPrice, pickQuickCell } from '../ccGridView';
+import { selectCcGridWindow, cellInGoal, ccGridSummary, ccCellNumbers, ccStockMovePct, ccChanceCalledPct, pickDefaultAnchor, pickCellForSellPrice, pickQuickCell, filterCcGrid, sanitizeCcMinPay } from '../ccGridView';
 import type { CcRulesType } from '../constants';
 import type { WheelChainLeg } from '@/lib/wheel/chainSearch';
 
@@ -213,5 +213,27 @@ describe('pickQuickCell', () => {
   });
   it('returns null when nothing qualifies', () => {
     expect(pickQuickCell({ ...g, cells: [mk(95, 0.02, 3.0, { wide: true })] }, 'paid', { allowBelowFloor: false })).toBeNull();
+  });
+});
+
+describe('filterCcGrid', () => {
+  const mk = (strike: number, premiumPerShare: number, over: Record<string, unknown> = {}) => ({ expiration: 'E', dte: 10, strike, delta: 0.2, bid: premiumPerShare, ask: premiumPerShare, premiumPerShare, openInterest: 500, occSymbol: 'C' + strike, belowFloor: false, wide: false, thinOi: false, calledAwayTotal: 0, calledAwayPct: 0, premiumTotal: 0, notCalledBasis: 80, ...over });
+  const g = { basis: 80, floor: 80, stockPrice: 70, contracts: 1, expirations: [{ expiration: 'E', dte: 10 }], left: { inTheMoney: 0, unusableQuote: 0, earnings: 0, farOtm: 0, truncated: 0 },
+    cells: [mk(82, 0.5), mk(84, 0.02), mk(85, 0.4, { thinOi: true }), mk(86, 0.02, { thinOi: true })] };
+  it('hides thin open interest first and low pay second, counting each call once', () => {
+    const r = filterCcGrid(g, { minPay: 25 });
+    expect(r.grid.cells.map(c => c.strike)).toEqual([82]);
+    expect(r.hiddenThinOi).toBe(2);
+    expect(r.hiddenLowPay).toBe(1);
+  });
+  it('Any keeps low-paying calls but still hides thin open interest', () => {
+    const r = filterCcGrid(g, { minPay: 0 });
+    expect(r.grid.cells.map(c => c.strike)).toEqual([82, 84]);
+    expect(r.hiddenLowPay).toBe(0);
+  });
+  it('sanitizes the stored minimum', () => {
+    expect(sanitizeCcMinPay('50')).toBe(50);
+    expect(sanitizeCcMinPay('7')).toBe(25);
+    expect(sanitizeCcMinPay(null)).toBe(25);
   });
 });

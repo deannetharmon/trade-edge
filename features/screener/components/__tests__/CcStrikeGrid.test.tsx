@@ -1,7 +1,7 @@
 // features/screener/components/__tests__/CcStrikeGrid.test.tsx
 // CC-WHEEL-0001 S4 -- clicking inside the grid must not reach the result card (which collapses on click), and a click
 // reports the trade the summary describes.
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CcStrikeGrid } from '../CcStrikeGrid';
@@ -18,6 +18,7 @@ const grid: CcGrid = {
 };
 
 describe('CcStrikeGrid', () => {
+  beforeEach(() => { window.localStorage.clear(); });
   it('clicks inside the grid do not reach the card', async () => {
     const parent = vi.fn();
     render(<div onClick={parent}><CcStrikeGrid grid={grid} th={th} /></div>);
@@ -53,5 +54,13 @@ describe('CcStrikeGrid', () => {
     expect(labels()).toEqual(before);
     await userEvent.click(screen.getByLabelText(before[before.length - 1]!));
     expect(labels()).toEqual(before);
+  });
+  it('hides calls that pay under the minimum and says how many', async () => {
+    const mixed: CcGrid = { ...grid, cells: [cell(82), cell(85, { premiumPerShare: 0.02, bid: 0.02, ask: 0.03 })] };
+    render(<CcStrikeGrid grid={mixed} th={th} />);
+    expect(screen.queryByLabelText('85 call 2030-01-10')).toBeNull();
+    expect(screen.getByTestId('cc-grid-hidden')).toHaveTextContent('1 paying under $25');
+    await userEvent.click(screen.getByRole('button', { name: 'Any' }));
+    expect(screen.getByLabelText('85 call 2030-01-10')).toBeTruthy();
   });
 });

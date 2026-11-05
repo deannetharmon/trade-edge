@@ -9,13 +9,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { CcGrid, CcGridCell } from '@/lib/scans/ccGridTypes';
-import { CC_GOALS, DEFAULT_CC_GOAL, ccCellNumbers, ccChanceCalledPct, ccGridSummary, cellInGoal, pickCellForSellPrice, pickQuickCell, CC_QUICK_PICKS, selectCcGridWindow, type CcGoal } from '@/lib/scans/ccGridView';
+import { CC_GOALS, DEFAULT_CC_GOAL, ccCellNumbers, ccChanceCalledPct, ccGridSummary, cellInGoal, pickCellForSellPrice, pickQuickCell, CC_QUICK_PICKS, filterCcGrid, sanitizeCcMinPay, CC_MIN_PAY_CHOICES, DEFAULT_CC_MIN_PAY, selectCcGridWindow, type CcGoal } from '@/lib/scans/ccGridView';
 
 interface Theme { border: string; text: string; textMuted: string; textFaint: string }
 
 const signed = (n: number) => `${n < 0 ? '-' : '+'}$${Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
-export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange, hideGoalNote }: {
+export function CcStrikeGrid({ grid: rawGrid, th, symbol, initial, onAnchorChange, hideGoalNote }: {
   grid: CcGrid; th: Theme; symbol?: string;
   /** The card already says the call is outside the delta range, so the grid does not say it again. */
   hideGoalNote?: boolean;
@@ -25,6 +25,10 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange, hideGo
   onAnchorChange?: (cell: CcGridCell | null) => void;
 }) {
   const [goal, setGoal] = useState<CcGoal>(DEFAULT_CC_GOAL);
+  const [minPay, setMinPayState] = useState<number>(DEFAULT_CC_MIN_PAY);
+  useEffect(() => { try { setMinPayState(sanitizeCcMinPay(window.localStorage.getItem('te-cc-min-pay'))); } catch { /* storage unavailable: default */ } }, []);
+  const filtered = useMemo(() => filterCcGrid(rawGrid, { minPay }), [rawGrid, minPay]);
+  const grid = filtered.grid;
   const [showBelowFloor, setShowBelowFloor] = useState(false);
   const [allExpirations, setAllExpirations] = useState(false);
   const [selected, setSelected] = useState<{ expiration: string; strike: number } | null>(initial ?? null);
@@ -46,10 +50,15 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange, hideGo
   const anchorKey = anchor ? `${anchor.expiration}|${anchor.strike}` : '';
   useEffect(() => { onAnchorChange?.(anchor); }, [anchorKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (grid.cells.length === 0) {
+  if (rawGrid.cells.length === 0) {
     return <p className={`text-[10px] ${th.textFaint}`}>No calls passed the safety checks for the strike grid.</p>;
   }
 
+  const pickMinPay = (n: number) => {
+    setMinPayState(n);
+    try { window.localStorage.setItem('te-cc-min-pay', String(n)); } catch { /* the choice still applies for this visit */ }
+    setSelected(null); setFrame(null); setExtraAbove(0); setExtraBelow(0);
+  };
   const pickGoal = (g: CcGoal) => { setGoal(g); setSelected(null); setFrame(null); setExtraAbove(0); setExtraBelow(0); };
   const anchorN = anchor ? ccCellNumbers(grid, anchor) : null;
 
@@ -73,6 +82,16 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange, hideGo
         )}
       </div>
 
+      <div role="group" aria-label="Minimum pay" className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+        <span className={th.textFaint}>Pays at least:</span>
+        {CC_MIN_PAY_CHOICES.map(n => (
+          <button key={n} type="button" aria-pressed={minPay === n} onClick={() => pickMinPay(n)}
+            className={`rounded border px-2 py-0.5 ${minPay === n ? 'border-emerald-400 bg-emerald-500/10 text-emerald-300' : 'border-neutral-700 text-neutral-400'}`}>{n === 0 ? 'Any' : `$${n}`}</button>
+        ))}
+      </div>
+      {grid.cells.length === 0 && (
+        <p data-testid="cc-grid-none" className="mb-1 text-[11px] text-amber-300">No call pays at least {minPay === 0 ? 'anything' : `$${minPay}`} with enough open interest. Lower the minimum to see more.</p>
+      )}
       {anchor && (
         <>
         <div role="group" aria-label="Quick picks" className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
@@ -176,6 +195,11 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange, hideGo
         )}
         {allExpirations && (
           <button type="button" onClick={() => setAllExpirations(false)} className="rounded border border-neutral-700 px-2 py-0.5 text-[10px] text-neutral-300">Show fewer expirations</button>
+        )}
+        {(filtered.hiddenThinOi > 0 || filtered.hiddenLowPay > 0) && (
+          <p data-testid="cc-grid-hidden" className={`w-full text-[11px] ${th.textFaint}`}>
+            Hidden:{filtered.hiddenThinOi > 0 ? ` ${filtered.hiddenThinOi} with open interest under your minimum` : ''}{filtered.hiddenThinOi > 0 && filtered.hiddenLowPay > 0 ? ' ·' : ''}{filtered.hiddenLowPay > 0 ? ` ${filtered.hiddenLowPay} paying under $${minPay}` : ''}.
+          </p>
         )}
         <details className={`w-full text-[9px] ${th.textFaint}`}>
           <summary className="cursor-pointer">How to read this grid</summary>

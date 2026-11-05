@@ -208,3 +208,35 @@ export function pickQuickCell(grid: CcGrid, kind: CcQuickPickKind, opts: { allow
   const worthIt = pool.filter(c => total(c) >= CC_QUICK_PICK_MIN_PREMIUM);
   return best(worthIt, c => -c.delta);
 }
+
+export const CC_MIN_PAY_CHOICES = [0, 10, 25, 50, 100] as const;
+export const DEFAULT_CC_MIN_PAY = 25;
+
+/** A stored or typed minimum pay, kept to the offered choices; anything else falls back to the default. */
+export function sanitizeCcMinPay(raw: unknown): number {
+  const n = typeof raw === 'string' ? Number(raw) : raw;
+  return typeof n === 'number' && (CC_MIN_PAY_CHOICES as readonly number[]).includes(n) ? n : DEFAULT_CC_MIN_PAY;
+}
+
+export interface CcFilteredGrid {
+  grid: CcGrid;
+  /** Calls left out because their open interest is under the scan's minimum. */
+  hiddenThinOi: number;
+  /** Calls left out because they pay less than the minimum, in total, for the contracts. */
+  hiddenLowPay: number;
+}
+
+/**
+ * Leaves out calls nobody can reasonably fill (open interest under the scan's minimum) and calls that pay too little to
+ * bother with. Each call is counted once, open interest first, so the footnote adds up. Pure.
+ */
+export function filterCcGrid(grid: CcGrid, opts: { minPay: number }): CcFilteredGrid {
+  let hiddenThinOi = 0;
+  let hiddenLowPay = 0;
+  const cells = grid.cells.filter(c => {
+    if (c.thinOi) { hiddenThinOi++; return false; }
+    if (opts.minPay > 0 && ccCellNumbers(grid, c).premiumTotal < opts.minPay) { hiddenLowPay++; return false; }
+    return true;
+  });
+  return { grid: { ...grid, cells }, hiddenThinOi, hiddenLowPay };
+}
