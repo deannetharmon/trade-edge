@@ -178,7 +178,7 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
     hint: 'Calls must sit at or above the stock price, and at or above your cost basis when it is known. If your cost basis is unavailable, the call is kept and flagged.',
     chipLabel: 'Strike ≥ price and cost basis',
     control: { kind: 'info' },
-    summary: () => 'strike ≥ stock price (and cost basis when known)',
+    summary: () => 'strike ≥ stock price and your cost basis',
   },
   {
     id: 'quoteValidity',

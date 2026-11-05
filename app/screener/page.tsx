@@ -96,9 +96,10 @@ import {
   hasCanonicalUniverse, migratePrimaryTickers,
 } from '@/lib/screener/opportunityUniverse';
 // TE-0007C — Covered Call as a first-class Screener strategy.
-import { findBestCoveredCall, diagnoseCcExclusions, formatCcExclusionSummary } from '@/lib/scans/covered-call-finder';
+import { findBestCoveredCall, diagnoseCcExclusions, formatCcExclusionSummary, buildCcGrid } from '@/lib/scans/covered-call-finder';
 import { ccStrikeFloor, ccStrikeFloorMessage } from '@/lib/scans/ccStrikeFloor';
 import { resolveResearchEntry, buildResearchCapacity, researchEntryLabel } from '@/lib/scans/ccResearch';
+import { CcStrikeGrid } from '@/features/screener/components/CcStrikeGrid';
 import { buildCcOiCheck } from '@/lib/scans/ccOiDisplay';
 import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
 import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
@@ -1540,9 +1541,17 @@ function runCcChecklist(
   // actual selected contract's DTE is known.
   let earningsCheck = buildEarningsPrecheckCheck(earningsDate, chainData.expirations, ccRules);
 
-  const bestCandidate = capacityCheck.status !== 'fail'
+  let bestCandidate = capacityCheck.status !== 'fail'
     ? findBestCoveredCall(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate })
     : null;
+  // CC-WHEEL-0001 S4: the delta range is a preference, not a gate. When nothing inside it qualifies, show the
+  // closest call outside it (every safety gate still applies) with a note, instead of an empty result.
+  if (!bestCandidate && capacityCheck.status !== 'fail') {
+    const closest = findBestCoveredCall(chainData, { rules: { ...ccRules, DELTA_MIN: 0.01, DELTA_MAX: 0.99 }, capacity, stockPrice: price, earningsDate });
+    if (closest) {
+      bestCandidate = { ...closest, ccOutsideRangeNote: `Delta ${closest.shortDelta.toFixed(2)} is outside your ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} range. Shown because no call inside the range qualified.` };
+    }
+  }
 
   // Contract eligibility is determined only against this selected expiry.
   if (bestCandidate && earningsDate) {
@@ -1593,6 +1602,7 @@ function runCcChecklist(
   return {
     symbol, strategy: 'CC', price, ivr: ivrValue,
     ivx: ivxValue, ivx30: null, ivHv30Diff: null, liquidityRating: null,
+    ccGrid: capacityCheck.status !== 'fail' ? buildCcGrid(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate }) : undefined,
     qualified, bestCandidate, failReasons,
     earningsDate, trendResult, isEtf: chainData.isEtfOrIndex ?? false,
     underlyingType: chainData.classification ?? 'stock', ruleSetApplied: 'CC',
@@ -6931,6 +6941,8 @@ const strategyScores = useMemo(() => {
                 <div><span className={th.label}>IVR / IVx: </span><span className={th.text}>{result.ivr != null ? `${result.ivr.toFixed(0)}%` : '—'} / {result.ivx != null ? `${result.ivx.toFixed(1)}%` : '—'}</span></div>
               </div>
               {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
+              {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} />}
+              {c.ccOutsideRangeNote && <p className="text-[9px] text-yellow-400 font-medium pt-1">⚠ {c.ccOutsideRangeNote}</p>}
               {c.ccResearch && <p className="text-[9px] text-cyan-300 font-bold pt-1">RESEARCH — not an order, and not counted in Best Opportunities. Entry price: {researchEntryLabel(c.ccEntrySource ?? null)}.</p>}
               {c.ccLiquidityWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccLiquidityWarning}</p>}
               {c.ccHasUnclassifiedExposure && (

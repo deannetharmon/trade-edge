@@ -103,19 +103,12 @@ function redFailureText(): string {
 }
 
 describe('EARNINGS-PRECHECK-0001: CC with no eligible candidate shows an earnings advisory, not an earnings failure', () => {
-  it('earnings inside the window, nothing in the delta band: advisory copy, generic no-candidate reason, no earnings failure', async () => {
+  it('earnings inside the window, nothing in the delta band: the closest safe call is shown (not an empty result), no earnings failure', async () => {
     const earnings = dayOut(37);
-    await scanCc(earnings, ccChain([25, 40], 0.60)); // delta 0.60 is outside 0.20-0.35: nothing qualifies
-    // Summary row reason is the generic no-candidate reason, not an earnings reason.
-    expect((await screen.findAllByText(/^No qualifying call found in delta 0\.2-0\.35/)).length).toBeGreaterThan(0);
-    await userEvent.click(await screen.findByLabelText('Show checks for NKE'));
-
-    // The earnings row is the advisory: earlier expirations remain.
-    expect(await screen.findByText(
-      new RegExp(`Earnings in 37d \\(${earnings}\\): expirations within 10 days before ${earnings}, or after it, are excluded; earlier expirations remain\\.`),
-    )).toBeInTheDocument();
-    // Not an earnings failure: no contract-level failure copy, and nothing earnings-related in any red line.
-    expect(screen.queryByText(/falls on or before this/)).not.toBeInTheDocument();
+    await scanCc(earnings, ccChain([25, 40], 0.60)); // delta 0.60 is outside 0.20-0.35
+    // CC-WHEEL-0001 S4: the delta range is a preference. The 25d call (earnings are 12 days after it) is shown, not dropped.
+    expect(await screen.findByText(/1 of 1\s*QUALIFIED/)).toBeInTheDocument();
+    // The 40d expiry falls after earnings and is excluded; nothing earnings-related appears as a red failure.
     expect(redFailureText()).not.toMatch(/arnings/);
   });
 

@@ -1,0 +1,86 @@
+// lib/scans/__tests__/ccGrid.test.ts
+// CC-WHEEL-0001 S4 -- grid cell math, safety exclusions, goal highlighting and the below-floor switch.
+import { describe, it, expect } from 'vitest';
+import { buildCcGrid } from '../covered-call-finder';
+import { computeCoveredCallCapacity } from '../covered-call-capacity';
+import { selectCcGridView, cellInGoal } from '../ccGridView';
+import type { CcRulesType } from '../constants';
+import type { WheelChainLeg } from '@/lib/wheel/chainSearch';
+
+const RULES: CcRulesType = { DELTA_MIN: 0.10, DELTA_MAX: 0.60, DTE_MIN: 7, DTE_MAX: 60, OI_MIN: 100, WIDTH_PCT_MAX: 10, WIDTH_CEILING: 0.50 };
+
+function expIn(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function leg(exp: string, strike: number, delta: number, bid: number, ask: number, oi = 500): WheelChainLeg {
+  return { strikePrice: strike, expirationDate: exp, optionType: 'C', delta, openInterest: oi, bid, ask, mid: (bid + ask) / 2, occSymbol: `C${strike}` } as unknown as WheelChainLeg;
+}
+
+const E1 = expIn(10);
+const E2 = expIn(30);
+const E3 = expIn(120); // outside DTE
+const chain = {
+  expirations: [E1, E2, E3],
+  chains: {
+    [E1]: [leg(E1, 60, 0.6, 3, 3.1), leg(E1, 65, 0.15, 0.4, 0.5), leg(E1, 80, 0.12, 0.28, 0.32), leg(E1, 85, 0.01, 0.1, 0.12)],
+    [E2]: [leg(E2, 80, 0.25, 1.0, 1.2), leg(E2, 90, 0.3, 0, 0.5), leg(E2, 95, 0.2, 0.1, 0.9, 5)],
+    [E3]: [leg(E3, 90, 0.2, 1, 1.05)],
+  },
+};
+const capacity = computeCoveredCallCapacity(200, 0, 0, 82); // 2 contracts
+const grid = buildCcGrid(chain, { rules: RULES, capacity, stockPrice: 62.85 });
+
+describe('buildCcGrid', () => {
+  it('uses the DTE window, and counts what it leaves out', () => {
+    expect(grid.expirations.map(e => e.expiration)).toEqual([E1, E2]);
+    expect(grid.left.inTheMoney).toBe(1);   // $60 < price
+    expect(grid.left.farOtm).toBe(1);       // delta .01
+    expect(grid.left.unusableQuote).toBe(1); // bid 0
+  });
+  it('floor is the higher of price and basis; below-basis strikes are flagged, not removed', () => {
+    expect(grid.floor).toBe(82);
+    expect(grid.cells.find(c => c.strike === 65)?.belowFloor).toBe(true);
+    expect(grid.cells.find(c => c.strike === 80)?.belowFloor).toBe(true);
+    expect(grid.cells.find(c => c.strike === 95)?.belowFloor).toBe(false);
+  });
+  it('called-away and not-called math at an $82 basis, 2 contracts', () => {
+    const c = grid.cells.find(x => x.strike === 80 && x.dte >= 29)!; // mid 1.10
+    expect(c.premiumPerShare).toBe(1.1);
+    expect(c.premiumTotal).toBe(220);
+    expect(c.calledAwayTotal).toBe(-180); // (80-82)*200 + 220
+    expect(c.notCalledBasis).toBe(80.9);
+  });
+  it('tags wide and thin-OI cells instead of dropping them', () => {
+    const c = grid.cells.find(x => x.strike === 95)!;
+    expect(c.wide).toBe(true);
+    expect(c.thinOi).toBe(true);
+  });
+  it('fails closed with no basis and no price', () => {
+    const none = buildCcGrid(chain, { rules: RULES, capacity: computeCoveredCallCapacity(200, 0, 0, null), stockPrice: null as unknown as number });
+    expect(none.cells).toEqual([]);
+    expect(none.floor).toBeNull();
+  });
+});
+
+describe('selectCcGridView', () => {
+  it('hides below-basis strikes by default and counts them', () => {
+    const v = selectCcGridView(grid, 'balanced', { showBelowFloor: false, allStrikes: true });
+    expect(v.strikes).toEqual([95]);
+    expect(v.hiddenBelowFloor).toBe(3);
+  });
+  it('shows them when switched on', () => {
+    const v = selectCcGridView(grid, 'balanced', { showBelowFloor: true, allStrikes: true });
+    expect(v.strikes).toEqual([65, 80, 95]);
+    expect(v.hiddenBelowFloor).toBe(0);
+  });
+  it('goal narrows strikes; with no match every strike shows', () => {
+    const upside = selectCcGridView(grid, 'upside', { showBelowFloor: true, allStrikes: false });
+    expect(upside.narrowedToGoal).toBe(true);
+    expect(upside.strikes).toEqual([65, 80, 95].filter(s => [65, 80, 95].includes(s) && grid.cells.some(c => c.strike === s && cellInGoal(c, 'upside'))));
+    const income = selectCcGridView(grid, 'income', { showBelowFloor: false, allStrikes: false });
+    expect(income.narrowedToGoal).toBe(false);
+    expect(income.strikes).toEqual([95]);
+  });
+});

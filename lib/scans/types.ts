@@ -174,6 +174,8 @@ export interface SpreadCandidate {
   // CC-RESEARCH-0001 -- a research scan (any ticker, as if the shares were owned). Never orderable, never sent to
   // Best Opportunities. ccEntrySource says where the entry price came from (see lib/scans/ccResearch.ts).
   ccResearch?: boolean;
+  /** CC-WHEEL-0001 S4: set when no call inside the delta range qualified and this is the closest one outside it. */
+  ccOutsideRangeNote?: string | null;
   ccEntrySource?: 'typed-for-scan' | 'position-typed' | 'position-broker' | 'price-assumed';
   // TE-0007C final corrective pass — mirrors CoveredCallCapacity.
   // hasUnclassifiedExposure: true when some (attributable) option exposure
@@ -227,6 +229,8 @@ export interface TrendResult {
 
 export interface ScreenResult {
   sourceResultId?: string;
+  /** CC-WHEEL-0001 S4: every covered call that passes the safety gates, by expiration and strike (covered-call results only). */
+  ccGrid?: import('./ccGridTypes').CcGrid;
   symbol: string; strategy: string; price: number | null; ivr: number | null;
   ivx?: number | null; ivx30?: number | null; ivHv30Diff?: number | null; liquidityRating?: number | null;
   qualified: boolean; bestCandidate: SpreadCandidate | null;

@@ -26,6 +26,7 @@ import type { CoveredCallCapacity } from './covered-call-capacity';
 import type { EligibilityDecision } from '@/lib/decision/types';
 import { buildCandidateId } from './candidateIdentity';
 import { ccStrikeFloor } from './ccStrikeFloor';
+import type { CcGrid, CcGridCell } from './ccGridTypes';
 import { assessOiLiquidity } from './oiLiquidity';
 import { evaluateHybridSpread } from './hybridSpread';
 import { earningsOnOrBeforeExpiration, EARNINGS_MIN_DAYS_AFTER_EXPIRY } from './earningsPrecheck';
@@ -365,6 +366,68 @@ export function findBestCoveredCall(
   if (!best) return null;
 
   return buildCcSpreadCandidate(best, params, price, costBasis);
+}
+
+// ── CC-WHEEL-0001 S4: the strike grid ───────────────────────────────────
+// Every call in the DTE window that passes the SAFETY gates, laid out by expiration and strike. Preference rules
+// (delta range, bid/ask width, open interest) do not remove anything here: they tag a cell (wide, thin OI) or are
+// applied by the screen as a highlight. Safety gates that do remove a call, each counted in `left`:
+//   in the money (strike below the stock price), no usable two-sided quote, an expiry too close to earnings, and
+//   very far out of the money (delta under 0.02), plus a cap on the cell count. A strike below the cost basis stays
+//   in, marked `belowFloor`, because hiding it is a screen choice (the switch), not a safety gate.
+const GRID_MIN_DELTA = 0.02;
+const GRID_MAX_DELTA = 0.70;
+const GRID_MAX_CELLS = 400;
+
+export function buildCcGrid(
+  chain: { expirations: string[]; chains: Record<string, WheelChainLeg[]> },
+  params: CcFindParams,
+): CcGrid {
+  const price = params.stockPrice;
+  const basis = params.capacity.costBasis != null && params.capacity.costBasis > 0 ? params.capacity.costBasis : null;
+  const contracts = Math.max(1, params.capacity.availableCoveredContracts);
+  const floorInfo = ccStrikeFloor(price, basis);
+  const left = { inTheMoney: 0, unusableQuote: 0, earnings: 0, farOtm: 0, truncated: 0 };
+  const cells: CcGridCell[] = [];
+  const expirations: Array<{ expiration: string; dte: number }> = [];
+  // Fail closed like the scan: with no known stock price or cost basis there is no floor, so there is no grid.
+  if (floorInfo.floor === null) return { basis, floor: null, stockPrice: price, contracts, expirations, cells, left };
+
+  for (const expDate of chain.expirations) {
+    const dte = daysUntil(expDate);
+    if (dte < params.rules.DTE_MIN || dte > params.rules.DTE_MAX) continue;
+    let any = false;
+    for (const leg of chain.chains[expDate] ?? []) {
+      if (leg.optionType !== 'C') continue;
+      if (leg.delta == null || !Number.isFinite(leg.delta) || !Number.isFinite(leg.strikePrice)) { left.unusableQuote += 1; continue; }
+      if (!Number.isFinite(leg.bid) || !Number.isFinite(leg.ask) || !(leg.bid > 0) || !(leg.ask > 0) || leg.ask < leg.bid) { left.unusableQuote += 1; continue; }
+      if (price != null && leg.strikePrice < price) { left.inTheMoney += 1; continue; }
+      if (!isEarningsSafeForExpiration(params.earningsDate, expDate)) { left.earnings += 1; continue; }
+      const delta = Math.abs(leg.delta);
+      if (delta < GRID_MIN_DELTA || delta > GRID_MAX_DELTA) { left.farOtm += 1; continue; }
+      if (cells.length >= GRID_MAX_CELLS) { left.truncated += 1; continue; }
+
+      const mid = (leg.bid + leg.ask) / 2;
+      const premiumPerShare = Math.round(mid * 100) / 100;
+      const premiumTotal = Math.round(premiumPerShare * 100 * contracts * 100) / 100;
+      const calledAwayTotal = basis === null ? null : Math.round(((leg.strikePrice - basis) * 100 * contracts + premiumTotal) * 100) / 100;
+      cells.push({
+        expiration: expDate, dte, strike: leg.strikePrice, delta, bid: leg.bid, ask: leg.ask, premiumPerShare,
+        openInterest: leg.openInterest, occSymbol: leg.occSymbol,
+        belowFloor: floorInfo.floor !== null && leg.strikePrice < floorInfo.floor,
+        wide: evaluateHybridSpread(leg.bid, leg.ask, { rejectPct: params.rules.WIDTH_PCT_MAX, warnPct: CC_WARN_PCT_UNUSED, ceiling: params.rules.WIDTH_CEILING }).reject,
+        thinOi: !(typeof leg.openInterest === 'number' && leg.openInterest >= params.rules.OI_MIN),
+        calledAwayTotal,
+        calledAwayPct: calledAwayTotal === null || basis === null ? null : Math.round((calledAwayTotal / (basis * 100 * contracts)) * 10000) / 100,
+        premiumTotal,
+        notCalledBasis: basis === null ? null : Math.round((basis - premiumPerShare) * 100) / 100,
+      });
+      any = true;
+    }
+    if (any) expirations.push({ expiration: expDate, dte });
+  }
+  cells.sort((a, b) => a.dte - b.dte || a.strike - b.strike);
+  return { basis, floor: floorInfo.floor, stockPrice: price, contracts, expirations, cells, left };
 }
 
 // ── CC-WHEEL-0001: why did nothing qualify? ─────────────────────────────
