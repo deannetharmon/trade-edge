@@ -100,6 +100,9 @@ import { findBestCoveredCall, diagnoseCcExclusions, formatCcExclusionSummary, bu
 import { ccStrikeFloor, ccStrikeFloorMessage } from '@/lib/scans/ccStrikeFloor';
 import { resolveResearchEntry, buildResearchCapacity, researchEntryLabel } from '@/lib/scans/ccResearch';
 import { CcStrikeGrid } from '@/features/screener/components/CcStrikeGrid';
+import { ccRsiChip } from '@/lib/scans/ccRsiChip';
+import { useCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
+import { CcRsiCutoffControl } from '@/features/screener/components/CcRsiCutoffControl';
 import { buildCcOiCheck } from '@/lib/scans/ccOiDisplay';
 import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
 import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
@@ -6449,6 +6452,7 @@ const strategyScores = useMemo(() => {
       && result.earningsDate
       && earningsIsUpcomingNy(result.earningsDate);
   const hasPastEarnings = result.earningsDate && earningsIsPastNy(result.earningsDate);
+  const [ccRsiCutoff] = useCcRsiCutoff();
   const rsi14 =
     result.trendResult?.metrics?.rsi14 ??
     cachedEntry?.trendResult?.metrics?.rsi14 ??
@@ -6631,6 +6635,11 @@ const strategyScores = useMemo(() => {
                   <span className={`${getRsiColor(rsi14)} font-medium`}>
                     {rsi14 != null ? rsi14.toFixed(0) : '—'}
                   </span>
+                  {c.strategy === 'CC' && !c.ccResearch && (() => {
+                    const chip = ccRsiChip({ rsi: rsi14, price: result.price, costBasis: c.ccCostBasis, cutoff: ccRsiCutoff });
+                    const tone = chip.state === 'ready' ? 'border-emerald-500/60 text-emerald-300' : chip.state === 'recovery' ? 'border-amber-500/60 text-amber-300' : 'border-neutral-500/60 text-neutral-300';
+                    return <span data-testid="cc-rsi-chip" title={chip.reason} className={`ml-1 rounded border px-1 text-[9px] font-bold ${tone}`}>{chip.label}</span>;
+                  })()}
                 </div>
               </div>
               <div className="text-xs shrink-0 w-16">
@@ -12470,6 +12479,7 @@ export default function Home() {
                   <section aria-label="CC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="cc-result-controls">
                     <div className="mb-2 flex items-center justify-between">
                       <p className={`text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>CC result controls</p>
+                      <CcRsiCutoffControl />
                       <button
                         onClick={() => setShowCcAdvisorPanel(v => !v)}
                         disabled={filteredQualified.length < 1}
