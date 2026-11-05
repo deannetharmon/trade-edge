@@ -28,8 +28,6 @@ export interface TabDef {
   desc: string;
   /** Can the user hide this tab from their profile? */
   hideable: boolean;
-  /** Amber styling used by the paper-trading tab. */
-  accent?: 'amber';
 }
 
 // Order here is the order shown on every page.
@@ -45,7 +43,7 @@ export const TABS: TabDef[] = [
   { id: 'trade-log',       label: 'TRADE LOG',         href: '/trade-log',       desc: 'Closed trade history and P&L analysis',            hideable: false },
   { id: 'pmcc-history',    label: 'PMCC HISTORY',      href: '/pmcc-history',    desc: 'Read-only PMCC audit history',                     hideable: true  },
   { id: 'performance',     label: 'PERFORMANCE',       href: '/performance',     desc: 'Monthly P&L charts and win rate stats',            hideable: false },
-  { id: 'paper-trading',   label: 'PAPER TRADING',     href: '/paper-trading',   desc: 'Simulated trading',                                hideable: true, accent: 'amber' },
+  { id: 'paper-trading',   label: 'PAPER TRADING',     href: '/paper-trading',   desc: 'Simulated trading',                                hideable: true  },
   { id: 'wheel-simulator', label: 'WHEEL SIMULATOR',   href: '/wheel-simulator', desc: 'Wheel strategy simulator',                         hideable: true  },
   { id: 'help',            label: 'HELP',              href: '/help',            desc: 'Guides and strategy reference',                    hideable: false },
 ];

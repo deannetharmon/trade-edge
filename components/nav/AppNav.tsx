@@ -4,6 +4,8 @@
 // NAV-HIDE-0001: the one tab bar used by every page. Tabs wrap onto a second
 // line instead of scrolling sideways, so every tab is always reachable, and
 // Profile is pinned to the right end.
+// NAV-PAPER-TAB-0001: every inactive tab uses the same color; only the selected
+// tab is highlighted (no per-tab accent).
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -29,9 +31,7 @@ export function AppNav({ active }: { active?: TabId }) {
           <Link
             key={t.id}
             href={t.href}
-            className={`${BASE} transition-colors ${
-              t.accent === 'amber' ? 'text-amber-400/80 hover:text-amber-300' : 'text-white/55 hover:text-white/80'
-            }`}
+            className={`${BASE} transition-colors text-white/55 hover:text-white/80`}
           >
             {t.label}
           </Link>
