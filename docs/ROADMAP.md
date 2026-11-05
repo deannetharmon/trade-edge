@@ -7,7 +7,46 @@
 
 # TradeEdge Roadmap (maintained by Paul — update after every major decision)
 
-Last updated: 2026-11-02 (BEST-PICK-0001, CASH-FREE-0001)
+Last updated: 2026-11-05 (reconciliation)
+
+## Reconciliation 2026-11-05 (Paul; verified by Dane against main @ 93a539f)
+
+Why: the status lines in tickets and docs/TICKET-STATUS.md (last swept 2026-09-27) were stale, so the open list could not be trusted. This section is the verified state. Where it disagrees with an older line below, this section wins.
+
+### Done (on main)
+- SCAN-RESET-0001, SCAN-TOP-0001, SCAN-TOP-0002 (2026-11-02)
+- PORT-HEADLINE-0001 (2026-11-02), CASH-FREE-0001, CSP-STOP-0001, CSP-COLLATERAL-0001
+- PNL-CAL-0001 and PNL-CAL-0002, IV-BLANK-0001, DTE-CSP-CC-0001 (built 2026-10-23; the older "Not built" line below is wrong)
+- PMCC-HELD-UNDERWATER-0001 through 0001B8 (2026-10-27)
+- RECO-UNIFY-0001A-C (2026-10-23). The Portfolio Advisor report no longer waits on it.
+- CC-WHEEL-0001 S1 (fail-closed floor), S2 (typed basis and per-position opt-in), S3 (Ready/Recovery/Wait chip, RSI cutoff default 50), S4 (strike grid), 2026-11-04
+
+### Partly done
+- SCAN-SIMPLIFY-0001: part 1 landed (CSP scan fetches by DTE only; filters are a results view). NOT done: one scan flow. The CSP modal still offers Rank and Targeted. No ticket file exists in docs/tickets yet; Paul to add one.
+- RSI-ENTRY-0001: slices P, A0, A1, A1b on main (2026-10-01). A2 (UI wiring) and B are not on main (A2a branch only). Step 0 (close-adjustment check on a Vercel preview) is still open.
+- RSI-CALL-GATE-0001: covered-call side shipped inside CC-WHEEL S3. PMCC short-call side not built; no RSI in the PMCC short-call code.
+- QUOTE-GUARD-0001: slice A done. Width scan control and IC ratio display still open.
+- CC-WHEEL-0001 open: S5 (adjusted basis from assignment history) and S6 (Income Engine and AI aligned). Not started.
+
+### Not built (verified: no code on main)
+- PORTFOLIO-AI-0003 (structured Portfolio Advisor report): draft v2. Today only the docked "Ask AI" chat exists (PORTFOLIO-AI-0001). No report UI and no flag.
+- MARKET-MOVERS-0001: slice A exists on branch market-movers-0001-a, unwired.
+- BAL-0001 and BAL-0002: branch bal-0001-buying-power only. BAL-0003 folds into PORTFOLIO-AI-0003.
+- PMCC-CAMPAIGN-0001: project doc only; nothing in the repo.
+- PORTFOLIO-VIEWS-0001, SCAN-REMEMBER-0001, AI-POLICY-0002, BEST-PICK-0001 (proposed), SCAN-TOP-0003 (PMCC gold tab missing).
+
+### Parked by Dean (2026-11-05, back burner)
+- JADE-LIZARD-0001, options bot v1, CSP-HOME-0001. Do not start.
+
+### Order of work (Frank, 2026-11-05)
+1. Portfolio AI: quick fix to the Ask AI default prompt (ranked actions with dollar outcomes; Ian approves wording), then PORTFOLIO-AI-0003 report, with Diane's mock for a visible "Analyze portfolio" button.
+2. MARKET-MOVERS-0001 (Diane's mock first; course rules from RECONCILIATION-0001 fold in).
+3. BAL-0001/0002.  4. PMCC-CAMPAIGN-0001 (S1 ledger first).  5. PORTFOLIO-VIEWS-0001.
+Rules: at most two builds in progress; a build closes only after Dean's live check; one list format: Done / Needs Dean's live check / Needs Dean's decision / Team owns.
+
+### Needs Dean's live check
+- SCAN-RESET-0001 on production, NFLX in the held PMCC scan, GGLL order modal, P/L Calendar month total vs Performance.
+
 
 ## Best trade per ticker — 2026-11-02 (Dean asked: which expiration and strike is the best trade?)
 

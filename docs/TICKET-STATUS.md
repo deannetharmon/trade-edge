@@ -1,3 +1,5 @@
+> **Superseded in part (2026-11-05):** see `docs/ROADMAP.md`, section "Reconciliation 2026-11-05", for the verified status. This file's last full sweep was 2026-09-27.
+
 # Ticket status: full reconciliation (2026-09-27)
 
 One-time sweep of every file in `docs/tickets/` (127 files) plus GitHub issues, so the status of anything is a lookup here instead of a re-scrub. **Update this file, don't re-derive it, when a ticket's status changes** — add a line to "Changes since this sweep" at the bottom rather than re-running the full audit.
