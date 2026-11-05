@@ -6764,7 +6764,7 @@ const strategyScores = useMemo(() => {
       {/* Expanded Content */}
       {expanded && (
         <div className={`border-t ${th.border} px-4 py-3 space-y-3`}>
-          {t && <div className={`text-[10px] ${th.textMuted} pb-2 border-b ${th.border}`}><span className={`${trendColor(t.trend)} mr-2 font-medium`}>{trendIcon(t.trend)} {t.trend.toUpperCase()}</span>{t.reason}</div>}
+          {t && <div className={`text-[10px] ${th.textMuted} pb-2 border-b ${th.border}`}><span className={`${trendColor(t.trend)} mr-2 font-medium`}>{trendIcon(t.trend)} {t.trend.toUpperCase()}</span>{result.strategy === 'CC' || result.strategy === 'CSP' ? t.reason.replace(/^(BCS|BPS)( \([^)]*\))? ?(REVERSAL|CONTINUATION|RECOVERY)?:?\s*/, '') : t.reason}</div>}
 
 {/* Score breakdown in rank mode */}
           {isRankMode && c?.strategy !== 'CSP' && scored && tierLight && (
@@ -10747,6 +10747,25 @@ export default function Home() {
       }
     }
   };
+
+  // SELL-CC-0001 B: the stock row's "Sell covered call" link (/screener?strategy=covered-call&symbol=X) opens the CC scan
+  // dialog with only that holding selected. Nothing is ordered here: the scan and the order dialog still prove coverage.
+  const [ccLaunchSymbol, setCcLaunchSymbol] = useState<string | null>(null);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const sym = (q.get('symbol') ?? '').toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
+    if (q.get('strategy') !== 'covered-call' || !sym) return;
+    setCcLaunchSymbol(sym);
+    setCcBypassUniverse(true);
+    setShowCcScanModal(true);
+    void loadCcCapacity();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!ccLaunchSymbol || ccEligibleHoldings.length === 0) return;
+    setCcHiddenSymbols(ccEligibleHoldings.filter(h => h.symbol !== ccLaunchSymbol).map(h => h.symbol));
+    setCcLaunchSymbol(null);
+  }, [ccLaunchSymbol, ccEligibleHoldings]);
 
   // Portfolio can launch this existing flow for one exact held LEAPS. The
   // handoff is intentionally one-time and is revalidated against a fresh

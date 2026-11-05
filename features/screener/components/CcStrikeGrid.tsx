@@ -86,7 +86,7 @@ export function CcStrikeGrid({ grid, th }: { grid: CcGrid; th: Theme }) {
                         aria-label={`${cell.strike} call ${cell.expiration}`}
                         className={`w-full rounded border p-1 text-left ${isSel ? 'border-white' : cell.belowFloor ? 'border-amber-500/50 bg-amber-500/10' : inGoal ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-neutral-800 opacity-60'}`}>
                         <span className={th.text}>${cell.premiumPerShare.toFixed(2)}</span> <span className="opacity-60">Δ{cell.delta.toFixed(2)}</span>
-                        {(cell.wide || cell.thinOi) && <span className="ml-1 text-yellow-400" title={cell.wide ? 'wide bid/ask' : 'thin open interest'}>⚠</span>}
+                        {(cell.wide || cell.thinOi) && <span className="ml-1 text-yellow-400" title={[cell.wide ? 'wide bid/ask spread' : '', cell.thinOi ? 'thin open interest' : ''].filter(Boolean).join(' and ')}>⚠ {cell.wide ? 'wide' : 'thin OI'}</span>}
                         {cell.calledAwayTotal !== null && (
                           <span className={`block ${cell.calledAwayTotal < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{money(cell.calledAwayTotal)} if called</span>
                         )}
