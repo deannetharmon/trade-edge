@@ -33,6 +33,8 @@ export interface CcOrderInput {
   initialQuantity?: number;
   /** Current stock price, when known: used to flag an in-the-money call. */
   stockPrice?: number | null;
+  /** CC-WHEEL-0001 S2b: the cost basis the trader typed for this symbol; wins over the broker's. */
+  typedBasis?: number | null;
 }
 
 interface Props {
@@ -98,13 +100,13 @@ export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
   const validationFresh = quoteValidation !== null && deps.now() - quoteValidation.at <= VALIDATION_WINDOW_MS;
 
   const request: CcOrderRequest = useMemo(() => ({
-    symbol: order.symbol, expiration: order.expiration, strike: order.strike, quantity, entryPerShare: entryLimit, belowCostBasisAcknowledged: acknowledged,
-  }), [order.symbol, order.expiration, order.strike, quantity, entryLimit, acknowledged]);
+    symbol: order.symbol, expiration: order.expiration, strike: order.strike, quantity, entryPerShare: entryLimit, belowCostBasisAcknowledged: acknowledged, costBasisOverride: order.typedBasis ?? null,
+  }), [order.symbol, order.expiration, order.strike, quantity, entryLimit, acknowledged, order.typedBasis]);
 
   const guard = useMemo(() => guardCcOrder(reports, request), [reports, request]);
   const viaLeap = guard.coverage !== null && guard.coverage.status === 'covered_by_leap';
   // A share cost basis only applies when shares cover the call; for a LEAP-covered call it is the wrong yardstick.
-  const costBasis = viaLeap ? null : costBasisFromReports(reports, order.symbol);
+  const costBasis = viaLeap ? null : (order.typedBasis ?? costBasisFromReports(reports, order.symbol));
   const belowBasis = costBasis !== null && order.strike < costBasis;
   const legBuild = buildCcOrderLeg(order.occSymbol, quantity, order.isIndex);
   const profitBuyback = entryLimit > 0 ? ccProfitBuyback(entryLimit, profitPct) : 0;

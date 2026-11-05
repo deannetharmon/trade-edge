@@ -96,6 +96,8 @@ import {
   hasCanonicalUniverse, migratePrimaryTickers,
 } from '@/lib/screener/opportunityUniverse';
 // TE-0007C — Covered Call as a first-class Screener strategy.
+import { resolveCcBasis, applyTypedBasis } from '@/lib/ccBasis/ccBasisSettings';
+import { fetchCcBasisSettings } from '@/features/screener/useCcBasisSettings';
 import { findBestCoveredCall, diagnoseCcExclusions, formatCcExclusionSummary, buildCcGrid } from '@/lib/scans/covered-call-finder';
 import { ccStrikeFloor, ccStrikeFloorMessage } from '@/lib/scans/ccStrikeFloor';
 import { resolveResearchEntry, buildResearchCapacity, researchEntryLabel } from '@/lib/scans/ccResearch';
@@ -1523,8 +1525,10 @@ function runCcChecklist(
   metrics: any,
   ccRules: CcRulesType,
   capacity: CoveredCallCapacity,
-  trendResult?: TrendResult
+  trendResult?: TrendResult,
+  basisOpts?: { allowBelowBasis?: boolean; basisSource?: 'typed' | 'broker' | null }
 ): ScreenResult {
+  const allowBelowBasis = basisOpts?.allowBelowBasis === true;
   const failReasons: string[] = [];
   const ivrValue = metrics.ivRank;
   const earningsDate = metrics.earningsExpectedDate;
@@ -1547,12 +1551,12 @@ function runCcChecklist(
   let earningsCheck = buildEarningsPrecheckCheck(earningsDate, chainData.expirations, ccRules);
 
   let bestCandidate = capacityCheck.status !== 'fail'
-    ? findBestCoveredCall(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate })
+    ? findBestCoveredCall(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis })
     : null;
   // CC-WHEEL-0001 S4: the delta range is a preference, not a gate. When nothing inside it qualifies, show the
   // closest call outside it (every safety gate still applies) with a note, instead of an empty result.
   if (!bestCandidate && capacityCheck.status !== 'fail') {
-    const closest = findBestCoveredCall(chainData, { rules: { ...ccRules, DELTA_MIN: 0.01, DELTA_MAX: 0.99 }, capacity, stockPrice: price, earningsDate });
+    const closest = findBestCoveredCall(chainData, { rules: { ...ccRules, DELTA_MIN: 0.01, DELTA_MAX: 0.99 }, capacity, stockPrice: price, earningsDate, allowBelowBasis });
     if (closest) {
       bestCandidate = { ...closest, ccOutsideRangeNote: `Delta ${closest.shortDelta.toFixed(2)} is outside your ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} range. Shown because no call inside the range qualified.` };
     }
@@ -1566,11 +1570,11 @@ function runCcChecklist(
   }
   // CC-WHEEL-0001 S1: the finder fails closed when the cost basis (or price) is unknown; say so instead of
   // the generic "no qualifying call" text, which would read as a delta/DTE problem.
-  const ccFloor = ccStrikeFloor(price, capacity.costBasis);
+  const ccFloor = ccStrikeFloor(price, capacity.costBasis, { allowBelowBasis });
   if (!bestCandidate && !failReasons.length && ccFloor.floor === null) failReasons.push(ccStrikeFloorMessage(ccFloor.missing));
   else if (!bestCandidate && !failReasons.length) failReasons.push(earningsCheck.reason.includes('no eligible expiration')
     ? earningsCheck.reason
-    : `No qualifying call found in delta ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} / DTE ${ccRules.DTE_MIN}-${ccRules.DTE_MAX} window above stock price / cost basis. ${formatCcExclusionSummary(diagnoseCcExclusions(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate }), ccRules)}`);
+    : `No qualifying call found in delta ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} / DTE ${ccRules.DTE_MIN}-${ccRules.DTE_MAX} window above stock price / cost basis. ${formatCcExclusionSummary(diagnoseCcExclusions(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }), ccRules)}`);
   if (earningsCheck.status === 'fail') failReasons.push(earningsCheck.reason);
 
   const oiCheck: CheckResult = !bestCandidate
@@ -1607,8 +1611,10 @@ function runCcChecklist(
   return {
     symbol, strategy: 'CC', price, ivr: ivrValue,
     ivx: ivxValue, ivx30: null, ivHv30Diff: null, liquidityRating: null,
-    ccGrid: capacityCheck.status !== 'fail' ? buildCcGrid(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate }) : undefined,
-    qualified, bestCandidate, failReasons,
+    ccGrid: capacityCheck.status !== 'fail' ? buildCcGrid(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }) : undefined,
+    qualified,
+    bestCandidate: bestCandidate ? { ...bestCandidate, ccBasisSource: basisOpts?.basisSource ?? null, ccAllowBelowBasis: allowBelowBasis } : bestCandidate,
+    failReasons,
     earningsDate, trendResult, isEtf: chainData.isEtfOrIndex ?? false,
     underlyingType: chainData.classification ?? 'stock', ruleSetApplied: 'CC',
     checks: { ivr: capacityCheck, earnings: earningsCheck, oi: oiCheck, delta: deltaCheck, credit: creditCheck, roc: rocCheck, pop: popCheck, iv: { status: 'pending' as const, value: '—', reason: 'N/A for CC' }, emClearance: { status: 'pending' as const, value: '—', reason: 'N/A for CC' } },
@@ -6958,7 +6964,7 @@ const strategyScores = useMemo(() => {
                 <div><span className={th.label}>Owned shares: </span><span className={th.text}>{c.ccSharesOwned ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(gross {c.ccGrossCoveredContracts ?? '—'} contracts)</span></div>
                 <div><span className={th.label}>Existing / working short calls: </span><span className={th.text}>{c.ccExistingShortCallContracts ?? 0} / {c.ccWorkingShortCallContracts ?? 0}</span></div>
                 <div><span className={th.label}>Available contracts: </span><span className="font-bold text-emerald-400">{c.ccAvailableCoveredContracts ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(quantity used for this candidate)</span></div>
-                <div><span className={th.label}>Cost basis: </span><span className={th.text}>{c.ccCostBasis != null ? `$${c.ccCostBasis.toFixed(2)}` : 'Unavailable'}</span></div>
+                <div><span className={th.label}>Cost basis: </span><span className={th.text}>{c.ccCostBasis != null ? `$${c.ccCostBasis.toFixed(2)}` : 'Unavailable'}</span>{c.ccBasisSource && <span className={`${th.textFaint} ml-1 text-[10px]`}>({c.ccBasisSource === 'typed' ? 'typed by you' : 'broker'}{c.ccAllowBelowBasis ? ' · below-basis OK' : ''})</span>}</div>
                 <div><span className={th.label}>Strike vs cost basis: </span><span className={th.text}>{c.ccStrikeVsCostBasisPct != null ? `${c.ccStrikeVsCostBasisPct >= 0 ? '+' : ''}${c.ccStrikeVsCostBasisPct.toFixed(1)}%` : 'Unavailable'}</span></div>
                 <div><span className={th.label}>Assignment proceeds: </span><span className={th.text}>${c.ccAssignmentProceeds?.toLocaleString() ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(per contract, strike × 100)</span></div>
                 <div><span className={th.label}>Max upside if called away: </span><span className={th.text}>{c.ccMaxUpsideIfCalledAway != null ? `$${c.ccMaxUpsideIfCalledAway.toFixed(2)}/share` : 'Unavailable'}</span></div>
@@ -7080,7 +7086,7 @@ const strategyScores = useMemo(() => {
                 const order: CcOrderInput | undefined = isScanPick || !cell ? undefined : {
                   symbol: result.symbol, occSymbol: cell.occSymbol, strike: cell.strike, expiration: cell.expiration, dte: cell.dte,
                   delta: cell.delta, midPerShare: parseFloat(cell.premiumPerShare.toFixed(2)), isIndex: result.underlyingType === 'index',
-                  initialQuantity: base.initialQuantity, stockPrice: base.stockPrice,
+                  initialQuantity: base.initialQuantity, stockPrice: base.stockPrice, typedBasis: base.typedBasis,
                 };
                 return (
                   <button
@@ -11249,6 +11255,9 @@ export default function Home() {
         return;
       }
 
+      // CC-WHEEL-0001 S2b: typed cost basis and below-basis opt-ins, read once per scan.
+      const ccBasisSettings = await fetchCcBasisSettings();
+
       // TE-0007: the Opportunity Universe may narrow this set (intersect
       // with verified eligible holdings) but can NEVER create eligibility
       // -- a ticker typed into the shared box that isn't a verified,
@@ -11353,8 +11362,11 @@ export default function Home() {
               ? { ...raw, bestCandidate: { ...raw.bestCandidate, ccResearch: true, ccEntrySource: entry.source ?? undefined } }
               : raw;
           } else {
-            const capacity: CoveredCallCapacity = capacityBySymbolMap![symbol];
-            result = runCcChecklist(symbol, chainData, price, metrics, rules, capacity, trendResult);
+            const brokerCapacity: CoveredCallCapacity = capacityBySymbolMap![symbol];
+            // CC-WHEEL-0001 S2b: a basis the trader typed wins over the broker's; the opt-in is per position.
+            const resolvedBasis = resolveCcBasis(ccBasisSettings, symbol, brokerCapacity);
+            const capacity = applyTypedBasis(ccBasisSettings, symbol, brokerCapacity);
+            result = runCcChecklist(symbol, chainData, price, metrics, rules, capacity, trendResult, { allowBelowBasis: resolvedBasis.allowBelowBasis, basisSource: resolvedBasis.source });
           }
           s = recordSymbolEvaluated(s, symbol, [result]);
         } catch (e: any) {

@@ -28,5 +28,6 @@ export function ccOrderInputFromScanResult(result: ScreenResult): CcOrderInput |
     isIndex: result.underlyingType === 'index',
     initialQuantity: contracts,
     stockPrice: typeof result.price === 'number' && result.price > 0 ? result.price : null,
+    typedBasis: c.ccBasisSource === 'typed' && typeof c.ccCostBasis === 'number' && c.ccCostBasis > 0 ? c.ccCostBasis : null,
   };
 }

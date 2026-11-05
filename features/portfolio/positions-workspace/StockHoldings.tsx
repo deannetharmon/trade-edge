@@ -16,6 +16,7 @@ import type { SymbolGroupViewModel } from './model/types';
 import { SellStockDialog, type SellStockDialogDeps } from './SellStockDialog';
 import { alignedStockColumns } from './model/stockColumnAlignment';
 import { IntentSelectControl } from './IntentSelect';
+import { CcBasisEditor } from './CcBasisEditor';
 import { marketMetricsPath, parseMarketMetricsEarnings, type StockEarnings } from './model/stockEarnings';
 import { nextEarningsLine } from './model/nextEarnings';
 import type { PositionIntent } from '@/lib/portfolio-data/types';
@@ -113,7 +114,7 @@ function Row({ row, th, chart, intentControl, earnings, gridStyle, savedNote, on
       <div className="p-3"><b className="text-white">{row.symbol}</b><span className={`block ${th.textFaint}`}>Equity · {row.direction.toLowerCase()}</span>{intentControl && <span className="mt-1 block">{intentControl}</span>}<span className="mt-1 block">{chart}</span>{earnings && <span className="mt-1 block">{earnings}</span>}</div>
       <div className="p-3 font-mono text-white">{row.shares}{row.sharesNote && <span className={`block font-sans text-[10px] ${th.textFaint}`}>{row.sharesNote}</span>}</div>
       <div className="p-3 font-mono text-white">{row.price != null ? money(row.price) : '—'}</div>
-      <div className="p-3 font-mono text-white">{row.avgCost != null ? <>{money(row.avgCost)}<span className={`block font-sans text-[10px] ${th.textFaint}`}>cost {money(row.costBasis ?? 0)}</span></> : <span className="text-amber-300">— <span className="block font-sans text-[10px]">basis incomplete</span></span>}</div>
+      <div className="p-3 font-mono text-white">{row.avgCost != null ? <>{money(row.avgCost)}<span className={`block font-sans text-[10px] ${th.textFaint}`}>cost {money(row.costBasis ?? 0)}</span></> : <span className="text-amber-300">— <span className="block font-sans text-[10px]">basis incomplete</span></span>}{row.direction === 'Long' && <CcBasisEditor symbol={row.symbol} brokerBasis={row.basisComplete ? row.avgCost : null} th={th} />}</div>
       <div className="p-3 font-mono text-white">{row.value != null ? (row.value < 0 ? `-${money(Math.abs(row.value))}` : money(row.value)) : '—'}</div>
       <div className={`p-3 font-mono font-semibold ${pnlTone}`}>
         {row.pnl != null ? <>{signedMoney(Math.round(row.pnl * 100) / 100)}{row.pnlPct != null && <span className="block font-sans text-[10px] font-normal">{row.pnlPct >= 0 ? '+' : ''}{row.pnlPct.toFixed(1)}%</span>}</>
@@ -188,6 +189,7 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
       {detailOpen && (
         <div data-testid="stock-card-detail" className="mt-3 space-y-3">
           <dl className="grid grid-cols-2 gap-2 sm:grid-cols-5">{stats.map(([label, value]) => <div key={label} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"><dt className={`text-[10px] uppercase tracking-wider ${th.textFaint}`}>{label}</dt><dd className="text-sm font-bold text-white">{value}</dd></div>)}</dl>
+          {row.direction === 'Long' && <CcBasisEditor symbol={row.symbol} brokerBasis={row.basisComplete ? row.avgCost : null} th={th} />}
           <div className="grid gap-3 sm:grid-cols-2">
             <StockNoteEditor label={`Note for ${row.symbol} stock holding`} savedNote={savedNote} onSave={note => onSaveNote(row.accountNumber, row.key, note)} />
             <StockAlertEditor id={row.key} symbol={row.symbol} price={row.price} savedAlert={savedAlert} onSave={(target, direction) => onSaveAlert(row.accountNumber, row.key, target, direction)} />
