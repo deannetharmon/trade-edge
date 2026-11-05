@@ -96,3 +96,14 @@ describe('figure check', () => {
     expect(r.removedCount).toBe(1);
   });
 });
+
+describe('figure guard keeps line breaks (PORTFOLIO-AI-FORMAT-0002)', () => {
+  it('does not swallow the newline after a hidden figure', () => {
+    const r = redactUnsupportedFigures('Close now -$9,999\nWhy: earnings tomorrow', [20]);
+    expect(r.removedCount).toBe(1);
+    expect(r.text).toBe('Close now -[figure hidden]\nWhy: earnings tomorrow');
+  });
+  it('still allows a figure written with a space before k', () => {
+    expect(extractFigures('about $2 k')[0]?.value).toBe(2000);
+  });
+});

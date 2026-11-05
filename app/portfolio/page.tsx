@@ -1779,6 +1779,7 @@ Why: one short sentence using only snapshot figures.
 Flip if: one short sentence naming what would change the call.
 After the blocks, one line "LEFT ALONE: SYMBOL, SYMBOL" for positions that need no action.
 Rules for the blocks: pick ONE action, never list alternatives and never tell the trader to decide or to "decide whether you want" something; the trader wants a call. Every number must be printed in the snapshot; never add, subtract or derive a number, and if a figure is not in the snapshot omit it or write "n/a". Keep each line under 120 characters.
+- PORTFOLIO-AI-FORMAT-0002. Every header line starts with its number ("1.", "2.", ...). The loss or gain from closing now is the value on the position's "P&L:" line; quote that value exactly and do not compute your own. "Flip if" must be a realistic condition: never say the stock rising above a break-even that is far from the current price. Good examples: "You do not want 100 shares at this basis", "Stock recovers above the strike", "Earnings gap against you". Your Do must agree with the app's suggested action; when the put still has meaningful extrinsic value and a reasonable probability of profit, Hold is a valid call. Never leave a block without a Do.
 - Your recommendation must agree with the app's suggested action for that position. If you disagree, say so on a separate line starting "AI NOTE:".
 - If a position's Intent shows the trader plans to take assignment, treat that as decided. Do not ask whether they want assignment; say what to do next using only snapshot figures.
 - Taking a realized loss is the last resort. Consider assignment, a roll, or holding before recommending a close at a loss. The trader's goal on a position is at least 50% profit when feasible.
@@ -5355,7 +5356,7 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th, suggestionC
                       ? <div className="space-y-1.5">
                           {txt.split('\n').filter(line => line.trim()).map((line, lineIndex) => /^\s*AI NOTE:/i.test(line)
                             ? <div key={lineIndex} className="rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2 py-1.5"><span className="text-[9px] font-bold tracking-widest text-indigo-300 mr-1.5">AI NOTE</span>{line.replace(/^\s*AI NOTE:\s*/i, '')}</div>
-                            : (() => { const clean = line.replace(/\*\*/g, ''); const head = /^\s*(\d+\.\s|SUMMARY:|LEFT ALONE:)/.test(clean); return <p key={lineIndex} className={head ? 'font-semibold pt-1.5 mt-1 border-t border-white/10 first:border-t-0 first:mt-0' : ''}>{clean}</p>; })())}
+                            : (() => { const clean = line.replace(/\*\*/g, ''); const head = /^\s*(\d+\.\s|SUMMARY:|LEFT ALONE:)/.test(clean) || (/\|/.test(clean) && /\bDTE\b/.test(clean)); return <p key={lineIndex} className={head ? 'font-semibold pt-1.5 mt-1 border-t border-white/10 first:border-t-0 first:mt-0' : ''}>{clean}</p>; })())}
                           {hiddenFigureCounts[i] > 0 && <p role="note" className="text-[10px] text-red-300 border border-red-500/40 rounded-lg px-2 py-1">FIGURE HIDDEN — {hiddenFigureCounts[i]} number{hiddenFigureCounts[i] === 1 ? '' : 's'} in this answer did not match your snapshot and {hiddenFigureCounts[i] === 1 ? 'was' : 'were'} removed.</p>}
                         </div>
                       : <span>{txt}</span>)}

@@ -249,7 +249,7 @@ export function buildPortfolioAiSnapshot(input: PortfolioAiSnapshotInput): Portf
 
 // ── Figure check ────────────────────────────────────────────────────────────
 
-const FIGURE_PATTERN = /(\$\s?\d[\d,]*(?:\.\d+)?\s?[kK]?)|(\d[\d,]*(?:\.\d+)?\s?%)/g;
+const FIGURE_PATTERN = /(\$[ \t]?\d[\d,]*(?:\.\d+)?[ \t]?[kK]?)|(\d[\d,]*(?:\.\d+)?[ \t]?%)/g;
 
 export interface ExtractedFigure { raw: string; value: number; isPercent: boolean }
 
