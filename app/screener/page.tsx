@@ -171,6 +171,8 @@ import AssignmentCashPanel from '@/features/screener/components/AssignmentCashPa
 import { evaluateAssignmentCash, guardAssignmentCash, type AssignmentCashResult, type ProposedOrder } from '@/lib/scans/assignmentCash';
 import { loadAssignmentCashSnapshot } from '@/lib/scans/assignmentCashLoader';
 import { loadAssignmentCashSettings, type AssignmentCashSettings } from '@/lib/scans/assignmentCashSettings';
+import { buildCspCardFunding, fundingFailReasons } from '@/lib/scans/cspCardFunding';
+import { CspFundingLine } from '@/features/screener/components/CspFundingLine';
 import type {
   SortField, SecondarySortField, SortSpec, SortableMetrics, OiEligibilityResult,
 } from '@/lib/screener/screenerResultOrdering';
@@ -6989,9 +6991,12 @@ const strategyScores = useMemo(() => {
                 <div><span className={th.label}>Annualized Return: </span><span className={th.text}>{c.annualizedRoc?.toFixed(0) ?? '—'}%</span></div>
                 <div><span className={th.label}>IVR / Expiration IVX: </span><span className={th.text}>{result.ivr != null ? `${result.ivr.toFixed(0)}%` : 'Unavailable'} / {result.ivx != null ? `${result.ivx.toFixed(1)}%` : 'Unavailable'}</span></div>
               </div>
-              {c.capitalBlocked ? (
+              {c.cspFunding ? (
+                <CspFundingLine funding={c.cspFunding} />
+              ) : c.capitalBlocked ? (
                 <p className={`text-[9px] text-red-400 font-medium pt-1`}>⚠ {c.capitalWarning}</p>
-              ) : (
+              ) : null}
+              {!c.capitalBlocked && (
                 <p className={`text-[9px] text-amber-400/80 pt-1`}>Cash-secured — assignment would mean buying 100 shares/contract at ${c.shortStrike}. Only enter if owning the stock at this price is acceptable.</p>
               )}
             </div>
@@ -11090,6 +11095,13 @@ export default function Home() {
           }
         : brokerCapital;
 
+      // CSP-CAP-BASIS-0001A: the same cash, open short puts and working orders the order dialog checks, read once for the
+      // whole scan. A source that fails to load comes back null and the cards say "Cannot verify funding".
+      pushStatus('Checking cash and open short puts...');
+      const fundingSnapshot = await loadAssignmentCashSnapshot();
+      const fundingSettings = loadAssignmentCashSettings();
+      const fundingAsOfMs = Date.now();
+
       pushStatus('Fetching market metrics...');
       const metricsArray = await getMarketMetrics(loopSymbols, token);
       const metricsMap = Object.fromEntries(metricsArray.map((m: any) => [m.symbol, m]));
@@ -11124,14 +11136,21 @@ export default function Home() {
             ].filter((v): v is string => v != null);
             const modeQualification = request.mode !== 'targeted' ? 'NOT_APPLICABLE' as const
               : targetedFailures.length === 0 ? 'PASSED' as const : 'FAILED' as const;
-            const nextCandidate = { ...c, cspModeQualification: modeQualification, cspModeQualificationReasons: targetedFailures };
+            // CSP-CAP-BASIS-0001A: display only. Eligibility, score and ranking above are unchanged.
+            const cspFunding = buildCspCardFunding({
+              strike: c.shortStrike, contracts: 1,
+              cashBalance: fundingSnapshot.cashBalance, reserve: fundingSettings.reserve,
+              positions: fundingSnapshot.positions, pendingOrders: fundingSnapshot.pendingOrders,
+              optionBuyingPower: brokerCapital.optionBuyingPower, manualLimit: manualCash, asOfMs: fundingAsOfMs,
+            });
+            const nextCandidate = { ...c, cspModeQualification: modeQualification, cspModeQualificationReasons: targetedFailures, cspFunding };
             return {
               ...result,
               bestCandidate: nextCandidate,
               qualified: c.cspMarketQualification != null
                 ? isOverallCspQualified(c.cspMarketQualification, modeQualification)
                 : false,
-              failReasons: [...result.failReasons, ...targetedFailures],
+              failReasons: [...fundingFailReasons(result.failReasons, cspFunding), ...targetedFailures],
             };
           });
           // Preserve the complete evaluated chain by default. If the trader

@@ -130,6 +130,9 @@ export interface SpreadCandidate {
    * for the selected account, or null when unverified. Never a fallback
    * constant. */
   cspAvailableCapital?: number | null;
+  /** CSP-CAP-BASIS-0001A: the funding figures the card shows (same basis as the order dialog). Display only: it does not
+   * feed qualification, scores, ranking or cspAccountEligibility. */
+  cspFunding?: import('./cspCardFunding').CspCardFunding;
   /**
    * CSP-SCORE-EXTRINSIC-0001 — the premium's time-value (extrinsic) portion:
    * mid minus put intrinsic value (max(0, strike - underlying price)),

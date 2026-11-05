@@ -38,6 +38,9 @@ vi.mock('@/lib/scans/tastytrade-client', async () => {
 const shortPutPosition = (strike: number, quantity: number) => ({ legs: [{ symbol: 'X', optionType: 'P' as const, strikePrice: strike, direction: 'Short' as const, quantity }] });
 const assignmentSnapshotMock = vi.fn();
 const AMPLE_FUNDING = { cashBalance: 1_000_000, positions: [] as any[], pendingOrders: [] as any[] };
+// CSP-CAP-BASIS-0001A: the CSP scan now reads this snapshot at scan start, and warmScreenerPage runs a scan in beforeAll,
+// before the beforeEach below. So the mock needs a working default from the start.
+assignmentSnapshotMock.mockResolvedValue(AMPLE_FUNDING);
 vi.mock('@/lib/scans/assignmentCashLoader', () => ({
   loadAssignmentCashSnapshot: (...args: any[]) => assignmentSnapshotMock(...args),
 }));
@@ -90,6 +93,30 @@ describe('CSP-ORDERS-0001: the CSP result card offers real trade placement', () 
     expect(screen.queryByText(/CSP trade placement.*not yet wired up/)).not.toBeInTheDocument();
     // "Find Better" for CSP is still explicitly deferred, separate scope.
     expect(screen.getByText('"Find Better" for CSP is not yet wired up')).toBeInTheDocument();
+  });
+
+  // CSP-CAP-BASIS-0001A: the card shows the same funding figures as the order dialog, from the scan-start snapshot.
+  it('shows the funding line on the result card from the same snapshot (funded case)', async () => {
+    await runCspScan();
+    const line = await screen.findByTestId('csp-funding');
+    expect(line.getAttribute('data-status')).toBe('funded');
+    expect(line.textContent).toContain('assignment cash $23,500.00');
+    expect(line.textContent).toMatch(/as of \d{1,2}:\d{2}/);
+  });
+
+  it('shows "Not fundable now" with the shortfall when open short puts already use the cash', async () => {
+    assignmentSnapshotMock.mockResolvedValue({ cashBalance: 25197.86, positions: [shortPutPosition(28.5, 1), shortPutPosition(90, 1), shortPutPosition(75, 1), shortPutPosition(28, 1), shortPutPosition(21, 1)], pendingOrders: [] });
+    await runCspScan();
+    const line = await screen.findByTestId('csp-funding');
+    expect(line.getAttribute('data-status')).toBe('not_fundable');
+    expect(line.textContent).toContain('Not fundable now');
+    expect(line.textContent).toContain('Shortfall $');
+  });
+
+  it('says "Cannot verify funding" when the snapshot could not be loaded', async () => {
+    assignmentSnapshotMock.mockResolvedValue({ cashBalance: null, positions: null, pendingOrders: null });
+    await runCspScan();
+    expect((await screen.findByTestId('csp-funding')).getAttribute('data-status')).toBe('cannot_verify');
   });
 
   it('opens CspTradeModal with Diane\'s mocked fields: strike line, Cash Required (not Max Loss as the label), and the assignment warning verbatim', async () => {
