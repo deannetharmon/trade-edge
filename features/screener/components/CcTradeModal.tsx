@@ -35,6 +35,10 @@ export interface CcOrderInput {
   stockPrice?: number | null;
   /** CC-WHEEL-0001 S2b: the cost basis the trader typed for this symbol; wins over the broker's. */
   typedBasis?: number | null;
+  /** The call's quote, and whether its bid/ask spread is wide. A wide call starts at the bid, not the mid. */
+  bidPerShare?: number | null;
+  askPerShare?: number | null;
+  wide?: boolean;
 }
 
 interface Props {
@@ -54,9 +58,16 @@ const VALIDATION_WINDOW_MS = 15000;
 const money0 = (n: number) => '$' + Math.round(n).toLocaleString();
 const moneySigned = (n: number) => (n < 0 ? '−' : '+') + '$' + Math.abs(Math.round(n)).toLocaleString();
 
+/** The limit the dialog starts at: the mid, except on a wide spread where the mid is unlikely to fill, so the bid. */
+export function ccStartingLimit(order: Pick<CcOrderInput, 'midPerShare' | 'bidPerShare' | 'wide'>): number {
+  const bid = order.bidPerShare;
+  if (order.wide === true && typeof bid === 'number' && Number.isFinite(bid) && bid > 0) return parseFloat(bid.toFixed(2));
+  return parseFloat(order.midPerShare.toFixed(2));
+}
+
 export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
   const [quantity, setQuantity] = useState(order.initialQuantity && order.initialQuantity > 0 ? order.initialQuantity : 1);
-  const [entryLimit, setEntryLimit] = useState(parseFloat(order.midPerShare.toFixed(2)));
+  const [entryLimit, setEntryLimit] = useState(ccStartingLimit(order));
   const [profitPct, setProfitPct] = useState(50);
   const [acknowledged, setAcknowledged] = useState(false);
   const [phase, setPhase] = useState<Phase>('confirm');
@@ -217,6 +228,15 @@ export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
               <button aria-label="Raise limit price" onClick={() => setEntryLimit((v) => parseFloat((v + 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs`}>+</button>
             </div>
           </div>
+          {order.wide === true && typeof order.bidPerShare === 'number' && typeof order.askPerShare === 'number' && (
+            <div data-testid="cc-wide-note" className="rounded border border-amber-400/40 bg-amber-400/10 p-2 text-[11px] text-amber-200">
+              Wide spread: bid ${order.bidPerShare.toFixed(2)} / ask ${order.askPerShare.toFixed(2)}. The mid ${order.midPerShare.toFixed(2)} may not fill. Starting at the bid.
+              <span className="mt-1 flex gap-2">
+                <button type="button" onClick={() => setEntryLimit(parseFloat(order.bidPerShare!.toFixed(2)))} className={`rounded border px-2 py-0.5 ${th.border}`}>Use bid</button>
+                <button type="button" onClick={() => setEntryLimit(parseFloat(order.midPerShare.toFixed(2)))} className={`rounded border px-2 py-0.5 ${th.border}`}>Use mid</button>
+              </span>
+            </div>
+          )}
           <div className="flex justify-between text-xs">
             <span className={th.textFaint}>Order type</span>
             <span className={th.text}>Net Credit Limit {'·'} GTC</span>

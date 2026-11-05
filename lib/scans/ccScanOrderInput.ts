@@ -28,6 +28,14 @@ export function ccOrderInputFromScanResult(result: ScreenResult): CcOrderInput |
     isIndex: result.underlyingType === 'index',
     initialQuantity: contracts,
     stockPrice: typeof result.price === 'number' && result.price > 0 ? result.price : null,
+    ...ccQuoteForOrder(result, c.shortOccSymbol),
     typedBasis: c.ccBasisSource === 'typed' && typeof c.ccCostBasis === 'number' && c.ccCostBasis > 0 ? c.ccCostBasis : null,
   };
+}
+
+/** The quote and wide flag for this call, taken from the scan's own grid cell so the dialog and the grid agree. */
+function ccQuoteForOrder(result: ScreenResult, occSymbol: string | undefined): { bidPerShare?: number; askPerShare?: number; wide?: boolean } {
+  const cell = result.ccGrid?.cells.find(x => x.occSymbol === occSymbol);
+  if (!cell) return {};
+  return { bidPerShare: cell.bid, askPerShare: cell.ask, wide: cell.wide };
 }

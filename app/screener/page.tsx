@@ -7087,6 +7087,7 @@ const strategyScores = useMemo(() => {
                   symbol: result.symbol, occSymbol: cell.occSymbol, strike: cell.strike, expiration: cell.expiration, dte: cell.dte,
                   delta: cell.delta, midPerShare: parseFloat(cell.premiumPerShare.toFixed(2)), isIndex: result.underlyingType === 'index',
                   initialQuantity: base.initialQuantity, stockPrice: base.stockPrice, typedBasis: base.typedBasis,
+                  bidPerShare: cell.bid, askPerShare: cell.ask, wide: cell.wide,
                 };
                 return (
                   <button
