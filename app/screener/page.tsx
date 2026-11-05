@@ -6826,7 +6826,7 @@ const strategyScores = useMemo(() => {
             </div>
           )}
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {Object.entries(result.checks).map(([key, check]) => {
+            {Object.entries(result.checks).filter(([, ck]) => !(result.strategy === 'CC' && ck.reason === 'N/A for CC')).map(([key, check]) => {
       if (key === 'iv') {
         console.log('IV_RENDER_DEBUG', {
           symbol: result.symbol,
@@ -6959,24 +6959,25 @@ const strategyScores = useMemo(() => {
             <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
               <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest font-medium`}>CC — Covered Call, Written Against Owned Shares</p>
               <div className="grid grid-cols-2 gap-3 text-xs">
-                <div><span className={th.label}>Call: </span><span className={th.text}>{c.shortStrike}C exp {c.expiration} ({c.dte}d) · Δ{c.shortDelta.toFixed(2)}</span></div>
                 <div><span className={th.label}>Premium: </span><span className="text-emerald-400 font-bold">${c.ccPremiumPerContract?.toFixed(2) ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(per contract)</span></div>
-                <div><span className={th.label}>Owned shares: </span><span className={th.text}>{c.ccSharesOwned ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(gross {c.ccGrossCoveredContracts ?? '—'} contracts)</span></div>
-                <div><span className={th.label}>Existing / working short calls: </span><span className={th.text}>{c.ccExistingShortCallContracts ?? 0} / {c.ccWorkingShortCallContracts ?? 0}</span></div>
                 <div><span className={th.label}>Available contracts: </span><span className="font-bold text-emerald-400">{c.ccAvailableCoveredContracts ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(quantity used for this candidate)</span></div>
                 <div><span className={th.label}>Cost basis: </span><span className={th.text}>{c.ccCostBasis != null ? `$${c.ccCostBasis.toFixed(2)}` : 'Unavailable'}</span>{c.ccBasisSource && <span className={`${th.textFaint} ml-1 text-[10px]`}>({c.ccBasisSource === 'typed' ? 'typed by you' : 'broker'}{c.ccAllowBelowBasis ? ' · below-basis OK' : ''})</span>}</div>
+              </div>
+              <details data-testid="cc-details" className="text-xs" onClick={(e) => e.stopPropagation()}>
+                <summary className={`cursor-pointer text-[10px] ${th.textFaint}`}>Details (owned shares, existing calls, assignment proceeds, IV, yield)</summary>
+                <div className="mt-1.5 grid grid-cols-2 gap-3">
+                <div><span className={th.label}>Call: </span><span className={th.text}>{c.shortStrike}C exp {c.expiration} ({c.dte}d) · Δ{c.shortDelta.toFixed(2)}</span></div>
+                <div><span className={th.label}>Owned shares: </span><span className={th.text}>{c.ccSharesOwned ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(gross {c.ccGrossCoveredContracts ?? '—'} contracts)</span></div>
+                <div><span className={th.label}>Existing / working short calls: </span><span className={th.text}>{c.ccExistingShortCallContracts ?? 0} / {c.ccWorkingShortCallContracts ?? 0}</span></div>
                 <div><span className={th.label}>Strike vs cost basis: </span><span className={th.text}>{c.ccStrikeVsCostBasisPct != null ? `${c.ccStrikeVsCostBasisPct >= 0 ? '+' : ''}${c.ccStrikeVsCostBasisPct.toFixed(1)}%` : 'Unavailable'}</span></div>
                 <div><span className={th.label}>Assignment proceeds: </span><span className={th.text}>${c.ccAssignmentProceeds?.toLocaleString() ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(per contract, strike × 100)</span></div>
                 <div><span className={th.label}>Max upside if called away: </span><span className={th.text}>{c.ccMaxUpsideIfCalledAway != null ? `$${c.ccMaxUpsideIfCalledAway.toFixed(2)}/share` : 'Unavailable'}</span></div>
                 <div><span className={th.label}>Period / annualized yield: </span><span className={th.text}>{c.ccPeriodYieldOnShares?.toFixed(2) ?? '—'}% / {c.ccAnnualizedYieldOnShares?.toFixed(0) ?? '—'}%</span></div>
-                {/* CC-IVR-IVX-PARITY-0001: same entry-timing signals CSP/
-                    LEAPS/PMCC already show -- CC was the one strategy
-                    missing them. Plain text, same tier as the other
-                    context fields on this card, not a decision number. */}
                 <div><span className={th.label}>IVR / IVx: </span><span className={th.text}>{result.ivr != null ? `${result.ivr.toFixed(0)}%` : '—'} / {result.ivx != null ? `${result.ivx.toFixed(1)}%` : '—'}</span></div>
-              </div>
+                </div>
+              </details>
               {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
-              {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} initial={c.expiration ? { expiration: c.expiration, strike: c.shortStrike } : null} onAnchorChange={setPickedCcCell} />}
+              {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} initial={c.expiration ? { expiration: c.expiration, strike: c.shortStrike } : null} onAnchorChange={setPickedCcCell} hideGoalNote={!!c.ccOutsideRangeNote} />}
               {c.ccOutsideRangeNote && <p className="text-[9px] text-yellow-400 font-medium pt-1">⚠ {c.ccOutsideRangeNote}</p>}
               {c.ccResearch && <p className="text-[9px] text-cyan-300 font-bold pt-1">RESEARCH — not an order, and not counted in Best Opportunities. Entry price: {researchEntryLabel(c.ccEntrySource ?? null)}.</p>}
               {c.ccLiquidityWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccLiquidityWarning}</p>}
@@ -6986,7 +6987,6 @@ const strategyScores = useMemo(() => {
                 // card may be viewed/shared independently of that card.
                 <p className={`text-[9px] text-amber-400 font-medium pt-1`}>⚠ Some option exposure could not be classified. Available covered-call capacity was reduced conservatively.</p>
               )}
-              <p className={`text-[9px] text-cyan-400/80 pt-1`}>Written against shares you already own. Assignment would mean selling 100 shares/contract at ${c.shortStrike}. Only enter if that's an acceptable outcome.</p>
             </div>
           )}
 

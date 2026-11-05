@@ -15,8 +15,10 @@ interface Theme { border: string; text: string; textMuted: string; textFaint: st
 
 const signed = (n: number) => `${n < 0 ? '-' : '+'}$${Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
-export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange }: {
+export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange, hideGoalNote }: {
   grid: CcGrid; th: Theme; symbol?: string;
+  /** The card already says the call is outside the delta range, so the grid does not say it again. */
+  hideGoalNote?: boolean;
   /** The trade the scan picked: the grid starts on it, so the grid and the Trade button agree from the first frame. */
   initial?: { expiration: string; strike: number } | null;
   /** Called with the trade the summary describes whenever it changes, so the card's Trade button orders exactly that. */
@@ -88,7 +90,7 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange }: {
       )}
 
       {anchor && (
-        <p data-testid="cc-grid-summary" className={`mb-1.5 rounded border ${th.border} px-2 py-1.5 text-[11px] leading-snug ${th.text}`}>
+        <p data-testid="cc-grid-summary" className={`mb-1.5 rounded border ${th.border} px-2.5 py-2 text-sm font-semibold leading-snug ${th.text}`}>
           {ccGridSummary(grid, anchor, symbol)}
         </p>
       )}
@@ -98,7 +100,7 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange }: {
           Every call that passed the safety checks is below your cost basis{grid.basis !== null ? ` ($${grid.basis.toFixed(2)})` : ''}. Tick &quot;Show below cost basis&quot; to see them; each one would lock in a loss if called away.
         </p>
       )}
-      {!view.anyInGoal && view.strikes.length > 0 && (
+      {!hideGoalNote && !view.anyInGoal && view.strikes.length > 0 && (
         <p className="mb-1 text-[10px] text-yellow-400">No call in the {CC_GOALS[goal].label} delta range. Showing the best available.</p>
       )}
 
@@ -165,9 +167,10 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange }: {
         {allExpirations && (
           <button type="button" onClick={() => setAllExpirations(false)} className="rounded border border-neutral-700 px-2 py-0.5 text-[10px] text-neutral-300">Show fewer expirations</button>
         )}
-        <span className={`text-[9px] ${th.textFaint}`}>
+        <details className={`w-full text-[9px] ${th.textFaint}`}>
+          <summary className="cursor-pointer">How to read this grid</summary>
           Big number: what you are paid now. &quot;If called&quot;: your total if the shares are called away, against your cost basis, before fees. A dash means no usable price ({grid.left.unusableQuote + grid.left.farOtm} calls had no bid, a crossed quote, or under a 2% chance of being reached). Click a cell to change the trade above.
-        </span>
+        </details>
       </div>
 
       {anchor && (
