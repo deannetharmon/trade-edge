@@ -2,9 +2,10 @@
 //
 // EXIT-WALK-0001B step 3b: the "Walk the price" button and panel for closing one position (Diane v4, "Walk the price").
 // Start near the mid, step toward the market, stop at the live bid/ask. Never auto-starts; every reprice is shown;
-// Stop walk is always there. It never touches the batch close modal and never cancels another order: a position with a
-// working order is refused (see lib/exit-walk/closeOrder.ts). With Dry Run ON every price is validated at /orders/dry-run
-// and nothing is placed (Ian's C2).
+// Stop walk is always there. It never touches the batch close modal. EXIT-WALK-CANCEL-0001: a working GTC close order is
+// shown and cancelled only when the trader presses "Cancel order and start walk" (a live bracket is refused, see
+// lib/exit-walk/workingClose.ts); a pending entry order still refuses. With Dry Run ON every price is validated at
+// /orders/dry-run and nothing is placed (Ian's C2), so a working close still refuses there.
 
 'use client';
 
@@ -12,11 +13,14 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { usePortfolioMode } from '@/components/portfolio-mode/PortfolioModeProvider';
 import { assertLiveContextReady } from '@/lib/portfolio-mode/guardrails';
 import { getExecutableOptionQuotes } from '@/lib/scans/tastytrade-client';
-import { getAccessToken, ttFetch } from '@/lib/tastytrade/client';
+import { BASE, getAccessToken, ttFetch } from '@/lib/tastytrade/client';
+import { criticalGtcRestorationWarning } from '@/lib/portfolio/existingGtcReplacement';
+import { cancelWorkingCloseForWalk } from '@/lib/exit-walk/workingClose';
 import { tickTableFromNestedChain, type TickTable } from '@/lib/portfolio/tickSize';
 import type { PendingOrder, Position } from '@/lib/portfolio-data/types';
 import {
   buildExitCloseOrder,
+  buildRestoreCloseOrder,
   checkExitWalkEligibility,
   exitWalkGateRefusal,
   type ExitWalkEligibility,
@@ -53,7 +57,8 @@ export function ExitWalkProvider({ pendingOrders, dryRun, onDone, children }: Ex
 // Launcher: the small button on a position's action row.
 // ---------------------------------------------------------------------------------------------------------------------
 
-export function ExitWalkLauncher({ pos }: { pos: Position }) {
+/** `className` sets the size and shape only, so the Table, Cards and legacy rows share one look and one colour. */
+export function ExitWalkLauncher({ pos, className }: { pos: Position; className?: string }) {
   const ctx = useContext(ExitWalkContext);
   const [open, setOpen] = useState(false);
   if (!ctx || pos.structureAmbiguous || !pos.identity || pos.entryPriceEffect === 'Unknown') return null;
@@ -62,7 +67,7 @@ export function ExitWalkLauncher({ pos }: { pos: Position }) {
       <button
         type="button"
         onClick={e => { e.stopPropagation(); setOpen(true); }}
-        className="text-[9px] px-2.5 py-1 border rounded font-bold whitespace-nowrap transition-colors border-teal-700 text-teal-300 hover:bg-teal-500/10">
+        className={`${className ?? 'text-[9px] px-2.5 py-1 rounded'} border font-bold whitespace-nowrap transition-colors border-teal-700 text-teal-300 hover:bg-teal-500/10`}>
         Walk the price
       </button>
       {open ? <ExitWalkDialog pos={pos} ctx={ctx} onClose={() => setOpen(false)} /> : null}
@@ -92,6 +97,9 @@ function ExitWalkDialog({ pos, ctx, onClose }: { pos: Position; ctx: ExitWalkCon
   const [running, setRunning] = useState(false);
   const [outcome, setOutcome] = useState<ExitWalkOutcome | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // EXIT-WALK-CANCEL-0001: the price of the working GTC the walk cancelled (null when it cancelled nothing), and whether it was put back.
+  const [cancelledOriginal, setCancelledOriginal] = useState<number | null>(null);
+  const [restored, setRestored] = useState(false);
   const cancelRef = useRef(false);
   const abandonRef = useRef(false);
   const runningRef = useRef(false);
@@ -109,7 +117,9 @@ function ExitWalkDialog({ pos, ctx, onClose }: { pos: Position; ctx: ExitWalkCon
   /** Eligibility, a fresh quote, the tick table, the plan, and the safety gate on the first price. */
   const prepare = useCallback(async (): Promise<Prepared> => {
     const nowMs = Date.now();
-    const eligibility = checkExitWalkEligibility(pos, ctx.pendingOrders, nowMs);
+    // EXIT-WALK-CANCEL-0001: a working GTC close no longer refuses; the walk offers to cancel it. Dry run places nothing and
+    // the broker's validator rejects a new close while the old one works, so dry run keeps the refusal.
+    const eligibility = checkExitWalkEligibility(pos, ctx.pendingOrders, nowMs, { allowWorkingClose: !ctx.dryRun });
     if (!eligibility.ok) return { kind: 'refused', text: refusalText(eligibility.reason) };
     try {
       const token = await getAccessToken();
@@ -141,6 +151,26 @@ function ExitWalkDialog({ pos, ctx, onClose }: { pos: Position; ctx: ExitWalkCon
   }, [prepare]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  /** Puts the cancelled GTC close back at its original price. Returns the line to show the trader; a failure is flagged critical. */
+  const putOriginalBack = async (price: number, side: ExitSide): Promise<string> => {
+    try {
+      const token = await getAccessToken();
+      const res = await fetch(`${BASE}/accounts/${pos.accountNumber}/orders`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(buildRestoreCloseOrder(pos, price, side)),
+      });
+      if (res.status === 401) throw new Error('Session expired');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error?.message ?? data?.errors?.[0]?.message ?? `Request failed (${res.status})`);
+      setRestored(true);
+      ctx.onDone();
+      return `The original close order was put back at $${price.toFixed(2)} (GTC).`;
+    } catch (error) {
+      return criticalGtcRestorationWarning(error).trim();
+    }
+  };
 
   const start = async () => {
     if (prepared.kind !== 'ready' || runningRef.current) return;
@@ -176,11 +206,53 @@ function ExitWalkDialog({ pos, ctx, onClose }: { pos: Position; ctx: ExitWalkCon
       };
       const deps = ctx.dryRun ? createDryRunExitWalkDeps(config) : createBrowserExitWalkDeps(config);
       const first = plan.prices_c[0];
+      // EXIT-WALK-CANCEL-0001: the trader pressed "Cancel order and start walk". Cancel the working GTC close first; a refusal
+      // (live bracket, any doubt) cancels nothing and stops here.
+      let cancelledPrice: number | null = null;
+      setCancelledOriginal(null);
+      setRestored(false);
+      if (eligibility.workingClose && !ctx.dryRun) {
+        try {
+          const token = await getAccessToken();
+          const cancelled = await cancelWorkingCloseForWalk(
+            {
+              orderId: pos.gtcOrderId,
+              complexOrderId: (pos as any).gtcComplexOrderId ?? null,
+              originalPrice: pos.gtcOrderPrice,
+              stopAssessment: pos.stopAssessment,
+              legSymbols: pos.legs.map(l => l.symbol),
+            },
+            {
+              readComplexOrder: id => ttFetch(`/accounts/${pos.accountNumber}/complex-orders/${id}`, token).then((r: any) => r?.data ?? null),
+              cancel: async (orderId, complexOrderId) => {
+                const res = await fetch(
+                  complexOrderId ? `${BASE}/accounts/${pos.accountNumber}/complex-orders/${complexOrderId}` : `${BASE}/accounts/${pos.accountNumber}/orders/${orderId}`,
+                  { method: 'DELETE', headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
+                );
+                if (res.status === 401) throw new Error('Session expired');
+                if (!res.ok) throw new Error(`Cancel failed: ${(await res.text()).slice(0, 200)}`);
+                return res.json().catch(() => ({}));
+              },
+            },
+          );
+          cancelledPrice = cancelled.originalPrice;
+          setCancelledOriginal(cancelled.originalPrice);
+          await new Promise(r => setTimeout(r, 800));
+        } catch (error) {
+          setNotice(error instanceof Error ? error.message : 'The working order could not be cancelled. Nothing was changed.');
+          return;
+        }
+      }
       let firstOrderId: string;
       try {
         firstOrderId = await deps.submit(first);
       } catch (error) {
-        setNotice(`The first order was refused. Nothing is working. ${error instanceof Error ? error.message : ''}`.trim());
+        const why = error instanceof Error ? error.message : '';
+        if (cancelledPrice != null) {
+          setNotice(`The first order was refused. ${why} ${await putOriginalBack(cancelledPrice, side)}`.replace(/\s+/g, ' ').trim());
+        } else {
+          setNotice(`The first order was refused. Nothing is working. ${why}`.trim());
+        }
         return;
       }
       setLog([{ price_c: first, state: 'waiting' }]);
@@ -204,6 +276,10 @@ function ExitWalkDialog({ pos, ctx, onClose }: { pos: Position; ctx: ExitWalkCon
   const close = () => { if (!runningRef.current) onClose(); };
 
   const ready = prepared.kind === 'ready' ? prepared : null;
+  const willCancelWorking = Boolean(ready?.eligibility.workingClose) && !ctx.dryRun;
+  // The walk cancelled the original and ended with nothing working: offer to put it back (never automatic after a Stop).
+  const canPutBack = cancelledOriginal != null && !restored && !running && outcome != null
+    && (outcome.kind === 'cancelled' || (outcome.kind === 'stopped' && !outcome.orderLive));
   const sideForText: ExitSide = ready?.side ?? (pos.entryPriceEffect === 'Credit' ? 'buy' : 'sell');
   const rows = ready ? rowsWithLog(ready.plan, log.map(l => l.price_c), running) : [];
 
@@ -227,6 +303,12 @@ function ExitWalkDialog({ pos, ctx, onClose }: { pos: Position; ctx: ExitWalkCon
           {prepared.kind === 'loading' ? <p className="text-xs text-slate-400">Reading the market…</p> : null}
           {prepared.kind === 'refused' ? (
             <div className="rounded-lg border border-amber-700 bg-amber-500/5 px-3 py-2 text-xs text-slate-200">{prepared.text}</div>
+          ) : null}
+          {willCancelWorking && !running && cancelledOriginal == null ? (
+            <div data-testid="walk-working-close" className="rounded-lg border border-amber-700 bg-amber-500/5 px-3 py-2 text-xs text-slate-200">
+              This position has a working close order{pos.gtcOrderPrice != null ? ` (GTC at $${pos.gtcOrderPrice.toFixed(2)})` : ''}. Starting the walk cancels it first.
+              If the walk ends with nothing working, you can put it back.
+            </div>
           ) : null}
           {ready ? (
             <table className="w-full text-[11px] tabular-nums border-collapse">
@@ -264,8 +346,14 @@ function ExitWalkDialog({ pos, ctx, onClose }: { pos: Position; ctx: ExitWalkCon
           </button>
           <button type="button" onClick={() => void start()} disabled={!ready || running}
             className="min-h-[44px] px-4 rounded-lg border border-teal-600 text-teal-300 text-sm font-bold disabled:opacity-40 disabled:border-dashed">
-            Start walk
+            {willCancelWorking ? 'Cancel order and start walk' : 'Start walk'}
           </button>
+          {canPutBack ? (
+            <button type="button" onClick={() => void putOriginalBack(cancelledOriginal as number, sideForText).then(setNotice)}
+              className="min-h-[44px] px-4 rounded-lg border border-amber-600 text-amber-300 text-sm font-bold">
+              Put the original order back at ${(cancelledOriginal as number).toFixed(2)}
+            </button>
+          ) : null}
           <button type="button" onClick={() => void refresh()} disabled={running}
             className="min-h-[44px] px-4 rounded-lg border border-neutral-700 text-slate-300 text-sm disabled:opacity-40">
             Refresh

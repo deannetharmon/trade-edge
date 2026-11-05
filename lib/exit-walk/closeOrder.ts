@@ -93,13 +93,22 @@ export type ExitWalkIneligible =
   | 'market_closed';
 
 export type ExitWalkEligibility =
-  | { ok: true; side: ExitSide; identity: CanonicalCloseIdentity }
+  | { ok: true; side: ExitSide; identity: CanonicalCloseIdentity; /** EXIT-WALK-CANCEL-0001: a working GTC close order exists and the walk will offer to cancel it. */ workingClose: boolean }
   | { ok: false; reason: ExitWalkIneligible; message: string };
+
+export interface ExitWalkEligibilityOptions {
+  /**
+   * EXIT-WALK-CANCEL-0001: when true, a working GTC close order on the position no longer refuses. The walk shows it and
+   * cancels it only after the trader starts the walk. A pending entry order on the same contracts still refuses.
+   */
+  allowWorkingClose?: boolean;
+}
 
 export function checkExitWalkEligibility(
   pos: Pick<Position, 'structureAmbiguous' | 'structureBlockMessage' | 'identity' | 'entryPriceEffect' | 'hasGtc' | 'legs' | 'accountNumber'>,
   pendingOrders: Array<Pick<PendingOrder, 'accountNumber' | 'legs'>>,
   nowMs: number,
+  options: ExitWalkEligibilityOptions = {},
 ): ExitWalkEligibility {
   if (pos.structureAmbiguous || !pos.identity) {
     return { ok: false, reason: 'structure_unclear', message: pos.structureBlockMessage ?? 'This position could not be read as one clear structure.' };
@@ -108,11 +117,24 @@ export function checkExitWalkEligibility(
   if (!side) return { ok: false, reason: 'entry_unknown', message: 'The entry price is unknown, so the walk cannot tell a credit close from a debit close.' };
   const legSymbols = new Set(pos.legs.map(l => l.symbol));
   const clash = pendingOrders.some(o => o.accountNumber === pos.accountNumber && o.legs.some(l => legSymbols.has(l.symbol)));
-  if (pos.hasGtc || clash) {
+  const workingClose = Boolean(pos.hasGtc);
+  if (clash || (workingClose && !options.allowWorkingClose)) {
     return { ok: false, reason: 'working_order', message: 'This position already has a working order. Cancel it first; the walk never cancels another order.' };
   }
   if (!isRegularSession(nowMs)) return { ok: false, reason: 'market_closed', message: 'The walk runs only during the regular session (9:30 AM to 4:00 PM ET).' };
-  return { ok: true, side, identity: pos.identity };
+  return { ok: true, side, identity: pos.identity, workingClose };
+}
+
+/**
+ * EXIT-WALK-CANCEL-0001: the put-back order for a working GTC close the walk cancelled: the same legs, a GTC limit at the
+ * original price. Used only when the walk ends with nothing working and the original was already cancelled.
+ */
+export function buildRestoreCloseOrder(
+  pos: Pick<Position, 'symbol' | 'legs'>,
+  originalPricePoints: number,
+  side: ExitSide,
+): Omit<ExitCloseOrderBody, 'time-in-force'> & { 'time-in-force': 'GTC' } {
+  return { ...buildExitCloseOrder(pos, Math.round(originalPricePoints * 100), side), 'time-in-force': 'GTC' };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
