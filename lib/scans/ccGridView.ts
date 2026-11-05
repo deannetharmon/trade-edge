@@ -48,12 +48,54 @@ export interface CcGridWindow {
   anyInGoal: boolean;
 }
 
-/** Best cell to describe by default: in-goal cells first, then by total if called away (highest), unknown last. */
+/**
+ * The numbers a cell shows. A wide bid/ask spread makes the midpoint unreliable, so a wide cell uses the BID (what you can
+ * count on being paid); the midpoint stays in the cell data for the hover text and the order dialog's starting limit.
+ */
+export function ccCellNumbers(grid: CcGrid, cell: CcGridCell) {
+  const usedBid = cell.wide;
+  const perShare = usedBid ? Math.round(cell.bid * 100) / 100 : cell.premiumPerShare;
+  const premiumTotal = Math.round(perShare * 100 * grid.contracts * 100) / 100;
+  const basis = grid.basis;
+  const calledAwayTotal = basis === null ? null : Math.round(((cell.strike - basis) * 100 * grid.contracts + premiumTotal) * 100) / 100;
+  return {
+    usedBid,
+    premiumPerShare: perShare,
+    premiumTotal,
+    calledAwayTotal,
+    calledAwayPct: calledAwayTotal === null || basis === null ? null : Math.round((calledAwayTotal / (basis * 100 * grid.contracts)) * 10000) / 100,
+    notCalledBasis: basis === null ? null : Math.round((basis - perShare) * 100) / 100,
+  };
+}
+
+/** How far the stock must rise from today's price for this strike to be reached; null when the price is unknown. */
+export function ccStockMovePct(grid: CcGrid, cell: Pick<CcGridCell, 'strike'>): number | null {
+  return typeof grid.stockPrice === 'number' && grid.stockPrice > 0 ? Math.round((cell.strike / grid.stockPrice - 1) * 1000) / 10 : null;
+}
+
+/** The market's estimate of the chance this call finishes in the money, as a whole percent. An estimate, not a guarantee. */
+export function ccChanceCalledPct(cell: Pick<CcGridCell, 'delta'>): number {
+  return Math.round(cell.delta * 100);
+}
+
+/**
+ * Best cell to describe by default: cells in the goal's delta range first (else all), then the ones with a tight spread,
+ * then the one closest to the middle of the goal's delta range, then the larger premium. The biggest total if called away
+ * is NOT used: it always points at the strike furthest from the price.
+ */
 export function pickDefaultAnchor(cells: CcGridCell[], goal: CcGoal): CcGridCell | null {
   if (cells.length === 0) return null;
-  const score = (c: CcGridCell) => (c.calledAwayTotal === null ? -Infinity : c.calledAwayTotal);
+  const g = CC_GOALS[goal];
+  const center = (g.min + g.max) / 2;
   const pool = cells.some(c => cellInGoal(c, goal)) ? cells.filter(c => cellInGoal(c, goal)) : cells;
-  return pool.reduce((best, c) => (score(c) > score(best) ? c : best), pool[0]);
+  const better = (a: CcGridCell, b: CcGridCell) => {
+    if (a.wide !== b.wide) return !a.wide;
+    const da = Math.abs(a.delta - center);
+    const db = Math.abs(b.delta - center);
+    if (da !== db) return da < db;
+    return a.premiumPerShare > b.premiumPerShare;
+  };
+  return pool.reduce((best, c) => (better(c, best) ? c : best), pool[0]);
 }
 
 export function selectCcGridWindow(grid: CcGrid, goal: CcGoal, opts: CcGridWindowOptions): CcGridWindow {
@@ -93,12 +135,15 @@ const usd = (n: number) => '$' + Math.abs(n).toLocaleString('en-US', { maximumFr
 
 /** One plain sentence for the selected trade. */
 export function ccGridSummary(grid: CcGrid, cell: CcGridCell, symbol?: string): string {
+  const n = ccCellNumbers(grid, cell);
   const per = grid.contracts === 1 ? 'one call' : `${grid.contracts} calls`;
-  const head = `Sell ${per}${symbol ? ' on ' + symbol : ''} expiring in ${cell.dte} days at the $${cell.strike} strike and collect ${usd(cell.premiumTotal)}.`;
-  if (cell.calledAwayTotal === null) return head;
-  const total = cell.calledAwayTotal;
+  const head = `Sell ${per}${symbol ? ' on ' + symbol : ''} expiring in ${cell.dte} days at the $${cell.strike} strike and collect ${usd(n.premiumTotal)}${n.usedBid ? ' (at the bid: the spread is wide)' : ''}.`;
+  if (n.calledAwayTotal === null) return head;
+  const move = ccStockMovePct(grid, cell);
+  const needs = move !== null && move > 0 ? ` and ${symbol ?? 'the stock'} would have to rise ${move.toFixed(0)}% to get there` : '';
+  const total = n.calledAwayTotal;
   const tail = total >= 0
-    ? ` If the shares are called away you make ${usd(total)} in total on your cost.`
+    ? ` If the shares are called away${needs} you make ${usd(total)} in total against your cost.`
     : ` If the shares are called away you lose ${usd(total)} in total against your cost: this strike is below it.`;
   return head + tail;
 }

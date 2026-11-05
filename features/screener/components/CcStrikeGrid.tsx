@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { CcGrid, CcGridCell } from '@/lib/scans/ccGridTypes';
-import { CC_GOALS, DEFAULT_CC_GOAL, ccGridSummary, cellInGoal, selectCcGridWindow, type CcGoal } from '@/lib/scans/ccGridView';
+import { CC_GOALS, DEFAULT_CC_GOAL, ccCellNumbers, ccChanceCalledPct, ccGridSummary, ccStockMovePct, cellInGoal, selectCcGridWindow, type CcGoal } from '@/lib/scans/ccGridView';
 
 interface Theme { border: string; text: string; textMuted: string; textFaint: string }
 
@@ -43,6 +43,7 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange }: {
 
   const pickGoal = (g: CcGoal) => { setGoal(g); setSelected(null); setExtraAbove(0); setExtraBelow(0); };
   const anchor = view.anchor;
+  const anchorN = anchor ? ccCellNumbers(grid, anchor) : null;
 
   return (
     <section aria-label="Covered call strike grid" data-testid="cc-strike-grid" className={`mt-2 border-t ${th.border} pt-2 cursor-default`} onClick={e => e.stopPropagation()}>
@@ -101,19 +102,25 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange }: {
                     const cell = view.cell(e.expiration, strike);
                     if (!cell) return <td key={e.expiration} className={`p-1 ${th.textFaint}`}>—</td>;
                     const isSel = anchor !== null && anchor.expiration === cell.expiration && anchor.strike === cell.strike;
-                    const total = cell.calledAwayTotal;
+                    const n = ccCellNumbers(grid, cell);
+                    const total = n.calledAwayTotal;
+                    const move = ccStockMovePct(grid, cell);
                     const tone = total === null ? th.textMuted : total < 0 ? 'text-red-400' : 'text-emerald-400';
                     return (
                       <td key={e.expiration} className="p-0.5">
                         <button type="button" onClick={() => setSelected({ expiration: cell.expiration, strike: cell.strike })}
                           aria-label={`${cell.strike} call ${cell.expiration}`} aria-pressed={isSel}
+                          title={`Bid $${cell.bid.toFixed(2)} / ask $${cell.ask.toFixed(2)} (mid $${cell.premiumPerShare.toFixed(2)}). Delta ${cell.delta.toFixed(2)} is the market's estimate of the chance this call finishes in the money.`}
                           className={`w-full rounded border p-1.5 text-left ${isSel ? 'border-white' : cell.belowFloor ? 'border-amber-500/50' : cellInGoal(cell, goal) ? 'border-emerald-500/60' : 'border-neutral-800'}`}>
-                          <span className={`block text-sm font-bold ${tone}`}>{total === null ? '—' : signed(total)}</span>
-                          {cell.calledAwayPct !== null && <span className={`block ${tone}`}>{cell.calledAwayPct >= 0 ? '+' : ''}{cell.calledAwayPct.toFixed(2)}% return</span>}
-                          <span className={`block ${th.textFaint}`}>
-                            ${cell.premiumPerShare.toFixed(2)} prem · Δ{cell.delta.toFixed(2)}
-                            {(cell.wide || cell.thinOi) && <span className="ml-1 text-yellow-400" title={[cell.wide ? 'wide bid/ask spread' : '', cell.thinOi ? 'thin open interest' : ''].filter(Boolean).join(' and ')}>⚠ {cell.wide ? 'wide' : 'thin OI'}</span>}
-                          </span>
+                          <span className="block text-sm font-bold text-emerald-400">${n.premiumTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })} <span className="text-[10px] font-normal opacity-80">{n.usedBid ? 'at bid' : 'now'}</span></span>
+                          {total !== null && (
+                            <span className={`block ${tone}`}>
+                              {total < 0 ? '-' : '+'}${Math.abs(total).toLocaleString('en-US', { maximumFractionDigits: 0 })} if called{move !== null && move > 0 ? ` · stock +${move.toFixed(0)}%` : ''}
+                            </span>
+                          )}
+                          <span className={`block ${th.textFaint}`}>~{ccChanceCalledPct(cell)}% chance called</span>
+                          {cell.wide && <span className="block text-yellow-400">⚠ wide: bid ${cell.bid.toFixed(2)} / ask ${cell.ask.toFixed(2)}</span>}
+                          {cell.thinOi && !cell.wide && <span className="block text-yellow-400">⚠ thin open interest</span>}
                           {cell.belowFloor && <span className="block text-amber-400">locks in a loss</span>}
                         </button>
                       </td>
@@ -136,15 +143,17 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange }: {
         {allExpirations && (
           <button type="button" onClick={() => setAllExpirations(false)} className="rounded border border-neutral-700 px-2 py-0.5 text-[10px] text-neutral-300">Show fewer expirations</button>
         )}
-        <span className={`text-[9px] ${th.textFaint}`}>Totals are if the shares are called away, before fees, against your cost basis. Click a cell to change the trade above.</span>
+        <span className={`text-[9px] ${th.textFaint}`}>
+          Big number: what you are paid now. &quot;If called&quot;: your total if the shares are called away, against your cost basis, before fees. A dash means no usable price ({grid.left.unusableQuote + grid.left.farOtm} calls had no bid, a crossed quote, or under a 2% chance of being reached). Click a cell to change the trade above.
+        </span>
       </div>
 
       {anchor && (
         <div data-testid="cc-grid-detail" className={`mt-2 rounded border ${th.border} p-2 text-[10px] leading-relaxed ${th.textMuted}`}>
           <p className={`font-bold ${th.text}`}>${anchor.strike} call · {anchor.expiration} ({anchor.dte}d) · Δ{anchor.delta.toFixed(2)} · bid ${anchor.bid.toFixed(2)} / ask ${anchor.ask.toFixed(2)} · OI {anchor.openInterest}</p>
-          <p><b>If not called:</b> you keep ${anchor.premiumTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })} and the shares{anchor.notCalledBasis !== null ? `; cost basis falls to $${anchor.notCalledBasis.toFixed(2)} per share` : ''}.</p>
+          <p><b>If not called:</b> you keep ${anchorN!.premiumTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })}{anchorN!.usedBid ? ' (counted at the bid)' : ''} and the shares{anchorN!.notCalledBasis !== null ? `; cost basis falls to $${anchorN!.notCalledBasis.toFixed(2)} per share` : ''}.</p>
           {anchor.belowFloor && <p className="text-amber-400">Below your cost basis: if called away this locks in a loss.</p>}
-          {anchor.wide && <p className="text-yellow-400">Wide bid/ask spread: the fill may be worse than the mid price.</p>}
+          {anchor.wide && <p className="text-yellow-400">Wide bid/ask spread (mid ${anchor.premiumPerShare.toFixed(2)}): you will probably be filled near the bid, so the numbers above use the bid.</p>}
           {anchor.thinOi && <p className="text-yellow-400">Thin open interest.</p>}
         </div>
       )}

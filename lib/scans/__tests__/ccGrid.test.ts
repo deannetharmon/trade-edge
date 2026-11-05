@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildCcGrid } from '../covered-call-finder';
 import { computeCoveredCallCapacity } from '../covered-call-capacity';
-import { selectCcGridWindow, cellInGoal, ccGridSummary } from '../ccGridView';
+import { selectCcGridWindow, cellInGoal, ccGridSummary, ccCellNumbers, ccStockMovePct, ccChanceCalledPct, pickDefaultAnchor } from '../ccGridView';
 import type { CcRulesType } from '../constants';
 import type { WheelChainLeg } from '@/lib/wheel/chainSearch';
 
@@ -122,9 +122,38 @@ describe('ccGridSummary', () => {
     expect(t).toMatch(/you make \$/);
   });
   it('says plainly when a trade is below the basis', () => {
-    const cell = grid.cells.find(c => c.strike === 80 && c.dte >= 29)!;
+    const cell = { ...grid.cells.find(c => c.strike === 80 && c.dte >= 29)!, wide: false };
     const t = ccGridSummary(grid, cell);
     expect(t).toContain('you lose $180');
     expect(t).toContain('below it');
+  });
+});
+
+describe('ccCellNumbers: wide cells use the bid', () => {
+  it('tight cell uses the mid; wide cell uses the bid and its totals follow', () => {
+    const tight = { ...grid.cells.find(c => c.strike === 80 && c.dte >= 29)!, wide: false }; // mid 1.10
+    expect(ccCellNumbers(grid, tight).premiumTotal).toBe(220);
+    const wideCell = { ...grid.cells.find(c => c.strike === 95)!, bid: 0.1, ask: 0.9, premiumPerShare: 0.5, wide: true };
+    const n = ccCellNumbers(grid, wideCell);
+    expect(n.usedBid).toBe(true);
+    expect(n.premiumTotal).toBe(20);          // 0.10 x 100 x 2 contracts
+    expect(n.calledAwayTotal).toBe(2620);     // (95-82)*200 + 20
+    expect(n.notCalledBasis).toBe(81.9);
+  });
+  it('how far the stock must rise, and the chance of being called', () => {
+    expect(ccStockMovePct(grid, { strike: 85 })).toBe(35.2); // 85 / 62.85
+    expect(ccChanceCalledPct({ delta: 0.024 })).toBe(2);
+  });
+});
+
+describe('pickDefaultAnchor does not chase the biggest total if called', () => {
+  const mk = (strike: number, delta: number, wide = false) => ({ ...grid.cells[0], strike, delta, wide, premiumPerShare: 0.3, calledAwayTotal: (strike - 82) * 100 });
+  it('prefers the tight call closest to the goal, not the furthest strike', () => {
+    const cells = [mk(105, 0.02), mk(100, 0.03), mk(86, 0.07), mk(84, 0.12)];
+    expect(pickDefaultAnchor(cells, 'income')?.strike).toBe(84); // none in range: closest delta to .35 wins
+  });
+  it('a tight call beats a wide one in range', () => {
+    const cells = [mk(90, 0.25, true), mk(92, 0.22, false)];
+    expect(pickDefaultAnchor(cells, 'balanced')?.strike).toBe(92);
   });
 });
