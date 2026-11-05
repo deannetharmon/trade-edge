@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { CcGrid, CcGridCell } from '@/lib/scans/ccGridTypes';
-import { CC_GOALS, DEFAULT_CC_GOAL, ccCellNumbers, ccChanceCalledPct, ccGridSummary, ccStockMovePct, cellInGoal, pickCellForSellPrice, selectCcGridWindow, type CcGoal } from '@/lib/scans/ccGridView';
+import { CC_GOALS, DEFAULT_CC_GOAL, ccCellNumbers, ccChanceCalledPct, ccGridSummary, cellInGoal, pickCellForSellPrice, pickQuickCell, CC_QUICK_PICKS, selectCcGridWindow, type CcGoal } from '@/lib/scans/ccGridView';
 
 interface Theme { border: string; text: string; textMuted: string; textFaint: string }
 
@@ -28,25 +28,29 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange, hideGo
   const [showBelowFloor, setShowBelowFloor] = useState(false);
   const [allExpirations, setAllExpirations] = useState(false);
   const [selected, setSelected] = useState<{ expiration: string; strike: number } | null>(initial ?? null);
+  // The frame is what the table is drawn around. Clicking a cell moves only the highlight; the frame changes when the goal or the
+  // below-basis tick changes, or when the "sell at" picker jumps to a call, so the table never shuffles under the cursor.
+  const [frame, setFrame] = useState<{ expiration: string; strike: number } | null>(initial ?? null);
   const [extraAbove, setExtraAbove] = useState(0);
   const [extraBelow, setExtraBelow] = useState(0);
   const [sellAt, setSellAt] = useState('');
   const [sellNote, setSellNote] = useState<string | null>(null);
 
   const view = useMemo(
-    () => selectCcGridWindow(grid, goal, { showBelowFloor, allExpirations, selected, extraAbove, extraBelow }),
-    [grid, goal, showBelowFloor, allExpirations, selected, extraAbove, extraBelow],
+    () => selectCcGridWindow(grid, goal, { showBelowFloor, allExpirations, selected: frame, extraAbove, extraBelow }),
+    [grid, goal, showBelowFloor, allExpirations, frame, extraAbove, extraBelow],
   );
 
-  const anchorKey = view.anchor ? `${view.anchor.expiration}|${view.anchor.strike}` : '';
-  useEffect(() => { onAnchorChange?.(view.anchor); }, [anchorKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const clicked = selected ? view.cell(selected.expiration, selected.strike) ?? null : null;
+  const anchor = clicked ?? view.anchor;
+  const anchorKey = anchor ? `${anchor.expiration}|${anchor.strike}` : '';
+  useEffect(() => { onAnchorChange?.(anchor); }, [anchorKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (grid.cells.length === 0) {
     return <p className={`text-[10px] ${th.textFaint}`}>No calls passed the safety checks for the strike grid.</p>;
   }
 
-  const pickGoal = (g: CcGoal) => { setGoal(g); setSelected(null); setExtraAbove(0); setExtraBelow(0); };
-  const anchor = view.anchor;
+  const pickGoal = (g: CcGoal) => { setGoal(g); setSelected(null); setFrame(null); setExtraAbove(0); setExtraBelow(0); };
   const anchorN = anchor ? ccCellNumbers(grid, anchor) : null;
 
   return (
@@ -63,13 +67,25 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange, hideGo
         </div>
         {grid.cells.some(c => c.belowFloor) && (
           <label className="flex items-center gap-1 text-[10px] text-amber-400">
-            <input type="checkbox" checked={showBelowFloor} onChange={e => { setShowBelowFloor(e.target.checked); setSelected(null); setExtraAbove(0); setExtraBelow(0); }} />
+            <input type="checkbox" checked={showBelowFloor} onChange={e => { setShowBelowFloor(e.target.checked); setSelected(null); setFrame(null); setExtraAbove(0); setExtraBelow(0); }} />
             Show below cost basis{view.hiddenBelowFloor > 0 ? ` (${view.hiddenBelowFloor} hidden)` : ''}
           </label>
         )}
       </div>
 
       {anchor && (
+        <>
+        <div role="group" aria-label="Quick picks" className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+          <span className={th.textFaint}>Jump to:</span>
+          {CC_QUICK_PICKS.map(q => (
+            <button key={q.kind} type="button"
+              onClick={() => {
+                const c = pickQuickCell(grid, q.kind, { allowBelowFloor: showBelowFloor || anchor.belowFloor });
+                if (c) { const at = { expiration: c.expiration, strike: c.strike }; setSelected(at); setFrame(at); setSellNote(null); } else setSellNote('No call qualifies for that pick.');
+              }}
+              className="rounded border border-neutral-700 px-2 py-0.5 text-neutral-300">{q.label}</button>
+          ))}
+        </div>
         <form
           data-testid="cc-sell-price"
           className="mb-1.5 flex flex-wrap items-center gap-2 text-[11px]"
@@ -77,7 +93,7 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange, hideGo
             e.preventDefault();
             const pick = pickCellForSellPrice(grid, Number(sellAt.replace(/[$,\s]/g, '')), { expiration: anchor.expiration, allowBelowFloor: showBelowFloor || anchor.belowFloor });
             setSellNote(pick.note);
-            if (pick.cell) setSelected({ expiration: pick.cell.expiration, strike: pick.cell.strike });
+            if (pick.cell) { const at = { expiration: pick.cell.expiration, strike: pick.cell.strike }; setSelected(at); setFrame(at); }
           }}
         >
           <label className={th.textFaint}>I would sell my shares at $
@@ -87,6 +103,7 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange, hideGo
           <button type="submit" className="rounded border border-teal-500/50 px-2 py-0.5 text-teal-300">Find the call</button>
           {sellNote && <span role="status" className="text-amber-300">{sellNote}</span>}
         </form>
+        </>
       )}
 
       {anchor && (
@@ -128,7 +145,6 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange, hideGo
                     const isSel = anchor !== null && anchor.expiration === cell.expiration && anchor.strike === cell.strike;
                     const n = ccCellNumbers(grid, cell);
                     const total = n.calledAwayTotal;
-                    const move = ccStockMovePct(grid, cell);
                     const tone = total === null ? th.textMuted : total < 0 ? 'text-red-400' : 'text-emerald-400';
                     return (
                       <td key={e.expiration} className="p-0.5">
@@ -136,16 +152,10 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange, hideGo
                           aria-label={`${cell.strike} call ${cell.expiration}`} aria-pressed={isSel}
                           title={`Bid $${cell.bid.toFixed(2)} / ask $${cell.ask.toFixed(2)} (mid $${cell.premiumPerShare.toFixed(2)}). Delta ${cell.delta.toFixed(2)} is the market's estimate of the chance this call finishes in the money.`}
                           className={`w-full rounded border p-1.5 text-left ${isSel ? 'border-white' : cell.belowFloor ? 'border-amber-500/50' : cellInGoal(cell, goal) ? 'border-emerald-500/60' : 'border-neutral-800'}`}>
-                          <span className="block text-sm font-bold text-emerald-400">${n.premiumTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })} <span className="text-[10px] font-normal opacity-80">{n.usedBid ? 'at bid' : 'now'}</span></span>
-                          {total !== null && (
-                            <span className={`block ${tone}`}>
-                              {total < 0 ? '-' : '+'}${Math.abs(total).toLocaleString('en-US', { maximumFractionDigits: 0 })} if called{move !== null && move > 0 ? ` · stock +${move.toFixed(0)}%` : ''}
-                            </span>
-                          )}
-                          <span className={`block ${th.textFaint}`}>~{ccChanceCalledPct(cell)}% chance called</span>
-                          {cell.wide && <span className="block text-yellow-400">⚠ wide: bid ${cell.bid.toFixed(2)} / ask ${cell.ask.toFixed(2)}</span>}
-                          {cell.thinOi && !cell.wide && <span className="block text-yellow-400">⚠ thin open interest</span>}
-                          {cell.belowFloor && <span className="block text-amber-400">locks in a loss</span>}
+                          <span className="block text-sm font-bold text-emerald-400">${n.premiumTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })} <span className="text-[10px] font-normal opacity-80">{n.usedBid ? 'at bid' : 'now'}</span>{(cell.wide || cell.thinOi) && <span className="ml-1 text-yellow-400" title={cell.wide ? `Wide spread: bid $${cell.bid.toFixed(2)} / ask $${cell.ask.toFixed(2)}` : 'Thin open interest'} aria-label={cell.wide ? 'wide spread' : 'thin open interest'}>⚠</span>}</span>
+                          <span className={`block text-[11px] ${total === null ? th.textFaint : tone}`}>
+                            {total !== null ? `${total < 0 ? '-' : '+'}$${Math.abs(total).toLocaleString('en-US', { maximumFractionDigits: 0 })} if called` : ''}<span className={th.textFaint}>{total !== null ? ' · ' : ''}~{ccChanceCalledPct(cell)}% called</span>
+                          </span>
                         </button>
                       </td>
                     );

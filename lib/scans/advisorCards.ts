@@ -82,3 +82,37 @@ export function buildPmccPickSummary(c: PmccPickInput): LeapsPickSummary {
   }
   return { tiles, callouts: sorted(callouts) };
 }
+
+export interface CcAdvisorFactsInput {
+  strike: number;
+  underlyingPrice: number | null;
+  costBasis: number | null;
+}
+
+const usd = (n: number) => '$' + n.toFixed(2);
+const pctText = (n: number) => `${Math.abs(n).toFixed(1)}%`;
+
+/**
+ * Plain-language facts about where the strike sits, computed here so the advisor model never has to work out which side of
+ * the stock price or the cost basis a strike is on (it had called a strike ABOVE the cost basis "below" it). Pure.
+ */
+export function ccAdvisorFacts(c: CcAdvisorFactsInput): string[] {
+  const facts: string[] = [];
+  const { strike, underlyingPrice: price, costBasis: basis } = c;
+  if (price != null && price > 0) {
+    const vs = ((strike - price) / price) * 100;
+    facts.push(vs > 0
+      ? `The strike (${usd(strike)}) is ${pctText(vs)} ABOVE the current stock price (${usd(price)}): the stock has to rise that far before the shares are called away.`
+      : `The strike (${usd(strike)}) is at or BELOW the current stock price (${usd(price)}): the call is in the money.`);
+  }
+  if (basis != null && basis > 0) {
+    const vs = ((strike - basis) / basis) * 100;
+    facts.push(strike >= basis
+      ? `The strike is ${pctText(vs)} ABOVE the cost basis (${usd(basis)}): if the shares are called away they sell at a gain of ${usd(strike - basis)} per share before premium.`
+      : `The strike is ${pctText(vs)} BELOW the cost basis (${usd(basis)}): if the shares are called away they sell at a loss of ${usd(basis - strike)} per share before premium.`);
+    if (price != null && price > 0 && price < basis) {
+      facts.push(`The stock (${usd(price)}) is currently ${pctText(((basis - price) / basis) * 100)} BELOW the cost basis.`);
+    }
+  }
+  return facts;
+}

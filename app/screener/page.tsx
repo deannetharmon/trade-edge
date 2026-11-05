@@ -117,7 +117,7 @@ import { computePmccStartPrice } from '@/lib/scans/pmccStartPrice';
 import { parseOccSymbol } from '@/lib/optionSymbol';
 import { CalloutList, LeapsAnalysisDashboard } from '@/features/screener/components/LeapsAnalysisDashboard';
 import { LeapsAdvisorPickCard } from '@/features/screener/components/LeapsAdvisorPickCard';
-import { buildCcPickSummary, buildPmccPickSummary } from '@/lib/scans/advisorCards';
+import { buildCcPickSummary, buildPmccPickSummary, ccAdvisorFacts } from '@/lib/scans/advisorCards';
 import type { LeapsPickSummary, LeapsPlan } from '@/lib/leaps-analysis/dashboard';
 import { buildConcentrationCallout, buildLeapsDashboard, buildLeapsPickSummary, LEAPS_PLAN_LABELS, leapsPlanToServerIntent, sortPicksByScore } from '@/lib/leaps-analysis/dashboard';
 import { collectCoveredCallCapacityShadow } from '@/lib/portfolio-snapshot/shadowTelemetry';
@@ -6790,7 +6790,7 @@ const strategyScores = useMemo(() => {
       {/* Expanded Content */}
       {expanded && (
         <div className={`border-t ${th.border} px-4 py-3 space-y-3`}>
-          {t && <div className={`text-[10px] ${th.textMuted} pb-2 border-b ${th.border}`}><span className={`${trendColor(t.trend)} mr-2 font-medium`}>{trendIcon(t.trend)} {t.trend.toUpperCase()}</span>{result.strategy === 'CC' || result.strategy === 'CSP' ? t.reason.replace(/^(BCS|BPS)( \([^)]*\))? ?(REVERSAL|CONTINUATION|RECOVERY)?:?\s*/, '') : t.reason}</div>}
+          {t && <div className={`text-[10px] ${th.textMuted} pb-2 border-b ${th.border}`}><span className={`${result.strategy === 'CC' ? 'opacity-70' : ''} ${trendColor(t.trend)} mr-2 font-medium`}>{trendIcon(t.trend)} {t.trend.toUpperCase()}</span>{result.strategy === 'CC' || result.strategy === 'CSP' ? t.reason.replace(/^(BCS|BPS)( \([^)]*\))? ?(REVERSAL|CONTINUATION|RECOVERY)?:?\s*/, '') : t.reason}</div>}
 
 {/* Score breakdown in rank mode */}
           {isRankMode && c?.strategy !== 'CSP' && scored && tierLight && (
@@ -6825,8 +6825,13 @@ const strategyScores = useMemo(() => {
               </div>
             </div>
           )}
+                    {result.strategy === 'CC' && (() => {
+                      const names: Record<string, string> = { ivr: 'coverage', earnings: 'earnings', oi: 'open interest', delta: 'delta', credit: 'credit', roc: 'ROC', pop: 'POP' };
+                      const passed = Object.entries(result.checks).filter(([, ck]) => ck.status === 'pass').map(([k]) => names[k] ?? k);
+                      return passed.length > 0 ? <p data-testid="cc-checks-passed" className={`text-[10px] ${th.textFaint}`}><span className="text-emerald-500">✓</span> Passed: {passed.join(', ')}</p> : null;
+                    })()}
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {Object.entries(result.checks).filter(([, ck]) => !(result.strategy === 'CC' && ck.reason === 'N/A for CC')).map(([key, check]) => {
+            {Object.entries(result.checks).filter(([, ck]) => !(result.strategy === 'CC' && (ck.reason === 'N/A for CC' || ck.status === 'pass'))).map(([key, check]) => {
       if (key === 'iv') {
         console.log('IV_RENDER_DEBUG', {
           symbol: result.symbol,
@@ -6843,7 +6848,7 @@ const strategyScores = useMemo(() => {
     const keyLabel: Record<string, string> = {
       iv: 'Strike Volatility',
       emClearance: 'EM Clearance',
-      ivr: 'IVR',
+      ivr: result.strategy === 'CC' ? 'Coverage' : 'IVR',
       oi: 'OI',
       delta: 'Delta',
       credit: 'Credit',
@@ -6866,7 +6871,7 @@ const strategyScores = useMemo(() => {
             const keyLabel: Record<string, string> = {
               iv: 'Strike Volatility',
               emClearance: 'EM Clearance',
-              ivr: 'IVR', oi: 'OI', delta: 'Delta',
+              ivr: result.strategy === 'CC' ? 'Coverage' : 'IVR', oi: 'OI', delta: 'Delta',
               credit: 'Credit', roc: 'ROC', pop: 'POP', earnings: 'Earnings',
             };
             return (
@@ -6957,7 +6962,6 @@ const strategyScores = useMemo(() => {
 
           {c && c.strategy === 'CC' && (
             <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
-              <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest font-medium`}>CC — Covered Call, Written Against Owned Shares</p>
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div><span className={th.label}>Premium: </span><span className="text-emerald-400 font-bold">${c.ccPremiumPerContract?.toFixed(2) ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(per contract)</span></div>
                 <div><span className={th.label}>Available contracts: </span><span className="font-bold text-emerald-400">{c.ccAvailableCoveredContracts ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(quantity used for this candidate)</span></div>
@@ -12559,6 +12563,7 @@ export default function Home() {
                             premiumPerContract: c.ccPremiumPerContract, strikeVsStockPct: c.ccStrikeVsStockPct,
                             strikeVsCostBasisPct: c.ccStrikeVsCostBasisPct, sharesOwned: c.ccSharesOwned,
                             annualizedYieldPct: c.ccAnnualizedYieldOnShares,
+                            plainFacts: ccAdvisorFacts({ strike: c.shortStrike, underlyingPrice: r.price, costBasis: c.ccCostBasis ?? null }),
                           };
                         })}
                       />
@@ -12589,7 +12594,7 @@ export default function Home() {
                       showStrategyToggle={false}
                       showCreditRatio={false}
                       oiAndSortControls={part => (
-                        <OiAndSortControls part={part} th={th} minOi={ccMinOi} setMinOi={setCcMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Call OI" oiHelper="Open interest on the short call. Missing OI does not pass a positive floor." sortLabels={{ score: 'Yield', relevantLegOI: 'Call OI' }} />
+                        <OiAndSortControls part={part} th={th} minOi={ccMinOi} setMinOi={setCcMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" oiLabel="Call OI" oiHelper="Open interest on the short call. Missing OI does not pass a positive floor." sortLabels={{ score: 'Yield', relevantLegOI: 'Call OI' }} sortFields={['score', 'creditDollars', 'pop', 'otmPct', 'relevantLegOI', 'dte']} />
                       )}
                     />
                   </section>
@@ -12774,7 +12779,7 @@ export default function Home() {
                   Earned top picks carry the gold tab (TopOpportunityFrame) and every card with advisor reasoning has a collapsed
                   "Why this ranks here" panel. This line only labels the list and shows the required empty state. */}
               {!activePmccSession && (results.length > 0 || hasCompletedScanForCurrentMode) && (screenMode === 'filter' || activeSession?.requestedStrategy === 'csp') && (
-                <RankedListHeader hasQualified={filteredQualified.length > 0} borderClassName={th.border} textFaintClassName={th.textFaint} />
+                <RankedListHeader hasQualified={filteredQualified.length > 0} rankedBy={activeSession?.requestedStrategy === 'cc' ? 'annualized yield' : undefined} borderClassName={th.border} textFaintClassName={th.textFaint} />
               )}
               {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && rankDisplayWidth != null && (
                 <p className={`mb-3 text-xs ${th.textFaint}`}>Best Opportunities uses the full scan. The selected-width results below have their own candidate scores; show all scanned widths to see the full-scan shortlist.</p>

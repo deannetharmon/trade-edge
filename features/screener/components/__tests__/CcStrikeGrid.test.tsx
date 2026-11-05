@@ -43,4 +43,15 @@ describe('CcStrikeGrid', () => {
     expect(screen.getByRole('status')).toHaveTextContent('closest at or above it is $85');
     expect(parent).not.toHaveBeenCalled();
   });
+  it('clicking a cell moves the highlight only: the table does not re-center or reshuffle', async () => {
+    const wide: CcGrid = { ...grid, cells: [82, 83, 84, 85, 86, 87, 88, 89, 90, 91].map(k => cell(k)) };
+    render(<CcStrikeGrid grid={wide} th={th} />);
+    const labels = () => screen.getAllByLabelText(/ call 2030-01-10$/).map(e => e.getAttribute('aria-label'));
+    const before = labels();
+    expect(before.length).toBeLessThan(10);
+    await userEvent.click(screen.getByLabelText(before[0]!));
+    expect(labels()).toEqual(before);
+    await userEvent.click(screen.getByLabelText(before[before.length - 1]!));
+    expect(labels()).toEqual(before);
+  });
 });

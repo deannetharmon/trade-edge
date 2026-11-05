@@ -9,17 +9,20 @@ export const RANKED_EMPTY_STATE_TEXT =
 
 export function RankedListHeader({
   hasQualified,
+  rankedBy = 'score',
   borderClassName = 'border-slate-700',
   textFaintClassName = 'text-slate-500',
 }: {
   hasQualified: boolean;
+  /** What the list is ordered by, in words (covered calls rank by annualized yield). */
+  rankedBy?: string;
   borderClassName?: string;
   textFaintClassName?: string;
 }) {
   return (
     <section aria-label="Qualified opportunities, ranked" data-testid="ranked-list-header" className="mb-2 space-y-2">
       <h3 className={`text-[9px] font-bold uppercase tracking-widest ${textFaintClassName}`}>
-        Qualified · ranked by score
+        Qualified · ranked by {rankedBy}
         {hasQualified && <span className="ml-2 font-normal normal-case tracking-normal">Best opportunities carry the gold tab.</span>}
       </h3>
       {!hasQualified && (

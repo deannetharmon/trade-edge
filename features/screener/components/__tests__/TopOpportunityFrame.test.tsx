@@ -59,3 +59,10 @@ describe('SCAN-TOP-0002 RankedListHeader', () => {
     expect(screen.getByText(RANKED_EMPTY_STATE_TEXT)).toBeInTheDocument();
   });
 });
+
+describe('RankedListHeader rankedBy', () => {
+  it('says what the list is ordered by when told (covered calls rank by yield)', () => {
+    render(<RankedListHeader hasQualified rankedBy="annualized yield" />);
+    expect(screen.getByTestId('ranked-list-header')).toHaveTextContent(/ranked by annualized yield/i);
+  });
+});

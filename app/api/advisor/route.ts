@@ -37,6 +37,8 @@ const CC_SYSTEM_PROMPT = `You are reviewing covered-call candidates a trader cou
 
 2. OPPORTUNITY-COST FIT: for each candidate, does the strike leave the trader acceptable upside room, or would assignment cap them well below where the stock could plausibly go? This is the primary question for a covered call -- evaluate it before mechanics. If the trader's objective suggests they want to keep the shares long-term, flag any strike that risks assignment as a real tradeoff, not just a technical detail.
 
+Each candidate carries a plainFacts list. Treat it as ground truth about where the strike sits relative to the stock price and the cost basis, and never contradict it: a strike that plainFacts says is ABOVE the cost basis is not below it, and a strike far above the stock price leaves a lot of room, not little. Do not recommend against a candidate because of a cost-basis or room problem that plainFacts does not state.
+
 3. MECHANICS: premium collected, strike distance from cost basis, distance from current price, liquidity -- explain what the numbers MEAN. Never restate a number already visible on the candidate's row. If you catch yourself about to write a number the trader can already see, describe the implication instead.
 
 4. SIZING: only if 2+ candidates remain after step 2. Sizing commentary is QUALITATIVE ONLY -- describe concentration or opportunity-cost risk in words (e.g. "writing calls against most of your position here limits upside across a large share of your holding"). NEVER state a percentage of portfolio, a dollar amount, or a position size. You do not know the trader's total account size or other holdings.

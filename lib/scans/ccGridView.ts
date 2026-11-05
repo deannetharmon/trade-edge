@@ -178,3 +178,33 @@ export function pickCellForSellPrice(
   const highest = pool[pool.length - 1];
   return { cell: highest, note: `No strike reaches $${sellPrice} in this expiration. The highest is $${highest.strike}.` };
 }
+
+/** A call paying less than this in total (all contracts) is not worth picking just for being the least likely to be called. */
+export const CC_QUICK_PICK_MIN_PREMIUM = 10;
+
+export type CcQuickPickKind = 'paid' | 'called' | 'safe';
+
+export const CC_QUICK_PICKS: Array<{ kind: CcQuickPickKind; label: string }> = [
+  { kind: 'paid', label: 'Most paid now' },
+  { kind: 'called', label: 'Most if called' },
+  { kind: 'safe', label: 'Least likely called' },
+];
+
+/**
+ * One-click picks over the whole grid. Wide-spread cells never win (their numbers use the bid and are shaky), and below-basis
+ * cells only compete when the grid is showing them. Returns null when nothing qualifies. Pure.
+ */
+export function pickQuickCell(grid: CcGrid, kind: CcQuickPickKind, opts: { allowBelowFloor: boolean }): CcGridCell | null {
+  const pool = grid.cells.filter(c => !c.wide && (opts.allowBelowFloor || !c.belowFloor));
+  if (pool.length === 0) return null;
+  const total = (c: CcGridCell) => ccCellNumbers(grid, c).premiumTotal;
+  const best = (list: CcGridCell[], score: (c: CcGridCell) => number) =>
+    list.reduce<CcGridCell | null>((acc, c) => (acc === null || score(c) > score(acc) ? c : acc), null);
+  if (kind === 'paid') return best(pool, total);
+  if (kind === 'called') {
+    const withTotals = pool.filter(c => ccCellNumbers(grid, c).calledAwayTotal !== null);
+    return best(withTotals, c => ccCellNumbers(grid, c).calledAwayTotal as number);
+  }
+  const worthIt = pool.filter(c => total(c) >= CC_QUICK_PICK_MIN_PREMIUM);
+  return best(worthIt, c => -c.delta);
+}

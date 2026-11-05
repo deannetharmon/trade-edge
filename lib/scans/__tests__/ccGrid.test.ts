@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildCcGrid } from '../covered-call-finder';
 import { computeCoveredCallCapacity } from '../covered-call-capacity';
-import { selectCcGridWindow, cellInGoal, ccGridSummary, ccCellNumbers, ccStockMovePct, ccChanceCalledPct, pickDefaultAnchor, pickCellForSellPrice } from '../ccGridView';
+import { selectCcGridWindow, cellInGoal, ccGridSummary, ccCellNumbers, ccStockMovePct, ccChanceCalledPct, pickDefaultAnchor, pickCellForSellPrice, pickQuickCell } from '../ccGridView';
 import type { CcRulesType } from '../constants';
 import type { WheelChainLeg } from '@/lib/wheel/chainSearch';
 
@@ -178,5 +178,40 @@ describe('pickCellForSellPrice', () => {
   });
   it('rejects a bad price', () => {
     expect(pickCellForSellPrice(g, Number.NaN, { expiration: 'E', allowBelowFloor: false }).cell).toBeNull();
+  });
+});
+
+import { ccAdvisorFacts } from '../advisorCards';
+describe('ccAdvisorFacts', () => {
+  it('says a strike above the basis is above it, with the gain, and notes the stock is under the basis', () => {
+    const f = ccAdvisorFacts({ strike: 85, underlyingPrice: 61.48, costBasis: 82 });
+    expect(f[0]).toContain('ABOVE the current stock price');
+    expect(f[1]).toContain('3.7% ABOVE the cost basis');
+    expect(f[1]).toContain('gain of $3.00');
+    expect(f[2]).toContain('BELOW the cost basis');
+  });
+  it('says a strike under the basis is a loss', () => {
+    expect(ccAdvisorFacts({ strike: 80, underlyingPrice: 90, costBasis: 82 }).join(' ')).toContain('loss of $2.00');
+  });
+  it('says an in-the-money strike is in the money and skips unknowns', () => {
+    expect(ccAdvisorFacts({ strike: 60, underlyingPrice: 61, costBasis: null })).toEqual([expect.stringContaining('in the money')]);
+  });
+});
+
+describe('pickQuickCell', () => {
+  const mk = (strike: number, delta: number, premiumPerShare: number, over: Record<string, unknown> = {}) => ({ expiration: 'E', dte: 10, strike, delta, bid: premiumPerShare, ask: premiumPerShare, premiumPerShare, openInterest: 500, occSymbol: 'C' + strike, belowFloor: false, wide: false, thinOi: false, calledAwayTotal: 0, calledAwayPct: 0, premiumTotal: 0, notCalledBasis: 80, ...over });
+  const g = { basis: 80, floor: 80, stockPrice: 70, contracts: 1, expirations: [{ expiration: 'E', dte: 10 }], left: { inTheMoney: 0, unusableQuote: 0, earnings: 0, farOtm: 0, truncated: 0 },
+    cells: [mk(82, 0.30, 1.0), mk(85, 0.10, 0.40), mk(90, 0.03, 0.05), mk(95, 0.02, 3.0, { wide: true, bid: 0.1 })] };
+  it('most paid now ignores wide cells', () => {
+    expect(pickQuickCell(g, 'paid', { allowBelowFloor: false })?.strike).toBe(82);
+  });
+  it('most if called is the highest total against the basis', () => {
+    expect(pickQuickCell(g, 'called', { allowBelowFloor: false })?.strike).toBe(90);
+  });
+  it('least likely called skips calls that pay almost nothing', () => {
+    expect(pickQuickCell(g, 'safe', { allowBelowFloor: false })?.strike).toBe(85);
+  });
+  it('returns null when nothing qualifies', () => {
+    expect(pickQuickCell({ ...g, cells: [mk(95, 0.02, 3.0, { wide: true })] }, 'paid', { allowBelowFloor: false })).toBeNull();
   });
 });
