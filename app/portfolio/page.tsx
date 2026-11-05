@@ -264,7 +264,7 @@ import { PMCC_REVIEW_HANDOFF_STORAGE_KEY, type PmccReviewHandoff } from '@/lib/s
 // with assertLiveContextReady -- defense in depth, not reliance on the
 // render-level gate alone (§3.3).
 import { usePortfolioMode } from '@/components/portfolio-mode/PortfolioModeProvider';
-import { ExitWalkLauncher, ExitWalkProvider } from '@/components/portfolio/ExitWalkPanel';
+import { ExitWalkHost, ExitWalkLauncher, ExitWalkProvider } from '@/components/portfolio/ExitWalkPanel';
 import { PortfolioModeGateNotice } from '@/components/portfolio-mode/PortfolioModeGateNotice';
 import { assertLiveContextReady } from '@/lib/portfolio-mode/guardrails';
 import { classifyTrendFromCloses } from '@/lib/portfolio/trendClassification';
@@ -3112,12 +3112,15 @@ function BatchConfirmModal({
   items: initialItems,
   onClose,
   onSuccess,
+  onWalkInstead,
   dryRun,
   th,
 }: {
   items: { pos: Position; action: ActionType; initialRollMode?: 'close' | 'roll' }[];
   onClose: () => void;
   onSuccess: () => void;
+  /** EXIT-WALK-DIALOG-0001: hand a single close to Walk the price (the page closes this dialog and opens the walk). */
+  onWalkInstead?: (pos: Position) => void;
   dryRun: boolean;
   th: typeof THEMES[Theme];
 }) {
@@ -4668,6 +4671,19 @@ function BatchConfirmModal({
                         `SUBMIT ${activeItems.length} ORDER${activeItems.length !== 1 ? 'S' : ''} — ${portfolioMode.mode ?? 'MODE UNRESOLVED'}`}
                   </button>
                 )}
+                {/* EXIT-WALK-DIALOG-0001: the same Walk the price as the cards, offered here for one close (never a roll). */}
+                {onWalkInstead && activeItems.length === 1 && (() => {
+                  const only = activeItems[0];
+                  const isClose = only.action === 'TAKE_PROFIT' || only.action === 'CUT_LOSSES'
+                    || (only.action === 'CLOSE_ROLL' && (rollMode[only.pos.key] ?? 'close') === 'close');
+                  if (!isClose || only.pos.structureAmbiguous || !only.pos.identity || only.pos.entryPriceEffect === 'Unknown') return null;
+                  return (
+                    <button type="button" onClick={() => onWalkInstead(only.pos)}
+                      className="px-4 py-3 border border-teal-700 text-teal-300 rounded-xl text-xs font-bold hover:bg-teal-500/10 transition-colors whitespace-nowrap">
+                      Walk the price instead
+                    </button>
+                  );
+                })()}
                 <button onClick={onClose} className={`px-4 py-3 border ${th.border} ${th.textFaint} rounded-xl text-xs font-medium hover:border-white/30 transition-colors`}>
                   Cancel
                 </button>
@@ -10732,6 +10748,7 @@ export default function PortfolioPage() {
   const [showClearSnapshotConfirm, setShowClearSnapshotConfirm] = useState(false);
   const [clearingSnapshots, setClearingSnapshots] = useState(false);
   const [batchItems, setBatchItems] = useState<{ pos: Position; action: ActionType; initialRollMode?: 'close' | 'roll' }[] | null>(null);
+  const [walkPosKey, setWalkPosKey] = useState<string | null>(null);
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [showPerformance, setShowPerformance] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
@@ -11590,9 +11607,17 @@ export default function PortfolioPage() {
           dryRun={dryRunMode}
           onClose={() => setBatchItems(null)}
           onSuccess={fetchPositions}
+          onWalkInstead={pos => { setBatchItems(null); setWalkPosKey(pos.key); }}
           th={th}
         />
       )}
+      {/* EXIT-WALK-DIALOG-0001: the walk opened from the Close / Take Profit dialog; resolved from live positions so a refresh never leaves it stale. */}
+      <ExitWalkProvider pendingOrders={pendingOrders} dryRun={dryRunMode} onDone={fetchPositions}>
+        {(() => {
+          const walkPos = walkPosKey ? positions.find(p => p.key === walkPosKey) : undefined;
+          return walkPos ? <ExitWalkHost pos={walkPos} onClose={() => setWalkPosKey(null)} /> : null;
+        })()}
+      </ExitWalkProvider>
 
       {showAuditLog && <AuditLogPanel onClose={() => setShowAuditLog(false)} th={th} />}
       {showPerformance && <PerformancePanel onClose={() => setShowPerformance(false)} th={th} />}

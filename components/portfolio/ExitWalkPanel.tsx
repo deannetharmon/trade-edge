@@ -75,6 +75,13 @@ export function ExitWalkLauncher({ pos, className }: { pos: Position; className?
   );
 }
 
+/** EXIT-WALK-DIALOG-0001: the walk dialog opened by the page (from the Close / Take Profit dialog) instead of a card button. */
+export function ExitWalkHost({ pos, onClose }: { pos: Position; onClose: () => void }) {
+  const ctx = useContext(ExitWalkContext);
+  if (!ctx) return null;
+  return <ExitWalkDialog pos={pos} ctx={ctx} onClose={onClose} />;
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Dialog
 // ---------------------------------------------------------------------------------------------------------------------
