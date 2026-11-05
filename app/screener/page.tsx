@@ -6501,7 +6501,6 @@ const strategyScores = useMemo(() => {
             <ScreenerChartLink symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
               sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
           </div>
-          <StockResearchButton research={research} th={th} />
         </div>
         {/* Col 2: Badges — fixed width */}
         <div className="w-52 shrink-0 flex items-center gap-1 flex-wrap">
@@ -6736,6 +6735,7 @@ const strategyScores = useMemo(() => {
         </div>
         {/* Col 4: Expand + re-screen — right aligned */}
         <div className="flex items-center gap-2 ml-auto shrink-0">
+          <StockResearchButton research={research} th={th} />
           <div className={`${th.textFaint} text-xs`}>{expanded ? '▲' : '▼'}</div>
         </div>
       </div>
