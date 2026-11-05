@@ -15,7 +15,7 @@ import { nextEarningsLine } from '@/features/portfolio/positions-workspace/model
 import { buildPnlSecondLine, buildPositionPnlBases } from '@/features/portfolio/positions-workspace/model/pnlBases';
 import { positionDayChangeDetail } from '@/features/portfolio/positions-workspace/model/portfolioSummary';
 
-export interface PositionFacts { lines: string[]; figures: number[] }
+export interface PositionFacts { lines: string[]; figures: number[]; /** PORTFOLIO-AI-0003: strike x 100 x contracts for a single short put, else null. */ assignmentCash: number | null }
 
 const NA = 'not available';
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -116,5 +116,8 @@ export function buildPositionFacts(pos: Position, nowMs: number): PositionFacts 
   add('Profit-target GTC', pos.hasGtc ? `working${finite(pos.gtcOrderPrice) ? ` at ${dollars(pos.gtcOrderPrice)}` : ''}` : 'none');
   add('Stop', `${pos.stopLossClassification ?? NA}${finite(pos.stopLossPrice) ? ` at ${dollars(pos.stopLossPrice)}` : ''}`);
 
-  return { lines, figures: figures.filter(finite) };
+  const assignmentCash = onlyLeg && onlyLeg.direction === 'Short' && onlyLeg.optionType === 'P' && finite(onlyLeg.strikePrice) && finite(onlyLeg.quantity)
+    ? onlyLeg.strikePrice * 100 * onlyLeg.quantity
+    : null;
+  return { lines, figures: figures.filter(finite), assignmentCash };
 }

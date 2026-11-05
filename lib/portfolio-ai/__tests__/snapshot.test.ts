@@ -107,3 +107,43 @@ describe('figure guard keeps line breaks (PORTFOLIO-AI-FORMAT-0002)', () => {
     expect(extractFigures('about $2 k')[0]?.value).toBe(2000);
   });
 });
+
+describe('portfolio checks (PORTFOLIO-AI-0003)', () => {
+  const puts = [
+    pos({ key: '1', symbol: 'TQQQ', strategy: 'CSP', assignmentCash: 7550 }),
+    pos({ key: '2', symbol: 'METU', strategy: 'CSP', assignmentCash: 2850 }),
+    pos({ key: '3', symbol: 'UBER', strategy: 'CALL' }),
+  ];
+
+  it('states funding as COVERED when cash less the 10% reserve exceeds assignment cash', () => {
+    const s = base(puts, { account: { cashBalance: 50000, netLiquidity: 100000 } });
+    expect(s.contextText).toContain('PORTFOLIO CHECKS (computed by TradeEdge');
+    expect(s.contextText).toContain('Funding: 2 short puts would need $10,400 cash if all were assigned | Cash $50,000 | Reserve (10% of net liquidity) $10,000 | Usable cash $40,000 | COVERED with $29,600 to spare');
+    expect(s.contextText).toContain('Assignment cash is 10% of net liquidity.');
+    expect(s.contextText).toContain('Distinct underlyings held: 3.');
+  });
+
+  it('states SHORT when usable cash does not cover assignment, and never goes negative', () => {
+    const s = base(puts, { account: { cashBalance: 5000, netLiquidity: 100000 } });
+    expect(s.contextText).toContain('Usable cash $0 | SHORT by $10,400');
+  });
+
+  it('fails closed when cash or net liquidity is missing', () => {
+    const s = base(puts, { account: { cashBalance: null, netLiquidity: 100000 } });
+    expect(s.contextText).toContain('so coverage cannot be stated');
+    expect(s.contextText).not.toContain('COVERED');
+    expect(s.notAvailable.join(' ')).toContain('Funding check');
+  });
+
+  it('the figure guard accepts the funding numbers and still hides invented ones', () => {
+    const s = base(puts, { account: { cashBalance: 50000, netLiquidity: 100000 } });
+    const out = redactUnsupportedFigures('Needs $10,400 with $29,600 spare, or $7,777.', s.allowedFigures);
+    expect(out.text).toBe('Needs $10,400 with $29,600 spare, or [figure hidden].');
+    expect(out.removedCount).toBe(1);
+  });
+
+  it('adds no funding line when no short put needs assignment cash', () => {
+    const s = base([pos({ key: '1', symbol: 'UBER', strategy: 'CALL' })], { account: { cashBalance: 50000, netLiquidity: 100000 } });
+    expect(s.contextText).not.toContain('Funding:');
+  });
+});

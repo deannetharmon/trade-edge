@@ -10,6 +10,7 @@ import { isPairedPmccLong } from '@/lib/portfolio-data/pmccPairDetection';
 import { buildPositionFacts } from './positionFacts';
 import {
   buildPortfolioAiSnapshot,
+  type PortfolioAiAccountInput,
   type PortfolioAiPositionInput,
   type PortfolioAiSnapshot,
 } from './snapshot';
@@ -33,6 +34,7 @@ export function toPortfolioAiPositions(positions: Position[], nowMs: number = Da
     pmccPaired: isPairedPmccLong(pos, positions),
     factLines: facts.lines,
     factFigures: facts.figures,
+    assignmentCash: facts.assignmentCash,
     };
   });
 }
@@ -41,12 +43,14 @@ export function buildPortfolioAiSnapshotFromPage(args: {
   positions: Position[];
   thetaPerDay: number | null;
   leverageGroups: LeveragedPositionExposureGroup[];
+  account?: PortfolioAiAccountInput;
   now?: Date;
 }): PortfolioAiSnapshot {
   return buildPortfolioAiSnapshot({
     generatedAt: (args.now ?? new Date()).toISOString(),
     positions: toPortfolioAiPositions(args.positions, (args.now ?? new Date()).getTime()),
     thetaPerDay: args.thetaPerDay,
+    account: args.account,
     leverageGroups: args.leverageGroups.map(group => ({
       economicUnderlying: group.economicUnderlying,
       memberSymbols: Array.from(new Set(group.members.map(m => m.symbol))),

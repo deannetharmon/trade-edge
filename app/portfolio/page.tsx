@@ -1769,17 +1769,17 @@ Keep responses focused and concise — 2-4 sentences. Answer first, then the one
 const PORTFOLIO_AI_SYSTEM_PROMPT = `${TRADING_CHAT_PROMPT}
 
 PORTFOLIO PANEL OVERRIDE (this section takes precedence over the prose and length rules above, for this panel only):
-- PORTFOLIO-AI-FORMAT-0001. When the trader asks you to analyze the portfolio or asks what needs attention, answer in EXACTLY this plain-text layout and nothing else. No bold, no asterisks, no tables, no markdown.
-SUMMARY: one line, for example "3 need action now, 2 need a decision before earnings, 4 can be left alone."
-Then one block per position that needs a decision, most urgent first, each block exactly five lines:
-1. SYMBOL short 75.5 put | 1 DTE | one or two words on the situation (for example "deep ITM")
-Do: the single action you recommend, in a few words (for example "Take assignment" or "Close it" or "Hold")
-Cash: the figures that matter, separated by " | " (for example "Cash needed $7,550 | Close now -$1,165")
-Why: one short sentence using only snapshot figures.
-Flip if: one short sentence naming what would change the call.
-After the blocks, one line "LEFT ALONE: SYMBOL, SYMBOL" for positions that need no action.
-Rules for the blocks: pick ONE action, never list alternatives and never tell the trader to decide or to "decide whether you want" something; the trader wants a call. Every number must be printed in the snapshot; never add, subtract or derive a number, and if a figure is not in the snapshot omit it or write "n/a". Keep each line under 120 characters.
-- PORTFOLIO-AI-FORMAT-0002. Every header line starts with its number ("1.", "2.", ...). The loss or gain from closing now is the value on the position's "P&L:" line; quote that value exactly and do not compute your own. "Flip if" must be a realistic condition: never say the stock rising above a break-even that is far from the current price. Good examples: "You do not want 100 shares at this basis", "Stock recovers above the strike", "Earnings gap against you". Your Do must agree with the app's suggested action; when the put still has meaningful extrinsic value and a reasonable probability of profit, Hold is a valid call. Never leave a block without a Do.
+- PORTFOLIO-AI-0003. When the trader asks you to analyze the portfolio or asks what needs attention, answer in EXACTLY this plain-text layout and nothing else. No bold, no asterisks, no tables, no markdown. The trader already sees every position's detail on the cards, so do not restate it.
+SUMMARY: one line: how many positions need a call now and whether funding is covered.
+FUNDING: copy the "Funding:" line from PORTFOLIO CHECKS in the snapshot, then one short clause on what it means (covered, or which positions to close or roll first to close the gap).
+RISK: one line on concentration: leveraged clusters and the share of net liquidity tied up in assignment cash, quoting the snapshot. Omit the line if the snapshot has nothing.
+CALENDAR: one line naming earnings dates that fall before expiration for held positions, quoting the position lines. Omit the line if there are none.
+ACT NOW:
+1. SYMBOL | short 75.5 put | 1 DTE: the action in a few words. One short reason using only snapshot figures.
+(One numbered line per position that needs a call, most urgent first, never more than one line each.)
+LEFT ALONE: SYMBOL, SYMBOL
+Rules: pick ONE action per position; never list alternatives; never ask the trader to decide. Every number must be printed in the snapshot; never add, subtract or derive one; write "n/a" if it is missing. Keep each line under 140 characters.
+- PORTFOLIO-AI-0003 decision rules, in this order. (1) A short put that is in the money defaults to holding toward assignment; assignment is the plan, not a failure. (2) Close or roll only for one of three reasons: the Intent shows the trader does not want assignment, the funding check says SHORT, or earnings fall before expiration on a position that is far in the money. (3) If funding is SHORT, name the positions to close or roll first, lowest probability of profit first, never one whose Intent is planned assignment, and quote the cash each would free from its "Cash needed if assigned" line. (4) For a long option worth under half of what was paid, quote the close-now value from its "Value:" line and say the Salvage action on its card recovers it; do not suggest rolling a long option that is far out of the money. (5) Your action must agree with the app's suggested action; if you disagree, add a separate line starting "AI NOTE:".
 - Your recommendation must agree with the app's suggested action for that position. If you disagree, say so on a separate line starting "AI NOTE:".
 - If a position's Intent shows the trader plans to take assignment, treat that as decided. Do not ask whether they want assignment; say what to do next using only snapshot figures.
 - Taking a realized loss is the last resort. Consider assignment, a roll, or holding before recommending a close at a loss. The trader's goal on a position is at least 50% profit when feasible.
@@ -5356,7 +5356,7 @@ function ChatThread({ initialContext, systemPrompt, placeholder, th, suggestionC
                       ? <div className="space-y-1.5">
                           {txt.split('\n').filter(line => line.trim()).map((line, lineIndex) => /^\s*AI NOTE:/i.test(line)
                             ? <div key={lineIndex} className="rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2 py-1.5"><span className="text-[9px] font-bold tracking-widest text-indigo-300 mr-1.5">AI NOTE</span>{line.replace(/^\s*AI NOTE:\s*/i, '')}</div>
-                            : (() => { const clean = line.replace(/\*\*/g, ''); const head = /^\s*(\d+\.\s|SUMMARY:|LEFT ALONE:)/.test(clean) || (/\|/.test(clean) && /\bDTE\b/.test(clean)); return <p key={lineIndex} className={head ? 'font-semibold pt-1.5 mt-1 border-t border-white/10 first:border-t-0 first:mt-0' : ''}>{clean}</p>; })())}
+                            : (() => { const clean = line.replace(/\*\*/g, ''); const head = /^\s*(SUMMARY:|FUNDING:|RISK:|CALENDAR:|ACT NOW:|LEFT ALONE:)/.test(clean); return <p key={lineIndex} className={head ? 'font-semibold pt-1.5 mt-1 border-t border-white/10 first:border-t-0 first:mt-0' : ''}>{clean}</p>; })())}
                           {hiddenFigureCounts[i] > 0 && <p role="note" className="text-[10px] text-red-300 border border-red-500/40 rounded-lg px-2 py-1">FIGURE HIDDEN — {hiddenFigureCounts[i]} number{hiddenFigureCounts[i] === 1 ? '' : 's'} in this answer did not match your snapshot and {hiddenFigureCounts[i] === 1 ? 'was' : 'were'} removed.</p>}
                         </div>
                       : <span>{txt}</span>)}
@@ -5557,7 +5557,7 @@ function PortfolioAiPanel({ snapshot, onRefresh, onClose, th }: {
 
   const analyze = () => {
     setStarted(true);
-    setSeed({ id: Date.now(), text: 'Analyze my portfolio in the required card layout: SUMMARY line, then one five-line block per position that needs a decision, most urgent first, then LEFT ALONE. One action per position. Treat any position whose Intent is planned assignment as decided. Use only the figures in the snapshot.' });
+    setSeed({ id: Date.now(), text: 'Analyze my portfolio in the required layout: SUMMARY, FUNDING, RISK, CALENDAR, ACT NOW with one line per position, then LEFT ALONE. One action per position. Treat any position whose Intent is planned assignment as decided. Use only the figures in the snapshot.' });
   };
 
   const chips = [
@@ -10736,6 +10736,7 @@ export default function PortfolioPage() {
       positions,
       thetaPerDay: calculatePortfolioGreeks(positions).thetaPerDay,
       leverageGroups: leveragedPositionExposureGroups,
+      account: { cashBalance: balances?.cashBalance ?? null, netLiquidity: balances?.netLiquidity ?? null },
     }));
   };
   const handleOpenPortfolioAi = () => {

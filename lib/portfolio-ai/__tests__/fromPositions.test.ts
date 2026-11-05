@@ -99,3 +99,15 @@ describe('cash needed at assignment and leg figures (PORTFOLIO-AI-FIGURES-0001)'
     expect(redactUnsupportedFigures('That is $9,999 of cash.', f.factFigures!).removedCount).toBe(1);
   });
 });
+
+describe('assignment cash per position (PORTFOLIO-AI-0003)', () => {
+  const leg = (over: Record<string, unknown>) => ({ symbol: 'SOXL', optionType: 'P', strikePrice: 90, direction: 'Short', quantity: 2, avgOpenPrice: 5, currentPrice: 26, currentDelta: -0.8, ...over });
+  it('is strike x 100 x contracts for a single short put and null for anything else', () => {
+    const single = make({ symbol: 'SOXL', strategy: 'CSP', quantity: 2, legs: [leg({})] });
+    const spread = make({ legs: [leg({}), leg({ strikePrice: 80, direction: 'Long' })] });
+    const longPut = make({ legs: [leg({ direction: 'Long' })] });
+    const call = make({ legs: [leg({ optionType: 'C' })] });
+    expect(toPortfolioAiPositions([single])[0].assignmentCash).toBe(18000);
+    for (const p of [spread, longPut, call]) expect(toPortfolioAiPositions([p])[0].assignmentCash).toBeNull();
+  });
+});

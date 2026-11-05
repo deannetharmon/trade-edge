@@ -29,6 +29,8 @@ export interface PortfolioAiPositionInput {
   /** PORTFOLIO-AI-0002: the full workspace record as "Label: text" lines, plus its $/% figures. */
   factLines?: string[];
   factFigures?: number[];
+  /** PORTFOLIO-AI-0003: cash needed if this single short put is assigned (strike x 100 x contracts), else null. */
+  assignmentCash?: number | null;
 }
 
 export interface PortfolioAiLeverageGroupInput {
@@ -38,11 +40,21 @@ export interface PortfolioAiLeverageGroupInput {
   capitalRiskComplete: boolean;
 }
 
+/** PORTFOLIO-AI-0003: Dean's standing rule is a 10% cash reserve (of net liquidity) that is never counted as usable. */
+export const PORTFOLIO_RESERVE_PCT = 10;
+
+export interface PortfolioAiAccountInput {
+  cashBalance: number | null;
+  netLiquidity: number | null;
+  reservePct?: number;
+}
+
 export interface PortfolioAiSnapshotInput {
   generatedAt: string;
   positions: PortfolioAiPositionInput[];
   thetaPerDay: number | null;
   leverageGroups: PortfolioAiLeverageGroupInput[];
+  account?: PortfolioAiAccountInput;
 }
 
 export type PortfolioAiTone = 'neutral' | 'info' | 'good' | 'warn' | 'bad';
@@ -216,12 +228,48 @@ export function buildPortfolioAiSnapshot(input: PortfolioAiSnapshotInput): Portf
     notAvailable.push('Combined capital loss for a leveraged-ETF cluster (data incomplete)');
   }
 
+  // PORTFOLIO-AI-0003: the funding check is computed here so the model only quotes it. Cash is the account's
+  // real cash balance (never buying power); the reserve comes off net liquidity; only single short puts count.
+  const shortPuts = positions.filter(p => finite(p.assignmentCash) && (p.assignmentCash as number) > 0);
+  const assignmentTotal = shortPuts.reduce((sum, p) => sum + (p.assignmentCash as number), 0);
+  const reservePct = finite(input.account?.reservePct) ? (input.account?.reservePct as number) : PORTFOLIO_RESERVE_PCT;
+  const cash = input.account?.cashBalance;
+  const netLiq = input.account?.netLiquidity;
+  const checkLines: string[] = [];
+  if (positions.length > 0) {
+    if (shortPuts.length > 0) {
+      allowed.push(shortPuts.length, assignmentTotal, Math.round(assignmentTotal), reservePct);
+      const need = `${shortPuts.length} short put${shortPuts.length === 1 ? '' : 's'} would need ${money(assignmentTotal)} cash if all were assigned`;
+      if (finite(cash) && finite(netLiq) && netLiq > 0) {
+        const reserve = (netLiq * reservePct) / 100;
+        const usable = Math.max(0, cash - reserve);
+        const diff = usable - assignmentTotal;
+        const share = (assignmentTotal / netLiq) * 100;
+        allowed.push(cash, Math.round(cash), reserve, Math.round(reserve), usable, Math.round(usable), Math.abs(diff), Math.round(Math.abs(diff)), share, Math.round(share));
+        const verdict = diff >= 0 ? `COVERED with ${money(diff)} to spare` : `SHORT by ${money(-diff)}`;
+        checkLines.push(`Funding: ${need} | Cash ${money(cash)} | Reserve (${reservePct}% of net liquidity) ${money(reserve)} | Usable cash ${money(usable)} | ${verdict}`);
+        checkLines.push(`Assignment cash is ${pct(share)} of net liquidity.`);
+      } else {
+        checkLines.push(`Funding: ${need} | Cash or net liquidity ${NOT_AVAILABLE}, so coverage cannot be stated`);
+        notAvailable.push('Funding check (cash balance or net liquidity missing)');
+      }
+    }
+    const distinct = new Set(positions.map(p => p.symbol)).size;
+    allowed.push(distinct);
+    checkLines.push(`Distinct underlyings held: ${distinct}.`);
+  }
+  const fundingText = checkLines.length > 0
+    ? ['PORTFOLIO CHECKS (computed by TradeEdge; quote these lines, never recompute them):', ...checkLines].join('\n')
+    : '';
+
   const generatedLabel = new Date(input.generatedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   const contextText = [
     'The screenshot rules at the end of this snapshot take precedence over any instruction to keep answers scoped to it.',
     `PORTFOLIO SNAPSHOT (built by TradeEdge at ${generatedLabel}; read-only data for the selected account)`,
     `Positions: ${positions.length} | Net theta/day: ${finite(input.thetaPerDay) ? signedMoney(input.thetaPerDay) : NOT_AVAILABLE} | At risk (reliable max risk only): ${reliable.length > 0 ? money(atRiskTotal) : NOT_AVAILABLE}${excluded > 0 && reliable.length > 0 ? ` (${excluded} excluded)` : ''}`,
     `Largest symbol share of at-risk: ${topShare != null && topSymbol != null ? `${topSymbol} ${pct(topShare)}` : NOT_AVAILABLE} | Close-now count: ${closeNow.length}`,
+    '',
+    fundingText,
     '',
     'POSITIONS:',
     lines.length > 0 ? lines.join('\n') : 'No open positions.',
