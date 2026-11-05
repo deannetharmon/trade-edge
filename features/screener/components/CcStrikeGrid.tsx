@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { CcGrid, CcGridCell } from '@/lib/scans/ccGridTypes';
-import { CC_GOALS, DEFAULT_CC_GOAL, ccCellNumbers, ccChanceCalledPct, ccGridSummary, ccStockMovePct, cellInGoal, selectCcGridWindow, type CcGoal } from '@/lib/scans/ccGridView';
+import { CC_GOALS, DEFAULT_CC_GOAL, ccCellNumbers, ccChanceCalledPct, ccGridSummary, ccStockMovePct, cellInGoal, pickCellForSellPrice, selectCcGridWindow, type CcGoal } from '@/lib/scans/ccGridView';
 
 interface Theme { border: string; text: string; textMuted: string; textFaint: string }
 
@@ -28,6 +28,8 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange }: {
   const [selected, setSelected] = useState<{ expiration: string; strike: number } | null>(initial ?? null);
   const [extraAbove, setExtraAbove] = useState(0);
   const [extraBelow, setExtraBelow] = useState(0);
+  const [sellAt, setSellAt] = useState('');
+  const [sellNote, setSellNote] = useState<string | null>(null);
 
   const view = useMemo(
     () => selectCcGridWindow(grid, goal, { showBelowFloor, allExpirations, selected, extraAbove, extraBelow }),
@@ -64,6 +66,26 @@ export function CcStrikeGrid({ grid, th, symbol, initial, onAnchorChange }: {
           </label>
         )}
       </div>
+
+      {anchor && (
+        <form
+          data-testid="cc-sell-price"
+          className="mb-1.5 flex flex-wrap items-center gap-2 text-[11px]"
+          onSubmit={e => {
+            e.preventDefault();
+            const pick = pickCellForSellPrice(grid, Number(sellAt.replace(/[$,\s]/g, '')), { expiration: anchor.expiration, allowBelowFloor: showBelowFloor || anchor.belowFloor });
+            setSellNote(pick.note);
+            if (pick.cell) setSelected({ expiration: pick.cell.expiration, strike: pick.cell.strike });
+          }}
+        >
+          <label className={th.textFaint}>I would sell my shares at $
+            <input aria-label="Price I would sell my shares at" inputMode="decimal" value={sellAt} onChange={e => setSellAt(e.target.value)}
+              className="ml-1 w-20 rounded border border-white/20 bg-transparent px-1.5 py-0.5 font-mono text-white" />
+          </label>
+          <button type="submit" className="rounded border border-teal-500/50 px-2 py-0.5 text-teal-300">Find the call</button>
+          {sellNote && <span role="status" className="text-amber-300">{sellNote}</span>}
+        </form>
+      )}
 
       {anchor && (
         <p data-testid="cc-grid-summary" className={`mb-1.5 rounded border ${th.border} px-2 py-1.5 text-[11px] leading-snug ${th.text}`}>

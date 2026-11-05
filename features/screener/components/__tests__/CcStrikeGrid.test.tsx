@@ -33,4 +33,14 @@ describe('CcStrikeGrid', () => {
     expect(onAnchor).toHaveBeenLastCalledWith(expect.objectContaining({ strike: 85 }));
     expect(screen.getByTestId('cc-grid-summary')).toHaveTextContent('$85 strike');
   });
+  it('"I would sell at $X" selects the lowest strike at or above X and says so when it is not exact', async () => {
+    const onAnchor = vi.fn();
+    const parent = vi.fn();
+    render(<div onClick={parent}><CcStrikeGrid grid={grid} th={th} initial={{ expiration: '2030-01-10', strike: 82 }} onAnchorChange={onAnchor} /></div>);
+    await userEvent.type(screen.getByLabelText('Price I would sell my shares at'), '84');
+    await userEvent.click(screen.getByText('Find the call'));
+    expect(onAnchor).toHaveBeenLastCalledWith(expect.objectContaining({ strike: 85 }));
+    expect(screen.getByRole('status')).toHaveTextContent('closest at or above it is $85');
+    expect(parent).not.toHaveBeenCalled();
+  });
 });

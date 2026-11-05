@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildCcGrid } from '../covered-call-finder';
 import { computeCoveredCallCapacity } from '../covered-call-capacity';
-import { selectCcGridWindow, cellInGoal, ccGridSummary, ccCellNumbers, ccStockMovePct, ccChanceCalledPct, pickDefaultAnchor } from '../ccGridView';
+import { selectCcGridWindow, cellInGoal, ccGridSummary, ccCellNumbers, ccStockMovePct, ccChanceCalledPct, pickDefaultAnchor, pickCellForSellPrice } from '../ccGridView';
 import type { CcRulesType } from '../constants';
 import type { WheelChainLeg } from '@/lib/wheel/chainSearch';
 
@@ -155,5 +155,28 @@ describe('pickDefaultAnchor does not chase the biggest total if called', () => {
   it('a tight call beats a wide one in range', () => {
     const cells = [mk(90, 0.25, true), mk(92, 0.22, false)];
     expect(pickDefaultAnchor(cells, 'balanced')?.strike).toBe(92);
+  });
+});
+
+describe('pickCellForSellPrice', () => {
+  const mk = (strike: number, belowFloor = false) => ({ expiration: 'E', dte: 10, strike, delta: 0.2, bid: 1, ask: 1.1, premiumPerShare: 1, openInterest: 500, occSymbol: 'C' + strike, belowFloor, wide: false, thinOi: false, calledAwayTotal: 0, calledAwayPct: 0, premiumTotal: 100, notCalledBasis: 80 });
+  const g = { basis: 80, floor: 80, stockPrice: 70, contracts: 1, expirations: [{ expiration: 'E', dte: 10 }], cells: [mk(75, true), mk(82), mk(85), mk(90)], left: { inTheMoney: 0, unusableQuote: 0, earnings: 0, farOtm: 0, truncated: 0 } };
+  it('takes the exact strike when there is one', () => {
+    expect(pickCellForSellPrice(g, 85, { expiration: 'E', allowBelowFloor: false })).toMatchObject({ cell: { strike: 85 }, note: null });
+  });
+  it('takes the lowest strike at or above the price', () => {
+    expect(pickCellForSellPrice(g, 83, { expiration: 'E', allowBelowFloor: false }).cell?.strike).toBe(85);
+  });
+  it('never offers a below-basis strike unless allowed', () => {
+    expect(pickCellForSellPrice(g, 70, { expiration: 'E', allowBelowFloor: false }).cell?.strike).toBe(82);
+    expect(pickCellForSellPrice(g, 70, { expiration: 'E', allowBelowFloor: true }).cell?.strike).toBe(75);
+  });
+  it('falls back to the highest strike and says so', () => {
+    const r = pickCellForSellPrice(g, 100, { expiration: 'E', allowBelowFloor: false });
+    expect(r.cell?.strike).toBe(90);
+    expect(r.note).toContain('highest is $90');
+  });
+  it('rejects a bad price', () => {
+    expect(pickCellForSellPrice(g, Number.NaN, { expiration: 'E', allowBelowFloor: false }).cell).toBeNull();
   });
 });

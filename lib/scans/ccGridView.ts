@@ -147,3 +147,34 @@ export function ccGridSummary(grid: CcGrid, cell: CcGridCell, symbol?: string): 
     : ` If the shares are called away you lose ${usd(total)} in total against your cost: this strike is below it.`;
   return head + tail;
 }
+
+export interface CcSellPricePick {
+  cell: CcGridCell | null;
+  /** Plain-language note when the pick is not exactly what was typed. */
+  note: string | null;
+}
+
+/**
+ * "I would be happy to sell my shares at $X": the call to sell. Within one expiration (the one the trader is looking at)
+ * it takes the lowest strike at or above X, which keeps the most premium for a price the trader accepts. A strike below
+ * the cost basis is never offered unless the grid is allowed to show it. Pure.
+ */
+export function pickCellForSellPrice(
+  grid: CcGrid,
+  sellPrice: number,
+  opts: { expiration: string; allowBelowFloor: boolean },
+): CcSellPricePick {
+  if (!Number.isFinite(sellPrice) || sellPrice <= 0) return { cell: null, note: 'Enter a price above 0.' };
+  const pool = grid.cells
+    .filter(c => c.expiration === opts.expiration && (opts.allowBelowFloor || !c.belowFloor))
+    .sort((a, b) => a.strike - b.strike);
+  if (pool.length === 0) return { cell: null, note: 'No strikes are available for this expiration.' };
+  const atOrAbove = pool.find(c => c.strike >= sellPrice);
+  if (atOrAbove) {
+    return atOrAbove.strike === sellPrice
+      ? { cell: atOrAbove, note: null }
+      : { cell: atOrAbove, note: `No $${sellPrice} strike. The closest at or above it is $${atOrAbove.strike}.` };
+  }
+  const highest = pool[pool.length - 1];
+  return { cell: highest, note: `No strike reaches $${sellPrice} in this expiration. The highest is $${highest.strike}.` };
+}
