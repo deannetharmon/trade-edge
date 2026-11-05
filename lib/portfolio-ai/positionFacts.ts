@@ -42,6 +42,16 @@ export function buildPositionFacts(pos: Position, nowMs: number): PositionFacts 
   add('Contracts', finite(pos.quantity) ? `${pos.quantity}` : NA);
   add('Legs', pos.legs.length === 0 ? NA : pos.legs.map(l =>
     `${l.direction} ${l.strikePrice}${l.optionType} x${l.quantity} (avg open ${finite(l.avgOpenPrice) ? l.avgOpenPrice.toFixed(2) : NA}, now ${finite(l.currentPrice) ? l.currentPrice.toFixed(2) : NA}, delta ${num(l.currentDelta)})`).join('; '));
+  // PORTFOLIO-AI-FIGURES-0001: leg prices are real snapshot figures; the figure guard must accept them.
+  for (const l of pos.legs) for (const v of [l.strikePrice, l.avgOpenPrice, l.currentPrice]) {
+    if (finite(v)) figures.push(v, Math.round(v));
+  }
+  // Cash needed at assignment for a single short put. Max risk is lower because the premium already
+  // received offsets it, so the two must never be mixed up.
+  const onlyLeg = pos.legs.length === 1 ? pos.legs[0] : null;
+  if (onlyLeg && onlyLeg.direction === 'Short' && onlyLeg.optionType === 'P' && finite(onlyLeg.strikePrice) && finite(onlyLeg.quantity)) {
+    add('Cash needed if assigned', `${dollars(onlyLeg.strikePrice * 100 * onlyLeg.quantity, 0)} (strike x 100 x ${onlyLeg.quantity} contract${onlyLeg.quantity === 1 ? '' : 's'}); max risk is lower because the premium already received offsets it`);
+  }
   add('Expiration', `${pos.expDate ?? NA}; DTE ${pos.dteAtEntry ?? pos.snapshotHistory?.[0]?.dte ?? NA} at first tracking, ${pos.dte} now`);
   add('Opened', pos.entryDate ?? NA);
   add('Intent', pos.intent ?? NA);

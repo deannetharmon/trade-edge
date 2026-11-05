@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Position } from '@/lib/portfolio-data/types';
 import { toPortfolioAiPositions } from '../fromPositions';
+import { redactUnsupportedFigures } from '../snapshot';
 
 const make = (over: Record<string, unknown>) => ({
   key: 'a', symbol: 'AAA', strategy: 'Bull Put Spread', dte: 25, legs: [],
@@ -64,5 +65,37 @@ describe('full position record (PORTFOLIO-AI-0002)', () => {
     expect(t).toContain('Intrinsic / extrinsic: not available');
     expect(t).not.toContain('NaN');
     expect(t).not.toContain('undefined');
+  });
+});
+
+
+describe('cash needed at assignment and leg figures (PORTFOLIO-AI-FIGURES-0001)', () => {
+  const leg = (over: Record<string, unknown>) => ({ symbol: 'METU', optionType: 'P', strikePrice: 28.5, direction: 'Short', quantity: 1, avgOpenPrice: 1.57, currentPrice: 4.1, currentDelta: -0.7, ...over });
+  const metu = make({ symbol: 'METU', strategy: 'CSP', quantity: 1, dte: 1, legs: [leg({})], stockPrice: 24.2, entryPriceEffect: 'Credit', entryCredit: 157, creditReceived: 157, maxRisk: 2693 });
+  const facts = (p: Position) => toPortfolioAiPositions([p], 0)[0];
+
+  it('states the cash needed for a single short put as strike x 100 x contracts, apart from max risk', () => {
+    const t = facts(metu).factLines!.join('\n');
+    expect(t).toContain('Cash needed if assigned: $2,850 (strike x 100 x 1 contract)');
+    expect(facts(metu).maxRisk).toBe(2693);
+  });
+
+  it('scales with contracts', () => {
+    const p = make({ symbol: 'SOXL', strategy: 'CSP', quantity: 2, legs: [leg({ symbol: 'SOXL', strikePrice: 90, quantity: 2 })] });
+    expect(facts(p).factLines!.join('\n')).toContain('Cash needed if assigned: $18,000 (strike x 100 x 2 contracts)');
+  });
+
+  it('does not add the line for spreads, long options or multi-leg positions', () => {
+    const spread = make({ legs: [leg({}), leg({ strikePrice: 25, direction: 'Long' })] });
+    const longPut = make({ legs: [leg({ direction: 'Long' })] });
+    const call = make({ legs: [leg({ optionType: 'C' })] });
+    for (const p of [spread, longPut, call]) expect(facts(p).factLines!.join('\n')).not.toContain('Cash needed if assigned');
+  });
+
+  it('allows leg strikes and prices through the figure guard', () => {
+    const f = facts(metu);
+    const out = redactUnsupportedFigures('The $28.50 strike needs $2,850 if assigned; the put is at $4.10.', f.factFigures!);
+    expect(out.removedCount).toBe(0);
+    expect(redactUnsupportedFigures('That is $9,999 of cash.', f.factFigures!).removedCount).toBe(1);
   });
 });

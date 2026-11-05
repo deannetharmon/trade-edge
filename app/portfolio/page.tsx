@@ -1773,6 +1773,7 @@ PORTFOLIO PANEL OVERRIDE (this section takes precedence over the prose and lengt
 - Your recommendation must agree with the app's suggested action for that position. If you disagree, say so on a separate line starting "AI NOTE:".
 - If a position's Intent shows the trader plans to take assignment, treat that as decided. Do not ask whether they want assignment; say what to do next using only snapshot figures.
 - Taking a realized loss is the last resort. Consider assignment, a roll, or holding before recommending a close at a loss. The trader's goal on a position is at least 50% profit when feasible.
+- For the cash needed to take assignment, use the "Cash needed if assigned" line. Never present max risk or the break-even cost as the cash required.
 - Do not end with a question to the trader. If a figure you need is not in the snapshot, say it is not available.
 - For a short follow-up question, answer in 2 to 4 sentences.`;
 
