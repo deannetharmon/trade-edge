@@ -103,6 +103,7 @@ import {
 } from '@/lib/portfolio/profitProtectingStop';
 import { positionStopPolicyKey, postStopPolicies } from '@/lib/portfolio-data/stopPolicyStore';
 import { creditClosePnlDollars, protectiveStopOutcomeLabel, signedDollar } from '@/lib/portfolio/positionManagementPresentation';
+import { staleEnvelopeVerdict } from '@/lib/portfolio/complexEnvelope';
 import { bracketCloseTimeInForce, buildExactOcoBody, cancelExistingGtcForReplacement, DAY_PROMOTED_NOTE, criticalGtcRestorationWarning, liveStopRefusal, PAIRED_LEG_REFUSAL_PREFIX, keptStopPolicy, resolvePairedLeg, restoreOriginalGtcIfNeeded, stopCoverageRefusal, submitAfterBrokerDryRun, type ReconstructablePairedLeg } from '@/lib/portfolio/existingGtcReplacement';
 import { orderErrorForDisplay } from '@/lib/portfolio/orderErrorDisplay';
 import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
@@ -3582,8 +3583,29 @@ function BatchConfirmModal({
           if (!dryRun && item.pos.hasGtc && gtcConfirmed.has(item.pos.key)) {
             // GTC-REPLACE-0001: a bracket's stop is kept exactly. Everything
             // that can refuse runs here, BEFORE anything is cancelled.
-            const gtcComplexId = (item.pos as any).gtcComplexOrderId as string | undefined;
-            const pairedResolution = gtcComplexId ? resolvePairedLeg(item.pos.stopAssessment, gtcComplexId) : null;
+            let gtcComplexId = (item.pos as any).gtcComplexOrderId as string | undefined;
+            let staleEnvelopeId: string | undefined;
+            let pairedResolution = gtcComplexId ? resolvePairedLeg(item.pos.stopAssessment, gtcComplexId) : null;
+            if (gtcComplexId) {
+              // GTC-STALE-COMPLEX-0001: the bracket's stop may be gone at the broker (cancelled there) while the old
+              // envelope id still points at this GTC. Re-read live; only positive proof makes it a plain order. A failed
+              // read, a live sibling or a working stop on the same contract keeps today's refusal, nothing cancelled.
+              const liveEnvelope = await ttFetch(`/accounts/${item.pos.accountNumber}/complex-orders/${gtcComplexId}`, token)
+                .then((r: any) => r?.data ?? null)
+                .catch(() => null);
+              const stale = staleEnvelopeVerdict({
+                liveEnvelope,
+                targetOrderId: item.pos.gtcOrderId,
+                positionSymbols: item.pos.legs.map(l => l.symbol),
+                knownOrders: item.pos.stopAssessment?.rawEvidence.orders ?? [],
+              });
+              if (stale.ok) {
+                console.log(`STALE ENVELOPE: ${item.pos.symbol} complexId=${gtcComplexId} has no other working order; treating GTC ${item.pos.gtcOrderId} as a plain order`);
+                staleEnvelopeId = gtcComplexId;
+                gtcComplexId = undefined;
+                pairedResolution = null;
+              }
+            }
             const pairedLeg = pairedResolution?.ok ? pairedResolution.leg : null;
             if (pairedLeg) {
               if (item.action === 'CLOSE_ROLL' && rollMode[item.pos.key] === 'roll') {
@@ -3609,7 +3631,15 @@ function BatchConfirmModal({
                 },
                 async orderId => {
                   console.log(`CANCEL DEBUG: symbol=${item.pos.symbol} orderId=${orderId} complexId=${gtcComplexId}`);
-                  const result = await cancelOrder(item.pos.accountNumber, orderId, token, gtcComplexId);
+                  let result: unknown;
+                  try {
+                    result = await cancelOrder(item.pos.accountNumber, orderId, token, gtcComplexId);
+                  } catch (plainCancelErr) {
+                    // GTC-STALE-COMPLEX-0001: a plain order that TastyTrade still files under a leftover envelope may only
+                    // cancel through that envelope. Safe: the envelope holds no other order that can work (verified live).
+                    if (!staleEnvelopeId) throw plainCancelErr;
+                    result = await cancelOrder(item.pos.accountNumber, orderId, token, staleEnvelopeId);
+                  }
                   console.log(`CANCEL SUCCESS: ${item.pos.symbol}`, result);
                   return result;
                 },

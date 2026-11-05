@@ -52,6 +52,7 @@ import {
 import type { PositionObjectiveInput, PositionHealthScore, PortfolioObjective, PortfolioRecommendation, PortfolioFinancialContext, PortfolioPricingDecisionEvidence, PortfolioPricingFreshness } from '@/lib/portfolio-intelligence';
 import { computePositionValuation, type PositionValuation } from '@/lib/positionValuation';
 import { classifyPositionLifecycle } from '@/lib/portfolio/positionLifecycle';
+import { envelopeIsLiveBracket } from '@/lib/portfolio/complexEnvelope';
 import { canonicalRecommendationPriority } from '@/lib/portfolio/canonicalRecommendationPresentation';
 import { technicalAlignmentForStrategy, type TrendDirection } from '@/lib/portfolio/trendClassification';
 import {
@@ -827,6 +828,9 @@ export async function fetchGtcOrders(
     const individualToComplexId: Record<string, string> = {};
     if (complexResult.status === 'fulfilled') {
       for (const complexOrder of complexResult.value?.data?.items ?? []) {
+        // GTC-STALE-COMPLEX-0001: an envelope with fewer than two orders that can still work is a leftover, not a
+        // bracket. Its surviving order is a plain order, so it gets no complex id (and is never refused as a bracket).
+        if (!envelopeIsLiveBracket(complexOrder)) continue;
         const complexId = String(complexOrder.id);
         for (const nestedOrder of complexOrder.orders ?? []) {
           if (nestedOrder.id) {
