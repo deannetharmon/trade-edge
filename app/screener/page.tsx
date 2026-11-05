@@ -6936,7 +6936,7 @@ const strategyScores = useMemo(() => {
             </div>
           )}
 
-          {!c && result.strategy === 'CC' && result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} />}
+          {!c && result.strategy === 'CC' && result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} />}
 
           {c && c.strategy === 'CC' && (
             <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
@@ -6960,7 +6960,7 @@ const strategyScores = useMemo(() => {
                 <div><span className={th.label}>IVR / IVx: </span><span className={th.text}>{result.ivr != null ? `${result.ivr.toFixed(0)}%` : '—'} / {result.ivx != null ? `${result.ivx.toFixed(1)}%` : '—'}</span></div>
               </div>
               {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
-              {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} />}
+              {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} />}
               {c.ccOutsideRangeNote && <p className="text-[9px] text-yellow-400 font-medium pt-1">⚠ {c.ccOutsideRangeNote}</p>}
               {c.ccResearch && <p className="text-[9px] text-cyan-300 font-bold pt-1">RESEARCH — not an order, and not counted in Best Opportunities. Entry price: {researchEntryLabel(c.ccEntrySource ?? null)}.</p>}
               {c.ccLiquidityWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccLiquidityWarning}</p>}

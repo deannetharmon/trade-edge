@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildCcGrid } from '../covered-call-finder';
 import { computeCoveredCallCapacity } from '../covered-call-capacity';
-import { selectCcGridView, cellInGoal } from '../ccGridView';
+import { selectCcGridWindow, cellInGoal, ccGridSummary } from '../ccGridView';
 import type { CcRulesType } from '../constants';
 import type { WheelChainLeg } from '@/lib/wheel/chainSearch';
 
@@ -64,23 +64,63 @@ describe('buildCcGrid', () => {
   });
 });
 
-describe('selectCcGridView', () => {
+const base = { showBelowFloor: false, allExpirations: false, selected: null, extraAbove: 0, extraBelow: 0 };
+
+describe('selectCcGridWindow', () => {
   it('hides below-basis strikes by default and counts them', () => {
-    const v = selectCcGridView(grid, 'balanced', { showBelowFloor: false, allStrikes: true });
+    const v = selectCcGridWindow(grid, 'balanced', base);
     expect(v.strikes).toEqual([95]);
     expect(v.hiddenBelowFloor).toBe(3);
+    expect(v.anchor?.strike).toBe(95);
   });
-  it('shows them when switched on', () => {
-    const v = selectCcGridView(grid, 'balanced', { showBelowFloor: true, allStrikes: true });
-    expect(v.strikes).toEqual([65, 80, 95]);
+  it('shows them when switched on, highest strike first', () => {
+    const v = selectCcGridWindow(grid, 'balanced', { ...base, showBelowFloor: true });
+    expect(v.strikes).toEqual([95, 80, 65]);
     expect(v.hiddenBelowFloor).toBe(0);
   });
-  it('goal narrows strikes; with no match every strike shows', () => {
-    const upside = selectCcGridView(grid, 'upside', { showBelowFloor: true, allStrikes: false });
-    expect(upside.narrowedToGoal).toBe(true);
-    expect(upside.strikes).toEqual([65, 80, 95].filter(s => [65, 80, 95].includes(s) && grid.cells.some(c => c.strike === s && cellInGoal(c, 'upside'))));
-    const income = selectCcGridView(grid, 'income', { showBelowFloor: false, allStrikes: false });
-    expect(income.narrowedToGoal).toBe(false);
-    expect(income.strikes).toEqual([95]);
+  it('the goal picks the starting trade: in-goal cells first, then the best total if called', () => {
+    const v = selectCcGridWindow(grid, 'upside', { ...base, showBelowFloor: true });
+    expect(v.anchor && cellInGoal(v.anchor, 'upside')).toBe(true);
+  });
+  it('a click selects the trade the summary describes', () => {
+    const v = selectCcGridWindow(grid, 'balanced', { ...base, showBelowFloor: true, selected: { expiration: E2, strike: 80 } });
+    expect(v.anchor?.strike).toBe(80);
+    expect(v.anchor?.expiration).toBe(E2);
+  });
+  it('anyInGoal is false when no cell matches the goal', () => {
+    expect(selectCcGridWindow(grid, 'income', base).anyInGoal).toBe(false);
+  });
+  it('limits the strike window around the trade and offers more', () => {
+    const wide = { ...grid, cells: [60, 61, 62, 63, 64, 65, 66, 67, 68, 69].map(k => ({ ...grid.cells[0], strike: k, belowFloor: false, expiration: E1, dte: 10 })), expirations: [{ expiration: E1, dte: 10 }] };
+    const v = selectCcGridWindow(wide, 'balanced', { ...base, selected: { expiration: E1, strike: 64 } });
+    expect(v.strikes).toEqual([66, 65, 64, 63, 62]);
+    expect(v.moreStrikesAbove).toBe(3);
+    expect(v.moreStrikesBelow).toBe(2);
+    const more = selectCcGridWindow(wide, 'balanced', { ...base, selected: { expiration: E1, strike: 64 }, extraAbove: 1, extraBelow: 1 });
+    expect(more.strikes).toEqual([67, 66, 65, 64, 63, 62, 61]);
+  });
+  it('shows the first four expirations, then the rest on request', () => {
+    const exps = [5, 6, 7, 8, 9, 10].map(d => ({ expiration: `2030-01-0${d - 4}`, dte: d }));
+    const many = { ...grid, expirations: exps, cells: exps.map(e => ({ ...grid.cells[0], expiration: e.expiration, dte: e.dte, strike: 90, belowFloor: false })) };
+    const v = selectCcGridWindow(many, 'balanced', base);
+    expect(v.expirations).toHaveLength(4);
+    expect(v.moreExpirations).toBe(2);
+    expect(selectCcGridWindow(many, 'balanced', { ...base, allExpirations: true }).expirations).toHaveLength(6);
+  });
+});
+
+describe('ccGridSummary', () => {
+  it('describes a trade above the basis', () => {
+    const cell = grid.cells.find(c => c.strike === 95)!;
+    const t = ccGridSummary(grid, cell, 'TQQQ');
+    expect(t).toContain('Sell 2 calls on TQQQ');
+    expect(t).toContain('$95 strike');
+    expect(t).toMatch(/you make \$/);
+  });
+  it('says plainly when a trade is below the basis', () => {
+    const cell = grid.cells.find(c => c.strike === 80 && c.dte >= 29)!;
+    const t = ccGridSummary(grid, cell);
+    expect(t).toContain('you lose $180');
+    expect(t).toContain('below it');
   });
 });
