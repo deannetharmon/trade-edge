@@ -27,5 +27,6 @@ export function ccOrderInputFromScanResult(result: ScreenResult): CcOrderInput |
     midPerShare: parseFloat(mid.toFixed(2)),
     isIndex: result.underlyingType === 'index',
     initialQuantity: contracts,
+    stockPrice: typeof result.price === 'number' && result.price > 0 ? result.price : null,
   };
 }

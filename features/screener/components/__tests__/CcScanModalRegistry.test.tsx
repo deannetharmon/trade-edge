@@ -79,15 +79,13 @@ describe('quick-select pills follow the shared pill and input contract', () => {
   it('a DTE pill sets both ends, and typing values that match a pill presses it', async () => {
     open();
     expect(pill('DTE range quick select', '21–45')).toHaveAttribute('aria-pressed', 'true');
-    await userEvent.click(pill('DTE range quick select', '45–60'));
-    expect(screen.getByLabelText('Min DTE')).toHaveValue('45');
-    expect(screen.getByLabelText('Max DTE')).toHaveValue('60');
-    await userEvent.clear(screen.getByLabelText('Max DTE'));
-    await userEvent.type(screen.getByLabelText('Max DTE'), '45');
+    await userEvent.click(pill('DTE range quick select', '7–45'));
+    expect(screen.getByLabelText('Min DTE')).toHaveValue('7');
+    expect(screen.getByLabelText('Max DTE')).toHaveValue('45');
     await userEvent.clear(screen.getByLabelText('Min DTE'));
-    await userEvent.type(screen.getByLabelText('Min DTE'), '30');
-    expect(pill('DTE range quick select', '30–45')).toHaveAttribute('aria-pressed', 'true');
-    expect(pill('DTE range quick select', '45–60')).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.type(screen.getByLabelText('Min DTE'), '21');
+    expect(pill('DTE range quick select', '21–45')).toHaveAttribute('aria-pressed', 'true');
+    expect(pill('DTE range quick select', '7–45')).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('a delta pill sets the range and reaches the request', async () => {
@@ -164,8 +162,8 @@ describe('the recap is built from the registry and updates as you edit', () => {
     expect(summary).toHaveTextContent('OI 100');
     // Two positions with capacity (AAA 4 + BBB 2 = 6); the fully covered one is not counted.
     expect(summary).toHaveTextContent('2 positions selected · up to 6 contracts');
-    await userEvent.click(pill('DTE range quick select', '14–21'));
-    expect(summary).toHaveTextContent('14–21 DTE');
+    await userEvent.click(pill('DTE range quick select', '7–14'));
+    expect(summary).toHaveTextContent('7–14 DTE');
   });
 
   it('leaves a hidden position out of the capacity line', () => {
@@ -231,7 +229,7 @@ describe('drafts and dialog behavior', () => {
     const onClose = vi.fn();
     const onRun = vi.fn();
     const { unmount } = open({ onClose, onRun });
-    await userEvent.click(pill('DTE range quick select', '45–60'));
+    await userEvent.click(pill('DTE range quick select', '7–45'));
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onRun).not.toHaveBeenCalled();

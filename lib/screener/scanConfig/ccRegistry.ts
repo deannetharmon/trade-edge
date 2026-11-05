@@ -92,10 +92,10 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
       kind: 'range', minKey: 'DTE_MIN', maxKey: 'DTE_MAX', minLabel: 'Min DTE', maxLabel: 'Max DTE',
       minTitle: 'Earliest expiration to include', maxTitle: 'Latest expiration to include', step: '1',
       presets: [
-        { label: '14–21', min: 14, max: 21 },
+        { label: '7–14', min: 7, max: 14 },
+        { label: '7–21', min: 7, max: 21 },
         { label: '21–45', min: 21, max: 45 },
-        { label: '30–45', min: 30, max: 45 },
-        { label: '45–60', min: 45, max: 60 },
+        { label: '7–45', min: 7, max: 45 },
       ],
     },
     summary: (v) => `${num(v.rules.DTE_MIN)}–${num(v.rules.DTE_MAX)} DTE`,

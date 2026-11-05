@@ -17,6 +17,7 @@ import type { CcOrderDeps } from '@/lib/scans/ccOrderDeps';
 import { buildCcOrderLeg, buildCreditEntryOto, ccProfitBuyback } from '@/lib/scans/ccOrderMath';
 import { costBasisFromReports, guardCcOrder, submitCcOrderIfSafe, type CcOrderRequest } from '@/lib/scans/ccOrderSubmission';
 import type { CoverageReports } from '@/lib/tradeLookup/loadLookup';
+import { ccOutcomeLines, computeCcOutcome } from '@/lib/scans/ccOutcome';
 
 export interface CcOrderInput {
   symbol: string;
@@ -30,6 +31,8 @@ export interface CcOrderInput {
   midPerShare: number;
   isIndex: boolean;
   initialQuantity?: number;
+  /** Current stock price, when known: used to flag an in-the-money call. */
+  stockPrice?: number | null;
 }
 
 interface Props {
@@ -243,6 +246,20 @@ export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
         >
           {!coverageLoaded ? 'Checking your shares and LEAPs…' : guard.allowed ? guard.coverage.message : guard.coverage && guard.coverage.canOrder ? guard.coverage.message : guard.reason}
         </p>
+
+        {/* SELL-CC-0001 A: plain-language outcome (shares-covered calls only). */}
+        {!viaLeap && coverageLoaded && guard.coverage !== null && guard.coverage.status === 'covered_by_shares' && (
+          <div data-testid="cc-outcome" className={`${th.card} border ${th.border} rounded-xl p-3 mb-4 text-[11px] space-y-1`}>
+            <p className={`text-[10px] font-bold ${th.textMuted} uppercase tracking-wider`}>What this means</p>
+            {ccOutcomeLines({ strike: order.strike, premiumPerShare: entryLimit, contracts: quantity, stockPrice: order.stockPrice }, order.symbol, quantity * 100).map(l => (
+              <p key={l} className={th.textMuted}>{l}</p>
+            ))}
+            {computeCcOutcome({ strike: order.strike, premiumPerShare: entryLimit, contracts: quantity, stockPrice: order.stockPrice }).inTheMoney === true && (
+              <p data-testid="cc-itm-warning" className="text-amber-300 font-medium">This call is in the money: assignment is likely, and your shares would be sold at ${order.strike}.</p>
+            )}
+            <p className={`text-[10px] ${th.textFaint}`}>Fees are an estimate. A higher strike usually pays less premium but leaves more room for the stock to rise.</p>
+          </div>
+        )}
 
         {/* What assignment means. */}
         <div className={`${th.card} border ${th.border} rounded-xl p-3 mb-4 text-xs space-y-1`}>

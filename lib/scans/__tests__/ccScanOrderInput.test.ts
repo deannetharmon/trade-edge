@@ -21,7 +21,7 @@ describe('ccOrderInputFromScanResult', () => {
   it('maps a covered-call scan result and keeps the contract count the card showed', () => {
     expect(ccOrderInputFromScanResult(result())).toEqual({
       symbol: 'BITX', occSymbol: 'BITX  261106C00016000', strike: 16, expiration: '2026-11-06', dte: 22,
-      delta: 0.27, midPerShare: 0.4, isIndex: false, initialQuantity: 2,
+      delta: 0.27, midPerShare: 0.4, isIndex: false, initialQuantity: 2, stockPrice: 15,
     });
   });
   it('marks index underlyings', () => {

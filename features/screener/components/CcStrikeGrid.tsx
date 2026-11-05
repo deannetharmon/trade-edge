@@ -55,6 +55,12 @@ export function CcStrikeGrid({ grid, th }: { grid: CcGrid; th: Theme }) {
         <p className="mb-1 text-[10px] text-yellow-400">No call in the {CC_GOALS[goal].label} delta range, so every strike is shown.</p>
       )}
 
+      {view.strikes.length === 0 && view.hiddenBelowFloor > 0 && (
+        <p data-testid="cc-grid-all-below" className="mb-1 text-[10px] text-amber-400">
+          Every call that passed the safety checks is below your cost basis{grid.basis !== null ? ` ($${grid.basis.toFixed(2)})` : ''}. Tick &quot;Show below cost basis&quot; to see them; each one would lock in a loss if called away.
+        </p>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-[10px]">
           <thead>

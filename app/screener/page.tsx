@@ -6289,6 +6289,7 @@ function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade,
   const otmPct = (() => {
     if (!c || result.price == null || result.price <= 0) return null;
     if (c.strategy === 'BPS' || c.strategy === 'CSP') return ((result.price - c.shortStrike) / result.price) * 100;
+    if (c.strategy === 'CC') return ((c.shortStrike - result.price) / result.price) * 100;
     if (c.strategy === 'BCS') return ((c.shortStrike - result.price) / result.price) * 100;
     if (c.strategy === 'IC' && c.shortCallStrike != null) {
       const putOtm = ((result.price - c.shortStrike) / result.price) * 100;
@@ -6608,6 +6609,12 @@ const strategyScores = useMemo(() => {
                   </div>
               </div>
               <div className="text-xs shrink-0 w-16">
+                {c.strategy === 'CC' ? (
+                  <div title="Estimated chance this call finishes in the money and your shares are called away. From the call's delta: an estimate, not a guarantee.">
+                    <span className={th.label}>Called away </span>
+                    <span className={`${th.text} font-medium`}>~{deltaExposure}%</span>
+                  </div>
+                ) : (
                 <div>
                   <span className={th.label}>Delta </span>
                   <div>
@@ -6618,6 +6625,7 @@ const strategyScores = useMemo(() => {
                 </div>
                   <span className={`${th.text} font-medium`}>{c.shortDelta.toFixed(2)}</span>
                 </div>
+                )}
                 <div>
                   <span className={th.label}>RSI </span>
                   <span className={`${getRsiColor(rsi14)} font-medium`}>
@@ -6918,6 +6926,8 @@ const strategyScores = useMemo(() => {
               )}
             </div>
           )}
+
+          {!c && result.strategy === 'CC' && result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} />}
 
           {c && c.strategy === 'CC' && (
             <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
