@@ -261,6 +261,10 @@ export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
           </div>
         )}
 
+        {guard.allowed && guard.warning && (
+          <p data-testid="cc-pending-sell-warning" role="status" className="mb-3 rounded-lg border border-amber-500/60 px-3 py-2 text-xs text-amber-200">{guard.warning}</p>
+        )}
+
         {/* What assignment means. */}
         <div className={`${th.card} border ${th.border} rounded-xl p-3 mb-4 text-xs space-y-1`}>
           <p className={`text-[10px] font-bold ${th.textMuted} uppercase tracking-wider`}>If assigned</p>

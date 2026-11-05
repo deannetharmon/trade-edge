@@ -27,7 +27,7 @@ export interface CcOrderRequest {
 
 export type CcOrderGuardResult =
   | { allowed: false; reason: string; coverage: CoverageResult | null }
-  | { allowed: true; coverage: CoverageResult; assignment: CcAssignmentResult };
+  | { allowed: true; coverage: CoverageResult; assignment: CcAssignmentResult; warning?: string };
 
 /**
  * Per-share broker cost basis for the symbol from a coverage reading, or null when the report is missing or the basis
@@ -76,6 +76,24 @@ export function guardCcOrder(reports: CoverageReports | null, request: CcOrderRe
   });
   if (assignment.belowCostBasis && !request.belowCostBasisAcknowledged) {
     return { allowed: false, reason: 'Acknowledge that assignment would sell your shares below your cost basis before placing this order.', coverage };
+  }
+  // SELL-CC-0001 B: a working order to sell the stock itself competes for the same shares.
+  if (coverage.status === 'covered_by_shares' && reports && reports.capacity && reports.capacity.status === 'ok') {
+    const symbol = request.symbol.toUpperCase();
+    const pendingSell = reports.capacity.workingStockSellShares?.[symbol] ?? 0;
+    const entry = reports.capacity.bySymbol[symbol];
+    if (pendingSell > 0 && entry) {
+      const sharesNeeded = (entry.existingShortCallContracts + entry.workingShortCallContracts + request.quantity) * 100;
+      const sharesAfterSale = entry.sharesOwned - pendingSell;
+      if (sharesAfterSale < sharesNeeded) {
+        return {
+          allowed: false,
+          reason: 'An open order to sell ' + pendingSell + ' ' + symbol + ' share' + (pendingSell === 1 ? '' : 's') + ' would leave this call uncovered. Cancel or change that order first.',
+          coverage,
+        };
+      }
+      return { allowed: true, coverage, assignment, warning: 'You have an open order to sell ' + pendingSell + ' ' + symbol + ' share' + (pendingSell === 1 ? '' : 's') + '. Your remaining shares still cover this call.' };
+    }
   }
   return { allowed: true, coverage, assignment };
 }

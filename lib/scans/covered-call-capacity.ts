@@ -341,11 +341,34 @@ export function computeCoveredCallCapacity(
 }
 
 // ── Orchestrator ────────────────────────────────────────────────────────────
+/**
+ * SELL-CC-0001 B: shares reserved by working orders that SELL THE STOCK (not options), by symbol. A pending stock sale
+ * competes with a new covered call for the same shares. Equity legs only; status uses the shared working-status rule.
+ */
+export function normalizeWorkingStockSells(rawOrders: RawOrderLike[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const order of rawOrders) {
+    if (!isWorkingOrderStatus(order.status)) continue;
+    for (const leg of order.legs ?? []) {
+      const instrument = String(leg['instrument-type'] ?? '').trim().toLowerCase();
+      const action = String(leg.action ?? '').trim().toLowerCase();
+      if (instrument !== 'equity' || !action.startsWith('sell')) continue;
+      const symbol = String(leg.symbol ?? leg['underlying-symbol'] ?? '').trim().toUpperCase();
+      const qty = Number(leg.quantity);
+      if (!symbol || !(qty > 0)) continue;
+      out[symbol] = (out[symbol] ?? 0) + qty;
+    }
+  }
+  return out;
+}
+
 export type CapacityDataStatus = 'ok' | 'unavailable';
 
 export interface CoveredCallCapacityReport {
   status: CapacityDataStatus;
   bySymbol: Record<string, CoveredCallCapacity>;
+  /** SELL-CC-0001 B: shares in WORKING orders to sell the stock itself, by symbol. Present only when there are some. */
+  workingStockSellShares?: Record<string, number>;
   // TE-0007C final corrective pass: account-level diagnostics. warnings is
   // always present (possibly empty); unavailableReason is set only when
   // status === 'unavailable' and carries a message suitable for direct UI
@@ -414,5 +437,6 @@ export function buildCoveredCallCapacityReport(
     );
   }
 
-  return { status: 'ok', bySymbol, warnings: [] };
+  const stockSells = normalizeWorkingStockSells(rawOrders);
+  return { status: 'ok', bySymbol, warnings: [], ...(Object.keys(stockSells).length > 0 ? { workingStockSellShares: stockSells } : {}) };
 }
