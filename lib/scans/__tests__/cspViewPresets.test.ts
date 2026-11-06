@@ -20,4 +20,8 @@ describe('CSP view presets', () => {
   it('each preset round-trips through detectCspPreset', () => {
     for (const p of CSP_VIEW_PRESETS) expect(detectCspPreset(cspViewFromPreset(p.key, 30, 45))).toBe(p.key);
   });
+  it('All preset has no delta, IVR or OI limits', () => {
+    const a = by('all');
+    expect([a.deltaMin, a.deltaMax, a.ivrMin, a.ivrMax, a.oiMin]).toEqual([0, 1, 0, 100, 0]);
+  });
 });

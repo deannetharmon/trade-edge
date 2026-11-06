@@ -11,7 +11,7 @@ import { calculateCspScore, type CspScoreInputs } from './cspScore';
 import { isMarketQualified, isOverallCspQualified } from './cspQualification';
 import type { ScreenResult } from './types';
 
-export type CspViewPresetKey = 'conservative' | 'balanced' | 'opportunity' | 'custom';
+export type CspViewPresetKey = 'conservative' | 'balanced' | 'opportunity' | 'all' | 'custom';
 
 /** The view-side grading controls. DTE is the scan's own range unless the user narrows it. */
 export interface CspView {
@@ -42,6 +42,8 @@ export const CSP_VIEW_PRESETS: CspViewPreset[] = [
   { key: 'conservative', label: 'Conservative', description: 'Lower delta, less event risk, and deeper liquidity.', deltaMin: 0.10, deltaMax: 0.20, ivrMin: 30, ivrMax: 60, oiMin: 1000 }, // PRESETS-0001 (Ian)
   { key: 'balanced', label: 'Balanced', description: 'Default CSP discovery range.', deltaMin: 0.15, deltaMax: 0.25, ivrMin: 30, ivrMax: 70, oiMin: 500 },
   { key: 'opportunity', label: 'More opportunities', description: 'Wider delta and IVR.', deltaMin: 0.12, deltaMax: 0.30, ivrMin: 20, ivrMax: 75, oiMin: 250 },
+  // PRESET-ALL-0001: everything the scan fetched; no delta, IVR or OI limits (liquidity/earnings/capital rules still apply).
+  { key: 'all', label: 'All', description: 'Everything the scan fetched, no delta, IVR or OI limits.', deltaMin: 0, deltaMax: 1, ivrMin: 0, ivrMax: 100, oiMin: 0 },
 ];
 
 export const DEFAULT_CSP_VIEW_PRESET: CspViewPresetKey = 'balanced';

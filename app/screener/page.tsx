@@ -11623,7 +11623,7 @@ export default function Home() {
       : activeSession?.requestedStrategy === 'csp' && activeSession.ruleSnapshot
         ? [activeSession.ruleSnapshot.deltaMin, activeSession.ruleSnapshot.deltaMax]
         : null;
-  const cspDefaultDeltaRangeForIntent: [number, number] | null = cspView && cspIntent === 'wheel' ? WHEEL_DELTA_BAND : cspDefaultDeltaRange;
+  const cspDefaultDeltaRangeForIntent: [number, number] | null = cspView && cspView.preset !== 'all' && cspIntent === 'wheel' ? WHEEL_DELTA_BAND : cspDefaultDeltaRange;
   const effectiveCspDeltaRange = filterCspDeltaTouched ? filterCspDeltaRange : cspDefaultDeltaRangeForIntent;
 
   const applyFilterModeChips = (list: ScreenResult[]) => list.filter(r => {
