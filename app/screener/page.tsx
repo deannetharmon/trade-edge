@@ -85,7 +85,7 @@ import { scoreBand, capScoreBandByReturn, returnCapNote, type ScoreBandFloors } 
 import { CspScoreBadge, CspScoreBreakdownPanel, SCORE_BAND_BORDER_L } from '@/features/screener/components/CspScoreBreakdown';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
 import { splitCspByDte } from '@/lib/scans/cspDteBuckets';
-import { CSP_INTENT_KEY, DEFAULT_CSP_INTENT, WHEEL_DELTA_BAND, parseCspIntent, type CspIntent } from '@/lib/scans/cspIntent';
+import { CSP_INTENT_KEY, DEFAULT_CSP_INTENT, WHEEL_DELTA_BAND, applyIntentToView, parseCspIntent, type CspIntent } from '@/lib/scans/cspIntent';
 import { CSP_VIEW_PRESETS, DEFAULT_CSP_VIEW_PRESET, cspScanRules, cspViewFromPreset, detectCspPreset, regradeCspResults, cspWithinViewWindow, type CspView, type CspViewPresetKey } from '@/lib/scans/cspView';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified, classifyCspLiquidity } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
@@ -9602,8 +9602,8 @@ export default function Home() {
   const cspViewActive = cspSnapshot?.preset === 'view';
   const cspView: CspView | null = useMemo(() => {
     if (!cspSnapshot || !cspViewActive) return null;
-    return cspViewOverride ?? cspViewFromPreset(cspSavedPreset, cspSnapshot.dteMin, cspSnapshot.dteMax);
-  }, [cspSnapshot, cspViewActive, cspViewOverride, cspSavedPreset]);
+    return cspViewOverride ?? applyIntentToView(cspViewFromPreset(cspSavedPreset, cspSnapshot.dteMin, cspSnapshot.dteMax), cspIntent, false);
+  }, [cspSnapshot, cspViewActive, cspViewOverride, cspSavedPreset, cspIntent]);
   const results = useMemo(
     () => (cspView ? regradeCspResults(scanResults, cspView) : scanResults),
     [scanResults, cspView],
