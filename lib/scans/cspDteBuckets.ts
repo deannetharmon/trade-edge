@@ -66,12 +66,15 @@ export function splitCspByDte(ordered: ScreenResult[], intent: CspIntent = 'prem
   const groups: CspDteBucketGroup[] = [];
   for (const b of CSP_DTE_BUCKETS) {
     const list = byBucket.get(b);
-    if (!list?.length) continue;
+    if (!list?.length) continue; // no contracts at this DTE at all: no line
     // stable: ties keep the incoming order
+    // NO-JUNK-PICK-0001 (Dean, TQQQ 7 DTE: Put 35, $19 credit, OI 18, Poor spread): a line is only a pick when it clears
+    // every floor. A DTE where nothing does shows an empty line, never a filler pick.
     const top = list.map((r, i) => ({ r, i })).sort(byIncome(intent))
+      .filter(x => incomeKey(x.r, intent)[0] === 1)
       .slice(0, CSP_BEST_PER_BUCKET).map(x => x.r);
     top.forEach(r => picked.add(r));
-    groups.push({ bucket: b, results: top });
+    groups.push({ bucket: b, results: top }); // results may be empty: contracts exist but none clear the floors
   }
   return { groups, rest: ordered.filter(r => !picked.has(r)) };
 }

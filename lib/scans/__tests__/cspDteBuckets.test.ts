@@ -43,13 +43,16 @@ describe('splitCspByDte', () => {
     const list = [mk('WIDE', 28, 60, { cspLiquidityClass: 'POOR' as any }), mk('THIN', 28, 50, { shortOI: 18 }), mk('OK', 28, 12)];
     expect(splitCspByDte(list).groups[0].results.map(r => r.symbol)).toEqual(['OK']);
   });
-  it('PICK-OTM-0001: an ITM put with a huge raw return loses to an OTM one, and the fallback shows the safest line', () => {
+  it('PICK-OTM-0001: an ITM put with a huge raw return loses to an OTM one; with nothing clearing the floors the line is empty', () => {
     const itm = mk('ITM', 28, 284, { shortStrike: 105, pop: 44 });
     const otmOk = mk('OTM', 28, 12);
     expect(splitCspByDte([itm, otmOk]).groups[0].results.map(r => r.symbol)).toEqual(['OTM']);
+    // NO-JUNK-PICK-0001: when nothing clears the floors, the DTE has an empty line, not a filler pick.
     const lowPop = mk('LOWPOP', 28, 60, { pop: 41 });
     const safer = mk('SAFER', 28, 5, { pop: 78 });
-    expect(splitCspByDte([lowPop, safer]).groups[0].results.map(r => r.symbol)).toEqual(['SAFER']);
+    const g = splitCspByDte([lowPop, safer]).groups[0];
+    expect(g.results).toEqual([]);
+    expect(splitCspByDte([lowPop, safer]).rest.map(r => r.symbol)).toEqual(['LOWPOP', 'SAFER']);
   });
   it('uses extrinsic annualized return, not the raw figure', () => {
     const rawHigh = mk('RAW', 28, 10, { annualizedRoc: 90 });

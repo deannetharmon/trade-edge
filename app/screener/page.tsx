@@ -13182,7 +13182,7 @@ export default function Home() {
                                   {split.groups.map(g => (
                                     <div key={g.bucket} className="space-y-2">
                                       <p className={`text-[10px] font-semibold ${th.textFaint}`}>{g.bucket} DTE</p>
-                                      {g.results.map(renderQualifiedCandidate)}
+                                      {g.results.length === 0 ? <p className={`text-[10px] ${th.textFaint}`}>No trade clears the floors for this DTE.</p> : g.results.map(renderQualifiedCandidate)}
                                     </div>
                                   ))}
                                   {split.rest.length > 0 && <p className="pt-2 text-[9px] text-emerald-500 tracking-widest font-medium">ALL OTHERS · BY SCORE</p>}
