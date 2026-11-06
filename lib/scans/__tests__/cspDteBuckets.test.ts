@@ -4,7 +4,7 @@ import type { ScreenResult } from '../types';
 
 // score arg is now the annualized return %; price 100, breakeven 90 (10% distance), POP 80 unless overridden
 const mk = (id: string, dte: number, score: number | null, over: Record<string, number> = {}) =>
-  ({ symbol: id, strategy: 'CSP', price: 100, bestCandidate: { dte, annualizedRoc: score, pop: 80, breakeven: 90, ...over } }) as unknown as ScreenResult;
+  ({ symbol: id, strategy: 'CSP', price: 100, bestCandidate: { dte, annualizedRoc: score, pop: 80, breakeven: 90, cspLiquidityClass: 'STRONG', shortOI: 1000, ...(over as object) } }) as unknown as ScreenResult;
 
 describe('cspBucketFor', () => {
   it('snaps to the nearest bucket within 3 days', () => {
@@ -37,6 +37,10 @@ describe('splitCspByDte', () => {
     const list = [mk('LOW', 28, 12, { pop: 80, breakeven: 90 }), mk('ATM', 28, 40, { pop: 50, breakeven: 98 })];
     expect(splitCspByDte(list, 'premium').groups[0].results[0].symbol).toBe('LOW');
     expect(splitCspByDte(list, 'wheel').groups[0].results[0].symbol).toBe('ATM');
+  });
+  it('a poor-spread or thin-OI trade loses to a lower-yield liquid one', () => {
+    const list = [mk('WIDE', 28, 60, { cspLiquidityClass: 'POOR' as any }), mk('THIN', 28, 50, { shortOI: 18 }), mk('OK', 28, 12)];
+    expect(splitCspByDte(list).groups[0].results.map(r => r.symbol)).toEqual(['OK']);
   });
   it('nothing is lost or duplicated', () => {
     const list = [mk('A', 7, 1), mk('B', 21, null), mk('C', 100, 5)];

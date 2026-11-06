@@ -6,9 +6,9 @@ export type CspIntent = 'premium' | 'wheel';
 export const CSP_INTENT_KEY = 'hunter-csp-intent';
 export const DEFAULT_CSP_INTENT: CspIntent = 'premium';
 
-export const INTENT_FLOORS: Record<CspIntent, { yieldPct: number; pop: number; beDistPct: number }> = {
-  premium: { yieldPct: 10, pop: 70, beDistPct: 4 },
-  wheel: { yieldPct: 15, pop: 40, beDistPct: 1 },
+export const INTENT_FLOORS: Record<CspIntent, { yieldPct: number; pop: number; beDistPct: number; oi: number }> = {
+  premium: { yieldPct: 10, pop: 70, beDistPct: 4, oi: 100 },
+  wheel: { yieldPct: 15, pop: 40, beDistPct: 1, oi: 100 },
 };
 
 /** Wheel overrides the preset's delta band; premium keeps the preset's own band. */

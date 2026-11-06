@@ -78,6 +78,13 @@ export function CleanCspLine({
           ? <span className="rounded-full border border-amber-600 bg-amber-950 px-2 py-px text-xs font-bold text-amber-200" title="Below your preferred open interest (advisory)">{c.shortOI}</span>
           : <b className={th.text}>{c.shortOI ?? '—'}</b>}
       </Stat>
+      <Stat label="Spread">
+        {c.cspLiquidityClass === 'POOR'
+          ? <span className="rounded-full border border-red-600 bg-red-950 px-2 py-px text-xs font-bold text-red-200" title="Bid/ask is wide: expect a poor fill">Poor</span>
+          : c.cspLiquidityClass === 'BORDERLINE'
+            ? <span className="rounded-full border border-amber-600 bg-amber-950 px-2 py-px text-xs font-bold text-amber-200" title="Bid/ask is fair">Fair</span>
+            : c.cspLiquidityClass === 'STRONG' ? <b className="text-emerald-400">Tight</b> : <b className={th.textFaint}>—</b>}
+      </Stat>
       <Stat label="RSI"><b className={th.text}>{rsi14 != null ? rsi14.toFixed(0) : '—'}</b></Stat>
       <Stat label="Cash needed"><b className={th.text}>{c.requiredCash != null ? fmtMoney0(c.requiredCash) : '—'}</b></Stat>
       {unfunded && <span data-testid="clean-unfunded" className="rounded-full border border-red-700 bg-red-950 px-3 py-1.5 text-xs font-bold text-red-200">{availableText}</span>}
