@@ -19,6 +19,7 @@
 // selection loop, structured the same way (closest-|delta|-to-center wins)
 // but over the FULL set of already-eligible candidates, not a single
 // preselected one.
+import { hasOpenInterestMarket } from './liquidityPolicy';
 import type { WheelChainLeg } from '@/lib/wheel/chainSearch';
 import type { SpreadCandidate } from './types';
 import type { CcRulesType } from './constants';
@@ -93,6 +94,7 @@ export function ccLegRejection(leg: WheelChainLeg, dte: number, p: CcEligibility
   if (leg.delta == null || !Number.isFinite(leg.delta)) return 'NO_DELTA';
   if (!Number.isFinite(leg.strikePrice)) return 'BAD_STRIKE'; // keeps NaN out of the ranking comparator
   if (ccOpenInterestRejection(leg.openInterest) != null) return 'BAD_OI';
+  if (!hasOpenInterestMarket(leg.openInterest)) return 'BAD_OI'; // LIQUIDITY-SYNC-0001: zero OI = no market
 
   // The strike floor is checked BEFORE the delta window, so a leg that fails both is counted as below the floor:
   // the floor is the safety rule, and the exclusion report should show how much of the chain it alone rules out.

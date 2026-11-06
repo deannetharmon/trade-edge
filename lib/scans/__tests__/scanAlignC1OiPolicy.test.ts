@@ -77,7 +77,7 @@ describe('fixtures 1-3: PMCC short OI is a warning, not a gate', () => {
     expect(decision.gates.some(g => g.code === 'NEW_SHORT_OI')).toBe(false);
   });
 
-  it.each([M - 1, 0])('2/3. OI = %s is eligible, reaches qualifiedPairs, warns, and is not OPEN_INTEREST_BELOW_MINIMUM', oi => {
+  it.each([M - 1, 1])('2/3. OI = %s is eligible, reaches qualifiedPairs, warns, and is not OPEN_INTEREST_BELOW_MINIMUM', oi => {
     const result = run([longLeg()], [shortLeg({ openInterest: oi })]);
     expect(result.qualifiedPairs).toHaveLength(1);
     expect(codes(result, 'short')).not.toContain('OPEN_INTEREST_BELOW_MINIMUM');
@@ -85,6 +85,14 @@ describe('fixtures 1-3: PMCC short OI is a warning, not a gate', () => {
     const warn = decision.gates.find(g => g.code === 'NEW_SHORT_OI');
     expect(warn?.status).toBe('warning');
     expect(decision.qualification).toBe('QUALIFIED');
+  });
+});
+
+describe('LIQUIDITY-SYNC-0001: a new PMCC short with zero OI has no market', () => {
+  it('is rejected, not paired', () => {
+    const result = run([longLeg()], [shortLeg({ openInterest: 0 })]);
+    expect(result.qualifiedPairs).toHaveLength(0);
+    expect(codes(result, 'short')).toContain('OPEN_INTEREST_BELOW_MINIMUM');
   });
 });
 
@@ -204,26 +212,26 @@ const CC_PARAMS = {
 const pick = (chain: ReturnType<typeof ccChain>) => selectAllEligibleCcContracts(chain as never, CC_PARAMS);
 
 describe('fixture 10: CC leg with missing/invalid OI is excluded; a good leg survives', () => {
-  it.each([null, undefined, Number.NaN, Number.POSITIVE_INFINITY, -1])('OI = %s', oi => {
+  it.each([null, undefined, Number.NaN, Number.POSITIVE_INFINITY, -1, 0])('OI = %s', oi => {
     const result = pick(ccChain([{ strike: 105, oi }, { strike: 110, oi: 800 }]));
     expect(result.map(c => c.strikePrice)).toEqual([110]);
   });
 });
 
-describe('fixture 11: CC OI at / below the minimum stays eligible', () => {
-  it.each([500, 499, 0])('OI = %s', oi => {
+describe('fixture 11: CC OI at / below the minimum (but above zero) stays eligible', () => {
+  it.each([500, 499, 1])('OI = %s', oi => {
     expect(pick(ccChain([{ strike: 105, oi }])).map(c => c.openInterest)).toEqual([oi]);
   });
 });
 
 describe('CC ranking is deterministic', () => {
-  const legs: CcLeg[] = [{ strike: 105, oi: 500 }, { strike: 106, oi: 300 }, { strike: 107, oi: 0 }];
+  const legs: CcLeg[] = [{ strike: 105, oi: 500 }, { strike: 106, oi: 300 }, { strike: 107, oi: 1 }];
   const permutations = (arr: CcLeg[]): CcLeg[][] => arr.length <= 1 ? [arr]
     : arr.flatMap((x, i) => permutations([...arr.slice(0, i), ...arr.slice(i + 1)]).map(rest => [x, ...rest]));
 
-  it('OI 500 vs 300 vs 0 at equal delta ranks 500, 300, 0 for every input order', () => {
+  it('OI 500 vs 300 vs 1 at equal delta ranks 500, 300, 1 for every input order', () => {
     for (const perm of permutations(legs)) {
-      expect(pick(ccChain(perm)).map(c => c.openInterest)).toEqual([500, 300, 0]);
+      expect(pick(ccChain(perm)).map(c => c.openInterest)).toEqual([500, 300, 1]);
     }
   });
 

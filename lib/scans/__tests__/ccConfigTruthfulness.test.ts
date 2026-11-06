@@ -174,8 +174,8 @@ describe('open interest is advisory for covered calls (unlike PMCC)', () => {
     expect(candidate?.ccLiquidityWarning).not.toBeNull();
   });
 
-  it('even zero open interest does not remove the call from the search', () => {
-    expect(eligible(chainOf([{ dte: 30, calls: [good(105, { oi: 0 })] }]))).toHaveLength(1);
+  it('zero open interest has no market, so it removes the call from the search (LIQUIDITY-SYNC-0001)', () => {
+    expect(eligible(chainOf([{ dte: 30, calls: [good(105, { oi: 0 })] }]))).toHaveLength(0);
   });
 });
 

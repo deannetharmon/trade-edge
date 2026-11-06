@@ -184,6 +184,8 @@ function filterLegs(
       const oi = leg.openInterest;
       if (oi == null || !Number.isFinite(oi) || oi < 0) reasons.push(reason('INSUFFICIENT_DATA', 'Open interest is missing or invalid'));
       else if (role === 'long' && oi < oiMin) reasons.push(reason('OPEN_INTEREST_BELOW_MINIMUM'));
+      // LIQUIDITY-SYNC-0001: a new short leg with zero open interest has no market; below-minimum (but > 0) still warns.
+      else if (role === 'short' && oi === 0) reasons.push(reason('OPEN_INTEREST_BELOW_MINIMUM', 'No open interest: there is no market in this contract'));
     }
 
     // PMCC-HELD-UNDERWATER-0001A (Ian): the ITM gate is an ENTRY rule for choosing a LEAP to buy. A held
