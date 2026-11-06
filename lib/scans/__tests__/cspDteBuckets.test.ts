@@ -21,16 +21,17 @@ describe('cspBucketFor', () => {
 });
 
 describe('splitCspByDte', () => {
-  it('picks top 3 by annualized return per bucket, rest keeps incoming order', () => {
+  it('picks exactly one per bucket (best annualized return), rest keeps incoming order', () => {
     const list = [mk('A', 28, 50), mk('B', 28, 90), mk('C', 28, 70), mk('D', 28, 60), mk('E', 14, 40), mk('F', 60, 99)];
     const { groups, rest } = splitCspByDte(list);
     expect(groups.map(g => g.bucket)).toEqual([14, 28]);
-    expect(groups[1].results.map(r => r.symbol)).toEqual(['B', 'C', 'D']);
-    expect(rest.map(r => r.symbol)).toEqual(['A', 'F']);
+    expect(groups.every(g => g.results.length === 1)).toBe(true);
+    expect(groups[1].results.map(r => r.symbol)).toEqual(['B']);
+    expect(rest.map(r => r.symbol)).toEqual(['A', 'C', 'D', 'F']);
   });
-  it('a trade below the POP floor ranks behind lower-yield trades that clear all floors', () => {
+  it('a trade below the POP floor loses to a lower-yield trade that clears all floors', () => {
     const list = [mk('HI', 28, 80, { pop: 50 }), mk('OK', 28, 15)];
-    expect(splitCspByDte(list).groups[0].results.map(r => r.symbol)).toEqual(['OK', 'HI']);
+    expect(splitCspByDte(list).groups[0].results.map(r => r.symbol)).toEqual(['OK']);
   });
   it('wheel intent accepts lower POP / tighter distance that premium rejects', () => {
     const list = [mk('LOW', 28, 12, { pop: 80, breakeven: 90 }), mk('ATM', 28, 40, { pop: 50, breakeven: 98 })];

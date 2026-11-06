@@ -4,7 +4,7 @@ import { INTENT_FLOORS, type CspIntent } from './cspIntent';
 
 export const CSP_DTE_BUCKETS = [7, 14, 21, 28, 35, 42] as const;
 export const CSP_DTE_BUCKET_TOLERANCE = 3; // days either side of a bucket
-export const CSP_BEST_PER_BUCKET = 3;
+export const CSP_BEST_PER_BUCKET = 1; // one line per DTE (Dean)
 
 export interface CspDteBucketGroup { bucket: number; results: ScreenResult[] }
 export interface CspDteSplit { groups: CspDteBucketGroup[]; rest: ScreenResult[] }
