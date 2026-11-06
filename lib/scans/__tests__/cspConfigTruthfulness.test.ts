@@ -115,7 +115,7 @@ describe('bid/ask liquidity is a fixed policy gate', () => {
     expect(classifyCspLiquidity(0.45, 5.0).liquidityClass).toBe('STRONG');
   });
 
-  it('borderline is kept with a warning and excluded from Best Opportunities; poor is disqualified', () => {
+  it('borderline is kept with a warning and excluded from Best Opportunities; poor is also kept with a warning (spread is never a gate)', () => {
     const chain = chainOf([{ dte: 35, puts: [
       { strike: 90, delta: -0.2, bid: 0.95, ask: 1.05, oi: 900 },
       { strike: 91, delta: -0.2, bid: 0.93, ask: 1.07, oi: 900 },
@@ -124,7 +124,7 @@ describe('bid/ask liquidity is a fixed policy gate', () => {
     const by = Object.fromEntries(run(chain).results.map((r) => [r.candidate.shortStrike, r.marketQualification]));
     expect(by[90]).toBe('QUALIFIED');
     expect(by[91]).toBe('QUALIFIED_WITH_LIQUIDITY_WARNING');
-    expect(by[92]).toBe('DISQUALIFIED_POOR_LIQUIDITY');
+    expect(by[92]).toBe('QUALIFIED_WITH_LIQUIDITY_WARNING');
     const borderline = run(chain).results.find((r) => r.candidate.shortStrike === 91)!;
     expect(isBestOpportunitiesEligible(borderline.marketQualification, borderline.accountEligibility, 'NOT_APPLICABLE', true, true)).toBe(false);
   });

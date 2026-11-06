@@ -197,33 +197,14 @@ describe('CSP-WORKFLOW-0001: AMD required acceptance fixture (multi-candidate)',
     // with a warning), 405 classifies STRONG (fully market-qualified),
     // 410/415 classify POOR (market-disqualified). None is discarded
     // merely because another strike ranked higher.
+    // LIQUIDITY-WARN-0001 -- spread width is a warning, not a gate: all six strikes are qualified
+    // (405 STRONG; 420/425/430 BORDERLINE; 410/415 POOR, each carrying the liquidity warning). None is disqualified.
     await waitFor(() => {
-      expect(accountingText()).toMatch(/4 qualified/);
+      expect(accountingText()).toMatch(/6 qualified/);
     });
-    // BLOCKER-05 -- candidateCount reconciles to exactly six: 4 qualified
-    // (405 STRONG + 420/425/430 BORDERLINE) + 2 disqualified (410/415
-    // POOR) = 6, matching the six structurally valid AMD strikes in the
-    // fixture. No strike is silently dropped or double-counted.
-    expect(accountingText()).toMatch(/4 qualified/);
-    expect(accountingText()).toMatch(/2 disqualified/);
+    expect(accountingText()).not.toMatch(/disqualified/);
     expect(screen.getAllByText('AMD').length).toBeGreaterThan(1); // multiple distinct AMD cards, not one
-
-    // Disqualified section auto-collapses once qualified candidates exist
-    // for the session (useDisclosureA11y's initialOpen = !hasQualifiedCandidates)
-    // -- expand it to reach the two still-disqualified (POOR liquidity) AMD
-    // contracts, each a real, owned CSP result with visible fundamentals.
-    const disqualifiedSection = await screen.findByTestId('disqualified-section');
-    expect(disqualifiedSection).toBeInTheDocument();
-    expect(disqualifiedSection.textContent).toMatch(/Disqualified audit \(2 contracts\)/);
-    await userEvent.click(screen.getByRole('button', { name: /Disqualified audit \(2 contracts\)/ }));
-    await userEvent.click(screen.getByRole('button', { name: /DTE, 2 excluded contracts/i }));
-    const fundamentalsRows = screen.getAllByTestId('csp-disqualified-fundamentals');
-    expect(fundamentalsRows.length).toBe(2);
-    for (const fundamentals of fundamentalsRows) {
-      expect(fundamentals.textContent).toMatch(/Δ 0\.\d\d/); // a real, discovered delta -- never absent
-      expect(fundamentals.textContent).toMatch(/Credit \$/);
-      expect(fundamentals.textContent).toMatch(/Cash Required \$/);
-    }
+    expect(screen.queryByTestId('disqualified-section')).not.toBeInTheDocument();
 
     // BLOCKER-05 addendum -- Best Opportunities eligibility is evaluated
     // independently per candidate, exactly as required: the 420/425/430
@@ -267,7 +248,7 @@ describe('CSP-CARD-PARITY-0001: CSP cards now render the same labeled POP/Delta/
     await addToUniverse('AMD');
     await clickCspScan();
 
-    await waitFor(() => expect(accountingText()).toMatch(/4 qualified/));
+    await waitFor(() => expect(accountingText()).toMatch(/6 qualified/)); // LIQUIDITY-WARN-0001: POOR strikes now qualify with a warning
 
     // One occurrence of each labeled stat per qualified card -- this block
     // used to be entirely absent for CSP, so any occurrence at all is new.
@@ -281,7 +262,7 @@ describe('CSP-CARD-PARITY-0001: CSP cards now render the same labeled POP/Delta/
     // an unrelated match; each qualified AMD card gets exactly one row.
     // Title wording updated by SCREENER-LIQUIDITY-0001 (b6ed7e12, separate/already-validated ticket).
     const oiContainers = document.querySelectorAll('[title="Open interest. The lower required leg determines the liquidity label for multi-leg candidates."]');
-    expect(oiContainers.length).toBe(4); // one per qualified AMD card (405 STRONG + 420/425/430 BORDERLINE)
+    expect(oiContainers.length).toBe(6); // one per AMD card (405 STRONG, 420/425/430 BORDERLINE, 410/415 POOR-with-warning)
 
     const oiValues: Array<string | null | undefined> = [];
     for (const oiContainer of Array.from(oiContainers)) {
@@ -297,7 +278,7 @@ describe('CSP-CARD-PARITY-0001: CSP cards now render the same labeled POP/Delta/
     }
     // The genuine per-contract OI (csp-finder.ts's real openInterest, not a
     // dash), matching the fixture's own strikes exactly.
-    expect(oiValues.sort()).toEqual(['107', '245', '333', '409']);
+    for (const oi of ['107', '245', '333', '409']) expect(oiValues).toContain(oi);
   });
 });
 

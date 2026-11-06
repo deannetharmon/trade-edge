@@ -170,8 +170,9 @@ function marketQualificationFor(
   if (params.earningsMarketDisqualified || earningsWithinExpiration === true) return 'DISQUALIFIED_EARNINGS';
   if (params.ivrMarketDisqualified) return 'DISQUALIFIED_IVR';
   if (params.ivrUnavailableDisqualified) return 'DISQUALIFIED_IVR_UNAVAILABLE';
-  if (c.liquidityClass === 'POOR') return 'DISQUALIFIED_POOR_LIQUIDITY';
-  if (c.liquidityClass === 'BORDERLINE') return 'QUALIFIED_WITH_LIQUIDITY_WARNING';
+  // LIQUIDITY-WARN-0001 (Dean): spread width is a warning, never a gate. POOR and BORDERLINE both stay visible as
+  // qualified-with-warning, and neither can be a Best Opportunity (that needs plain QUALIFIED).
+  if (c.liquidityClass === 'POOR' || c.liquidityClass === 'BORDERLINE') return 'QUALIFIED_WITH_LIQUIDITY_WARNING';
   return 'QUALIFIED';
 }
 

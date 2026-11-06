@@ -183,7 +183,7 @@ describe('findAllCsp — SQ-0001A foundation gate (CSP-WORKFLOW-RECONCILE-0002)'
       rules: DEFAULT_CSP_RULES, contracts: 1, underlyingSymbol: 'TEST',
       foundationEligibility: SUPPORTIVE,
     });
-    expect(result.results[0].marketQualification).toBe('DISQUALIFIED_POOR_LIQUIDITY');
+    expect(result.results[0].marketQualification).toBe('QUALIFIED_WITH_LIQUIDITY_WARNING');
   });
 
   it('candidate identity and rule-snapshot-relevant fields remain intact regardless of foundation-gate outcome', () => {
