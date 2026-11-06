@@ -254,6 +254,9 @@ export function buildPortfolioAiSnapshot(input: PortfolioAiSnapshotInput): Portf
         notAvailable.push('Funding check (cash balance or net liquidity missing)');
       }
     }
+    if (shortPuts.length > 0) {
+      checkLines.push('Cash freed: only closing a short put frees its assignment cash. Rolling at the same strike frees none of it (the date moves, the collateral stays); a roll to a lower strike frees only the strike difference, which is not known until a strike is chosen, so never state a freed figure for a roll.');
+    }
     const distinct = new Set(positions.map(p => p.symbol)).size;
     allowed.push(distinct);
     checkLines.push(`Distinct underlyings held: ${distinct}.`);

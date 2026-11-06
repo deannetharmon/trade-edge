@@ -1,5 +1,7 @@
 // lib/portfolio-ai/__tests__/snapshot.test.ts
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   buildPortfolioAiSnapshot,
@@ -145,5 +147,26 @@ describe('portfolio checks (PORTFOLIO-AI-0003)', () => {
   it('adds no funding line when no short put needs assignment cash', () => {
     const s = base([pos({ key: '1', symbol: 'UBER', strategy: 'CALL' })], { account: { cashBalance: 50000, netLiquidity: 100000 } });
     expect(s.contextText).not.toContain('Funding:');
+  });
+});
+
+describe('a roll is never credited with freed cash (PORTFOLIO-AI-ROLLCASH-0001)', () => {
+  const puts = [pos({ key: '1', symbol: 'TQQQ', strategy: 'CSP', assignmentCash: 8000 })];
+
+  it('tells the model only a close frees assignment cash when a short put is held', () => {
+    const s = base(puts, { account: { cashBalance: 5000, netLiquidity: 100000 } });
+    expect(s.contextText).toContain('Cash freed: only closing a short put frees its assignment cash.');
+    expect(s.contextText).toContain('never state a freed figure for a roll');
+  });
+
+  it('adds no cash-freed line when no short put needs assignment cash', () => {
+    const s = base([pos({ key: '1', symbol: 'UBER', strategy: 'CALL' })], { account: { cashBalance: 50000, netLiquidity: 100000 } });
+    expect(s.contextText).not.toContain('Cash freed:');
+  });
+
+  it('the Portfolio AI prompt no longer tells the model a roll frees cash', () => {
+    const source = readFileSync(resolve(__dirname, '../../../app/portfolio/page.tsx'), 'utf8');
+    expect(source).not.toMatch(/close or roll first/);
+    expect(source).toContain('Never say a roll frees cash');
   });
 });
