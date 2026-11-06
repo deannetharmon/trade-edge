@@ -12,6 +12,7 @@ import {
   fmtPct0, fmtMoney0, type AllocResult, type Tone,
 } from '@/lib/scans/cleanCard';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META } from '@/lib/scans/cspReturnThisCycle';
+import { CSP_HIGH_IVR, CSP_LOW_IVR } from '@/lib/scans/cspIntent';
 import { summarizeFailReason } from '@/lib/screener/failReasonSummary';
 import { SCORE_BAND_CLASS } from './CspScoreBreakdown';
 import type { ScoreBand } from '@/lib/scans/scoreBands';
@@ -86,6 +87,14 @@ export function CleanCspLine({
           : c.cspLiquidityClass === 'BORDERLINE'
             ? <span className="rounded-full border border-amber-600 bg-amber-950 px-2 py-px text-xs font-bold text-amber-200" title="Bid/ask is fair">Fair</span>
             : c.cspLiquidityClass === 'STRONG' ? <b className="text-emerald-400">Tight</b> : <b className={th.textFaint}>—</b>}
+      </Stat>
+      <Stat label="IVR">
+        {result.ivr == null ? <b className={th.textFaint}>—</b>
+          : result.ivr > CSP_HIGH_IVR
+            ? <span data-testid="clean-ivr-high" className="rounded-full border border-red-600 bg-red-950 px-2 py-px text-xs font-bold text-red-200" title="High IVR: size down, or consider the unleveraged underlying">{result.ivr.toFixed(0)} High</span>
+            : result.ivr < CSP_LOW_IVR
+              ? <span data-testid="clean-ivr-low" className="text-slate-400 font-bold" title="Below IVR 50: thinner premium">{result.ivr.toFixed(0)} Low</span>
+              : <b className={th.text}>{result.ivr.toFixed(0)}</b>}
       </Stat>
       <Stat label="RSI"><b className={th.text}>{rsi14 != null ? rsi14.toFixed(0) : '—'}</b></Stat>
       <Stat label="Cash needed"><b className={th.text}>{c.requiredCash != null ? fmtMoney0(c.requiredCash) : '—'}</b></Stat>

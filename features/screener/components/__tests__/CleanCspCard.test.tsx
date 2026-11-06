@@ -36,6 +36,15 @@ describe('CleanCspLine', () => {
     expect(line.contains(screen.getByTestId('note'))).toBe(true);
     expect(screen.getAllByText(/Open position/i)).toHaveLength(1);
   });
+  it('IVR-FLAG-0001: flags high IVR (above 70) in red and low IVR (below 50) in gray, plain in between', () => {
+    const { rerender } = render(<CleanCspLine {...base} result={{ ...result, ivr: 89.5 } as any} />);
+    expect(screen.getByTestId('clean-ivr-high')).toBeTruthy();
+    rerender(<CleanCspLine {...base} result={{ ...result, ivr: 37 } as any} />);
+    expect(screen.getByTestId('clean-ivr-low')).toBeTruthy();
+    rerender(<CleanCspLine {...base} result={{ ...result, ivr: 60 } as any} />);
+    expect(screen.queryByTestId('clean-ivr-high')).toBeNull();
+    expect(screen.queryByTestId('clean-ivr-low')).toBeNull();
+  });
   it('credit is always bold green', () => {
     render(<CleanCspLine {...base} />);
     expect(screen.getByText('$11').className).toMatch(/text-emerald-400/);

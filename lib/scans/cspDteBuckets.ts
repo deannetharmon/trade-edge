@@ -2,13 +2,13 @@
 
 // CSP-DTE-BEST-0001 — "Best by DTE": top picks per target expiry bucket, then everything else.
 import type { ScreenResult } from './types';
-import { INTENT_FLOORS, type CspIntent } from './cspIntent';
+import { INTENT_FLOORS, CSP_HIGH_IVR, type CspIntent } from './cspIntent';
 
 export const CSP_DTE_BUCKETS = [7, 14, 21, 28, 35, 42] as const;
 export const CSP_DTE_BUCKET_TOLERANCE = 3; // days either side of a bucket
 export const CSP_BEST_PER_BUCKET = 1; // one line per DTE (Dean)
 
-export interface CspDteBucketGroup { bucket: number; results: ScreenResult[] }
+export interface CspDteBucketGroup { bucket: number; results: ScreenResult[]; /** IVR-FLAG-0001: set when a Premium line is empty because IVR is above the high-risk line. */ highIvr?: number | null }
 export interface CspDteSplit { groups: CspDteBucketGroup[]; rest: ScreenResult[] }
 
 export function cspBucketFor(dte: number | null | undefined): number | null {
@@ -43,7 +43,8 @@ export function incomeKey(r: ScreenResult, intent: CspIntent = 'premium'): [numb
   const be = Number(c?.breakeven);
   const otm = price > 0 && Number.isFinite(strike) && strike <= price;
   const dist = price > 0 && Number.isFinite(be) ? ((price - be) / price) * 100 : NaN;
-  const ok = otm && Number.isFinite(yieldPct) && Number.isFinite(pop) && Number.isFinite(dist)
+  const highIvr = intent === 'premium' && r.ivr != null && r.ivr > CSP_HIGH_IVR; // IVR-FLAG-0001
+  const ok = !highIvr && otm && Number.isFinite(yieldPct) && Number.isFinite(pop) && Number.isFinite(dist)
     && c?.cspLiquidityClass !== 'POOR'
     && yieldPct >= f.yieldPct && pop >= f.pop && dist >= f.beDistPct;
   return [ok ? 1 : 0, otm ? 1 : 0, ok ? yieldPct : (Number.isFinite(pop) ? pop : -Infinity)];
@@ -76,7 +77,8 @@ export function splitCspByDte(ordered: ScreenResult[], intent: CspIntent = 'prem
       .filter(x => incomeKey(x.r, intent)[0] === 1)
       .slice(0, CSP_BEST_PER_BUCKET).map(x => x.r);
     top.forEach(r => picked.add(r));
-    groups.push({ bucket: b, results: top }); // results may be empty: contracts exist but none clear the floors
+    const blockedIvr = top.length === 0 && intent === 'premium' ? list.find(r => r.ivr != null && r.ivr > CSP_HIGH_IVR)?.ivr ?? null : null;
+    groups.push({ bucket: b, results: top, highIvr: blockedIvr }); // results may be empty: contracts exist but none clear the floors
   }
   return { groups, rest: ordered.filter(r => !picked.has(r)) };
 }

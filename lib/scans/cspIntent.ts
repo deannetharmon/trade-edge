@@ -27,3 +27,7 @@ export function applyIntentToView<T extends { preset: string; deltaMin: number; 
   if (intent !== 'wheel' || handEdited || view.preset === 'all') return view;
   return { ...view, deltaMin: WHEEL_DELTA_BAND[0], deltaMax: WHEEL_DELTA_BAND[1], ivrMax: 100 };
 }
+
+/** IVR-FLAG-0001 (Guac): IVR below 50 is "low" (less premium, score only); above 70 is high risk (size down, no Premium pick). Never a hide. */
+export const CSP_LOW_IVR = 50;
+export const CSP_HIGH_IVR = 70;

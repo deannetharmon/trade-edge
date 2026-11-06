@@ -85,7 +85,7 @@ import { scoreBand, capScoreBandByReturn, returnCapNote, type ScoreBandFloors } 
 import { CspScoreBadge, CspScoreBreakdownPanel, SCORE_BAND_BORDER_L } from '@/features/screener/components/CspScoreBreakdown';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
 import { splitCspByDte, cspSortLabel } from '@/lib/scans/cspDteBuckets';
-import { CSP_INTENT_KEY, DEFAULT_CSP_INTENT, WHEEL_DELTA_BAND, applyIntentToView, parseCspIntent, type CspIntent } from '@/lib/scans/cspIntent';
+import { CSP_INTENT_KEY, CSP_HIGH_IVR, DEFAULT_CSP_INTENT, WHEEL_DELTA_BAND, applyIntentToView, parseCspIntent, type CspIntent } from '@/lib/scans/cspIntent';
 import { CSP_VIEW_PRESETS, DEFAULT_CSP_VIEW_PRESET, cspScanRules, cspViewFromPreset, detectCspPreset, regradeCspResults, cspWithinViewWindow, type CspView, type CspViewPresetKey } from '@/lib/scans/cspView';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified, classifyCspLiquidity } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
@@ -13197,7 +13197,7 @@ export default function Home() {
                                   {split.groups.map(g => (
                                     <div key={g.bucket} className="space-y-2">
                                       <p className={`text-[10px] font-semibold ${th.textFaint}`}>{g.bucket} DTE</p>
-                                      {g.results.length === 0 ? <p className={`text-[10px] ${th.textFaint}`}>No trade clears the floors for this DTE.</p> : g.results.map(renderQualifiedCandidate)}
+                                      {g.results.length === 0 ? <p className={`text-[10px] ${th.textFaint}`}>{g.highIvr != null ? `IVR ${g.highIvr.toFixed(1)}% is above ${CSP_HIGH_IVR}% (high risk): no Premium pick. Switch to Wheel to see candidates.` : 'No trade clears the floors for this DTE.'}</p> : g.results.map(renderQualifiedCandidate)}
                                     </div>
                                   ))}
                                   {split.rest.length > 0 && <p className="pt-2 text-[9px] text-emerald-500 tracking-widest font-medium">ALL OTHERS · BY {cspSortLabel(filteredSort.primary).toUpperCase()}</p>}

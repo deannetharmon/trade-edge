@@ -8,6 +8,7 @@ import {
   CSP_VIEW_PRESETS, cspViewFromPreset, detectCspPreset, regradeCspResult, cspWithinViewWindow, cspScanRules,
 } from '../cspView';
 import type { ScreenResult } from '../types';
+import { DEFAULT_CSP_RULES } from '../constants';
 
 const RAW = {
   pop: 78, otmPct: 9, periodRocPct: 1.8, annualizedRocPct: 21, liquidityClass: 'STRONG' as const,
@@ -30,7 +31,7 @@ function result(delta: number, over: Partial<ScreenResult> = {}): ScreenResult {
 describe('SCAN-SIMPLIFY-0001 cspView', () => {
   it('Balanced view reproduces the scan-time Balanced score exactly', () => {
     const r = result(0.22);
-    const out = regradeCspResult(r, cspViewFromPreset('balanced', 7, 60));
+    const out = regradeCspResult(r, { ...cspViewFromPreset('balanced', 7, 60), ivrMin: DEFAULT_CSP_RULES.IVR_MIN }); // same preferred IVR floor as the scan
     expect(out.bestCandidate!.cspScore).toEqual(r.bestCandidate!.cspScore);
     expect(out.qualified).toBe(true);
   });
@@ -54,14 +55,14 @@ describe('SCAN-SIMPLIFY-0001 cspView', () => {
     expect(loose.bestCandidate!.cspScore!.total).toBeGreaterThan(strict.bestCandidate!.cspScore!.total as number);
   });
 
-  it('IVR above the view cap hides the contract; lifting the cap restores it', () => {
-    const r = result(0.22, { ivr: 80 });
-    const capped = regradeCspResult(r, cspViewFromPreset('balanced', 7, 60));
-    expect(capped.qualified).toBe(false);
-    expect(capped.bestCandidate!.cspMarketQualification).toBe('DISQUALIFIED_IVR');
-    expect(capped.failReasons.some((s) => /exceeds the 70% CSP risk cap/.test(s))).toBe(true);
-    const open = regradeCspResult(r, { ...cspViewFromPreset('balanced', 7, 60), ivrMax: 100 });
-    expect(open.qualified).toBe(true);
+  it('IVR-FLAG-0001: IVR never hides a contract, at any value or setting', () => {
+    const r = result(0.22, { ivr: 89.5 });
+    for (const key of ['conservative', 'balanced', 'opportunity', 'all'] as const) {
+      const out = regradeCspResult(r, cspViewFromPreset(key, 7, 60));
+      expect(out.qualified).toBe(true);
+      expect(out.bestCandidate!.cspMarketQualification).not.toBe('DISQUALIFIED_IVR');
+      expect(out.failReasons.some((s) => /CSP risk cap/.test(s))).toBe(false);
+    }
   });
 
   it('never softens an earnings or liquidity disqualification', () => {

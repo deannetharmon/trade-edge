@@ -66,8 +66,8 @@ export function CspViewControls({ view, th, onPreset, onChange, affordableOnly, 
         <Field label="IVR preferred ≥">
           <DeferredNumberInput aria-label="IVR preferred minimum" value={view.ivrMin} onValueChange={v => onChange({ ivrMin: v })} className={NUM} />
         </Field>
-        <Field label="IVR cap ≤">
-          <DeferredNumberInput aria-label="IVR cap maximum" value={view.ivrMax} onValueChange={v => onChange({ ivrMax: v })} className={NUM} />
+        <Field label="IVR preferred ≤">
+          <DeferredNumberInput aria-label="IVR preferred maximum" value={view.ivrMax} onValueChange={v => onChange({ ivrMax: v })} className={NUM} />
         </Field>
         <Field label="Prefer OI ≥">
           <DeferredNumberInput aria-label="Preferred open interest" value={view.oiMin} onValueChange={v => onChange({ oiMin: v })} className={NUM} />

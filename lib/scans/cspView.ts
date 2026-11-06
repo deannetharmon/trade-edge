@@ -39,9 +39,9 @@ export interface CspViewPreset {
 // Same numbers as the former pre-scan presets. DTE is deliberately NOT part of a preset:
 // the user already chose it in the scan modal and has its own results control.
 export const CSP_VIEW_PRESETS: CspViewPreset[] = [
-  { key: 'conservative', label: 'Conservative', description: 'Lower delta, less event risk, and deeper liquidity.', deltaMin: 0.10, deltaMax: 0.20, ivrMin: 30, ivrMax: 60, oiMin: 1000 }, // PRESETS-0001 (Ian)
-  { key: 'balanced', label: 'Balanced', description: 'Default CSP discovery range.', deltaMin: 0.15, deltaMax: 0.25, ivrMin: 30, ivrMax: 70, oiMin: 500 },
-  { key: 'opportunity', label: 'More opportunities', description: 'Wider delta and IVR.', deltaMin: 0.12, deltaMax: 0.30, ivrMin: 20, ivrMax: 75, oiMin: 250 },
+  { key: 'conservative', label: 'Conservative', description: 'Lower delta, less event risk, and deeper liquidity.', deltaMin: 0.10, deltaMax: 0.20, ivrMin: 50, ivrMax: 60, oiMin: 1000 }, // PRESETS-0001 (Ian)
+  { key: 'balanced', label: 'Balanced', description: 'Default CSP discovery range.', deltaMin: 0.15, deltaMax: 0.25, ivrMin: 50, ivrMax: 70, oiMin: 500 },
+  { key: 'opportunity', label: 'More opportunities', description: 'Wider delta and IVR.', deltaMin: 0.12, deltaMax: 0.30, ivrMin: 50, ivrMax: 75, oiMin: 250 },
   // PRESET-ALL-0001: everything the scan fetched; no delta, IVR or OI limits (liquidity/earnings/capital rules still apply).
   { key: 'all', label: 'All', description: 'Everything the scan fetched, no delta, IVR or OI limits.', deltaMin: 0, deltaMax: 1, ivrMin: 0, ivrMax: 100, oiMin: 0 },
 ];
@@ -91,11 +91,9 @@ export function regradeCspResult(r: ScreenResult, view: CspView): ScreenResult {
   const absDelta = Math.abs(c.shortDelta);
   const deltaPassing = absDelta >= view.deltaMin && absDelta <= view.deltaMax;
 
-  // IVR cap = hide. Only ever escalates a market-qualified contract; an earnings/liquidity/
-  // foundation disqualification is never softened by a looser cap.
-  let market = c.cspMarketQualification;
-  const ivrAboveCap = r.ivr != null && r.ivr > view.ivrMax;
-  if (market && isMarketQualified(market) && ivrAboveCap) market = 'DISQUALIFIED_IVR';
+  // IVR-FLAG-0001 (Dean, Guac): IVR never hides a contract. Below 50 and above 70 are flags and score inputs
+  // (chips on the card; Premium skips a pick above 70). The view's IVR numbers only shape the score.
+  const market = c.cspMarketQualification;
 
   const raw = c.cspScoreInputs;
   const cspScore = raw
@@ -111,10 +109,6 @@ export function regradeCspResult(r: ScreenResult, view: CspView): ScreenResult {
   if (oiWarning) failReasons.push(oiWarning);
   if (!deltaPassing) {
     failReasons.push(`Delta ${absDelta.toFixed(2)} is outside the preferred ${view.deltaMin.toFixed(2)}-${view.deltaMax.toFixed(2)} range`);
-  }
-  if (market === 'DISQUALIFIED_IVR' && c.cspMarketQualification !== 'DISQUALIFIED_IVR') {
-    // AUDIT-TRUTH-0001: the disqualifier leads, so the audit never headlines an advisory (like low OI) as the reason.
-    failReasons.unshift(`IVR ${r.ivr?.toFixed?.(1) ?? '—'}% exceeds the ${view.ivrMax}% CSP risk cap`);
   }
 
   const deltaCheck = deltaPassing

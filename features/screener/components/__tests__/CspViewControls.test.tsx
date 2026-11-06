@@ -42,7 +42,7 @@ describe('SCAN-SIMPLIFY-0001 CspViewControls', () => {
   it('every former pre-scan control has a results-screen input', () => {
     setup();
     for (const label of ['Delta minimum', 'Delta maximum', 'View DTE minimum', 'View DTE maximum',
-      'IVR preferred minimum', 'IVR cap maximum', 'Preferred open interest', 'Return minimum']) {
+      'IVR preferred minimum', 'IVR preferred maximum', 'Preferred open interest', 'Return minimum']) {
       expect(screen.getByLabelText(label)).toBeInTheDocument();
     }
     expect(screen.getByRole('checkbox', { name: /Affordable only/i })).toBeInTheDocument();
@@ -50,7 +50,7 @@ describe('SCAN-SIMPLIFY-0001 CspViewControls', () => {
 
   it('editing a field reports a patch; Affordable only toggles', async () => {
     const p = setup();
-    const cap = screen.getByLabelText('IVR cap maximum');
+    const cap = screen.getByLabelText('IVR preferred maximum');
     await userEvent.clear(cap);
     await userEvent.type(cap, '90');
     expect(p.onChange).toHaveBeenLastCalledWith({ ivrMax: 90 });

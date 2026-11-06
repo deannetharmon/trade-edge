@@ -80,3 +80,24 @@ describe('cspSortLabel (SORT-LABEL-0001)', () => {
     expect(cspSortLabel(undefined)).toBe('score');
   });
 });
+
+describe('IVR-FLAG-0001: high IVR in Best by DTE', () => {
+  const withIvr = (r: any, ivr: number) => ({ ...r, ivr }) as ScreenResult;
+  it('Premium gives no pick above IVR 70 and says why; the contracts stay in the list', () => {
+    const list = [withIvr(mk('A', 28, 90), 89.5), withIvr(mk('B', 28, 60), 89.5)];
+    const { groups, rest } = splitCspByDte(list, 'premium');
+    expect(groups[0].results).toEqual([]);
+    expect(groups[0].highIvr).toBe(89.5);
+    expect(rest).toHaveLength(2);
+  });
+  it('Wheel still picks at the same IVR', () => {
+    const list = [withIvr(mk('A', 28, 90), 89.5)];
+    const { groups } = splitCspByDte(list, 'wheel');
+    expect(groups[0].results).toHaveLength(1);
+    expect(groups[0].highIvr).toBeNull();
+  });
+  it('Premium picks normally at IVR 70 or below', () => {
+    const { groups } = splitCspByDte([withIvr(mk('A', 28, 90), 70)], 'premium');
+    expect(groups[0].results).toHaveLength(1);
+  });
+});
