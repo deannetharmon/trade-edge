@@ -84,6 +84,8 @@ import { calculateCspScore } from '@/lib/scans/cspScore';
 import { scoreBand, capScoreBandByReturn, returnCapNote, type ScoreBandFloors } from '@/lib/scans/scoreBands';
 import { CspScoreBadge, CspScoreBreakdownPanel, SCORE_BAND_BORDER_L } from '@/features/screener/components/CspScoreBreakdown';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
+import { splitCspByDte } from '@/lib/scans/cspDteBuckets';
+import { CSP_INTENT_KEY, DEFAULT_CSP_INTENT, WHEEL_DELTA_BAND, parseCspIntent, type CspIntent } from '@/lib/scans/cspIntent';
 import { CSP_VIEW_PRESETS, DEFAULT_CSP_VIEW_PRESET, cspScanRules, cspViewFromPreset, detectCspPreset, regradeCspResults, cspWithinViewWindow, type CspView, type CspViewPresetKey } from '@/lib/scans/cspView';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified, classifyCspLiquidity } from '@/lib/scans/cspQualification';
 import { buildCspRuleSnapshot } from '@/lib/scans/cspRuleSnapshot';
@@ -9591,6 +9593,10 @@ export default function Home() {
   const [cspGroupByExp, setCspGroupByExpRaw] = useState(false);
   useEffect(() => { try { setCspGroupByExpRaw(localStorage.getItem(LS_CSP_GROUP_EXP) === '1'); } catch {} }, []);
   const setCspGroupByExp = (v: boolean) => { setCspGroupByExpRaw(v); try { localStorage.setItem(LS_CSP_GROUP_EXP, v ? '1' : '0'); } catch {} };
+  // CSP-INTENT-0001: Premium only vs Wheel; remembered per browser.
+  const [cspIntent, setCspIntentRaw] = useState<CspIntent>(DEFAULT_CSP_INTENT);
+  useEffect(() => { try { setCspIntentRaw(parseCspIntent(localStorage.getItem(CSP_INTENT_KEY))); } catch {} }, []);
+  const setCspIntent = (v: CspIntent) => { setCspIntentRaw(v); try { localStorage.setItem(CSP_INTENT_KEY, v); } catch {} };
   const cspSnapshot = activeSession?.requestedStrategy === 'csp' ? activeSession.ruleSnapshot ?? null : null;
   // Only sessions scanned by the simplified flow (preset 'view') are re-graded; older saved sessions display as scanned.
   const cspViewActive = cspSnapshot?.preset === 'view';
@@ -11617,10 +11623,8 @@ export default function Home() {
       : activeSession?.requestedStrategy === 'csp' && activeSession.ruleSnapshot
         ? [activeSession.ruleSnapshot.deltaMin, activeSession.ruleSnapshot.deltaMax]
         : null;
-  // DELTA-VISIBLE-0001: the view's delta band is a preference (regrade -> Caution), never a hide.
-  // It only hides contracts once the user explicitly sets the delta chip.
-  void cspDefaultDeltaRange;
-  const effectiveCspDeltaRange = filterCspDeltaTouched ? filterCspDeltaRange : null;
+  const cspDefaultDeltaRangeForIntent: [number, number] | null = cspView && cspIntent === 'wheel' ? WHEEL_DELTA_BAND : cspDefaultDeltaRange;
+  const effectiveCspDeltaRange = filterCspDeltaTouched ? filterCspDeltaRange : cspDefaultDeltaRangeForIntent;
 
   const applyFilterModeChips = (list: ScreenResult[]) => list.filter(r => {
     if (filterHiddenSymbols.includes(r.symbol)) return false;
@@ -12585,7 +12589,17 @@ export default function Home() {
               {(screenMode === 'filter' || (activeSession?.requestedStrategy === 'csp' && screenMode === 'rank')) && (
                 activeSession?.requestedStrategy === 'csp' ? (
                   <>
-                  <div className="mb-2 flex justify-end"><CardViewToggle /></div>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div role="group" aria-label="Strategy intent" data-testid="csp-intent" className="inline-flex overflow-hidden rounded-lg border border-slate-600 text-xs">
+                      {(['premium', 'wheel'] as const).map(k => (
+                        <button key={k} type="button" aria-pressed={cspIntent === k} onClick={() => setCspIntent(k)}
+                          className={`min-h-[36px] px-3 ${cspIntent === k ? 'bg-emerald-600 text-white' : th.textFaint}`}>
+                          {k === 'premium' ? 'Premium only' : 'Wheel'}
+                        </button>
+                      ))}
+                    </div>
+                    <CardViewToggle />
+                  </div>
                   <CollapsiblePanel id="result-controls-csp" title="Result controls">
                   <section aria-label="CSP result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="csp-result-controls">
                     {/* SCREENER-CSP-CC-FILTER-PARITY-0001 -- CSP previously
@@ -13157,7 +13171,27 @@ export default function Home() {
                             kind="qualified" defaultOpen borderClassName={th.border}>
                             {group.map(renderQualifiedCandidate)}
                           </ExpirationDisclosure>
-                        )) : activeSession?.requestedStrategy === 'csp' ? filteredQualified.map(renderQualifiedCandidate) : activePmccSession && pmccViewMode === 'grouped' ? pmccTickerGroups.map(([symbol, group, bestWidth, bestRoi, bestScore]) => (
+                        )) : activeSession?.requestedStrategy === 'csp' ? (() => {
+                          // CSP-DTE-BEST-0001: best picks per 7/14/21/28/35/42 DTE (income rank), then the rest in current sort.
+                          const split = cspTargetedReturnSort ? { groups: [], rest: filteredQualified } : splitCspByDte(filteredQualified, cspIntent);
+                          return (
+                            <>
+                              {split.groups.length > 0 && (
+                                <div data-testid="csp-best-by-dte" className="space-y-2">
+                                  <p className="text-[9px] text-emerald-500 tracking-widest font-medium">BEST BY DTE · INCOME RANK</p>
+                                  {split.groups.map(g => (
+                                    <div key={g.bucket} className="space-y-2">
+                                      <p className={`text-[10px] font-semibold ${th.textFaint}`}>{g.bucket} DTE</p>
+                                      {g.results.map(renderQualifiedCandidate)}
+                                    </div>
+                                  ))}
+                                  {split.rest.length > 0 && <p className="pt-2 text-[9px] text-emerald-500 tracking-widest font-medium">ALL OTHERS · BY SCORE</p>}
+                                </div>
+                              )}
+                              {split.rest.map(renderQualifiedCandidate)}
+                            </>
+                          );
+                        })() : activePmccSession && pmccViewMode === 'grouped' ? pmccTickerGroups.map(([symbol, group, bestWidth, bestRoi, bestScore]) => (
                           <PmccTickerDisclosure key={symbol} symbol={symbol}
                             price={group[0]?.price ?? null} candidateCount={group.length}
                             bestWidthMinusDebitPct={bestWidth} bestAnnualizedRoiPct={bestRoi} bestScore={bestScore} bestScoreLabel="Best Fit"
