@@ -95,3 +95,22 @@ export function cspSortLabel(primary: string | null | undefined): string {
     default: return 'score';
   }
 }
+
+/**
+ * EMPTY-LINES-0001 (Dean): DTE lines with no pick are not drawn one by one. One short note per reason names them all.
+ * Returns [] when every line has a pick.
+ */
+export function cspEmptyBucketNotes(groups: CspDteBucketGroup[], totalBuckets = groups.length): string[] {
+  const empty = groups.filter(g => g.results.length === 0);
+  if (empty.length === 0) return [];
+  const label = (gs: CspDteBucketGroup[]) => (gs.length === totalBuckets ? 'any DTE' : `${gs.map(g => g.bucket).join(', ')} DTE`);
+  const notes: string[] = [];
+  const ivr = empty.filter(g => g.highIvr != null);
+  const floors = empty.filter(g => g.highIvr == null);
+  if (ivr.length) {
+    const top = Math.max(...ivr.map(g => Number(g.highIvr)));
+    notes.push(`No Premium pick at ${label(ivr)}: IVR ${top.toFixed(1)}% is above ${CSP_HIGH_IVR}% (high risk). Switch to Wheel to see candidates.`);
+  }
+  if (floors.length) notes.push(`No trade clears the floors at ${label(floors)}.`);
+  return notes;
+}

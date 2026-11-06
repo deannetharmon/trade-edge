@@ -101,3 +101,25 @@ describe('IVR-FLAG-0001: high IVR in Best by DTE', () => {
     expect(groups[0].results).toHaveLength(1);
   });
 });
+
+describe('cspEmptyBucketNotes (EMPTY-LINES-0001)', () => {
+  it('one note, not one per DTE, when every line is blocked by high IVR', async () => {
+    const { cspEmptyBucketNotes } = await import('../cspDteBuckets');
+    const g = (bucket: number, highIvr: number | null = 88.5) => ({ bucket, results: [], highIvr });
+    expect(cspEmptyBucketNotes([g(7), g(14), g(21)])).toEqual([
+      'No Premium pick at any DTE: IVR 88.5% is above 70% (high risk). Switch to Wheel to see candidates.',
+    ]);
+  });
+  it('names the empty DTEs when only some lines are empty, and separates the floors reason', async () => {
+    const { cspEmptyBucketNotes } = await import('../cspDteBuckets');
+    const full = { bucket: 14, results: [{} as any], highIvr: null };
+    const notes = cspEmptyBucketNotes([{ bucket: 7, results: [], highIvr: 88.5 }, full, { bucket: 28, results: [], highIvr: null }]);
+    expect(notes).toHaveLength(2);
+    expect(notes[0]).toMatch(/7 DTE/);
+    expect(notes[1]).toBe('No trade clears the floors at 28 DTE.');
+  });
+  it('is empty when every line has a pick', async () => {
+    const { cspEmptyBucketNotes } = await import('../cspDteBuckets');
+    expect(cspEmptyBucketNotes([{ bucket: 7, results: [{} as any], highIvr: null }])).toEqual([]);
+  });
+});
