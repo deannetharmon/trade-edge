@@ -2,6 +2,8 @@
 
 // RSI-ENTRY-0001 slice A1b: getTrend now reads its bars through the shared memo. This pins its observable behavior
 // (same request, same error text, same TrendResult) against output captured from the pre-change implementation.
+// RSI-CARD-0001: the golden rsi14 was re-captured on purpose (Wilder on completed bars; plain-average before) and
+// rsi14Known added. Every other field is unchanged.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getTrend } from '../trend';

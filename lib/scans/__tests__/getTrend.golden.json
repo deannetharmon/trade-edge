@@ -26,7 +26,7 @@
    "momentum40": 0.1113951506700751,
    "momentum60": 0.17185330392877554,
    "momentum90": 0.24648132059079067,
-   "rsi14": 55.82608695652176,
+   "rsi14": 64.02059016796106,
    "ma20Slope": 0.05205664344221259,
    "ma50Slope": 0.1477601186407374,
    "range60": 0.1935136923967898,
@@ -48,7 +48,8 @@
    "brokePriorSupport": false,
    "brokePriorResistance": true,
    "upsideExhausted": false,
-   "downsideExhausted": false
+   "downsideExhausted": false,
+   "rsi14Known": true
   },
   "reason": "BPS CONTINUATION: score 139, momentum 33, MA 30, slope 22, structure/regime 54."
  },
@@ -79,7 +80,7 @@
    "momentum40": 0.1113951506700751,
    "momentum60": 0.17185330392877554,
    "momentum90": 0.24648132059079067,
-   "rsi14": 55.82608695652176,
+   "rsi14": 64.02059016796106,
    "ma20Slope": 0.05205664344221259,
    "ma50Slope": 0.1477601186407374,
    "range60": 0.1935136923967898,
@@ -101,7 +102,8 @@
    "brokePriorSupport": false,
    "brokePriorResistance": true,
    "upsideExhausted": false,
-   "downsideExhausted": false
+   "downsideExhausted": false,
+   "rsi14Known": true
   },
   "reason": "BPS CONTINUATION: score 139, momentum 33, MA 30, slope 22, structure/regime 54."
  }

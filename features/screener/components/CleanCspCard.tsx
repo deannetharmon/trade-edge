@@ -38,12 +38,12 @@ export function CleanCspLine({
   expanded: boolean;
 }) {
   const price = result.price;
-  const beDist = breakevenDistancePct({ price, breakeven: c.breakeven, strike: c.shortStrike, creditPerShare: c.credit });
-  const credit = (c.totalCredit ?? c.credit) * 100;
+  const beDist = breakevenDistancePct({ price, breakeven: c.breakeven, strike: c.shortStrike, creditPerShare: c.credit / 100 });
+  const credit = c.totalCredit ?? c.credit; // already dollars for the whole position, not per share
   const hardFails = result.failReasons.filter(r => !CAPACITY.test(r));
   const funding = c.cspFunding;
   const unfunded = funding?.status === 'not_fundable' || (c.capitalBlocked && !funding);
-  const availableText = funding?.usableCash != null ? `${fmtMoney0(Math.max(0, funding.usableCash))} available` : summarizeFailReason(c.capitalWarning ?? 'Not funded');
+  const availableText = funding?.room != null ? `${fmtMoney0(funding.room)} available` : summarizeFailReason(c.capitalWarning ?? 'Not funded');
   return (
     <div data-testid="clean-csp-line" className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
       <span className="w-16 shrink-0 text-sm font-bold">

@@ -1,5 +1,7 @@
 // lib/scans/trend.ts
 // Mechanically extracted from app/screener/page.tsx (TE-0005A). Verbatim — not rewritten.
+import { completedDailyCloses } from '@/lib/indicators/completedBars';
+import { rsiSeries } from '@/lib/indicators/rsi';
 import type { TrendResult } from './types';
 import { normalizeTickerToken } from './scan-utils';
 import { YAHOO_INDEX_CHART_MAP } from './constants';
@@ -37,27 +39,16 @@ export async function getTrend(symbol: string, isIndexOrEtf?: boolean): Promise<
     const sign = value >= 0 ? 1 : -1;
     return sign * Math.min(1, Math.abs(value) / fullAt) * maxPoints;
   };
-  const calcRsi = (values: number[], period = 14): number | null => {
-    if (values.length < period + 1) return null;
-
-    let gains = 0;
-    let losses = 0;
-    for (let i = values.length - period; i < values.length; i++) {
-      const change = values[i] - values[i - 1];
-      if (change >= 0) gains += change;
-      else losses += Math.abs(change);
-    }
-
-    const avgGain = gains / period;
-    const avgLoss = losses / period;
-    if (avgLoss === 0) return 100;
-
-    const rs = avgGain / avgLoss;
-    return 100 - (100 / (1 + rs));
-  };
-
   const currentPrice = closes[closes.length - 1];
-  const rsi14 = calcRsi(closes, 14) ?? 50;
+  // RSI-CARD-0001: Wilder-smoothed RSI(14) on COMPLETED daily bars only, the same calculation the RSI entry gate uses.
+  // (This used to be a plain 14-day average over every returned bar, including the still-forming one, so the card
+  // disagreed with the chart and the gate.) When it cannot be computed the scoring value stays a neutral 50 and
+  // rsi14Known is false, so displays show "—" instead of a made-up 50.
+  const rsiCloses = completedDailyCloses(bars);
+  const rsiAll = rsiCloses ? rsiSeries(rsiCloses) : null;
+  const rsiLatest = rsiAll && rsiAll.length > 0 ? rsiAll[rsiAll.length - 1] : null;
+  const rsi14 = rsiLatest ?? 50;
+  const rsi14Known = rsiLatest != null;
   const ma20 = avg(closes.slice(-20));
   const ma50 = avg(closes.slice(-50));
   const ma200 = closes.length >= 200 ? avg(closes.slice(-200)) : avg(closes);
@@ -205,6 +196,7 @@ export async function getTrend(symbol: string, isIndexOrEtf?: boolean): Promise<
     momentum60,
     momentum90,
     rsi14,
+    rsi14Known,
     ma20Slope,
     ma50Slope,
     range60,

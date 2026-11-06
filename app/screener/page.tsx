@@ -254,6 +254,7 @@ import { CardViewToggle } from '@/features/screener/components/CardViewToggle';
 import { useCardView } from '@/features/screener/lib/useCardView';
 import { allocationFor, type AllocBook } from '@/lib/scans/cleanCard';
 import { buildAllocBook } from '@/lib/scans/cleanCardBook';
+import { trendRsiForDisplay } from '@/lib/scans/trendRsi';
 import { evaluateCspIvr } from '@/lib/scans/cspIvrPolicy';
 import { summarizeCspResults } from '@/lib/screener/scanConfig/cspRegistry';
 import { summarizeCcResults } from '@/lib/screener/scanConfig/ccRegistry';
@@ -6287,7 +6288,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
 function ccCrownEligible(result: ScreenResult | undefined): boolean {
   if (!result || result.strategy !== 'CC') return true;
   const c = result.bestCandidate;
-  return ccRsiChip({ rsi: result.trendResult?.metrics?.rsi14 ?? null, price: result.price, costBasis: c?.ccCostBasis ?? null, cutoff: readCcRsiCutoff() }).state === 'ready';
+  return ccRsiChip({ rsi: trendRsiForDisplay(result.trendResult?.metrics), price: result.price, costBasis: c?.ccCostBasis ?? null, cutoff: readCcRsiCutoff() }).state === 'ready';
 }
 
 function ResultCard(props: ResultCardProps) {
@@ -6540,9 +6541,9 @@ const strategyScores = useMemo(() => {
   const hasPastEarnings = result.earningsDate && earningsIsPastNy(result.earningsDate);
   const [ccRsiCutoff] = useCcRsiCutoff();
   const rsi14 =
-    result.trendResult?.metrics?.rsi14 ??
-    cachedEntry?.trendResult?.metrics?.rsi14 ??
-    (cachedEntry as any)?.metrics?.rsi14 ??
+    trendRsiForDisplay(result.trendResult?.metrics) ??
+    trendRsiForDisplay(cachedEntry?.trendResult?.metrics) ??
+    trendRsiForDisplay((cachedEntry as any)?.metrics) ??
     null;
 
   const scoreBorderL = qualDerivation?.state === 'disqualified' ? 'border-l-4 border-l-red-500'

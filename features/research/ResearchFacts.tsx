@@ -10,6 +10,7 @@ import type { ResearchFacts as Facts } from '@/lib/research/researchFacts';
 import type { ChartLevel } from '@/lib/research/yahooChart';
 import { strikeContext } from '@/lib/research/techFacts';
 import type { TrendResult } from '@/lib/scans/types';
+import { trendRsiForDisplay } from '@/lib/scans/trendRsi';
 import type { THEMES, Theme } from '@/lib/theme';
 
 export interface BrokerMetrics {
@@ -97,7 +98,7 @@ export function ResearchFacts({ symbol, th, deps, onLevels, onGaps }: Props) {
         : <dl className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="facts-trend">
             <Cell th={th} label="Trend (screener read)" value={`${trend.trend} · ${trend.confidence.toFixed(0)}%${trend.subtype && trend.subtype !== 'UNKNOWN' ? ` · ${trend.subtype.toLowerCase()}` : ''}`} hint={trend.reason} />
             <Cell th={th} label="20 / 50 / 200-day avg" value={`${fixed(trend.ma20, 2)} / ${fixed(trend.ma50, 2)} / ${fixed(trend.ma200 ?? null, 2)}`} />
-            <Cell th={th} label="RSI (14)" value={fixed(trend.metrics?.rsi14, 0)} />
+            <Cell th={th} label="RSI (14)" value={fixed(trendRsiForDisplay(trend.metrics), 0)} />
             <Cell th={th} label="Price vs 50-day avg" value={fixed(trend.metrics?.distFromMa50 != null ? trend.metrics.distFromMa50 * 100 : null, 1, '%')} />
           </dl>}
       {trend && trend.trend !== 'unknown' && (

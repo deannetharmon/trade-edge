@@ -220,6 +220,8 @@ export interface TrendResult {
     momentum60: number;
     momentum90: number;
     rsi14: number;
+    /** False when RSI could not be computed; rsi14 is then a neutral 50 used only so scoring keeps working. Never display it. */
+    rsi14Known?: boolean;
     ma20Slope: number;
     ma50Slope: number;
     range60: number;

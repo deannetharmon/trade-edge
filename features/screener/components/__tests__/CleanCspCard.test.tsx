@@ -10,7 +10,7 @@ import { cspViewFromPreset } from '@/lib/scans/cspView';
 
 const th = { text: 'text-white', textFaint: 'text-gray-500', label: 'text-gray-400', border: 'border-gray-700' };
 const c: any = {
-  strategy: 'CSP', shortStrike: 90, expiration: 'Nov 13', dte: 7, credit: 0.11, annualizedRoc: 6, pop: 87, shortOI: 421,
+  strategy: 'CSP', shortStrike: 90, expiration: 'Nov 13', dte: 7, credit: 11, annualizedRoc: 6, pop: 87, shortOI: 421,
   requiredCash: 9000, breakeven: 89.89, shortDelta: 0.13, shortBid: 0.07, shortAsk: 0.15, roc: 0.1, expectedMove: 3.19,
   cspOiPassing: false,
 };
@@ -48,7 +48,7 @@ describe('CleanCspLine', () => {
   });
   it('shows a red Fails chip only on a hard-rule miss, and a funding chip when unfunded', () => {
     render(<CleanCspLine {...base} result={{ ...result, qualified: false, failReasons: ['Low IVR 22.0%'] }}
-      c={{ ...c, cspFunding: { status: 'not_fundable', usableCash: 0 } }} />);
+      c={{ ...c, cspFunding: { status: 'not_fundable', usableCash: 23938, room: 0 } }} />);
     expect(screen.getByTestId('clean-fails')).toHaveTextContent('Fails: Low IVR 22.0%');
     expect(screen.getByTestId('clean-unfunded')).toHaveTextContent('$0 available');
   });

@@ -39,7 +39,7 @@ export interface CspViewPreset {
 // Same numbers as the former pre-scan presets. DTE is deliberately NOT part of a preset:
 // the user already chose it in the scan modal and has its own results control.
 export const CSP_VIEW_PRESETS: CspViewPreset[] = [
-  { key: 'conservative', label: 'Conservative', description: 'Lower delta and stronger entry cushion.', deltaMin: 0.12, deltaMax: 0.20, ivrMin: 30, ivrMax: 70, oiMin: 500 },
+  { key: 'conservative', label: 'Conservative', description: 'Lower delta, less event risk, and deeper liquidity.', deltaMin: 0.10, deltaMax: 0.20, ivrMin: 30, ivrMax: 60, oiMin: 1000 }, // PRESETS-0001 (Ian)
   { key: 'balanced', label: 'Balanced', description: 'Default CSP discovery range.', deltaMin: 0.15, deltaMax: 0.25, ivrMin: 30, ivrMax: 70, oiMin: 500 },
   { key: 'opportunity', label: 'More opportunities', description: 'Wider delta and IVR.', deltaMin: 0.12, deltaMax: 0.30, ivrMin: 20, ivrMax: 75, oiMin: 250 },
 ];
