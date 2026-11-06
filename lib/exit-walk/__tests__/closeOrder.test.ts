@@ -162,8 +162,14 @@ describe('runExitWalkGate: the existing close-order safety gate on every walk pr
     expect(result.ok).toBe(false);
     expect(exitWalkGateRefusal({ pos: TQQQ_POS, identity: TQQQ_ID, side: 'buy', price_c: 500, quote: q(830, 950), nowMs: NOW })).toMatch(/MATERIAL_PNL_DEVIATION/);
   });
-  it('blocks a very wide market whose mid is more than 30% from the marketable side (safe failure, not a bypass)', () => {
-    expect(exitWalkGateRefusal({ pos: MRNA_POS, identity: MRNA_ID, side: 'sell', price_c: 200, quote: q(100, 300), nowMs: NOW })).toMatch(/MATERIAL_PNL_DEVIATION/);
+  it('WALK-WIDE-MARKET-0001: passes a price inside a very wide market (MRNA 0.05 x 0.81, start at the mid)', () => {
+    const base = { pos: MRNA_POS, identity: MRNA_ID, side: 'sell' as const, quote: q(5, 81) };
+    expect(exitWalkGateRefusal({ ...base, price_c: 43, nowMs: NOW })).toBeNull();
+    expect(exitWalkGateRefusal({ ...base, price_c: 5, nowMs: NOW })).toBeNull();
+  });
+  it('still blocks a price outside the live spread (selling below the bid, buying above the ask)', () => {
+    expect(exitWalkGateRefusal({ pos: MRNA_POS, identity: MRNA_ID, side: 'sell', price_c: 1, quote: q(100, 300), nowMs: NOW })).toMatch(/MATERIAL_PNL_DEVIATION/);
+    expect(exitWalkGateRefusal({ pos: TQQQ_POS, identity: TQQQ_ID, side: 'buy', price_c: 1500, quote: q(830, 950), nowMs: NOW })).toMatch(/MATERIAL_PNL_DEVIATION/);
   });
   it('blocks a missing or old quote', () => {
     expect(exitWalkGateRefusal({ pos: TQQQ_POS, identity: TQQQ_ID, side: 'buy', price_c: 890, quote: q(830, 950, new Date(NOW - 20 * 60000).toISOString()), nowMs: NOW })).not.toBeNull();

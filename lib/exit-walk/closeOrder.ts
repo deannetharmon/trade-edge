@@ -187,6 +187,7 @@ export function runExitWalkGate(input: ExitWalkGateInput): SafetyCheckResult {
     nowMs,
     actualOrder,
     displayedExpectedPnlDollars: expectedClosePnlDollars(identity, side, points),
+    allowPriceInsideSpread: true, // WALK-WIDE-MARKET-0001
   });
 }
 

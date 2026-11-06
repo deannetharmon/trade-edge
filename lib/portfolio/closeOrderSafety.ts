@@ -546,6 +546,13 @@ export interface LiveCloseOrderSafetyInput {
   pnlToleranceDollars?: number;
   /** Defaults to 0.30 (30%). */
   materialDeviationThresholdPct?: number;
+  /**
+   * WALK-WIDE-MARKET-0001: the price walk starts at the mid by design, so on a wide market (MRNA 0.05 x 0.81) the mid sits
+   * far from the marketable side and the drift check below refused every walk. When true, a price INSIDE the live
+   * bid-ask is sane by construction (it cannot fill worse than the market) and skips the drift check; a price outside
+   * the spread is still checked as before. Only the exit walk sets it.
+   */
+  allowPriceInsideSpread?: boolean;
 }
 
 const DEFAULT_MAX_QUOTE_AGE_MS = 5 * 60 * 1000;
@@ -713,7 +720,12 @@ export function runLiveCloseOrderSafetyGate(input: LiveCloseOrderSafetyInput): S
   // gated behind an optional caller-supplied value), derived from the same
   // required quote evidence validated above. Resting stops/targets are exempt
   // (see above).
-  if (!isRestingOrder && marketablePricePoints != null && marketablePricePoints > 0) {
+  const insideSpread = input.allowPriceInsideSpread === true && input.quote != null
+    && input.quote.netBid != null && input.quote.netAsk != null
+    && Number.isFinite(input.quote.netBid) && Number.isFinite(input.quote.netAsk)
+    && plan.closePricePointsPerUnit >= Math.min(Math.abs(input.quote.netBid), Math.abs(input.quote.netAsk)) - 1e-9
+    && plan.closePricePointsPerUnit <= Math.max(Math.abs(input.quote.netBid), Math.abs(input.quote.netAsk)) + 1e-9;
+  if (!isRestingOrder && !insideSpread && marketablePricePoints != null && marketablePricePoints > 0) {
     const threshold = input.materialDeviationThresholdPct ?? DEFAULT_MATERIAL_DEVIATION_THRESHOLD;
     const pctFromMarketable = Math.abs(plan.closePricePointsPerUnit - marketablePricePoints) / marketablePricePoints;
     if (pctFromMarketable > threshold) {
