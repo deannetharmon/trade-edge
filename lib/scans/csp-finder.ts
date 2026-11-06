@@ -170,6 +170,8 @@ function marketQualificationFor(
   if (params.earningsMarketDisqualified || earningsWithinExpiration === true) return 'DISQUALIFIED_EARNINGS';
   if (params.ivrMarketDisqualified) return 'DISQUALIFIED_IVR';
   if (params.ivrUnavailableDisqualified) return 'DISQUALIFIED_IVR_UNAVAILABLE';
+  // OI-ZERO-GATE-0001 (Dean): open interest of exactly 0 means no market exists, so it disqualifies.
+  if (c.openInterest === 0) return 'DISQUALIFIED_POOR_LIQUIDITY';
   // LIQUIDITY-WARN-0001 (Dean): spread width is a warning, never a gate. POOR and BORDERLINE both stay visible as
   // qualified-with-warning, and neither can be a Best Opportunity (that needs plain QUALIFIED).
   if (c.liquidityClass === 'POOR' || c.liquidityClass === 'BORDERLINE') return 'QUALIFIED_WITH_LIQUIDITY_WARNING';
@@ -214,7 +216,9 @@ function buildSpreadCandidate(
       ? 'Capital could not be verified for the selected account.'
       : null;
 
-  const liquidityReason = c.liquidityClass === 'POOR'
+  const liquidityReason = c.openInterest === 0
+    ? 'No open interest: there is no market in this contract.'
+    : c.liquidityClass === 'POOR'
     ? `Bid/ask width $${c.bidAskWidth.toFixed(2)} (${c.bidAskWidthPct.toFixed(1)}% of mid) exceeds the poor-liquidity threshold.`
     : null;
   const oiWarning = c.oiPassing ? null : `OI ${c.openInterest} is below the preferred minimum of ${searchRules.oiMin}.`;

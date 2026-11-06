@@ -186,6 +186,16 @@ describe('findAllCsp — SQ-0001A foundation gate (CSP-WORKFLOW-RECONCILE-0002)'
     expect(result.results[0].marketQualification).toBe('QUALIFIED_WITH_LIQUIDITY_WARNING');
   });
 
+  it('OI-ZERO-GATE-0001: open interest of exactly 0 is disqualified, with a clear reason', () => {
+    const exp = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    const chain = { expirations: [exp], chains: { [exp]: [
+      { strikePrice: 100, expirationDate: exp, optionType: 'P' as const, delta: -0.20, bid: 1.00, ask: 1.02, mid: 1.01, openInterest: 0, occSymbol: 'ZERO_OCC' },
+    ] } };
+    const result = findAllCsp(chain, 100, { rules: DEFAULT_CSP_RULES, contracts: 1, underlyingSymbol: 'TEST', foundationEligibility: SUPPORTIVE });
+    expect(result.results[0].marketQualification).toBe('DISQUALIFIED_POOR_LIQUIDITY');
+    expect(result.results[0].candidate.cspLiquidityReason).toMatch(/No open interest/);
+  });
+
   it('candidate identity and rule-snapshot-relevant fields remain intact regardless of foundation-gate outcome', () => {
     const rules = DEFAULT_CSP_RULES;
     const gated = findAllCsp(richCandidateChain(), 100, {
