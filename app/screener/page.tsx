@@ -230,7 +230,7 @@ import { FilteredResultControls, type FilterStrategy } from '@/features/screener
 import { pickTopOpportunityIds } from '@/features/screener/components/BestOpportunitiesShortlist';
 import { TopOpportunityFrame } from '@/features/screener/components/TopOpportunityFrame';
 import { RankedListHeader } from '@/features/screener/components/RankedListHeader';
-import { buildBestOpportunityRows, excludeHiddenSymbols } from '@/features/screener/lib/bestOpportunityRows';
+import { buildBestOpportunityRows, excludeHiddenSymbols, createRankFrameClaimer } from '@/features/screener/lib/bestOpportunityRows';
 import { DisqualifiedSection } from '@/features/screener/components/DisqualifiedSection';
 import { CspFundamentalsRow } from '@/features/screener/components/CspFundamentalsRow';
 import { SymbolOutcomesDisclosure } from '@/features/screener/components/SymbolOutcomesDisclosure';
@@ -13420,6 +13420,7 @@ export default function Home() {
                 const rankTopIds = pickTopOpportunityIds(rankTopRows);
                 const rankTopRankByKey = new Map(rankTopRows.map((row, index) => [row.resultKey, index + 1] as const).filter(([, n]) => rankTopRows[n - 1] != null && rankTopIds.has(rankTopRows[n - 1].candidateId)));
                 const rankTopRowByKey = new Map(rankTopRows.map(row => [row.resultKey, row] as const));
+                const claimRankFrame = createRankFrameClaimer(rankTopRankByKey); // RANK-FRAME-0001
                 // Post-scan, client-side filters over the already-fetched `results`
                 // array — same approach Targeted mode uses, so loosening a filter
                 // never requires a rescan. Order: DTE -> strategy -> POP -> OTM ->
@@ -13646,6 +13647,8 @@ export default function Home() {
                       // lib/scans/ranked-scan-runner.ts, not assumed).
                       const trendAligned = r.trendResult?.strategy === r.strategy;
                       const trendAgainst = r.trendResult != null && r.trendResult.strategy !== 'NO_TRADE' && !trendAligned && r.strategy !== 'IC' && (r.strategy === 'BPS' || r.strategy === 'BCS');
+                      const topKey = r.candidateId ?? `${r.symbol}-${r.strategy}`;
+                      const frameRank = claimRankFrame(topKey, r.qualified === true);
                       return (
                         <div data-testid="ranked-card" key={`${r.symbol}-${r.strategy}-${r.bestCandidate?.expiration}-${r.bestCandidate?.shortStrike}-${r.bestCandidate?.longStrike}-${r.bestCandidate?.shortCallStrike ?? ''}-${r.bestCandidate?.longCallStrike ?? ''}`} className="flex items-start gap-2">
                           <div className="flex flex-col items-center gap-1 shrink-0 mt-3">
@@ -13657,7 +13660,7 @@ export default function Home() {
                             {trendAgainst && <span className="text-[8px] text-amber-400" title="Against trend">⚠</span>}
                           </div>
                           <div className="flex-1">
-                            <TopOpportunityFrame rank={rankTopRankByKey.get(r.candidateId ?? `${r.symbol}-${r.strategy}`) ?? null} row={rankTopRowByKey.get(r.candidateId ?? `${r.symbol}-${r.strategy}`) ?? null} borderClassName={th.border} textFaintClassName={th.textFaint} textMutedClassName={th.textMuted}>
+                            <TopOpportunityFrame rank={frameRank} row={frameRank != null ? rankTopRowByKey.get(topKey) ?? null : null} borderClassName={th.border} textFaintClassName={th.textFaint} textMutedClassName={th.textMuted}>
                             <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} onTradeCsp={setCspTradeResult} onTradeCc={openCcFromScan} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} allocBook={allocBook} />
                             {(rankOiByResult.get(r)?.protectiveLegWarnings ?? []).map((w, wi) => (
                               <p key={wi} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">

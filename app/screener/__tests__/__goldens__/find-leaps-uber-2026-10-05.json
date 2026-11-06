@@ -15,7 +15,7 @@
   {
    "symbol": "UBER",
    "expiration": "2027-12-17",
-   "dte": 437,
+   "dte": 438,
    "strike": 35,
    "delta": 0.914551103,
    "openInterest": 78,
@@ -33,7 +33,7 @@
   {
    "symbol": "UBER",
    "expiration": "2027-12-17",
-   "dte": 437,
+   "dte": 438,
    "strike": 37.5,
    "delta": 0.898970736,
    "openInterest": 17,
@@ -51,7 +51,7 @@
   {
    "symbol": "UBER",
    "expiration": "2027-12-17",
-   "dte": 437,
+   "dte": 438,
    "strike": 40,
    "delta": 0.882828942,
    "openInterest": 179,
@@ -69,7 +69,7 @@
   {
    "symbol": "UBER",
    "expiration": "2027-12-17",
-   "dte": 437,
+   "dte": 438,
    "strike": 42.5,
    "delta": 0.865956733,
    "openInterest": 1149,
@@ -87,7 +87,7 @@
   {
    "symbol": "UBER",
    "expiration": "2027-12-17",
-   "dte": 437,
+   "dte": 438,
    "strike": 45,
    "delta": 0.848198261,
    "openInterest": 383,
@@ -105,7 +105,7 @@
   {
    "symbol": "UBER",
    "expiration": "2027-12-17",
-   "dte": 437,
+   "dte": 438,
    "strike": 47.5,
    "delta": 0.829330945,
    "openInterest": 103,
@@ -123,7 +123,7 @@
   {
    "symbol": "UBER",
    "expiration": "2027-12-17",
-   "dte": 437,
+   "dte": 438,
    "strike": 50,
    "delta": 0.808735892,
    "openInterest": 477,
@@ -141,7 +141,7 @@
   {
    "symbol": "UBER",
    "expiration": "2027-12-17",
-   "dte": 437,
+   "dte": 438,
    "strike": 55,
    "delta": 0.761357405,
    "openInterest": 253,
@@ -159,7 +159,7 @@
   {
    "symbol": "UBER",
    "expiration": "2027-12-17",
-   "dte": 437,
+   "dte": 438,
    "strike": 60,
    "delta": 0.709899274,
    "openInterest": 544,
@@ -177,7 +177,7 @@
   {
    "symbol": "UBER",
    "expiration": "2027-12-17",
-   "dte": 437,
+   "dte": 438,
    "strike": 62.5,
    "delta": 0.682482834,
    "openInterest": 180,
@@ -195,7 +195,7 @@
   {
    "symbol": "UBER",
    "expiration": "2027-12-17",
-   "dte": 437,
+   "dte": 438,
    "strike": 65,
    "delta": 0.654104349,
    "openInterest": 431,
@@ -213,7 +213,7 @@
   {
    "symbol": "UBER",
    "expiration": "2027-12-17",
-   "dte": 437,
+   "dte": 438,
    "strike": 67.5,
    "delta": 0.625696246,
    "openInterest": 341,
@@ -231,7 +231,7 @@
   {
    "symbol": "UBER",
    "expiration": "2028-01-21",
-   "dte": 472,
+   "dte": 473,
    "strike": 35,
    "delta": 0.914551093,
    "openInterest": 152,
@@ -249,7 +249,7 @@
   {
    "symbol": "UBER",
    "expiration": "2028-01-21",
-   "dte": 472,
+   "dte": 473,
    "strike": 37.5,
    "delta": 0.898970727,
    "openInterest": 32,
@@ -267,7 +267,7 @@
   {
    "symbol": "UBER",
    "expiration": "2028-01-21",
-   "dte": 472,
+   "dte": 473,
    "strike": 40,
    "delta": 0.882191402,
    "openInterest": 610,
@@ -285,7 +285,7 @@
   {
    "symbol": "UBER",
    "expiration": "2028-01-21",
-   "dte": 472,
+   "dte": 473,
    "strike": 42.5,
    "delta": 0.864574019,
    "openInterest": 400,
@@ -303,7 +303,7 @@
   {
    "symbol": "UBER",
    "expiration": "2028-01-21",
-   "dte": 472,
+   "dte": 473,
    "strike": 45,
    "delta": 0.845415141,
    "openInterest": 157,
@@ -321,7 +321,7 @@
   {
    "symbol": "UBER",
    "expiration": "2028-01-21",
-   "dte": 472,
+   "dte": 473,
    "strike": 47.5,
    "delta": 0.825396426,
    "openInterest": 155,
@@ -339,7 +339,7 @@
   {
    "symbol": "UBER",
    "expiration": "2028-01-21",
-   "dte": 472,
+   "dte": 473,
    "strike": 50,
    "delta": 0.804421018,
    "openInterest": 1415,
@@ -357,7 +357,7 @@
   {
    "symbol": "UBER",
    "expiration": "2028-01-21",
-   "dte": 472,
+   "dte": 473,
    "strike": 55,
    "delta": 0.75916554,
    "openInterest": 469,
@@ -375,7 +375,7 @@
   {
    "symbol": "UBER",
    "expiration": "2028-01-21",
-   "dte": 472,
+   "dte": 473,
    "strike": 60,
    "delta": 0.709710367,
    "openInterest": 1820,
@@ -393,7 +393,7 @@
   {
    "symbol": "UBER",
    "expiration": "2028-01-21",
-   "dte": 472,
+   "dte": 473,
    "strike": 62.5,
    "delta": 0.683474841,
    "openInterest": 128,
@@ -411,7 +411,7 @@
   {
    "symbol": "UBER",
    "expiration": "2028-01-21",
-   "dte": 472,
+   "dte": 473,
    "strike": 65,
    "delta": 0.656542132,
    "openInterest": 1046,
@@ -429,7 +429,7 @@
   {
    "symbol": "UBER",
    "expiration": "2028-01-21",
-   "dte": 472,
+   "dte": 473,
    "strike": 67.5,
    "delta": 0.629805613,
    "openInterest": 1323,

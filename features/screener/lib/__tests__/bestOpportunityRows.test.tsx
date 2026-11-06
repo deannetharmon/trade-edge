@@ -258,3 +258,14 @@ describe('excludeHiddenSymbols (FILTER-LAYOUT-0001: Best Opportunities obeys the
     expect(excludeHiddenSymbols(recs, ['SOXL', 'TQQQ'])).toEqual([]);
   });
 });
+
+describe('createRankFrameClaimer (RANK-FRAME-0001)', () => {
+  it('gives a shared key its rank once, to the first qualified row only', async () => {
+    const { createRankFrameClaimer } = await import('../bestOpportunityRows');
+    const claim = createRankFrameClaimer(new Map([['TQQQ-BCS', 3]]));
+    expect(claim('TQQQ-BCS', false)).toBeNull(); // a disqualified row never wears the tab
+    expect(claim('TQQQ-BCS', true)).toBe(3);
+    expect(claim('TQQQ-BCS', true)).toBeNull(); // a second row with the same key does not
+    expect(claim('OTHER', true)).toBeNull(); // not a top pick
+  });
+});

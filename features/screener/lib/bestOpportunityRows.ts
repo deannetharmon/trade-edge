@@ -233,3 +233,18 @@ export function excludeHiddenSymbols<T extends { symbol: string }>(
   const hidden = new Set(hiddenSymbols);
   return recommendations.filter(rec => !hidden.has(rec.symbol));
 }
+
+/**
+ * RANK-FRAME-0001 (Dean, TQQQ Ranked scan): three rows all wore "BEST OPPORTUNITY #3", two of them disqualified. The
+ * lookup key (symbol-strategy) is shared by every row of that symbol and strategy, so one rank was stamped on all of
+ * them. The claimer hands a key's rank to the FIRST qualified row only; every other row gets none.
+ */
+export function createRankFrameClaimer(rankByKey: Map<string, number>) {
+  const claimed = new Set<string>();
+  return (key: string, qualified: boolean): number | null => {
+    const rank = rankByKey.get(key);
+    if (!qualified || rank == null || claimed.has(key)) return null;
+    claimed.add(key);
+    return rank;
+  };
+}
