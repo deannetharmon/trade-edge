@@ -80,3 +80,16 @@ export function splitCspByDte(ordered: ScreenResult[], intent: CspIntent = 'prem
   }
   return { groups, rest: ordered.filter(r => !picked.has(r)) };
 }
+
+/** SORT-LABEL-0001: the words for the active Sort chip, so list headings never claim an order the list does not have. */
+export function cspSortLabel(primary: string | null | undefined): string {
+  switch (primary) {
+    case 'rocPct': return 'cash return';
+    case 'creditDollars': return 'premium $';
+    case 'otmPct': return 'OTM %';
+    case 'pop': return 'POP est.';
+    case 'relevantLegOI': return 'put OI';
+    case 'dte': return 'DTE';
+    default: return 'score';
+  }
+}

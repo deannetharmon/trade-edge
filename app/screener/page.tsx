@@ -84,7 +84,7 @@ import { calculateCspScore } from '@/lib/scans/cspScore';
 import { scoreBand, capScoreBandByReturn, returnCapNote, type ScoreBandFloors } from '@/lib/scans/scoreBands';
 import { CspScoreBadge, CspScoreBreakdownPanel, SCORE_BAND_BORDER_L } from '@/features/screener/components/CspScoreBreakdown';
 import { calculateCspReturnThisCycle, CSP_RETURN_STATUS_META, sortCspByThirtyDayEquivalent } from '@/lib/scans/cspReturnThisCycle';
-import { splitCspByDte } from '@/lib/scans/cspDteBuckets';
+import { splitCspByDte, cspSortLabel } from '@/lib/scans/cspDteBuckets';
 import { CSP_INTENT_KEY, DEFAULT_CSP_INTENT, WHEEL_DELTA_BAND, applyIntentToView, parseCspIntent, type CspIntent } from '@/lib/scans/cspIntent';
 import { CSP_VIEW_PRESETS, DEFAULT_CSP_VIEW_PRESET, cspScanRules, cspViewFromPreset, detectCspPreset, regradeCspResults, cspWithinViewWindow, type CspView, type CspViewPresetKey } from '@/lib/scans/cspView';
 import { isMarketQualified, isBestOpportunitiesEligible, isOverallCspQualified, classifyCspLiquidity } from '@/lib/scans/cspQualification';
@@ -12939,7 +12939,7 @@ export default function Home() {
                   Earned top picks carry the gold tab (TopOpportunityFrame) and every card with advisor reasoning has a collapsed
                   "Why this ranks here" panel. This line only labels the list and shows the required empty state. */}
               {!activePmccSession && (results.length > 0 || hasCompletedScanForCurrentMode) && (screenMode === 'filter' || activeSession?.requestedStrategy === 'csp') && (
-                <RankedListHeader hasQualified={filteredQualified.length > 0} rankedBy={activeSession?.requestedStrategy === 'cc' ? 'annualized yield' : undefined} borderClassName={th.border} textFaintClassName={th.textFaint}
+                <RankedListHeader hasQualified={filteredQualified.length > 0} rankedBy={activeSession?.requestedStrategy === 'cc' ? 'annualized yield' : activeSession?.requestedStrategy === 'csp' ? (cspTargetedReturnSort ? '30-day return' : cspSortLabel(filteredSort.primary)) : undefined} borderClassName={th.border} textFaintClassName={th.textFaint}
                   emptyHint={(() => {
                     // IVR-CAP-HINT-0001: say plainly when the view's IVR cap is what emptied the list.
                     if (!cspView || filteredQualified.length > 0) return null;
@@ -13193,7 +13193,7 @@ export default function Home() {
                                       {g.results.length === 0 ? <p className={`text-[10px] ${th.textFaint}`}>No trade clears the floors for this DTE.</p> : g.results.map(renderQualifiedCandidate)}
                                     </div>
                                   ))}
-                                  {split.rest.length > 0 && <p className="pt-2 text-[9px] text-emerald-500 tracking-widest font-medium">ALL OTHERS · BY SCORE</p>}
+                                  {split.rest.length > 0 && <p className="pt-2 text-[9px] text-emerald-500 tracking-widest font-medium">ALL OTHERS · BY {cspSortLabel(filteredSort.primary).toUpperCase()}</p>}
                                 </div>
                               )}
                               {split.rest.map(renderQualifiedCandidate)}

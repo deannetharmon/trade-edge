@@ -70,3 +70,13 @@ describe('splitCspByDte', () => {
     expect(groups.flatMap(g => g.results).length + rest.length).toBe(3);
   });
 });
+
+describe('cspSortLabel (SORT-LABEL-0001)', () => {
+  it('names the active sort chip', async () => {
+    const { cspSortLabel } = await import('../cspDteBuckets');
+    expect(cspSortLabel('score')).toBe('score');
+    expect(cspSortLabel('creditDollars')).toBe('premium $');
+    expect(cspSortLabel('rocPct')).toBe('cash return');
+    expect(cspSortLabel(undefined)).toBe('score');
+  });
+});
