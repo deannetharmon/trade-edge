@@ -1,3 +1,5 @@
+// lib/scans/cspIntent.ts
+
 // CSP-INTENT-0001 — "Premium only" (avoid assignment) vs "Wheel" (happy to own the stock).
 // Team decision (Ian/Alan): intent changes the delta band shown by default and the floors used by Best by DTE.
 // Wheel floors are looser on POP/distance because ownership is acceptable; the "OK to own" trend gate

@@ -12,12 +12,15 @@ export function RankedListHeader({
   rankedBy = 'score',
   borderClassName = 'border-slate-700',
   textFaintClassName = 'text-slate-500',
+  emptyHint,
 }: {
   hasQualified: boolean;
   /** What the list is ordered by, in words (covered calls rank by annualized yield). */
   rankedBy?: string;
   borderClassName?: string;
   textFaintClassName?: string;
+  /** IVR-CAP-HINT-0001: one line saying the real reason when it is a view cap (e.g. IVR above the cap). */
+  emptyHint?: string | null;
 }) {
   return (
     <section aria-label="Qualified opportunities, ranked" data-testid="ranked-list-header" className="mb-2 space-y-2">
@@ -28,6 +31,7 @@ export function RankedListHeader({
       {!hasQualified && (
         <div className={`rounded-lg border ${borderClassName} px-4 py-4 text-center`}>
           <p className={`text-[11px] ${textFaintClassName}`}>{RANKED_EMPTY_STATE_TEXT}</p>
+          {emptyHint && <p className="mt-1 text-[11px] font-semibold text-amber-400" data-testid="ranked-empty-hint">{emptyHint}</p>}
         </div>
       )}
     </section>

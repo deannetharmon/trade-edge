@@ -1,3 +1,5 @@
+// lib/scans/liquidityPolicy.ts
+
 // LIQUIDITY-SYNC-0001 (Ian, Dean): ONE liquidity policy for every strategy's scan.
 //  - Open interest of exactly 0 means no market exists: it is disqualified (a gate), never a warning.
 //  - A preset/rule OI minimum (500 / 250 / 1000...) is advisory only: an amber chip, it never hides a trade.

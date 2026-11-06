@@ -1,3 +1,5 @@
+// lib/scans/cspDteBuckets.ts
+
 // CSP-DTE-BEST-0001 — "Best by DTE": top picks per target expiry bucket, then everything else.
 import type { ScreenResult } from './types';
 import { INTENT_FLOORS, type CspIntent } from './cspIntent';

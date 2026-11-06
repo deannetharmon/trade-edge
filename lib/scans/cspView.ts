@@ -78,6 +78,7 @@ export type CspScoreRawInputs = Omit<CspScoreInputs, 'oiMin' | 'ivrMin' | 'ivrMa
 
 const DELTA_REASON = /^Delta [\d.]+ is outside the preferred /;
 const IVR_REASON = /exceeds the .*% CSP risk cap$/;
+const OI_REASON = /^OI [\d,.]+ is below the preferred minimum of [\d,.]+\.?$/;
 
 /**
  * Re-grade one scan-time CSP result against a view. Pure: returns the same object when the
@@ -103,9 +104,13 @@ export function regradeCspResult(r: ScreenResult, view: CspView): ScreenResult {
 
   const oiPassing = Number.isFinite(c.shortOI) ? c.shortOI >= view.oiMin : c.cspOiPassing;
 
-  const failReasons = r.failReasons.filter((s) => !DELTA_REASON.test(s) && !IVR_REASON.test(s));
+  const failReasons = r.failReasons.filter((s) => !DELTA_REASON.test(s) && !IVR_REASON.test(s) && !OI_REASON.test(s));
+  // AUDIT-TRUTH-0002: preferences (OI, delta) come AFTER the real disqualifiers, so the audit headline is the true
+  // blocker; and the OI text states the VIEW's minimum, not the scan's built-in 500.
+  const oiWarning = oiPassing ? null : `OI ${c.shortOI} is below the preferred minimum of ${view.oiMin}.`;
+  if (oiWarning) failReasons.push(oiWarning);
   if (!deltaPassing) {
-    failReasons.unshift(`Delta ${absDelta.toFixed(2)} is outside the preferred ${view.deltaMin.toFixed(2)}-${view.deltaMax.toFixed(2)} range`);
+    failReasons.push(`Delta ${absDelta.toFixed(2)} is outside the preferred ${view.deltaMin.toFixed(2)}-${view.deltaMax.toFixed(2)} range`);
   }
   if (market === 'DISQUALIFIED_IVR' && c.cspMarketQualification !== 'DISQUALIFIED_IVR') {
     // AUDIT-TRUTH-0001: the disqualifier leads, so the audit never headlines an advisory (like low OI) as the reason.
@@ -122,13 +127,22 @@ export function regradeCspResult(r: ScreenResult, view: CspView): ScreenResult {
     cspMarketQualification: market,
     cspScore,
     cspOiPassing: oiPassing,
+    cspOiWarning: oiWarning,
+    cspAdvisoryWarnings: (c.cspAdvisoryWarnings ?? []).filter((w) => !OI_REASON.test(w)).concat(oiWarning ? [oiWarning] : []),
   };
 
   return {
     ...r,
     bestCandidate: candidate,
     failReasons,
-    checks: { ...r.checks, delta: deltaCheck },
+    checks: {
+      ...r.checks,
+      delta: deltaCheck,
+      // AUDIT-TRUTH-0002: the OI check row states the view's minimum, not the scan's built-in 500.
+      oi: oiPassing
+        ? { status: 'pass' as const, value: `${c.shortOI}`, reason: `≥ ${view.oiMin} minimum` }
+        : { status: 'warn' as const, value: `${c.shortOI}`, reason: oiWarning ?? `Below ${view.oiMin} — fills may be difficult` },
+    },
     // Same rule the scan applies: delta is a preference (Caution / not a Best Opportunity), never a
     // qualification gate. Only market state (IVR cap, earnings, liquidity) decides qualified.
     qualified: !!market && isOverallCspQualified(market, c.cspModeQualification ?? 'NOT_APPLICABLE'),

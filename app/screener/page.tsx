@@ -12939,7 +12939,15 @@ export default function Home() {
                   Earned top picks carry the gold tab (TopOpportunityFrame) and every card with advisor reasoning has a collapsed
                   "Why this ranks here" panel. This line only labels the list and shows the required empty state. */}
               {!activePmccSession && (results.length > 0 || hasCompletedScanForCurrentMode) && (screenMode === 'filter' || activeSession?.requestedStrategy === 'csp') && (
-                <RankedListHeader hasQualified={filteredQualified.length > 0} rankedBy={activeSession?.requestedStrategy === 'cc' ? 'annualized yield' : undefined} borderClassName={th.border} textFaintClassName={th.textFaint} />
+                <RankedListHeader hasQualified={filteredQualified.length > 0} rankedBy={activeSession?.requestedStrategy === 'cc' ? 'annualized yield' : undefined} borderClassName={th.border} textFaintClassName={th.textFaint}
+                  emptyHint={(() => {
+                    // IVR-CAP-HINT-0001: say plainly when the view's IVR cap is what emptied the list.
+                    if (!cspView || filteredQualified.length > 0) return null;
+                    const capped = results.filter(r => r.strategy === 'CSP' && r.bestCandidate?.cspMarketQualification === 'DISQUALIFIED_IVR');
+                    if (capped.length === 0) return null;
+                    const ivr = capped[0].ivr;
+                    return `${capped.length} contracts are above the IVR cap of ${cspView.ivrMax}%${ivr != null ? ` (${capped[0].symbol} IVR ${ivr.toFixed(1)})` : ''}. Raise "IVR cap" or choose the All preset.`;
+                  })()} />
               )}
               {(results.length > 0 || hasCompletedScanForCurrentMode) && screenMode === 'rank' && rankDisplayWidth != null && (
                 <p className={`mb-3 text-xs ${th.textFaint}`}>Best Opportunities uses the full scan. The selected-width results below have their own candidate scores; show all scanned widths to see the full-scan shortlist.</p>

@@ -1,3 +1,5 @@
+// lib/scans/__tests__/cspDteBuckets.test.ts
+
 import { describe, it, expect } from 'vitest';
 import { cspBucketFor, splitCspByDte } from '../cspDteBuckets';
 import type { ScreenResult } from '../types';

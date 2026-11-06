@@ -40,7 +40,7 @@ describe('SCAN-SIMPLIFY-0001 cspView', () => {
     const bal = regradeCspResult(r, cspViewFromPreset('balanced', 7, 60));
     expect(bal.bestCandidate!.cspDeltaTargetPassing).toBe(false);
     expect(bal.qualified).toBe(true); // delta is a preference, not a qualification gate
-    expect(bal.failReasons[0]).toMatch(/outside the preferred 0\.15-0\.25/);
+    expect(bal.failReasons.some(s => /outside the preferred 0\.15-0\.25/.test(s))).toBe(true); // AUDIT-TRUTH-0002: preferences follow the real blockers
     const more = regradeCspResult(r, cspViewFromPreset('opportunity', 7, 60));
     expect(more.bestCandidate!.cspDeltaTargetPassing).toBe(true);
     expect(more.qualified).toBe(true);
