@@ -108,7 +108,8 @@ export function regradeCspResult(r: ScreenResult, view: CspView): ScreenResult {
     failReasons.unshift(`Delta ${absDelta.toFixed(2)} is outside the preferred ${view.deltaMin.toFixed(2)}-${view.deltaMax.toFixed(2)} range`);
   }
   if (market === 'DISQUALIFIED_IVR' && c.cspMarketQualification !== 'DISQUALIFIED_IVR') {
-    failReasons.push(`IVR ${r.ivr?.toFixed?.(1) ?? '—'}% exceeds the ${view.ivrMax}% CSP risk cap`);
+    // AUDIT-TRUTH-0001: the disqualifier leads, so the audit never headlines an advisory (like low OI) as the reason.
+    failReasons.unshift(`IVR ${r.ivr?.toFixed?.(1) ?? '—'}% exceeds the ${view.ivrMax}% CSP risk cap`);
   }
 
   const deltaCheck = deltaPassing
