@@ -16,6 +16,9 @@ export interface CspViewControlsProps {
   onChange: (patch: Partial<Omit<CspView, 'preset'>>) => void;
   affordableOnly: boolean;
   setAffordableOnly: (v: boolean) => void;
+  /** Optional: when provided, shows the "Group by expiration" checkbox. Off = one flat list ordered by the Sort chips. */
+  groupByExpiration?: boolean;
+  setGroupByExpiration?: (v: boolean) => void;
 }
 
 const NUM = 'w-14 rounded-md border border-neutral-700 bg-transparent px-1.5 py-1 text-xs tabular-nums';
@@ -29,7 +32,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export function CspViewControls({ view, th, onPreset, onChange, affordableOnly, setAffordableOnly }: CspViewControlsProps) {
+export function CspViewControls({ view, th, onPreset, onChange, affordableOnly, setAffordableOnly, groupByExpiration, setGroupByExpiration }: CspViewControlsProps) {
   return (
     <div data-testid="csp-view-controls" className="mb-3 flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -77,6 +80,12 @@ export function CspViewControls({ view, th, onPreset, onChange, affordableOnly, 
           <input type="checkbox" checked={affordableOnly} onChange={e => setAffordableOnly(e.target.checked)} />
           Affordable only
         </label>
+        {setGroupByExpiration && (
+          <label className="flex items-center gap-1.5 text-[11px] text-neutral-300">
+            <input type="checkbox" checked={!!groupByExpiration} onChange={e => setGroupByExpiration(e.target.checked)} />
+            Group by expiration
+          </label>
+        )}
       </div>
     </div>
   );

@@ -194,6 +194,8 @@ beforeAll(() => warmScreenerPage(async () => {
 
 beforeEach(() => {
   window.localStorage.clear();
+  window.localStorage.setItem('hunter-card-view', 'full'); // CLEAN-CARD-0001: these tests assert the Full card
+  window.localStorage.setItem('hunter-csp-group-by-expiration', '1');
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
   getCoveredCallCapacityReportMock.mockReset().mockResolvedValue({ status: 'ok', bySymbol: {}, warnings: [] });
   getMarketMetricsMock.mockReset().mockResolvedValue([]);

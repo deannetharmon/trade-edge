@@ -7,13 +7,24 @@
 // Only affects files using jsdom -- see vitest.config.ts's
 // environmentMatchGlobs.
 
-import { afterEach } from 'vitest';
+import { afterEach, beforeEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { pinClock } from './lib/testing/fixedClock';
 
 afterEach(() => {
   cleanup();
+});
+
+// CLEAN-CARD-0001: the screener's defaults changed (Clean card, flat list). The long-standing page tests assert the
+// Full card and expiration groups, so they start there; tests of the Clean view set 'hunter-card-view' to 'clean'.
+beforeEach(() => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem('hunter-card-view', 'full');
+      window.localStorage.setItem('hunter-csp-group-by-expiration', '1');
+    }
+  } catch { /* no storage in this environment */ }
 });
 
 // CI-FLAKY-0002 -- when FAKE_NOW is set (the evening CI guard pass), pin the clock for every test in

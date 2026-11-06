@@ -248,6 +248,12 @@ import { LeapsScanModal, type LeapsScanRequest } from '@/features/screener/compo
 import { DeferredNumberInput } from '@/features/screener/components/DeferredNumberInput';
 import { CspViewControls } from '@/features/screener/components/CspViewControls';
 import { ActiveCspRules } from '@/features/screener/components/ActiveCspRules';
+import { CollapsiblePanel } from '@/features/screener/components/CollapsiblePanel';
+import { CleanCspLine, CleanCspDetails } from '@/features/screener/components/CleanCspCard';
+import { CardViewToggle } from '@/features/screener/components/CardViewToggle';
+import { useCardView } from '@/features/screener/lib/useCardView';
+import { allocationFor, type AllocBook } from '@/lib/scans/cleanCard';
+import { buildAllocBook } from '@/lib/scans/cleanCardBook';
 import { evaluateCspIvr } from '@/lib/scans/cspIvrPolicy';
 import { summarizeCspResults } from '@/lib/screener/scanConfig/cspRegistry';
 import { summarizeCcResults } from '@/lib/screener/scanConfig/ccRegistry';
@@ -1100,6 +1106,7 @@ const LS_SAVED_FILTERS = 'hunter-saved-filters';
 const LS_GLOBAL_SESSIONS = 'hunter-global-sessions';
 const LS_SCREEN_MODE = 'hunter-screen-mode';
 const LS_CSP_VIEW_PRESET = 'hunter-csp-view-preset';
+const LS_CSP_GROUP_EXP = 'hunter-csp-group-by-expiration';
 const LS_RANK_CONFIG = 'hunter-rank-config';
 const LS_RESULTS_CACHE = 'hunter-results-cache';
 const LS_RAW_SCAN_CACHE = 'hunter-raw-scan-cache'; // legacy localStorage key — no longer written to; rawScanCache now lives in IndexedDB (see idbGet/idbSet below) because full options-chain data can exceed localStorage's quota
@@ -1251,6 +1258,21 @@ function parseOccForDisplay(occ: string): { optionType: 'P' | 'C' | null; strike
   const m = cleaned.match(/^[A-Z]+(\d{6})([CP])(\d{8})$/);
   if (!m) return { optionType: null, strike: 0 };
   return { optionType: m[2] as 'P' | 'C', strike: parseInt(m[3], 10) / 1000 };
+}
+
+// CLEAN-CARD-0001: account value + what is already committed per symbol, for the ALLOC field. Read-only, browser-side.
+// Any failure returns null and the field shows an em dash; nothing is guessed.
+async function loadAllocBook(): Promise<AllocBook | null> {
+  try {
+    const token = await getAccessToken();
+    const accountNumber = await requireActiveBrokerAccount(token, ttFetch);
+    if (!accountNumber) return null;
+    const [bal, pos] = await Promise.all([
+      ttFetch(`/accounts/${accountNumber}/balances`, token),
+      ttFetch(`/accounts/${accountNumber}/positions`, token),
+    ]);
+    return buildAllocBook(bal?.data, pos?.data?.items);
+  } catch { return null; }
 }
 
 async function loadExistingPositions(): Promise<ExistingPosition[]> {
@@ -5694,6 +5716,8 @@ type ResultCardProps = {
   onRefreshPortfolio?: () => Promise<unknown>;
   cachedEntry?: RawScanEntry;
   existingPositions?: ExistingPosition[];
+  /** CLEAN-CARD-0001: account value and what is already committed per symbol, for the ALLOC field. Null = unavailable. */
+  allocBook?: AllocBook | null;
   pmccBestFit?: {
     profile: PmccBestFitProfile;
     score: number;
@@ -6283,7 +6307,8 @@ function CspReturnThisCycleRow({ candidate }: { candidate: SpreadCandidate }) {
   </div>;
 }
 
-function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade, onTradeCsp, onTradeCc, cachedEntry, existingPositions }: ResultCardProps) {
+function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade, onTradeCsp, onTradeCc, cachedEntry, existingPositions, allocBook }: ResultCardProps) {
+  const cardView = useCardView();
   const [pickedCcCell, setPickedCcCell] = useState<CcGridCell | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [showBestFinder, setShowBestFinder] = useState(false);
@@ -6414,6 +6439,9 @@ function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade,
     : null;
   const cspBand = cspBandCapped?.band ?? null;
   const cspCapNote = cspBandCapped?.capped ? returnCapNote() : null;
+  // CLEAN-CARD-0001: Clean is the default; Full is today's card. Only the CSP card has a Clean layout so far.
+  const cleanCsp = cardView === 'clean' && c?.strategy === 'CSP';
+  const cleanAlloc = c?.strategy === 'CSP' ? allocationFor(allocBook, result.symbol, c.requiredCash) : null;
   const cspScoreBadge = cspScoreResult && cspScore != null && cspBand
     ? <CspScoreBadge score={cspScore} band={cspBand} open={showCspScore} onToggle={() => setShowCspScore(v => !v)} capNote={cspCapNote} />
     : null;
@@ -6543,6 +6571,10 @@ const strategyScores = useMemo(() => {
           to fit whichever column is tallest -- no drift into a neighbor's
           space. Single-line rows (the common case) look the same either
           way. */}
+      {cleanCsp && c ? (
+        <CleanCspLine result={result} c={c} th={th} rsi14={rsi14} oiBelowFloor={c.cspOiPassing === false} alloc={cleanAlloc}
+          score={cspScore} band={cspBand} scoreOpen={showCspScore} onScore={() => setShowCspScore(v => !v)} expanded={expanded} />
+      ) : (
       <div className="px-4 py-3 flex items-start gap-2">
         {/* Col 1: Symbol + price — fixed */}
         <div className="w-16 shrink-0">
@@ -6795,6 +6827,7 @@ const strategyScores = useMemo(() => {
           <div className={`${th.textFaint} text-xs`}>{expanded ? '▲' : '▼'}</div>
         </div>
       </div>
+      )}
 
       {showCspScore && cspScoreResult && cspBand && c && (
         <CspScoreBreakdownPanel
@@ -6821,15 +6854,43 @@ const strategyScores = useMemo(() => {
           DisqualifiedSection's CspFundamentalsRow, so qualified and
           disqualified CSP cards present identical fundamentals without
           requiring an expand click. */}
-      {c && <CspFundamentalsRow candidate={c} price={result.price} textMutedClassName={th.textMuted} testId="csp-qualified-fundamentals" />}
-      {c?.strategy === 'CSP' && result.ivr != null && result.ivr < DEFAULT_CSP_RULES.IVR_MIN && (
+      {c && !cleanCsp && <CspFundamentalsRow candidate={c} price={result.price} textMutedClassName={th.textMuted} testId="csp-qualified-fundamentals" />}
+      {c?.strategy === 'CSP' && !cleanCsp && result.ivr != null && result.ivr < DEFAULT_CSP_RULES.IVR_MIN && (
         <div className="border-t border-amber-700/30 bg-amber-500/5 px-4 py-1.5 text-[9px] text-amber-300" data-testid="csp-low-ivr-warning">
           Quality warning — IVR {result.ivr.toFixed(1)}% is below the preferred {DEFAULT_CSP_RULES.IVR_MIN}% premium environment. This contract remains eligible but is ranked lower.
         </div>
       )}
 
+      {/* CLEAN-CARD-0001: Clean expanded grid (each fact once). Full keeps the section below unchanged. */}
+      {expanded && cleanCsp && c && (
+        <CleanCspDetails result={result} c={c} th={th} bidAskMax={rules.BID_ASK_MAX} ivrMin={rules.IVR_MIN} alloc={cleanAlloc}
+          actions={<>
+            <StockResearchButton research={research} th={th} />
+            <ScreenerChartLink symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
+              sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
+            <button type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!qualDerivation && result.checks.oi.status === 'warn') {
+                  const proceed = window.confirm(`${result.checks.oi.reason}. Trade anyway?`);
+                  if (!proceed) return;
+                }
+                onTradeCsp?.(result);
+              }}
+              className={`ml-auto min-h-[44px] rounded-xl px-5 text-xs font-bold tracking-widest transition-colors ${
+                qualDerivation?.state === 'disqualified' ? 'border border-slate-600 text-slate-400 hover:bg-slate-500/10'
+                : qualDerivation?.state === 'caution' ? 'border border-amber-500 text-amber-400 hover:bg-amber-500/10'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
+            >
+              {qualDerivation?.state === 'disqualified' ? 'Trade anyway (override)'
+                : qualDerivation?.state === 'caution' ? '⚡ TRADE THIS (CAUTION)'
+                : '⚡ TRADE THIS'}
+            </button>
+          </>} />
+      )}
+
       {/* Expanded Content */}
-      {expanded && (
+      {expanded && !cleanCsp && (
         <div className={`border-t ${th.border} px-4 py-3 space-y-3`}>
           {t && <div className={`text-[10px] ${th.textMuted} pb-2 border-b ${th.border}`}><span className={`${result.strategy === 'CC' ? 'opacity-70' : ''} ${trendColor(t.trend)} mr-2 font-medium`}>{trendIcon(t.trend)} {t.trend.toUpperCase()}</span>{result.strategy === 'CC' || result.strategy === 'CSP' ? t.reason.replace(/^(BCS|BPS)( \([^)]*\))? ?(REVERSAL|CONTINUATION|RECOVERY)?:?\s*/, '') : t.reason}</div>}
 
@@ -9524,6 +9585,11 @@ export default function Home() {
   }, []);
   const [cspViewOverride, setCspViewOverride] = useState<CspView | null>(null);
   const [cspAffordableOnly, setCspAffordableOnly] = useState(false);
+  // Sort chips order one flat list by default. Grouping by expiration fixes the cross-expiration order by date, so a
+  // sort could only reorder inside each group and looked like it did nothing; grouping is now an explicit, remembered choice.
+  const [cspGroupByExp, setCspGroupByExpRaw] = useState(false);
+  useEffect(() => { try { setCspGroupByExpRaw(localStorage.getItem(LS_CSP_GROUP_EXP) === '1'); } catch {} }, []);
+  const setCspGroupByExp = (v: boolean) => { setCspGroupByExpRaw(v); try { localStorage.setItem(LS_CSP_GROUP_EXP, v ? '1' : '0'); } catch {} };
   const cspSnapshot = activeSession?.requestedStrategy === 'csp' ? activeSession.ruleSnapshot ?? null : null;
   // Only sessions scanned by the simplified flow (preset 'view') are re-graded; older saved sessions display as scanned.
   const cspViewActive = cspSnapshot?.preset === 'view';
@@ -9764,6 +9830,8 @@ export default function Home() {
   const [targetedPreset, setTargetedPreset] = useState<string>('course');
   const targetedCancelRef = useRef<boolean>(false);
   const [existingPositions, setExistingPositions] = useState<ExistingPosition[]>([]);
+  const [allocBook, setAllocBook] = useState<AllocBook | null>(null);
+  useEffect(() => { loadAllocBook().then(setAllocBook).catch(() => {}); }, []);
   useEffect(() => {
     loadExistingPositions().then(setExistingPositions).catch(() => {});
   }, []);
@@ -12133,8 +12201,8 @@ export default function Home() {
 
           {/* Last Rules Used — hidden in rank mode */}
           {screenMode === 'filter' && activeSession?.requestedStrategy !== 'csp' && activeSession?.requestedStrategy !== 'pmcc' && (
+            <CollapsiblePanel id="active-rules-generic" title="Active rules">
             <div className={`${th.card} border ${th.border} rounded-xl p-3 text-[9px] space-y-1`}>
-              <p className={`${th.textMuted} mb-2 tracking-widest font-medium`}>ACTIVE RULES</p>
               <div className="space-y-3">
                 {[
                   { label: '📈 Stock', rules: runtimeStockRules, preset: stockPresetLabel },
@@ -12161,6 +12229,7 @@ export default function Home() {
                 ))}
               </div>
             </div>
+            </CollapsiblePanel>
           )}
 
         </div>
@@ -12432,18 +12501,23 @@ export default function Home() {
               </div>
 
               {activeSession?.requestedStrategy === 'cc' && ccReceipt?.sessionId === activeSession.sessionId && (
+                <CollapsiblePanel id="active-rules-cc" title="Active rules">
                 <ActiveCcRules
                   values={{ rules: ccReceipt.rules }}
                   counts={summarizeCcResults(results)}
                   onEdit={() => { setCcBypassUniverse(opportunityUniverse.length === 0); setShowCcScanModal(true); void loadCcCapacity(); }}
                 />
+                </CollapsiblePanel>
               )}
 
               {activePmccSession && activeSession?.pmccSnapshot && (
-                <ActivePmccRules snapshot={activeSession.pmccSnapshot} entryMode={pmccScanEntryMode(results)} />
+                <CollapsiblePanel id="active-rules-pmcc" title="Active rules">
+                  <ActivePmccRules snapshot={activeSession.pmccSnapshot} entryMode={pmccScanEntryMode(results)} />
+                </CollapsiblePanel>
               )}
 
               {activeSession?.requestedStrategy === 'csp' && activeSession.ruleSnapshot && (
+                <CollapsiblePanel id="active-rules-csp" title="Active rules">
                 <ActiveCspRules
                   snapshot={(viewSession ?? activeSession).ruleSnapshot!}
                   counts={summarizeCspResults(results)}
@@ -12470,6 +12544,7 @@ export default function Home() {
                     setShowCspRunModal(true);
                   }}
                 />
+                </CollapsiblePanel>
               )}
 
               {screenMode === 'filter' && activeSession?.requestedStrategy !== 'csp' && activeSession?.requestedStrategy !== 'pmcc' && (
@@ -12505,8 +12580,10 @@ export default function Home() {
                   zero visible controls that started this whole thread. */}
               {(screenMode === 'filter' || (activeSession?.requestedStrategy === 'csp' && screenMode === 'rank')) && (
                 activeSession?.requestedStrategy === 'csp' ? (
+                  <>
+                  <div className="mb-2 flex justify-end"><CardViewToggle /></div>
+                  <CollapsiblePanel id="result-controls-csp" title="Result controls">
                   <section aria-label="CSP result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="csp-result-controls">
-                    <p className={`mb-2 text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>CSP result controls</p>
                     {/* SCREENER-CSP-CC-FILTER-PARITY-0001 -- CSP previously
                         rendered only OiAndSortControls, missing the ticker
                         filter row and the POP/OTM/credit-ratio minimum
@@ -12525,6 +12602,8 @@ export default function Home() {
                         th={th}
                         affordableOnly={cspAffordableOnly}
                         setAffordableOnly={setCspAffordableOnly}
+                        groupByExpiration={cspGroupByExp}
+                        setGroupByExpiration={setCspGroupByExp}
                         onPreset={key => {
                           setCspViewOverride(cspViewFromPreset(key, cspView.dteMin, cspView.dteMax));
                           setCspSavedPreset(key);
@@ -12584,10 +12663,12 @@ export default function Home() {
                       <span className={`text-[9px] ${th.textFaint}`}>Bid-based estimate; legacy midpoint ROC is unchanged.</span>
                     </div>}
                   </section>
+                  </CollapsiblePanel>
+                  </>
                 ) : activeSession?.requestedStrategy === 'cc' ? (
+                  <CollapsiblePanel id="result-controls-cc" title="Result controls">
                   <section aria-label="CC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="cc-result-controls">
                     <div className="mb-2 flex items-center justify-between">
-                      <p className={`text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>CC result controls</p>
                       <CcRsiCutoffControl />
                       <button
                         onClick={() => setShowCcAdvisorPanel(v => !v)}
@@ -12657,10 +12738,11 @@ export default function Home() {
                       )}
                     />
                   </section>
+                  </CollapsiblePanel>
                 ) : activeSession?.requestedStrategy === 'pmcc' ? (
+                  <CollapsiblePanel id="result-controls-pmcc" title="Result controls">
                   <section aria-label="PMCC result controls" className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="pmcc-result-controls">
                     <div className="mb-2 flex items-center justify-between">
-                      <p className={`text-[9px] font-bold uppercase tracking-widest ${th.textMuted}`}>PMCC result controls</p>
                       <button
                         onClick={() => setShowPmccAdvisorPanel(v => !v)}
                         disabled={filteredQualified.length < 1}
@@ -12784,7 +12866,8 @@ export default function Home() {
                       );
                     })()}
                   </section>
-                ) : <FilteredResultControls
+                  </CollapsiblePanel>
+                ) : <CollapsiblePanel id="result-controls-generic" title="Result controls"><FilteredResultControls
                   results={results}
                   qualifiedTotal={qualified.length}
                   filteredQualifiedCount={filteredQualified.length}
@@ -12805,7 +12888,7 @@ export default function Home() {
                   oiAndSortControls={part => (
                     <OiAndSortControls part={part} th={th} minOi={filteredMinOi} setMinOi={setFilteredMinOi} sort={filteredSort} setSort={setFilteredSort} accent="amber" />
                   )}
-                />
+                /></CollapsiblePanel>
               )}
 
               {/* OE-0002A: first production activation of OE-0001. Real,
@@ -12912,7 +12995,7 @@ export default function Home() {
                       className={isJumpHighlighted ? 'transition-colors duration-500 ring-2 ring-cyan-400 rounded-xl' : 'transition-colors duration-500'}
                     >
                       <TopOpportunityFrame rank={isTopOpportunity ? topOpportunityRankByKey.get(resultKey) ?? null : null} row={whyRowByKey.get(resultKey) ?? null} borderClassName={th.border} textFaintClassName={th.textFaint} textMutedClassName={th.textMuted}>
-                      <ResultCard hideLeapNotes={r.pmccPair?.entryMode === 'covered-short-call-against-held-leaps' && filteredQualified.find(q => q.symbol === r.symbol && q.pmccPair?.entryMode === 'covered-short-call-against-held-leaps') !== r} result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} onTradeCsp={setCspTradeResult} onTradeCc={openCcFromScan} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions}
+                      <ResultCard hideLeapNotes={r.pmccPair?.entryMode === 'covered-short-call-against-held-leaps' && filteredQualified.find(q => q.symbol === r.symbol && q.pmccPair?.entryMode === 'covered-short-call-against-held-leaps') !== r} result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} onTradeCsp={setCspTradeResult} onTradeCc={openCcFromScan} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} allocBook={allocBook}
                         pmccBestFit={pmccBestFitWinner?.result === r ? { profile: pmccBestFitProfile, score: pmccBestFitWinner.score, runnerUp: pmccBestFitRanked[1]?.result ?? null, earningsBlocksRecommendation: pmccEarningsBlocksBestFit(r) } : undefined} />
                       {(filteredOiByResult.get(r)?.protectiveLegWarnings ?? []).map((w, wi) => <p key={wi} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">⚠ {w}</p>)}
                       </TopOpportunityFrame>
@@ -13064,7 +13147,7 @@ export default function Home() {
                         </div>
                       )}
                       <div className="space-y-2">
-                        {activeSession?.requestedStrategy === 'csp' && !cspTargetedReturnSort ? cspExpirationGroups.map(([expiration, group]) => (
+                        {activeSession?.requestedStrategy === 'csp' && !cspTargetedReturnSort && cspGroupByExp ? cspExpirationGroups.map(([expiration, group]) => (
                           <ExpirationDisclosure key={expiration} expiration={expiration}
                             dte={group[0]?.bestCandidate?.dte ?? null} candidateCount={group.length}
                             kind="qualified" defaultOpen borderClassName={th.border}>
@@ -13521,7 +13604,7 @@ export default function Home() {
                           </div>
                           <div className="flex-1">
                             <TopOpportunityFrame rank={rankTopRankByKey.get(r.candidateId ?? `${r.symbol}-${r.strategy}`) ?? null} row={rankTopRowByKey.get(r.candidateId ?? `${r.symbol}-${r.strategy}`) ?? null} borderClassName={th.border} textFaintClassName={th.textFaint} textMutedClassName={th.textMuted}>
-                            <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} onTradeCsp={setCspTradeResult} onTradeCc={openCcFromScan} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} />
+                            <ResultCard result={r} th={th} rules={r.isEtf ? runtimeEtfRules : runtimeStockRules} screenMode={screenMode} rankConfig={rankConfig} onTrade={setTradeResult} onTradeCsp={setCspTradeResult} onTradeCc={openCcFromScan} cachedEntry={rawScanCache.find(e => e.symbol === r.symbol && e.strategy === r.strategy)} existingPositions={existingPositions} allocBook={allocBook} />
                             {(rankOiByResult.get(r)?.protectiveLegWarnings ?? []).map((w, wi) => (
                               <p key={wi} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">
                                 ⚠ {w}
@@ -13678,6 +13761,7 @@ export default function Home() {
                   </div>
                 </div>
 
+                <CollapsiblePanel id="result-controls-leaps" title="Result controls">
                 <div className={`mb-4 rounded-xl border ${th.border} p-3`} data-testid="leaps-result-controls">
                   <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-1.5">
@@ -13764,6 +13848,7 @@ export default function Home() {
                     )}
                   </div>
                 </div>
+                </CollapsiblePanel>
 
                 {showLeapsAdvisorPanel && (
                   <LeapsAdvisorPanel

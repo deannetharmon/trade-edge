@@ -148,6 +148,8 @@ beforeEach(() => {
   // and the app's DTE math agree regardless of when the suite runs (UTC rollover).
   vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-06-15T12:00:00Z') });
   window.localStorage.clear();
+  window.localStorage.setItem('hunter-card-view', 'full'); // CLEAN-CARD-0001: these tests assert the Full card
+  window.localStorage.setItem('hunter-csp-group-by-expiration', '1');
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
   getMarketMetricsMock.mockReset().mockResolvedValue([]);
   getChainMock.mockReset();

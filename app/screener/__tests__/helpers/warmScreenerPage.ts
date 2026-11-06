@@ -25,6 +25,8 @@ export const WARM_FLOW_TIMEOUT_MS = 15_000;
 
 export async function warmScreenerPage(drive: () => Promise<void>): Promise<void> {
   window.localStorage.clear();
+  window.localStorage.setItem('hunter-card-view', 'full'); // CLEAN-CARD-0001: these tests assert the Full card
+  window.localStorage.setItem('hunter-csp-group-by-expiration', '1');
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
   try {
     await drive();
