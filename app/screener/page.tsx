@@ -11617,7 +11617,10 @@ export default function Home() {
       : activeSession?.requestedStrategy === 'csp' && activeSession.ruleSnapshot
         ? [activeSession.ruleSnapshot.deltaMin, activeSession.ruleSnapshot.deltaMax]
         : null;
-  const effectiveCspDeltaRange = filterCspDeltaTouched ? filterCspDeltaRange : cspDefaultDeltaRange;
+  // DELTA-VISIBLE-0001: the view's delta band is a preference (regrade -> Caution), never a hide.
+  // It only hides contracts once the user explicitly sets the delta chip.
+  void cspDefaultDeltaRange;
+  const effectiveCspDeltaRange = filterCspDeltaTouched ? filterCspDeltaRange : null;
 
   const applyFilterModeChips = (list: ScreenResult[]) => list.filter(r => {
     if (filterHiddenSymbols.includes(r.symbol)) return false;
