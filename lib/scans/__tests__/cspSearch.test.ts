@@ -145,24 +145,24 @@ describe('searchCspCandidates — liquidity evaluation (Stage 4) never discards 
   });
 
   it('wide bid/ask only -> selected with status DISQUALIFIED_WIDE_MARKET, not discarded', () => {
-    const chain = chainOf([{ dte: 35, legs: [{ strike: 415, delta: -0.20, bid: 10.20, ask: 11.90, oi: 1000 }] }]);
+    const chain = chainOf([{ dte: 35, legs: [{ strike: 415, delta: -0.20, bid: 10.20, ask: 14.30, oi: 1000 }] }]);
     const result = searchCspCandidates(chain, RULES);
     expect(result.reason).toBeNull();
     expect(result.selectedStatus).toBe('DISQUALIFIED_WIDE_MARKET');
-    expect(result.selectedCandidate?.bidAskWidth).toBeCloseTo(1.70, 2);
+    expect(result.selectedCandidate?.bidAskWidth).toBeCloseTo(4.10, 2);
     expect(result.diagnostics.spreadPassingCandidates).toBe(0);
     const message = describeCspSearchOutcome(result, RULES);
-    expect(message).toContain('Bid/ask width $1.70 exceeds the maximum of $0.10');
+    expect(message).toContain('Bid/ask width $4.10 exceeds the maximum of $0.10');
   });
 
   it('low OI AND wide market together -> DISQUALIFIED_WIDE_MARKET_LOW_OI, still not discarded (the exact AMD 415 put)', () => {
-    const chain = chainOf([{ dte: 35, legs: [{ strike: 415, delta: -0.20, bid: 10.20, ask: 11.90, oi: 190 }] }]);
+    const chain = chainOf([{ dte: 35, legs: [{ strike: 415, delta: -0.20, bid: 10.20, ask: 14.30, oi: 190 }] }]);
     const result = searchCspCandidates(chain, RULES);
     expect(result.reason).toBeNull();
     expect(result.selectedStatus).toBe('DISQUALIFIED_WIDE_MARKET_LOW_OI');
     const message = describeCspSearchOutcome(result, RULES);
     expect(message).toContain('OI 190 is below the preferred minimum of 500');
-    expect(message).toContain('Bid/ask width $1.70 exceeds the maximum of $0.10');
+    expect(message).toContain('Bid/ask width $4.10 exceeds the maximum of $0.10');
   });
 
   it('a closer-to-center but liquidity-bad candidate never hides a farther-out fully qualified one', () => {
@@ -170,7 +170,7 @@ describe('searchCspCandidates — liquidity evaluation (Stage 4) never discards 
       dte: 35,
       legs: [
         // Center of 0.15-0.25 is 0.20 — this one is dead-center but illiquid.
-        { strike: 415, delta: -0.20, bid: 10.20, ask: 11.90, oi: 190 },
+        { strike: 415, delta: -0.20, bid: 10.20, ask: 14.30, oi: 190 },
         // Farther from center (0.15) but fully liquid.
         { strike: 410, delta: -0.15, bid: 8.95, ask: 9.05, oi: 1000 },
       ],
@@ -188,7 +188,7 @@ describe('searchCspCandidates — CSP-0002 corrective pass BLOCKER: selection ti
     // market is too wide (width $1.70 > $0.10 max). Under the real policy
     // (bid/ask width is the hard gate) this is DISQUALIFIED regardless of
     // its excellent OI.
-    const candidateA = { strike: 415, delta: -0.20, bid: 10.20, ask: 11.90, oi: 1000 };
+    const candidateA = { strike: 415, delta: -0.20, bid: 10.20, ask: 14.30, oi: 1000 };
     // Candidate B: farther from center (0.15), OI below the preferred
     // minimum, but a valid narrow market (width $0.10 <= max). Under the
     // real policy this IS qualified -- with an OI warning, never hidden by

@@ -4,17 +4,18 @@ import type { ScreenResult } from '../types';
 
 // score arg is now the annualized return %; price 100, breakeven 90 (10% distance), POP 80 unless overridden
 const mk = (id: string, dte: number, score: number | null, over: Record<string, number> = {}) =>
-  ({ symbol: id, strategy: 'CSP', price: 100, bestCandidate: { dte, annualizedRoc: score, pop: 80, breakeven: 90, cspLiquidityClass: 'STRONG', shortOI: 1000, ...(over as object) } }) as unknown as ScreenResult;
+  ({ symbol: id, strategy: 'CSP', price: 100, bestCandidate: { dte, annualizedRoc: score, cspExtrinsicAnnualizedRoc: score, shortStrike: 90, pop: 80, breakeven: 90, cspLiquidityClass: 'STRONG', shortOI: 1000, ...(over as object) } }) as unknown as ScreenResult;
 
 describe('cspBucketFor', () => {
   it('snaps to the nearest bucket within 3 days', () => {
     expect(cspBucketFor(28)).toBe(28);
     expect(cspBucketFor(30)).toBe(28);
     expect(cspBucketFor(25)).toBe(28);
+    expect(cspBucketFor(10)).toBe(7);
     expect(cspBucketFor(31)).toBe(28);
   });
   it('returns null outside tolerance or for bad input', () => {
-    expect(cspBucketFor(10)).toBeNull();
+    expect(cspBucketFor(2)).toBeNull();
     expect(cspBucketFor(60)).toBeNull();
     expect(cspBucketFor(null)).toBeNull();
   });
@@ -41,6 +42,19 @@ describe('splitCspByDte', () => {
   it('a poor-spread or thin-OI trade loses to a lower-yield liquid one', () => {
     const list = [mk('WIDE', 28, 60, { cspLiquidityClass: 'POOR' as any }), mk('THIN', 28, 50, { shortOI: 18 }), mk('OK', 28, 12)];
     expect(splitCspByDte(list).groups[0].results.map(r => r.symbol)).toEqual(['OK']);
+  });
+  it('PICK-OTM-0001: an ITM put with a huge raw return loses to an OTM one, and the fallback shows the safest line', () => {
+    const itm = mk('ITM', 28, 284, { shortStrike: 105, pop: 44 });
+    const otmOk = mk('OTM', 28, 12);
+    expect(splitCspByDte([itm, otmOk]).groups[0].results.map(r => r.symbol)).toEqual(['OTM']);
+    const lowPop = mk('LOWPOP', 28, 60, { pop: 41 });
+    const safer = mk('SAFER', 28, 5, { pop: 78 });
+    expect(splitCspByDte([lowPop, safer]).groups[0].results.map(r => r.symbol)).toEqual(['SAFER']);
+  });
+  it('uses extrinsic annualized return, not the raw figure', () => {
+    const rawHigh = mk('RAW', 28, 10, { annualizedRoc: 90 });
+    const extHigh = mk('EXT', 28, 30);
+    expect(splitCspByDte([rawHigh, extHigh]).groups[0].results.map(r => r.symbol)).toEqual(['EXT']);
   });
   it('nothing is lost or duplicated', () => {
     const list = [mk('A', 7, 1), mk('B', 21, null), mk('C', 100, 5)];

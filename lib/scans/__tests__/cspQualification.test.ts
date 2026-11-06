@@ -65,8 +65,8 @@ describe('classifyCspLiquidity — borderline vs poor, both independently combin
   });
 
   it('poor liquidity + eligible: width beyond the poor limit classifies POOR regardless of capital', () => {
-    // midpoint 10, width 2.00 -> poorLimit=1.50 -> POOR
-    const liquidity = classifyCspLiquidity(2.00, 10);
+    // midpoint 10, width 3.00 -> poorLimit=2.50 (25%) -> POOR
+    const liquidity = classifyCspLiquidity(3.00, 10);
     expect(liquidity.liquidityClass).toBe('POOR');
     const eligibility = classifyAccountEligibility({ requiredCash: 1000, availableCspCapital: 5000, accountSelected: true });
     expect(eligibility).toBe('ELIGIBLE');

@@ -26,24 +26,31 @@ export function cspBucketFor(dte: number | null | undefined): number | null {
 // far-OTM, tiny-credit puts.
 export const INCOME_FLOORS = INTENT_FLOORS.premium;
 
-export function incomeKey(r: ScreenResult, intent: CspIntent = 'premium'): [number, number] {
+// PICK-OTM-0001 (Dean, TQQQ screenshot): a pick must be OTM or ATM (strike <= price). A deep-ITM put's credit is mostly
+// intrinsic value, so its raw annualized return (284% on TQQQ) is not income. Yield is the extrinsic-only annualized
+// return, the same figure the CSP score already uses. When nothing at a DTE clears the floors, the safest (higher POP,
+// OTM first) line is shown instead of the highest-yield one.
+export function incomeKey(r: ScreenResult, intent: CspIntent = 'premium'): [number, number, number] {
   const f = INTENT_FLOORS[intent];
   const c = r.bestCandidate as any;
-  const ann = Number(c?.annualizedRoc);
+  const ext = Number(c?.cspExtrinsicAnnualizedRoc);
+  const yieldPct = Number.isFinite(ext) ? ext : Number(c?.annualizedRoc);
   const pop = Number(c?.pop);
   const price = Number(r.price);
+  const strike = Number(c?.shortStrike);
   const be = Number(c?.breakeven);
+  const otm = price > 0 && Number.isFinite(strike) && strike <= price;
   const dist = price > 0 && Number.isFinite(be) ? ((price - be) / price) * 100 : NaN;
-  const ok = Number.isFinite(ann) && Number.isFinite(pop) && Number.isFinite(dist)
+  const ok = otm && Number.isFinite(yieldPct) && Number.isFinite(pop) && Number.isFinite(dist)
     && c?.cspLiquidityClass !== 'POOR' && Number(c?.shortOI) >= f.oi
-    && ann >= f.yieldPct && pop >= f.pop && dist >= f.beDistPct;
-  return [ok ? 1 : 0, Number.isFinite(ann) ? ann : -Infinity];
+    && yieldPct >= f.yieldPct && pop >= f.pop && dist >= f.beDistPct;
+  return [ok ? 1 : 0, otm ? 1 : 0, ok ? yieldPct : (Number.isFinite(pop) ? pop : -Infinity)];
 }
 
 function byIncome(intent: CspIntent) {
   return (x: { r: ScreenResult; i: number }, y: { r: ScreenResult; i: number }): number => {
-  const [xt, xv] = incomeKey(x.r, intent); const [yt, yv] = incomeKey(y.r, intent);
-  return yt - xt || yv - xv || x.i - y.i;
+  const [xt, xo, xv] = incomeKey(x.r, intent); const [yt, yo, yv] = incomeKey(y.r, intent);
+  return yt - xt || yo - xo || yv - xv || x.i - y.i;
   };
 }
 

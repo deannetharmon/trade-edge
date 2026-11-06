@@ -202,7 +202,7 @@ describe('CSP-WORKFLOW-0001: AMD required acceptance fixture (multi-candidate)',
     await waitFor(() => {
       expect(accountingText()).toMatch(/6 qualified/);
     });
-    expect(accountingText()).not.toMatch(/disqualified/);
+    expect(accountingText()).not.toMatch(/[1-9]\d* disqualified/);
     expect(screen.getAllByText('AMD').length).toBeGreaterThan(1); // multiple distinct AMD cards, not one
     expect(screen.queryByTestId('disqualified-section')).not.toBeInTheDocument();
 

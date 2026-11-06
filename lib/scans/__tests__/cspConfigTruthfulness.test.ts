@@ -110,7 +110,8 @@ describe('bid/ask liquidity is a fixed policy gate', () => {
   it('classifies strong, borderline, and poor by width against the midpoint', () => {
     expect(classifyCspLiquidity(0.10, 1.0).liquidityClass).toBe('STRONG');
     expect(classifyCspLiquidity(0.14, 1.0).liquidityClass).toBe('BORDERLINE');
-    expect(classifyCspLiquidity(0.16, 1.0).liquidityClass).toBe('POOR');
+    expect(classifyCspLiquidity(0.24, 1.0).liquidityClass).toBe('BORDERLINE'); // SPREAD-25-0001
+    expect(classifyCspLiquidity(0.26, 1.0).liquidityClass).toBe('POOR');
     // The strong limit is the larger of $0.10 or 10% of mid.
     expect(classifyCspLiquidity(0.45, 5.0).liquidityClass).toBe('STRONG');
   });
@@ -151,9 +152,10 @@ describe('open interest is advisory', () => {
     expect(isBestOpportunitiesEligible(r.marketQualification, r.accountEligibility, 'NOT_APPLICABLE', true, true)).toBe(true);
   });
 
-  it('literal zero open interest cannot be a Best Opportunity', () => {
+  it('literal zero open interest is disqualified, so it can never be a Best Opportunity', () => {
     const r = run(chainOf([{ dte: 35, puts: [tight(90, -0.2, 0)] }])).results[0];
-    expect(r.marketQualification).toBe('QUALIFIED');
+    // OI-ZERO-GATE-0001: no open interest means no market, so it is disqualified outright.
+    expect(r.marketQualification).toBe('DISQUALIFIED_POOR_LIQUIDITY');
     expect(isBestOpportunitiesEligible(r.marketQualification, r.accountEligibility, 'NOT_APPLICABLE', true, r.candidate.shortOI != null && r.candidate.shortOI > 0)).toBe(false);
   });
 });

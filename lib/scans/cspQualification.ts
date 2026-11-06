@@ -54,7 +54,7 @@ export type CspLiquidityClass = 'STRONG' | 'BORDERLINE' | 'POOR';
 export interface CspLiquidityThresholds {
   /** Dollar width at or below which liquidity is STRONG: max($0.10, 10% of midpoint). */
   strongLimitDollars: number;
-  /** Dollar width at or below which liquidity is at worst BORDERLINE: max(strongLimit, 15% of midpoint). */
+  /** Dollar width at or below which liquidity is at worst BORDERLINE: max(strongLimit, 25% of midpoint). */
   poorLimitDollars: number;
 }
 
@@ -66,8 +66,10 @@ export interface CspLiquidityClassification {
 // Initial approved classification (CSP-WORKFLOW-0001):
 //   strongLimit = max($0.10, 10% of midpoint)
 //   width <= strongLimit                          -> STRONG
-//   strongLimit < width <= 15% of midpoint         -> BORDERLINE
-//   width > 15% of midpoint                        -> POOR
+//   strongLimit < width <= 25% of midpoint         -> BORDERLINE ("Fair")
+//   width > 25% of midpoint                        -> POOR
+// SPREAD-25-0001 (Dean/Ian): the poor line moved 15% -> 25% to match Guac Tracker, whose labels were reverse-
+// engineered from KO 12/4 puts (Fair through ~24% of mid, Poor from ~28%; open interest does not drive the label).
 //
 // Guard: when the midpoint is small enough that 15% of it is less than the
 // dollar floor ($0.10 <= strongLimit always), the "borderline" band would
@@ -75,9 +77,11 @@ export interface CspLiquidityClassification {
 // is therefore always taken as at least the strong threshold, so a
 // candidate whose width sits between the two absolute-dollar figures is
 // never misclassified as POOR merely because the underlying is cheap.
+export const CSP_POOR_SPREAD_FRACTION = 0.25;
+
 export function classifyCspLiquidity(widthDollars: number, midpoint: number): CspLiquidityClassification {
   const strongLimitDollars = Math.max(0.10, 0.10 * midpoint);
-  const poorLimitDollars = Math.max(strongLimitDollars, 0.15 * midpoint);
+  const poorLimitDollars = Math.max(strongLimitDollars, CSP_POOR_SPREAD_FRACTION * midpoint);
   const liquidityClass: CspLiquidityClass =
     widthDollars <= strongLimitDollars ? 'STRONG'
     : widthDollars <= poorLimitDollars ? 'BORDERLINE'

@@ -82,7 +82,8 @@ describe('findBestCsp — AMD production-incident fixture', () => {
     // docs/reviews/FIND-CSP-Comprehensive-Code-Audit.md §8, which the flat
     // rule could never recognize. This is the intended, approved behavior
     // change, not a regression.
-    expect(result.search.diagnostics.spreadPassingCandidates).toBe(4);
+    // SPREAD-25-0001: with the Poor line at 25% of mid, 410 (16.8%) and 415 (15.4%) are BORDERLINE too, so all 6 pass.
+    expect(result.search.diagnostics.spreadPassingCandidates).toBe(6);
   });
 
   it('the raw negative put delta is normalized and displayed as a positive absolute value', () => {
@@ -98,14 +99,15 @@ describe('findBestCsp — AMD production-incident fixture', () => {
     // still capital-unverified (no capital params were supplied), so the
     // legacy `qualified` boolean is not blocked by that either.
     const result = findBestCsp(amdChain(), AMD_UNDERLYING_PRICE, { rules: DEFAULT_CSP_RULES, contracts: 1 });
-    expect(result.candidate!.shortStrike).toBe(420);
+    // SPREAD-25-0001: 415 is now the closest to the 0.20 delta center among six passing strikes (was 420).
+    expect(result.candidate!.shortStrike).toBe(415);
     expect(result.candidate!.cspMarketQualification).toBe('QUALIFIED_WITH_LIQUIDITY_WARNING');
     expect(result.qualified).toBe(true);
     // A warned-but-qualified candidate carries no disqualification reason at
     // all -- the old generic message is not merely absent, it is null.
     expect(result.disqualificationReason).toBeNull();
     expect(result.candidate!.cspAdvisoryWarnings ?? []).toEqual(
-      expect.arrayContaining([expect.stringMatching(/OI 409 is below the preferred minimum of 500/)]),
+      expect.arrayContaining([expect.stringMatching(/OI 190 is below the preferred minimum of 500/)]),
     );
   });
 
@@ -130,7 +132,7 @@ describe('findBestCsp — AMD production-incident fixture', () => {
     const exp = amdExpDate();
     const wideOnly = {
       expirations: [exp],
-      chains: { [exp]: [{ strikePrice: 415, expirationDate: exp, optionType: 'P' as const, delta: -0.20, bid: 10.20, ask: 11.90, mid: 11.05, openInterest: 1000, occSymbol: 'WIDE' }] },
+      chains: { [exp]: [{ strikePrice: 415, expirationDate: exp, optionType: 'P' as const, delta: -0.20, bid: 10.20, ask: 14.30, mid: 12.25, openInterest: 1000, occSymbol: 'WIDE' }] },
     };
     const lowOiOnly = {
       expirations: [exp],
@@ -138,7 +140,8 @@ describe('findBestCsp — AMD production-incident fixture', () => {
     };
     const wideResult = findBestCsp(wideOnly, AMD_UNDERLYING_PRICE, { rules: DEFAULT_CSP_RULES, contracts: 1 });
     expect(wideResult.search.selectedStatus).toBe('DISQUALIFIED_WIDE_MARKET');
-    expect(wideResult.qualified).toBe(false);
+    // LIQUIDITY-WARN-0001: a wide market is a warning, not a gate, so the candidate is still qualified.
+    expect(wideResult.qualified).toBe(true);
 
     const lowOiResult = findBestCsp(lowOiOnly, AMD_UNDERLYING_PRICE, { rules: DEFAULT_CSP_RULES, contracts: 1 });
     expect(lowOiResult.search.selectedStatus).toBe('QUALIFIED_LOW_OI');
@@ -159,7 +162,7 @@ describe('findBestCsp — CSP-0002 corrective pass BLOCKER regression: selection
         [exp]: [
           // Candidate A: closest to delta center (0.20), sufficient OI,
           // wide market -- must be disqualified and NOT selected.
-          { strikePrice: 415, expirationDate: exp, optionType: 'P' as const, delta: -0.20, bid: 10.20, ask: 11.90, mid: 11.05, openInterest: 1000, occSymbol: 'A_WIDE_GOODOI' },
+          { strikePrice: 415, expirationDate: exp, optionType: 'P' as const, delta: -0.20, bid: 10.20, ask: 14.30, mid: 12.25, openInterest: 1000, occSymbol: 'A_WIDE_GOODOI' },
           // Candidate B: farther from center (0.15), low OI, narrow market
           // -- must be the selection: qualified, with an OI warning.
           { strikePrice: 410, expirationDate: exp, optionType: 'P' as const, delta: -0.15, bid: 8.95, ask: 9.05, mid: 9.00, openInterest: 190, occSymbol: 'B_NARROW_LOWOI' },
