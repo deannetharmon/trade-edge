@@ -39,9 +39,12 @@ describe('splitCspByDte', () => {
     expect(splitCspByDte(list, 'premium').groups[0].results[0].symbol).toBe('LOW');
     expect(splitCspByDte(list, 'wheel').groups[0].results[0].symbol).toBe('ATM');
   });
-  it('a poor-spread or thin-OI trade loses to a lower-yield liquid one', () => {
-    const list = [mk('WIDE', 28, 60, { cspLiquidityClass: 'POOR' as any }), mk('THIN', 28, 50, { shortOI: 18 }), mk('OK', 28, 12)];
-    expect(splitCspByDte(list).groups[0].results.map(r => r.symbol)).toEqual(['OK']);
+  it('SPREAD-ONLY-0001: a poor spread loses to a lower-yield liquid trade, but thin open interest does not', () => {
+    const wide = mk('WIDE', 28, 60, { cspLiquidityClass: 'POOR' as any });
+    const thin = mk('THIN', 28, 50, { shortOI: 18 });
+    const ok = mk('OK', 28, 12);
+    expect(splitCspByDte([wide, ok]).groups[0].results.map(r => r.symbol)).toEqual(['OK']);
+    expect(splitCspByDte([thin, ok]).groups[0].results.map(r => r.symbol)).toEqual(['THIN']);
   });
   it('PICK-OTM-0001: an ITM put with a huge raw return loses to an OTM one; with nothing clearing the floors the line is empty', () => {
     const itm = mk('ITM', 28, 284, { shortStrike: 105, pop: 44 });

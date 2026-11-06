@@ -2,14 +2,13 @@
 // Team decision (Ian/Alan): intent changes the delta band shown by default and the floors used by Best by DTE.
 // Wheel floors are looser on POP/distance because ownership is acceptable; the "OK to own" trend gate
 // (EMA clouds / Bollinger / RSI) is a later slice and is NOT applied yet.
-import { PICK_OI_FLOOR } from './liquidityPolicy';
 export type CspIntent = 'premium' | 'wheel';
 export const CSP_INTENT_KEY = 'hunter-csp-intent';
 export const DEFAULT_CSP_INTENT: CspIntent = 'premium';
 
-export const INTENT_FLOORS: Record<CspIntent, { yieldPct: number; pop: number; beDistPct: number; oi: number }> = {
-  premium: { yieldPct: 10, pop: 70, beDistPct: 4, oi: PICK_OI_FLOOR },
-  wheel: { yieldPct: 15, pop: 40, beDistPct: 1, oi: PICK_OI_FLOOR },
+export const INTENT_FLOORS: Record<CspIntent, { yieldPct: number; pop: number; beDistPct: number }> = {
+  premium: { yieldPct: 10, pop: 70, beDistPct: 4 },
+  wheel: { yieldPct: 15, pop: 40, beDistPct: 1 },
 };
 
 /** Wheel overrides the preset's delta band; premium keeps the preset's own band. */

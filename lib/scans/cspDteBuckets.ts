@@ -20,7 +20,7 @@ export function cspBucketFor(dte: number | null | undefined): number | null {
   return best;
 }
 
-// LIQUIDITY-PICK-0001 (Dean): a Best-by-DTE pick must also have a non-POOR spread and OI at/above the floor.
+// LIQUIDITY-PICK-0001 (Dean): a Best-by-DTE pick must also have a non-POOR spread (SPREAD-ONLY-0001: no open-interest floor; zero OI is already excluded).
 // Income rank (Ian/Alan): trades that clear the Clean-card floors (yield >= 10%, POP >= 70, BE distance >= 4%)
 // come first, then higher annualized return. Score is NOT used here: it rewards cushion, which favours
 // far-OTM, tiny-credit puts.
@@ -42,7 +42,7 @@ export function incomeKey(r: ScreenResult, intent: CspIntent = 'premium'): [numb
   const otm = price > 0 && Number.isFinite(strike) && strike <= price;
   const dist = price > 0 && Number.isFinite(be) ? ((price - be) / price) * 100 : NaN;
   const ok = otm && Number.isFinite(yieldPct) && Number.isFinite(pop) && Number.isFinite(dist)
-    && c?.cspLiquidityClass !== 'POOR' && Number(c?.shortOI) >= f.oi
+    && c?.cspLiquidityClass !== 'POOR'
     && yieldPct >= f.yieldPct && pop >= f.pop && dist >= f.beDistPct;
   return [ok ? 1 : 0, otm ? 1 : 0, ok ? yieldPct : (Number.isFinite(pop) ? pop : -Infinity)];
 }
