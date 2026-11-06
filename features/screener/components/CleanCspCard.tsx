@@ -31,11 +31,13 @@ const tone = (t: Tone) => TONE_CLASS[t];
 const CAPACITY = /^Insufficient CSP capacity/i;
 
 export function CleanCspLine({
-  result, c, th, rsi14, oiBelowFloor, alloc, score, band, scoreOpen, onScore, expanded,
+  result, c, th, rsi14, oiBelowFloor, alloc, score, band, scoreOpen, onScore, expanded, positionNote,
 }: {
   result: ScreenResult; c: SpreadCandidate; th: CleanTheme; rsi14: number | null; oiBelowFloor: boolean;
   alloc: AllocResult | null; score: number | null; band: ScoreBand | null; scoreOpen: boolean; onScore: () => void;
   expanded: boolean;
+  /** POS-NOTE-0001: the existing-position note, shown in the empty middle of the row instead of a separate banner row. */
+  positionNote?: ReactNode;
 }) {
   const price = result.price;
   const beDist = breakevenDistancePct({ price, breakeven: c.breakeven, strike: c.shortStrike, creditPerShare: c.credit / 100 });
@@ -63,7 +65,7 @@ export function CleanCspLine({
         <span className={th.text}>{c.expiration}</span><span className="text-slate-500">·</span>
         <span className={th.text}>{c.dte}d</span>
       </span>
-      <span className="flex-1" />
+      <span className="flex-1 min-w-0 px-2">{positionNote}</span>
       <Stat label="Credit"><b className="font-extrabold text-emerald-400">{fmtMoney0(credit)}</b></Stat>
       <Stat label="Yield"><b className={tone(yieldTone(c.annualizedRoc))}>{c.annualizedRoc != null ? fmtPct0(c.annualizedRoc) : '—'}</b></Stat>
       <Stat label="POP"><b className={tone(popTone(c.pop))}>{c.pop != null ? fmtPct0(c.pop) : '—'}</b></Stat>

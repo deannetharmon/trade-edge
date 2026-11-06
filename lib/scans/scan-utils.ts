@@ -2,10 +2,19 @@
 // Mechanically extracted from app/screener/page.tsx (TE-0005A). Verbatim — not rewritten.
 import { ESTIMATED_EARNINGS_CYCLE_DAYS } from './constants';
 
+/**
+ * DTE-CALENDAR-0001: whole calendar days from today (New York date, the market's calendar) to the expiration date.
+ * It used to parse the date as UTC midnight and subtract "now", so on a US weekday daytime a 7-day weekly counted as 6
+ * (UTC midnight is the evening before in New York) and fell outside a 7-day minimum. UBER 11/13 vanished from the
+ * Best by DTE list for exactly this reason.
+ */
 export function daysUntil(dateStr: string): number {
-  const target = new Date(dateStr);
-  const now = new Date();
-  return Math.round((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(new Date());
+  const get = (t: string) => Number(parts.find(p => p.type === t)?.value);
+  const todayUtc = Date.UTC(get('year'), get('month') - 1, get('day'));
+  return Math.round((Date.UTC(y, m - 1, d) - todayUtc) / 86_400_000);
 }
 
 

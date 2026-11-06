@@ -30,6 +30,12 @@ describe('CleanCspLine', () => {
     expect(screen.getByText('$9,000')).toBeInTheDocument();
     expect(screen.queryByTestId('clean-fails')).toBeNull();
   });
+  it('POS-NOTE-0001: the open-position note sits inside the main row, once', () => {
+    render(<CleanCspLine {...base} positionNote={<span data-testid="note">Open position LONG_CALL 67.5C</span>} />);
+    const line = screen.getByTestId('clean-csp-line');
+    expect(line.contains(screen.getByTestId('note'))).toBe(true);
+    expect(screen.getAllByText(/Open position/i)).toHaveLength(1);
+  });
   it('credit is always bold green', () => {
     render(<CleanCspLine {...base} />);
     expect(screen.getByText('$11').className).toMatch(/text-emerald-400/);

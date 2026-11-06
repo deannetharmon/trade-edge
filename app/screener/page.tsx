@@ -6576,7 +6576,15 @@ const strategyScores = useMemo(() => {
           way. */}
       {cleanCsp && c ? (
         <CleanCspLine result={result} c={c} th={th} rsi14={rsi14} oiBelowFloor={c.cspOiPassing === false} alloc={cleanAlloc}
-          score={cspScore} band={cspBand} scoreOpen={showCspScore} onScore={() => setShowCspScore(v => !v)} expanded={expanded} />
+          score={cspScore} band={cspBand} scoreOpen={showCspScore} onScore={() => setShowCspScore(v => !v)} expanded={expanded}
+          positionNote={matchingPositions.length > 0 ? (
+            <span data-testid="clean-open-position" className="inline-flex flex-wrap items-center gap-x-2 rounded border border-amber-500/60 bg-amber-500/10 px-2 py-0.5 text-[10px]" onClick={e => e.stopPropagation()}>
+              <span className="font-bold uppercase tracking-widest text-amber-400">▸ Open position</span>
+              {matchingPositions.map((p, i) => (
+                <span key={i} className="text-amber-300/90">{p.strategy} {p.strikes} <span className="text-amber-500/70">exp {p.expDate} ×{p.qty}</span></span>
+              ))}
+            </span>
+          ) : null} />
       ) : (
       <div className="px-4 py-3 flex items-start gap-2">
         {/* Col 1: Symbol + price — fixed */}
@@ -7232,7 +7240,7 @@ const strategyScores = useMemo(() => {
       )}
 
       {/* Existing position banner */}
-      {matchingPositions.length > 0 && (
+      {matchingPositions.length > 0 && !(cleanCsp && c) && (
         <div 
           className="border-t border-l-2 border-amber-500 bg-amber-500/10 px-4 py-2 flex items-center gap-3 flex-wrap rounded-b-lg"
           onClick={e => e.stopPropagation()}
@@ -7240,7 +7248,6 @@ const strategyScores = useMemo(() => {
           <span className="text-[9px] font-bold text-amber-400 tracking-widest shrink-0 uppercase flex items-center gap-1">
             ▸ Open Position
           </span>
-          <span className="text-[9px] font-bold text-amber-400 tracking-widest shrink-0 uppercase">▸ Open Position</span>
           {matchingPositions.map((p, i) => (
             <div key={i} className="flex items-center gap-2 text-[10px]" style={{ fontFamily: "var(--font-inter), system-ui, sans-serif" }}>
               <span className={`px-1.5 py-0.5 border rounded text-[9px] font-bold ${
