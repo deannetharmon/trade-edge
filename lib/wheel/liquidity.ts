@@ -17,6 +17,8 @@ export interface LiquidityLimits {
   minOpenInterest: number;
 }
 
+import { hasOpenInterestMarket } from '@/lib/scans/liquidityPolicy';
+
 const cents = (dollars: number) => Math.round(dollars * 100);
 
 /** The gap as a whole percent of the midpoint (for the chip), or null when there is no usable quote. */
@@ -31,6 +33,9 @@ export function isLiquid(leg: LiquidityLeg, limits: LiquidityLimits): boolean {
   const bid = cents(leg.bid);
   const ask = cents(leg.ask);
   if (!(bid > 0) || !(ask >= bid)) return false;
+  // LIQUIDITY-SYNC-0002: zero open interest is no market, whatever minimum the plan sets (even 0). The minimum itself stays
+  // the trader's own plan setting.
+  if (!hasOpenInterestMarket(leg.openInterest)) return false;
   if (!(leg.openInterest >= limits.minOpenInterest)) return false;
   // 2 x (ask - bid) / (ask + bid) <= maxBidAskBps / 10,000, cross-multiplied so nothing is divided.
   return 2 * (ask - bid) * 10_000 <= limits.maxBidAskBps * (ask + bid);

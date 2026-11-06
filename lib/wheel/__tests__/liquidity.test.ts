@@ -45,3 +45,12 @@ describe('bidAskPercent', () => {
     expect(bidAskPercent(leg(0.9, 0.8))).toBeNull();
   });
 });
+
+describe('isLiquid and zero open interest (LIQUIDITY-SYNC-0002)', () => {
+  it('zero open interest is never liquid, even when the plan minimum is 0', () => {
+    expect(isLiquid(leg(0.8, 0.84, 0), { maxBidAskBps: 1000, minOpenInterest: 0 })).toBe(false);
+  });
+  it('a positive open interest passes when the plan minimum is 0', () => {
+    expect(isLiquid(leg(0.8, 0.84, 1), { maxBidAskBps: 1000, minOpenInterest: 0 })).toBe(true);
+  });
+});

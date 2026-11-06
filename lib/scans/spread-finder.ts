@@ -5,6 +5,7 @@ import type { RulesType } from './constants';
 import { getWidthSteps, getBidAskMax, normalizeIv, calcSpreadPop, daysUntil } from './scan-utils';
 import { calculateIronCondorCapital, STANDARD_EQUITY_OPTION_MULTIPLIER } from './financials';
 import { assessSpreadMarket, type LegQuoteInput } from './quoteQuality';
+import { hasOpenInterestMarket } from './liquidityPolicy';
 
 export function calculateTargetedConservativeCredit(
   shortLeg: any, longLeg: any, width: number, requireValidQuotes: boolean,
@@ -30,10 +31,10 @@ export function trySpreadAtWidth(legs: any[], strategy: 'BPS' | 'BCS', expDate: 
     const delta = shortLeg.delta; if (delta == null) continue;
     const absDelta = Math.abs(delta);
     if (absDelta < RULES.SPREAD_DELTA_MIN || absDelta > RULES.SPREAD_DELTA_MAX) continue;
-    if (shortLeg.openInterest < RULES.OI_MIN || shortLeg.ask - shortLeg.bid > bidAskMax) continue;
+    if (!hasOpenInterestMarket(shortLeg.openInterest) || shortLeg.ask - shortLeg.bid > bidAskMax) continue;
     const longStrike = strategy === 'BPS' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
     const longLeg = legs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
-    if (!longLeg || longLeg.openInterest < RULES.OI_MIN || longLeg.ask - longLeg.bid > bidAskMax) continue;
+    if (!longLeg || !hasOpenInterestMarket(longLeg.openInterest) || longLeg.ask - longLeg.bid > bidAskMax) continue;
     const midCredit = shortLeg.mid - longLeg.mid;
     const naturalCredit = shortLeg.bid - longLeg.ask;
     const suggestedCredit = Number((naturalCredit + 0.25 * (midCredit - naturalCredit)).toFixed(2));
@@ -109,10 +110,10 @@ export function tryICSideAtWidth(legs: any[], side: 'put' | 'call', width: numbe
     const delta = shortLeg.delta; if (delta == null) continue;
     const absDelta = Math.abs(delta);
     if (absDelta < RULES.IC_DELTA_MIN || absDelta > RULES.IC_DELTA_MAX) continue;
-    if (shortLeg.openInterest < RULES.OI_MIN || shortLeg.ask - shortLeg.bid > bidAskMax) continue;
+    if (!hasOpenInterestMarket(shortLeg.openInterest) || shortLeg.ask - shortLeg.bid > bidAskMax) continue;
     const longStrike = side === 'put' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
     const longLeg = legs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
-    if (!longLeg || longLeg.openInterest < RULES.OI_MIN || longLeg.ask - longLeg.bid > bidAskMax) continue;
+    if (!longLeg || !hasOpenInterestMarket(longLeg.openInterest) || longLeg.ask - longLeg.bid > bidAskMax) continue;
     const midCredit = shortLeg.mid - longLeg.mid;
     const naturalCredit = shortLeg.bid - longLeg.ask;
     const suggestedCredit = Number((naturalCredit + 0.25 * (midCredit - naturalCredit)).toFixed(2));
@@ -178,7 +179,7 @@ export function findBestSpreadUnfiltered(chain: any[], strategy: 'BPS' | 'BCS', 
           : shortLeg.strikePrice + width;
 
       const longLeg = legs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
-      if (!longLeg) continue;
+      if (!longLeg || !hasOpenInterestMarket(longLeg.openInterest) || !hasOpenInterestMarket(shortLeg.openInterest)) continue; // LIQUIDITY-SYNC-0002: zero OI = no market
 
       const credit = parseFloat((shortLeg.mid - longLeg.mid).toFixed(2));
       if (credit <= 0) continue;
@@ -276,7 +277,7 @@ export function findBestTargetedICWithCreditRatioFloor(
       for (const width of exactWidth == null ? getWidthSteps(maxWidth, price) : [exactWidth]) {
         const longStrike = side === 'put' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
         const longLeg = legs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
-        if (!longLeg) continue;
+        if (!longLeg || !hasOpenInterestMarket(longLeg.openInterest) || !hasOpenInterestMarket(shortLeg.openInterest)) continue; // LIQUIDITY-SYNC-0002: zero OI = no market
         // A positive launch floor makes quote validity an eligibility
         // requirement, rather than allowing a fabricated/mid-only credit.
         const quote = calculateTargetedConservativeCredit(shortLeg, longLeg, width, true);
@@ -352,7 +353,7 @@ export function findBestRankedIC(chain: any[], expDate: string, price: number | 
         if (!(absDelta >= 0.05 && absDelta <= 0.60)) continue;
         const longStrike = side === 'put' ? shortLeg.strikePrice - width : shortLeg.strikePrice + width;
         const longLeg = legs.find((o: any) => Math.abs(o.strikePrice - longStrike) < 0.01);
-        if (!longLeg) continue;
+        if (!longLeg || !hasOpenInterestMarket(longLeg.openInterest) || !hasOpenInterestMarket(shortLeg.openInterest)) continue; // LIQUIDITY-SYNC-0002: zero OI = no market
         // Executable credit. Quote usability is judged separately below and shown, not silently dropped.
         const quote = calculateTargetedConservativeCredit(shortLeg, longLeg, width, false);
         if (!quote) continue;
