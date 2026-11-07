@@ -24,7 +24,7 @@ export function useHoldingRsi(symbols: string[]): HoldingRsiMap {
     let cancelled = false;
     for (const symbol of key.split(',')) {
       const chartSymbol = YAHOO_INDEX_CHART_MAP[symbol] ?? symbol;
-      fetchDailyBars(chartSymbol, symbol)
+      Promise.resolve().then(() => fetchDailyBars(chartSymbol, symbol))
         .then(bars => stockRsiFromBars(bars))
         .catch(() => null)
         .then(result => {

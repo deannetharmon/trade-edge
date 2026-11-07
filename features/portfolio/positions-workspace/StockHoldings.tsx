@@ -21,6 +21,11 @@ import { marketMetricsPath, parseMarketMetricsEarnings, type StockEarnings } fro
 import { nextEarningsLine } from './model/nextEarnings';
 import type { PositionIntent } from '@/lib/portfolio-data/types';
 import type { StockAiAnalysis, StockAnalysisContext } from '@/lib/portfolio/stockAnalysis';
+import { rsiAtEntry, type StockRsi } from '@/lib/portfolio/stockRsi';
+import { ccRsiChip } from '@/lib/scans/ccRsiChip';
+import { useCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
+import { useHoldingRsi } from '@/components/portfolio-data/useHoldingRsi';
+import { RsiSparkline } from './RsiSparkline';
 
 /** Matches the notes route's limit (app/api/position-notes/route.ts). */
 export const STOCK_NOTE_MAX_LENGTH = 150;
@@ -36,6 +41,43 @@ const PILL: Record<CoveredTone, string> = {
   neutral: 'border-neutral-500/40 bg-neutral-500/10 text-neutral-300',
   watch: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
 };
+
+const RSI_ARROW = { up: { glyph: '▲', label: 'rising' }, down: { glyph: '▼', label: 'falling' }, flat: { glyph: '–', label: 'flat' } } as const;
+const RSI_CHIP_TONE = {
+  ready: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+  recovery: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
+  wait: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+} as const;
+
+type SaveEntryDate = (accountNumber: string, key: string, entryDate: string | null) => Promise<void>;
+
+/** The RSI-since-entry text and chip for one holding. Never estimates: no date, or a date outside the loaded window, shows the current RSI only. */
+function rsiView(row: StockHoldingRow, rsi: StockRsi | null | undefined, cutoff: number, entryDate: string | null) {
+  const chip = rsi && row.direction === 'Long'
+    ? ccRsiChip({ rsi: rsi.rsi, price: row.price, costBasis: row.basisComplete ? row.avgCost : null, cutoff })
+    : null;
+  const atEntry = rsi ? rsiAtEntry(rsi.points, entryDate) : null;
+  return { chip, atEntry };
+}
+
+function StockEntryDateEditor({ id, symbol, savedDate, onSave }: { id: string; symbol: string; savedDate: string | null; onSave: (entryDate: string | null) => Promise<void> }) {
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  const today = new Date().toISOString().slice(0, 10);
+  const run = async (next: string | null) => {
+    setState('saving'); setError(null);
+    try { await onSave(next); setState('saved'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Save failed'); setState('error'); }
+  };
+  return (
+    <div>
+      <label className={`block text-[10px] ${'text-white/60'}`} htmlFor={`stock-entry-date-${id}`}>Entry date (when you bought {symbol})</label>
+      <input id={`stock-entry-date-${id}`} type="date" max={today} min="1990-01-01" value={savedDate ?? ''}
+        onChange={event => { void run(event.target.value === '' ? null : event.target.value); }}
+        className="mt-1 rounded border border-white/20 bg-transparent px-2 py-1 text-xs text-white focus:outline-none focus:ring-2 focus:ring-teal-400" />
+      <span className="mt-1 block text-[9px] text-white/40">{state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : state === 'error' ? error : savedDate ? 'Clear the field to remove it' : 'Optional. Shows RSI at entry vs now.'}</span>
+    </div>
+  );
+}
 
 function StockNoteEditor({ label, savedNote, onSave }: { label: string; savedNote: string; onSave: (note: string) => Promise<void> }) {
   const [draft, setDraft] = useState(savedNote);
@@ -155,12 +197,17 @@ function Row({ row, th, chart, intentControl, earnings, gridStyle, savedNote, on
 }
 
 /** POSITIONS-CARDS-0001: the stock holding as a card, same shell as the option cards (header, big P/L, chips, action row, Show detail). */
-function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveNote, savedAlert, onSaveAlert, onSell, onAnalyze }: {
+function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveNote, savedAlert, onSaveAlert, onSell, onAnalyze, rsi, cutoff, entryDate, onSaveEntryDate }: {
+  rsi?: StockRsi | null; cutoff: number; entryDate: string | null; onSaveEntryDate: SaveEntryDate;
   row: StockHoldingRow; chart: ReactNode; intentControl: ReactNode; earnings: ReactNode; th: Theme; savedNote: string; onSaveNote: SaveNote; savedAlert: SavedAlert | null; onSaveAlert: SaveAlert; onSell: (row: StockHoldingRow) => void; onAnalyze?: (row: StockHoldingRow) => void;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const pnlTone = row.pnl == null ? 'text-white/40' : row.pnl >= 0 ? 'text-emerald-400' : 'text-red-400';
   const canSellCovered = row.covered.kind === 'available';
+  const { chip: rsiChip, atEntry } = rsiView(row, rsi, cutoff, entryDate);
+  const rsiArrow = rsi ? RSI_ARROW[rsi.direction] : null;
+  const priceMove = row.basisComplete && row.avgCost != null && row.price != null && row.avgCost > 0
+    ? ((row.price - row.avgCost) / row.avgCost) * 100 : null;
   const stats: Array<[string, string]> = [
     ['Shares', String(row.shares)],
     ['Price', row.price != null ? money(row.price) : '—'],
@@ -182,12 +229,40 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
       </div>
       <ul aria-label="Signals" className="mt-3 flex flex-wrap items-center gap-1.5">
         <li className={`rounded-full border px-2.5 py-0.5 text-[11px] ${PILL[row.covered.tone]}`}>{row.covered.headline}</li>
+        {rsi !== undefined && <li data-testid={`stock-rsi-${row.key}`} className="text-[11px] text-white">
+          RSI <b>{rsi ? Math.round(rsi.rsi) : '—'}</b>
+          {rsiArrow && <span className={`ml-1 text-[10px] ${th.textFaint}`} aria-label={rsiArrow.label}>{rsiArrow.glyph}</span>}
+          {atEntry && rsi && <span className={th.textFaint}> · {Math.round(atEntry.rsi)} at entry</span>}
+        </li>}
+        {rsiChip && <li title={rsiChip.reason} className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${RSI_CHIP_TONE[rsiChip.state]}`}>Calls: {rsiChip.label}</li>}
         {row.stale && <li className="rounded-full border border-amber-400/50 bg-amber-400/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">Stale price</li>}
         {earnings && <li className="text-[11px]">{earnings}</li>}
       </ul>
       {row.covered.detail && <p className={`mt-1 text-[11px] ${th.textFaint}`}>{row.covered.detail}</p>}
+      {priceMove != null && row.price != null && row.avgCost != null && (
+        <p data-testid={`stock-price-move-${row.key}`} className={`mt-1 text-[11px] ${th.textFaint}`}>
+          <span>{money(row.avgCost)}</span><span className="mx-1" aria-label="to">→</span><b className="text-white">{money(row.price)}</b>
+          {' · '}{Math.abs(priceMove) < 0.05 ? '0.0%' : `${priceMove > 0 ? '+' : '−'}${Math.abs(priceMove).toFixed(1)}%`} since you bought
+        </p>
+      )}
       {detailOpen && (
         <div data-testid="stock-card-detail" className="mt-3 space-y-3">
+          <div data-testid="stock-rsi-detail" className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-3 sm:grid-cols-[auto_1fr]">
+            <div className={th.textFaint}>
+              {rsi?.points && rsi.points.length >= 2 ? <RsiSparkline points={rsi.points} cutoff={cutoff} entryDate={entryDate} symbol={row.symbol} /> : <span className="text-[11px]">RSI history unavailable</span>}
+              <span className="block text-[9px]">Daily RSI(14), last 30 sessions · dashed line = {cutoff} cutoff</span>
+            </div>
+            <div className="space-y-2">
+              <dl className="grid grid-cols-3 gap-2 text-xs text-white">
+                <div><dt className={`text-[10px] ${th.textFaint}`}>Now</dt><dd className="font-bold">{rsi ? Math.round(rsi.rsi) : '—'}</dd></div>
+                <div><dt className={`text-[10px] ${th.textFaint}`}>Yesterday</dt><dd className="font-bold">{rsi ? Math.round(rsi.previous) : '—'}</dd></div>
+                <div><dt className={`text-[10px] ${th.textFaint}`}>At entry</dt><dd className="font-bold">{atEntry ? Math.round(atEntry.rsi) : '—'}</dd></div>
+              </dl>
+              {entryDate && !atEntry && rsi && <p className="text-[10px] text-amber-300">Entry date is outside the last ~5 months of chart history, so RSI at entry is not shown.</p>}
+              {rsiChip && <p className={`text-[11px] ${th.textFaint}`}>{rsiChip.reason}</p>}
+              <StockEntryDateEditor id={row.key} symbol={row.symbol} savedDate={entryDate} onSave={next => onSaveEntryDate(row.accountNumber, row.key, next)} />
+            </div>
+          </div>
           <dl className="grid grid-cols-2 gap-2 sm:grid-cols-5">{stats.map(([label, value]) => <div key={label} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"><dt className={`text-[10px] uppercase tracking-wider ${th.textFaint}`}>{label}</dt><dd className="text-sm font-bold text-white">{value}</dd></div>)}</dl>
           {row.direction === 'Long' && <CcBasisEditor symbol={row.symbol} brokerBasis={row.basisComplete ? row.avgCost : null} th={th} />}
           <div className="grid gap-3 sm:grid-cols-2">
@@ -236,6 +311,28 @@ export function StockHoldings({ cards = false, earningsEnabled = false, intentEn
   renderConversation?: (row: StockHoldingRow, analysis: StockAiAnalysis, context: StockAnalysisContext) => ReactNode;
 }) {
   const rows = buildStockHoldingRows(groups);
+  // STOCK-RSI-0001: daily RSI per held symbol, the covered-call RSI cutoff, and the user-set entry dates.
+  const rsiBySymbol = useHoldingRsi(rows.map(r => r.symbol));
+  const [ccRsiCutoff] = useCcRsiCutoff();
+  const [entryDates, setEntryDates] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (typeof fetch !== 'function') return;
+    let active = true;
+    fetch('/api/position-entry-dates').then(response => response.json()).then(payload => { if (active && payload?.entryDates) setEntryDates(payload.entryDates); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+  const saveEntryDate: SaveEntryDate = async (accountNumber, key, entryDate) => {
+    const id = storageKey(accountNumber, key);
+    const previous = entryDates[id];
+    setEntryDates(current => { const next = { ...current }; if (entryDate) next[id] = entryDate; else delete next[id]; return next; });
+    try {
+      const response = await fetch('/api/position-entry-dates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountNumber, positionKey: key, entryDate }) });
+      if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload?.error ?? 'Save failed'); }
+    } catch (cause) {
+      setEntryDates(current => { const next = { ...current }; if (previous) next[id] = previous; else delete next[id]; return next; });
+      throw cause;
+    }
+  };
   // Shares are not option positions, so their intent is saved under the account and holding key in the same store.
   const [intents, setIntents] = useState<Record<string, string>>({});
   useEffect(() => {
@@ -317,6 +414,7 @@ export function StockHoldings({ cards = false, earningsEnabled = false, intentEn
                 sparkLoading={chartLoadingSymbol === row.symbol} setSparkLoading={loading => setChartLoadingSymbol(loading ? row.symbol : null)} />}
               savedNote={notes[storageKey(row.accountNumber, row.key)] ?? ''} onSaveNote={onSaveNote}
               savedAlert={alerts[storageKey(row.accountNumber, row.key)] ?? null} onSaveAlert={onSaveAlert}
+              rsi={rsiBySymbol[row.symbol.trim().toUpperCase()]} cutoff={ccRsiCutoff} entryDate={entryDates[storageKey(row.accountNumber, row.key)] ?? null} onSaveEntryDate={saveEntryDate}
               onSell={sellDeps ? setSellRow : () => {}} onAnalyze={onAnalyze ? row => void runAnalysis(row) : undefined} />
             ))}
           </div>
