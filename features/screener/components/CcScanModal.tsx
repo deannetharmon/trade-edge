@@ -316,7 +316,7 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
         <section aria-label="Search and preferences" data-cc-card="search" className={`grid grid-cols-1 gap-x-5 gap-y-3 border-t ${th.border} pt-3 sm:grid-cols-2`}>
           {rangeCell(getCcCriterion('dte'), 'left')}
           <p className="self-end pb-1 text-[10px] leading-snug text-neutral-400">
-            Days to expiration is the only setting that decides which expirations are fetched. Delta, width and open interest are preferences: calls outside them are tagged in the results grid, not hidden.
+            Days to expiration is the only setting that decides which expirations are fetched. Delta and width limit which call is picked as the best opportunity (if none fits, the closest call is shown with a note). Open interest below your minimum is kept with a warning. The strike grid shows more calls than the pick.
           </p>
           <details data-testid="cc-more-settings" className="sm:col-span-2">
             <summary className="cursor-pointer text-[10px] font-bold uppercase tracking-wider text-neutral-400">More settings (delta, width, open interest)</summary>

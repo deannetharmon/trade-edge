@@ -109,7 +109,7 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
     rescan: true,
     card: 'search',
     summaryGroup: 'search',
-    hint: 'A hard limit for covered calls: a call outside the range is never a candidate.',
+    hint: 'A hard limit for covered calls: the best pick comes only from inside this range. If no call inside it qualifies, the closest call is shown with a note. The strike grid shows more.',
     control: {
       kind: 'range', minKey: 'DELTA_MIN', maxKey: 'DELTA_MAX', minLabel: 'Min Δ', maxLabel: 'Max Δ',
       minTitle: 'Lower edge of the call delta range', maxTitle: 'Upper edge of the call delta range', step: '0.01',
@@ -130,7 +130,7 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
     rescan: true,
     card: 'search',
     summaryGroup: 'search',
-    hint: 'Rejects wider than max(10% of mid, $0.05), or over the ceiling.',
+    hint: 'The best pick never comes from a call wider than max(10% of mid, $0.05), or over the ceiling. The strike grid still shows it.',
     control: {
       kind: 'rule', key: 'WIDTH_PCT_MAX', label: 'Max width', title: 'Widest bid/ask spread, as a percent of the mid price (never below $0.05)', step: '1', unit: '% of mid',
       presets: [{ label: '5%', value: 5 }, { label: '10%', value: 10 }, { label: '15%', value: 15 }],
@@ -146,7 +146,7 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
     rescan: true,
     card: 'search',
     summaryGroup: 'search',
-    hint: 'A call whose bid/ask is wider than this dollar amount is never a candidate, however high the price.',
+    hint: 'The best pick never comes from a call whose bid/ask is wider than this dollar amount, however high the price. The strike grid still shows it.',
     control: {
       kind: 'rule', key: 'WIDTH_CEILING', label: 'Width ceiling', title: 'Widest bid/ask spread allowed, in dollars per share', step: '0.01', unit: '$ per share',
       presets: [{ label: '$0.30', value: 0.3 }, { label: '$0.50', value: 0.5 }, { label: '$0.75', value: 0.75 }],

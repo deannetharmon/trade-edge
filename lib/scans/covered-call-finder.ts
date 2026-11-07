@@ -511,6 +511,24 @@ export function formatCcExclusionSummary(r: CcExclusionReport, rules: CcRulesTyp
   return line;
 }
 
+/**
+ * CC-SIMPLIFY-0001 phase 1: one line saying what was left out of the best pick, shown on a result that DID find a call.
+ * Null when nothing was left out. Uses the same counts as the empty-result summary, so the two never disagree.
+ */
+export function formatCcHiddenNote(r: CcExclusionReport, rules: CcRulesType): string | null {
+  if (r.callsTotal === 0) return null;
+  const parts: string[] = [];
+  const add = (n: number, label: string) => { if (n > 0) parts.push(`${n} ${label}`); };
+  add(r.rejected.BELOW_FLOOR, r.floor !== null ? `with strike below the $${r.floor.toFixed(2)} floor` : 'with strike below the floor');
+  add(r.rejected.DELTA_WINDOW, `with delta outside ${rules.DELTA_MIN}-${rules.DELTA_MAX}`);
+  add(r.rejected.WIDTH, 'with a bid/ask too wide');
+  add(r.rejected.BAD_QUOTE + r.rejected.CROSSED_QUOTE, 'with no usable quote');
+  add(r.rejected.NO_DELTA + r.rejected.BAD_STRIKE + r.rejected.BAD_OI, 'with missing data or no open interest');
+  add(r.removedByEarnings, 'too close to earnings');
+  if (parts.length === 0) return null;
+  return `Left out of the best pick (DTE ${rules.DTE_MIN}-${rules.DTE_MAX}): ${parts.join(', ')}.`;
+}
+
 // ── SQ-0001A foundation gate + multi-candidate discovery ────────────────
 // TE-0007C-RECONCILE-0001.
 //

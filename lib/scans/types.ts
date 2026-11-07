@@ -239,6 +239,8 @@ export interface ScreenResult {
   sourceResultId?: string;
   /** CC-WHEEL-0001 S4: every covered call that passes the safety gates, by expiration and strike (covered-call results only). */
   ccGrid?: import('./ccGridTypes').CcGrid;
+  /** CC-SIMPLIFY-0001: what the scan left out of the best pick (covered-call results that found a call). */
+  ccExclusionNote?: string | null;
   symbol: string; strategy: string; price: number | null; ivr: number | null;
   ivx?: number | null; ivx30?: number | null; ivHv30Diff?: number | null; liquidityRating?: number | null;
   qualified: boolean; bestCandidate: SpreadCandidate | null;

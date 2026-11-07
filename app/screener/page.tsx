@@ -100,7 +100,7 @@ import {
 // TE-0007C — Covered Call as a first-class Screener strategy.
 import { resolveCcBasis, applyTypedBasis } from '@/lib/ccBasis/ccBasisSettings';
 import { fetchCcBasisSettings } from '@/features/screener/useCcBasisSettings';
-import { findBestCoveredCall, diagnoseCcExclusions, formatCcExclusionSummary, buildCcGrid } from '@/lib/scans/covered-call-finder';
+import { findBestCoveredCall, diagnoseCcExclusions, formatCcExclusionSummary, formatCcHiddenNote, buildCcGrid } from '@/lib/scans/covered-call-finder';
 import { ccStrikeFloor, ccStrikeFloorMessage } from '@/lib/scans/ccStrikeFloor';
 import { resolveResearchEntry, buildResearchCapacity, researchEntryLabel } from '@/lib/scans/ccResearch';
 import { CcStrikeGrid } from '@/features/screener/components/CcStrikeGrid';
@@ -1643,6 +1643,9 @@ function runCcChecklist(
     symbol, strategy: 'CC', price, ivr: ivrValue,
     ivx: ivxValue, ivx30: null, ivHv30Diff: null, liquidityRating: null,
     ccGrid: capacityCheck.status !== 'fail' ? buildCcGrid(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }) : undefined,
+    ccExclusionNote: bestCandidate && capacityCheck.status !== 'fail'
+      ? formatCcHiddenNote(diagnoseCcExclusions(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }), ccRules)
+      : null,
     qualified,
     bestCandidate: bestCandidate ? { ...bestCandidate, ccBasisSource: basisOpts?.basisSource ?? null, ccAllowBelowBasis: allowBelowBasis } : bestCandidate,
     failReasons,
@@ -7099,6 +7102,7 @@ const strategyScores = useMemo(() => {
               {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
               {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} initial={c.expiration ? { expiration: c.expiration, strike: c.shortStrike } : null} onAnchorChange={setPickedCcCell} hideGoalNote={!!c.ccOutsideRangeNote} />}
               {c.ccOutsideRangeNote && <p className="text-[9px] text-yellow-400 font-medium pt-1">⚠ {c.ccOutsideRangeNote}</p>}
+              {result.ccExclusionNote && <p data-testid="cc-exclusion-note" className={`text-[10px] pt-1 ${th.textFaint}`}>{result.ccExclusionNote}</p>}
               {c.ccResearch && <p className="text-[9px] text-cyan-300 font-bold pt-1">RESEARCH — not an order, and not counted in Best Opportunities. Entry price: {researchEntryLabel(c.ccEntrySource ?? null)}.</p>}
               {c.ccLiquidityWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccLiquidityWarning}</p>}
               {c.ccHasUnclassifiedExposure && (
