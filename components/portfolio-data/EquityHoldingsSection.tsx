@@ -3,6 +3,11 @@
 import type { PortfolioSnapshot } from '@/lib/portfolio-snapshot/types';
 import { buildSnapshotCapacityReport } from '@/lib/portfolio-snapshot/capacity';
 import { THEMES, type Theme } from '@/lib/theme';
+import type { EquityHolding } from '@/lib/portfolio-snapshot/types';
+import { ccRsiChip } from '@/lib/scans/ccRsiChip';
+import type { StockRsi } from '@/lib/portfolio/stockRsi';
+import { useCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
+import { useHoldingRsi } from './useHoldingRsi';
 
 export function isEquityDisplayEnabled(value = process.env.NEXT_PUBLIC_LCC_0001A_EQUITY_DISPLAY_ENABLED): boolean {
   return value === 'true';
@@ -47,10 +52,53 @@ function quoteAsOfLabel(value: string | null): string {
   return `Quote as of ${new Date(value).toLocaleString()}`;
 }
 
+// STOCK-RSI-0001: the basis -> price movement caption. Neutral text (Unrealized P/L carries the color). Never guessed:
+// an incomplete basis says so, and a missing price falls back to the average basis alone.
+function priceCaption(holding: EquityHolding): string {
+  if (!holding.basisComplete || holding.basis == null || !(holding.basis > 0)) return 'Basis unavailable';
+  if (holding.currentPrice == null || !Number.isFinite(holding.currentPrice)) return `Avg basis ${money(holding.basis)}`;
+  const pct = ((holding.currentPrice - holding.basis) / holding.basis) * 100;
+  if (Math.abs(pct) < 0.05) return '0.0% since you bought';
+  return `${pct > 0 ? '+' : '−'}${Math.abs(pct).toFixed(1)}% since you bought`;
+}
+
+const RSI_ARROW = { up: { glyph: '▲', label: 'rising' }, down: { glyph: '▼', label: 'falling' }, flat: { glyph: '–', label: 'flat' } } as const;
+const RSI_CHIP_TONE = {
+  ready: 'bg-emerald-500/15 text-emerald-400',
+  recovery: 'bg-sky-500/15 text-sky-400',
+  wait: 'bg-amber-500/15 text-amber-400',
+} as const;
+
+// STOCK-RSI-0001 slice A. Display only: the number is not colored (the chip is the only signal) and nothing here
+// changes a verdict, a score or an order gate. Short stock has no covered-call timing, so it shows RSI without a chip.
+function HoldingRsiTile({ holding, rsi, cutoff, th }: {
+  holding: EquityHolding;
+  rsi: StockRsi | null | undefined;
+  cutoff: number;
+  th: typeof THEMES[Theme];
+}) {
+  const chip = rsi && holding.direction === 'Long'
+    ? ccRsiChip({ rsi: rsi.rsi, price: holding.currentPrice, costBasis: holding.basisComplete ? holding.basis : null, cutoff })
+    : null;
+  const arrow = rsi ? RSI_ARROW[rsi.direction] : null;
+  return (
+    <div data-testid={`equity-rsi-${holding.symbol}-${holding.direction}`} className={`border-l pl-3 ${th.border}`}>
+      <dt className={`text-[9px] uppercase tracking-wider ${th.textFaint}`}>RSI (14d)</dt>
+      <dd className={`mt-1 flex items-baseline gap-1.5 text-sm ${th.text}`}>
+        <span className="font-bold">{rsi ? Math.round(rsi.rsi) : '—'}</span>
+        {arrow && <span className={`text-[10px] ${th.textFaint}`} aria-label={arrow.label}>{arrow.glyph}</span>}
+        {chip && <span title={chip.reason} className={`rounded px-1.5 py-px text-[10px] font-bold ${RSI_CHIP_TONE[chip.state]}`}>Calls: {chip.label}</span>}
+      </dd>
+    </div>
+  );
+}
+
 export function EquityHoldingsSection({ snapshot, th }: {
   snapshot: PortfolioSnapshot | null;
   th: typeof THEMES[Theme];
 }) {
+  const rsiBySymbol = useHoldingRsi(snapshot ? snapshot.equities.map(h => h.symbol) : []);
+  const [ccRsiCutoff] = useCcRsiCutoff();
   if (!snapshot) {
     return (
       <section aria-label="Equity Holdings" className="space-y-2">
@@ -112,11 +160,24 @@ export function EquityHoldingsSection({ snapshot, th }: {
             </div>
 
             <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
-              <div><dt className={`text-[9px] uppercase tracking-wider ${th.textFaint}`}>Average basis</dt><dd className={`mt-1 text-sm ${th.text}`}>{holding.basisComplete ? money(holding.basis) : 'Basis unavailable'}</dd></div>
-              <div><dt className={`text-[9px] uppercase tracking-wider ${th.textFaint}`}>{economicsCurrent ? 'Current price' : referencePrice ? 'Reference price' : 'Current price'}</dt><dd className={`mt-1 text-sm ${th.text}`}>{holding.currentPrice == null ? 'Unavailable' : money(holding.currentPrice)}</dd></div>
+              <div>
+                <dt className={`text-[9px] uppercase tracking-wider ${th.textFaint}`}>{economicsCurrent ? 'Current price' : referencePrice ? 'Reference price' : 'Current price'}</dt>
+                <dd className={`mt-1 text-sm ${th.text}`} title="Average basis to current price">
+                  {holding.currentPrice == null ? 'Unavailable' : (
+                    <>
+                      {holding.basisComplete && holding.basis != null && (
+                        <><span className={th.textFaint}>{money(holding.basis)}</span><span className={`mx-1 text-[10px] ${th.textFaint}`} aria-label="to">→</span></>
+                      )}
+                      <span className="font-bold">{money(holding.currentPrice)}</span>
+                    </>
+                  )}
+                </dd>
+                <p className={`mt-0.5 text-[10px] ${th.textFaint}`}>{priceCaption(holding)}</p>
+              </div>
               <div><dt className={`text-[9px] uppercase tracking-wider ${th.textFaint}`}>Market value</dt><dd className={`mt-1 text-sm ${th.text}`}>{economicsCurrent ? money(holding.marketValue) : 'Unavailable'}</dd></div>
               <div><dt className={`text-[9px] uppercase tracking-wider ${th.textFaint}`}>Unrealized P/L</dt><dd className={`mt-1 text-sm ${economicsCurrent ? pnlTone : th.textFaint}`}>{economicsCurrent ? money(holding.unrealizedPnl) : 'Unavailable'}</dd></div>
               <div><dt className={`text-[9px] uppercase tracking-wider ${th.textFaint}`}>Call capacity</dt><dd className={`mt-1 text-sm ${th.text}`}>{holding.direction === 'Short' ? '0 contracts' : symbolCapacity ? `${symbolCapacity.availableCoveredContracts} contracts` : 'Unavailable'}</dd></div>
+              <HoldingRsiTile holding={holding} rsi={rsiBySymbol[holding.symbol.trim().toUpperCase()]} cutoff={ccRsiCutoff} th={th} />
             </dl>
           </article>
         );
