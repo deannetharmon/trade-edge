@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import type { WheelChainLeg } from '@/lib/wheel/chainSearch';
 import { computeCoveredCallCapacity } from '../covered-call-capacity';
-import { findBestCoveredCallWithFallback } from '../covered-call-finder';
+import { findBestCoveredCall as findBestCoveredCallWithFallback, findNearestCoveredCall } from '../covered-call-finder';
 import { DEFAULT_CC_RULES, type CcRulesType } from '../constants';
 import {
   CC_WIDTH_CHOICES, DEFAULT_CC_VIEW, buildCcPool, ccScanRules, ccViewFromPreset, ccViewRules, ccViewWith, countCcViewHidden, detectCcPreset, type CcView,
@@ -71,7 +71,7 @@ describe('default view = today\'s pre-scan rules', () => {
   });
 });
 
-describe('parity: pool + view picks the same call as the old rules', () => {
+describe('parity: pool + view picks the same call as a scan with those rules', () => {
   const e = expIn(30);
 
   it('1. normal: several calls inside the window', () => {
@@ -79,15 +79,16 @@ describe('parity: pool + view picks the same call as the old rules', () => {
     const { pool, cap } = expectParity('normal', c, 100, 90);
     const pick = findBestCoveredCallWithFallback(pool, { rules: ccViewRules(BASE, DEFAULT_CC_VIEW), capacity: cap, stockPrice: 100 });
     expect(pick?.shortStrike).toBe(108);
-    expect(pick?.ccOutsideRangeNote).toBeUndefined();
   });
 
-  it('2. empty window: falls back to the closest call outside it, with the note', () => {
+  it('2. empty window: not qualified, and the nearest call is information only', () => {
     const c = chain({ [e]: [leg(e, 110, 0.12, 0.40, 0.44), leg(e, 114, 0.08, 0.25, 0.28), leg(e, 120, 0.04, 0.10, 0.12)] });
     const { pool, cap } = expectParity('empty window', c, 100, 90);
-    const pick = findBestCoveredCallWithFallback(pool, { rules: ccViewRules(BASE, DEFAULT_CC_VIEW), capacity: cap, stockPrice: 100 });
-    expect(pick?.shortStrike).toBe(110);
-    expect(pick?.ccOutsideRangeNote).toMatch(/outside your/);
+    const params = { rules: ccViewRules(BASE, DEFAULT_CC_VIEW), capacity: cap, stockPrice: 100 };
+    expect(findBestCoveredCallWithFallback(pool, params)).toBeNull();
+    expect(findNearestCoveredCall(pool, params)?.shortStrike).toBe(110);
+    // A wider delta view brings that call in range, so it becomes a pick.
+    expect(findBestCoveredCallWithFallback(pool, { ...params, rules: ccViewRules(BASE, ccViewWith(DEFAULT_CC_VIEW, { deltaMin: 0.05, deltaMax: 0.60 })) })?.shortStrike).toBe(110);
   });
 
   it('3. width: a wide call is skipped at 10% and chosen at 15%', () => {

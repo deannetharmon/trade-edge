@@ -33,7 +33,7 @@ export function CcViewControls({ view, th, hiddenCount, onChange }: CcViewContro
     <div data-testid="cc-view-controls" className="mb-3 flex flex-col gap-2">
       {hiddenCount > 0 && (
         <div role="status" data-testid="cc-view-hidden" className="flex items-center justify-between gap-3 rounded-lg border border-amber-700 bg-amber-400/10 px-3 py-2">
-          <span className="text-xs text-amber-300">{hiddenCount} call{hiddenCount === 1 ? '' : 's'} hidden by result filters</span>
+          <span className="text-xs text-amber-300">{hiddenCount} call{hiddenCount === 1 ? '' : 's'} outside this delta and width view</span>
           <button type="button" onClick={() => { setCustomOpen(false); onChange(DEFAULT_CC_VIEW); }} disabled={atDefault}
             className="min-h-7 rounded-md border border-amber-400 px-3 text-xs text-amber-300 disabled:opacity-40">Reset filters</button>
         </div>

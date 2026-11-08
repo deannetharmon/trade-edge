@@ -372,19 +372,15 @@ export function findBestCoveredCall(
 }
 
 /**
- * The best covered call for a rule set, with the CC-WHEEL-0001 S4 fallback: when nothing inside the delta range
- * qualifies, the closest call outside it (every safety gate and the width rule still apply) with a note. Shared by the
- * scan and by the results-screen view, so both pick the same call for the same rules.
+ * CC-SIMPLIFY-0001E (Dean, Ian): the nearest call OUTSIDE the delta range, for information only. A ticker with no call
+ * inside the active range is not qualified (the old closest-call fallback is gone); this tells the trader what the
+ * nearest valid call is so the "no call in range" reason is concrete. Every safety gate and the width rule still apply.
  */
-export function findBestCoveredCallWithFallback(
+export function findNearestCoveredCall(
   chain: { expirations: string[]; chains: Record<string, WheelChainLeg[]> },
   params: CcFindParams,
 ): SpreadCandidate | null {
-  const best = findBestCoveredCall(chain, params);
-  if (best) return best;
-  const closest = findBestCoveredCall(chain, { ...params, rules: { ...params.rules, DELTA_MIN: 0.01, DELTA_MAX: 0.99 } });
-  if (!closest) return null;
-  return { ...closest, ccOutsideRangeNote: `Delta ${closest.shortDelta.toFixed(2)} is outside your ${params.rules.DELTA_MIN}-${params.rules.DELTA_MAX} range. Shown because no call inside the range qualified.` };
+  return findBestCoveredCall(chain, { ...params, rules: { ...params.rules, DELTA_MIN: 0.01, DELTA_MAX: 0.99 } });
 }
 
 // ── CC-WHEEL-0001 S4: the strike grid ───────────────────────────────────

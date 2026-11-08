@@ -180,8 +180,6 @@ export interface SpreadCandidate {
   // CC-RESEARCH-0001 -- a research scan (any ticker, as if the shares were owned). Never orderable, never sent to
   // Best Opportunities. ccEntrySource says where the entry price came from (see lib/scans/ccResearch.ts).
   ccResearch?: boolean;
-  /** CC-WHEEL-0001 S4: set when no call inside the delta range qualified and this is the closest one outside it. */
-  ccOutsideRangeNote?: string | null;
   ccEntrySource?: 'typed-for-scan' | 'position-typed' | 'position-broker' | 'price-assumed';
   // TE-0007C final corrective pass — mirrors CoveredCallCapacity.
   // hasUnclassifiedExposure: true when some (attributable) option exposure

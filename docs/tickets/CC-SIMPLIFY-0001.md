@@ -24,3 +24,7 @@ Descriptions match the engine; a "Left out of the best pick" line on a result (c
 ## Phase 2c (2026-11-07)
 
 Fix: the accounting bar (qualified / caution / disqualified) now counts the regraded rows when the covered-call view is active. Found on a live scan: the bar said "2 qualified, 0 disqualified" while the list showed 1 qualified and 1 disqualified, because the bar read scan-time counts graded wide open.
+
+## Phase 2d (2026-11-07, Dean + Ian)
+
+Dean: show only valid covered calls. The CC-WHEEL-0001 S4 closest-call fallback is removed. A ticker with no call inside the active delta range is NOT qualified; its reason names the delta range, the nearest valid call (information only, never a pick) and, when the stock is below cost basis, the lowest allowed strike. The chips can bring a call into range, which makes the ticker qualify. The banner now reads "N calls outside this delta and width view" because it counts the delta/width view only, not the POP / OTM / IVR / Call OI chips.

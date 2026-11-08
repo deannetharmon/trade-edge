@@ -100,7 +100,7 @@ import {
 // TE-0007C — Covered Call as a first-class Screener strategy.
 import { resolveCcBasis, applyTypedBasis } from '@/lib/ccBasis/ccBasisSettings';
 import { fetchCcBasisSettings } from '@/features/screener/useCcBasisSettings';
-import { findBestCoveredCallWithFallback, diagnoseCcExclusions, formatCcExclusionSummary, formatCcHiddenNote, buildCcGrid } from '@/lib/scans/covered-call-finder';
+import { findBestCoveredCall, findNearestCoveredCall, diagnoseCcExclusions, formatCcExclusionSummary, formatCcHiddenNote, buildCcGrid } from '@/lib/scans/covered-call-finder';
 import { ccStrikeFloor, ccStrikeFloorMessage } from '@/lib/scans/ccStrikeFloor';
 import { DEFAULT_CC_VIEW, buildCcPool, ccScanRules, ccViewFromPreset, ccViewRules, ccViewWith, countCcViewHidden, type CcView } from '@/lib/scans/ccView';
 import { CcViewControls } from '@/features/screener/components/CcViewControls';
@@ -1586,11 +1586,14 @@ function runCcChecklist(
   // actual selected contract's DTE is known.
   let earningsCheck = buildEarningsPrecheckCheck(earningsDate, chainData.expirations, ccRules);
 
-  // CC-WHEEL-0001 S4: the delta range is a preference, not a gate. When nothing inside it qualifies, show the
-  // closest call outside it (every safety gate still applies) with a note, instead of an empty result.
-  // CC-SIMPLIFY-0001: the same shared helper re-picks from the pool when a results-screen chip changes.
+  // CC-SIMPLIFY-0001E: only a call inside the active delta range can be the best pick. When none qualifies the ticker
+  // is not qualified (no closest-call fallback); the nearest valid call below is information, not a pick.
+  // The same finder re-picks from the pool when a results-screen chip changes.
   const bestCandidate = capacityCheck.status !== 'fail'
-    ? findBestCoveredCallWithFallback(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis })
+    ? findBestCoveredCall(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis })
+    : null;
+  const nearestCandidate = !bestCandidate && capacityCheck.status !== 'fail'
+    ? findNearestCoveredCall(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis })
     : null;
 
   // Contract eligibility is determined only against this selected expiry.
@@ -1605,7 +1608,7 @@ function runCcChecklist(
   if (!bestCandidate && !failReasons.length && ccFloor.floor === null) failReasons.push(ccStrikeFloorMessage(ccFloor.missing));
   else if (!bestCandidate && !failReasons.length) failReasons.push(earningsCheck.reason.includes('no eligible expiration')
     ? earningsCheck.reason
-    : `No qualifying call found in delta ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} / DTE ${ccRules.DTE_MIN}-${ccRules.DTE_MAX} window above stock price / cost basis. ${formatCcExclusionSummary(diagnoseCcExclusions(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }), ccRules)}`);
+    : `No qualifying call found in delta ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} / DTE ${ccRules.DTE_MIN}-${ccRules.DTE_MAX} window above stock price / cost basis. ${formatCcExclusionSummary(diagnoseCcExclusions(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }), ccRules)}${nearestCandidate ? ` Nearest valid call: $${nearestCandidate.shortStrike} ${nearestCandidate.expiration}, Δ${nearestCandidate.shortDelta.toFixed(2)}${ccFloor.floor !== null && price != null && ccFloor.floor > price ? ` (lowest allowed strike is $${ccFloor.floor.toFixed(2)}, your cost basis)` : ''}. Shown for information only, not a pick.` : ''}`);
   if (earningsCheck.status === 'fail') failReasons.push(earningsCheck.reason);
 
   const oiCheck: CheckResult = !bestCandidate
@@ -1657,7 +1660,7 @@ function runCcChecklist(
 
 
 // CC-SIMPLIFY-0001 Phase 2: re-pick one covered-call result for the active delta/width view. The same checklist (and
-// the same finder + closest-call fallback) runs on the pool of calls the safety gates let through, so the pick at the
+// the same finder, no fallback) runs on the pool of calls the safety gates let through, so the pick at the
 // default view equals the pick the old pre-scan rules made. Only the pick-derived fields change; the strike grid, the
 // scan-time record and everything else stay as scanned.
 function regradeCcResult(r: ScreenResult, view: CcView): ScreenResult {
@@ -7127,8 +7130,7 @@ const strategyScores = useMemo(() => {
                 </div>
               </details>
               {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
-              {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} initial={c.expiration ? { expiration: c.expiration, strike: c.shortStrike } : null} onAnchorChange={setPickedCcCell} hideGoalNote={!!c.ccOutsideRangeNote} />}
-              {c.ccOutsideRangeNote && <p className="text-[9px] text-yellow-400 font-medium pt-1">⚠ {c.ccOutsideRangeNote}</p>}
+              {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} initial={c.expiration ? { expiration: c.expiration, strike: c.shortStrike } : null} onAnchorChange={setPickedCcCell} />}
               {result.ccExclusionNote && <p data-testid="cc-exclusion-note" className={`text-[10px] pt-1 ${th.textFaint}`}>{result.ccExclusionNote}</p>}
               {c.ccResearch && <p className="text-[9px] text-cyan-300 font-bold pt-1">RESEARCH — not an order, and not counted in Best Opportunities. Entry price: {researchEntryLabel(c.ccEntrySource ?? null)}.</p>}
               {c.ccLiquidityWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccLiquidityWarning}</p>}

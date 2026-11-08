@@ -40,14 +40,14 @@ describe('CcViewControls', () => {
   it('shows the hidden count, and Reset returns to the default view', async () => {
     const onChange = vi.fn();
     render(<CcViewControls view={ccViewWith(ccViewFromPreset('income'), { widthPctMax: 5 })} th={th} hiddenCount={12} onChange={onChange} />);
-    expect(screen.getByTestId('cc-view-hidden')).toHaveTextContent('12 calls hidden by result filters');
+    expect(screen.getByTestId('cc-view-hidden')).toHaveTextContent('12 calls outside this delta and width view');
     await userEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
     expect(onChange).toHaveBeenCalledWith(DEFAULT_CC_VIEW);
   });
 
   it('says "1 call" for one, and Reset is disabled when already at the default', () => {
     render(<CcViewControls view={DEFAULT_CC_VIEW} th={th} hiddenCount={1} onChange={vi.fn()} />);
-    expect(screen.getByTestId('cc-view-hidden')).toHaveTextContent('1 call hidden by result filters');
+    expect(screen.getByTestId('cc-view-hidden')).toHaveTextContent('1 call outside this delta and width view');
     expect(screen.getByRole('button', { name: 'Reset filters' })).toBeDisabled();
   });
 

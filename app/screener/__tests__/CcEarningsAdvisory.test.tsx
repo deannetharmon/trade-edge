@@ -103,11 +103,13 @@ function redFailureText(): string {
 }
 
 describe('EARNINGS-PRECHECK-0001: CC with no eligible candidate shows an earnings advisory, not an earnings failure', () => {
-  it('earnings inside the window, nothing in the delta band: the closest safe call is shown (not an empty result), no earnings failure', async () => {
+  it('earnings inside the window, nothing in the delta band: not qualified, no earnings failure', async () => {
     const earnings = dayOut(37);
     await scanCc(earnings, ccChain([25, 40], 0.60)); // delta 0.60 is outside 0.20-0.35
-    // CC-WHEEL-0001 S4: the delta range is a preference. The 25d call (earnings are 12 days after it) is shown, not dropped.
-    expect(await screen.findByText(/1 of 1\s*QUALIFIED/)).toBeInTheDocument();
+    // CC-SIMPLIFY-0001E: only a call inside the delta range can qualify, so the ticker is not qualified. The reason is
+    // the delta range, not earnings (the 25d call is 12 days before the report and is the nearest valid call).
+    expect(await screen.findByText(/1 of 1\s*DISQUALIFIED/)).toBeInTheDocument();
+    expect(screen.queryByText(/1 of 1\s*QUALIFIED/)).not.toBeInTheDocument();
     // The 40d expiry falls after earnings and is excluded; nothing earnings-related appears as a red failure.
     expect(redFailureText()).not.toMatch(/arnings/);
   });
