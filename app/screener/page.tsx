@@ -102,7 +102,7 @@ import { resolveCcBasis, applyTypedBasis } from '@/lib/ccBasis/ccBasisSettings';
 import { fetchCcBasisSettings } from '@/features/screener/useCcBasisSettings';
 import { findBestCoveredCall, findNearestCoveredCall, diagnoseCcExclusions, formatCcExclusionSummary, formatCcHiddenNote, buildCcGrid } from '@/lib/scans/covered-call-finder';
 import { ccStrikeFloor, ccStrikeFloorMessage } from '@/lib/scans/ccStrikeFloor';
-import { DEFAULT_CC_VIEW, buildCcPool, ccScanRules, ccViewFromPreset, ccViewRules, ccViewWith, countCcViewHidden, type CcView } from '@/lib/scans/ccView';
+import { DEFAULT_CC_VIEW, buildCcPool, ccScanRules, ccViewFromPreset, ccViewRules, ccViewWith, countCcViewHidden, listCcViewHidden, type CcView } from '@/lib/scans/ccView';
 import { CcViewControls } from '@/features/screener/components/CcViewControls';
 import { resolveResearchEntry, buildResearchCapacity, researchEntryLabel } from '@/lib/scans/ccResearch';
 import { CcStrikeGrid } from '@/features/screener/components/CcStrikeGrid';
@@ -12798,6 +12798,12 @@ export default function Home() {
                         th={th}
                         hiddenCount={results.reduce((sum, r) => sum + (r.ccViewHidden ?? 0), 0)}
                         onChange={setCcView}
+                        loadHidden={() => results.flatMap(r => {
+                          const g = r.ccRegrade;
+                          if (!g) return [];
+                          const input = { dteMin: g.baseRules.DTE_MIN, dteMax: g.baseRules.DTE_MAX, stockPrice: g.price, costBasis: g.capacity.costBasis, allowBelowBasis: g.basisOpts?.allowBelowBasis };
+                          return [{ symbol: r.symbol, floor: ccStrikeFloor(g.price, g.capacity.costBasis, { allowBelowBasis: g.basisOpts?.allowBelowBasis === true }).floor, calls: listCcViewHidden(g.pool, ccView, input) }];
+                        })}
                       />
                     )}
                     <FilteredResultControls

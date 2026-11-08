@@ -142,6 +142,51 @@ export function countCcViewHidden(pool: CcPool, view: CcView, input: { dteMin: n
   return hidden;
 }
 
+export interface CcHiddenCall {
+  expiration: string;
+  dte: number;
+  strike: number;
+  delta: number;
+  bid: number;
+  ask: number;
+  /** Bid/ask width as a percent of mid. */
+  widthPct: number;
+  /** Why the active view hides it. A call the delta range hides is never also listed for width. */
+  reason: 'delta-low' | 'delta-high' | 'width';
+}
+
+/**
+ * The calls the active view hides, for the "show me what's outside the view" list. Information only: never a pick and
+ * never orderable. Strikes below the cost-basis floor and calls with no real market are not listed (they were never
+ * candidates under any view); the strike grid's "Show below cost basis" covers the floor. Nearest to the view first.
+ */
+export function listCcViewHidden(pool: CcPool, view: CcView, input: { dteMin: number; dteMax: number; stockPrice: number | null; costBasis: number | null; allowBelowBasis?: boolean; today?: Date }): CcHiddenCall[] {
+  const floor = ccStrikeFloor(input.stockPrice, input.costBasis, { allowBelowBasis: input.allowBelowBasis === true }).floor;
+  if (floor === null) return [];
+  const params: CcEligibilityParams = {
+    deltaTarget: { min: view.deltaMin, max: view.deltaMax },
+    dteTarget: { min: input.dteMin, max: input.dteMax },
+    minStrike: floor, oiMin: 0, widthPctMax: view.widthPctMax, widthCeiling: view.widthCeiling,
+  };
+  const out: CcHiddenCall[] = [];
+  for (const expiration of Object.keys(pool.chains)) {
+    const dte = daysUntil(expiration, input.today);
+    for (const leg of pool.chains[expiration]) {
+      const why = ccLegRejection(leg, dte, params);
+      if (why !== 'DELTA_WINDOW' && why !== 'WIDTH') continue;
+      const mid = (leg.bid + leg.ask) / 2;
+      const absDelta = Math.abs(leg.delta as number);
+      out.push({
+        expiration, dte, strike: leg.strikePrice, delta: absDelta, bid: leg.bid, ask: leg.ask,
+        widthPct: mid > 0 ? ((leg.ask - leg.bid) / mid) * 100 : 0,
+        reason: why === 'WIDTH' ? 'width' : absDelta < view.deltaMin ? 'delta-low' : 'delta-high',
+      });
+    }
+  }
+  const center = (view.deltaMin + view.deltaMax) / 2;
+  return out.sort((a, b) => Math.abs(a.delta - center) - Math.abs(b.delta - center) || a.dte - b.dte || a.strike - b.strike);
+}
+
 function daysUntil(dateStr: string, today: Date = new Date()): number {
   const [y, m, d] = dateStr.split('-').map(Number);
   const target = new Date(y, m - 1, d);

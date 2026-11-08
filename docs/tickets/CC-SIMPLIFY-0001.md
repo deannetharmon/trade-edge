@@ -28,3 +28,12 @@ Fix: the accounting bar (qualified / caution / disqualified) now counts the regr
 ## Phase 2d (2026-11-07, Dean + Ian)
 
 Dean: show only valid covered calls. The CC-WHEEL-0001 S4 closest-call fallback is removed. A ticker with no call inside the active delta range is NOT qualified; its reason names the delta range, the nearest valid call (information only, never a pick) and, when the stock is below cost basis, the lowest allowed strike. The chips can bring a call into range, which makes the ticker qualify. The banner now reads "N calls outside this delta and width view" because it counts the delta/width view only, not the POP / OTM / IVR / Call OI chips.
+
+## Phase 2e -- see the calls outside the view (0001F)
+
+Dean could not trust a result with "N calls outside this delta and width view" and no way to see them. The banner now has
+**Show the calls**: per ticker, a table of expiry, strike, delta, bid/ask and why each is outside ("Δ below 0.20",
+"Δ above 0.35", "36% wide (max 10%)"), nearest to the view first, 25 rows per ticker. Information only: not picks, not
+orderable. Calls below the cost-basis floor and calls with no real market are not listed (never candidates under any
+view); the note says so. Pure selector `listCcViewHidden` in `lib/scans/ccView.ts` uses the same `ccLegRejection` as the
+grader, so the list length equals the banner count (tested).

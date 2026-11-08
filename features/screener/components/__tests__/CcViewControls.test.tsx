@@ -61,4 +61,20 @@ describe('CcViewControls', () => {
     await userEvent.tab();
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ preset: 'custom', deltaMax: 0.5 }));
   });
+
+  it('opens a list of the hidden calls and says why each is outside the view', async () => {
+    const loadHidden = vi.fn(() => [{ symbol: 'TQQQ', floor: 55, calls: [
+      { expiration: '2026-12-04', dte: 27, strike: 60, delta: 0.05, bid: 0.4, ask: 0.44, widthPct: 9, reason: 'delta-low' as const },
+      { expiration: '2026-12-04', dte: 27, strike: 58, delta: 0.25, bid: 0.1, ask: 0.4, widthPct: 120, reason: 'width' as const },
+    ] }]);
+    render(<CcViewControls view={DEFAULT_CC_VIEW} th={th} hiddenCount={2} onChange={vi.fn()} loadHidden={loadHidden} />);
+    expect(screen.queryByTestId('cc-view-hidden-list')).not.toBeInTheDocument();
+    expect(loadHidden).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: /Show the calls/ }));
+    expect(screen.getByTestId('cc-view-hidden-TQQQ')).toHaveTextContent('$55.00 floor');
+    expect(screen.getByText('Δ below 0.20')).toBeInTheDocument();
+    expect(screen.getByText('120% wide (max 10%)')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Hide the calls/ }));
+    expect(screen.queryByTestId('cc-view-hidden-list')).not.toBeInTheDocument();
+  });
 });

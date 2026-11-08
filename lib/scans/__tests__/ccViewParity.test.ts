@@ -10,7 +10,7 @@ import { computeCoveredCallCapacity } from '../covered-call-capacity';
 import { findBestCoveredCall as findBestCoveredCallWithFallback, findNearestCoveredCall } from '../covered-call-finder';
 import { DEFAULT_CC_RULES, type CcRulesType } from '../constants';
 import {
-  CC_WIDTH_CHOICES, DEFAULT_CC_VIEW, buildCcPool, ccScanRules, ccViewFromPreset, ccViewRules, ccViewWith, countCcViewHidden, detectCcPreset, type CcView,
+  CC_WIDTH_CHOICES, DEFAULT_CC_VIEW, buildCcPool, ccScanRules, ccViewFromPreset, ccViewRules, ccViewWith, countCcViewHidden, detectCcPreset, listCcViewHidden, type CcView,
 } from '../ccView';
 import { ccPremiumPerShare } from '../ccPremium';
 
@@ -170,5 +170,24 @@ describe('hidden count and presets', () => {
   it('preset label follows the numbers', () => {
     expect(ccViewWith(DEFAULT_CC_VIEW, { deltaMin: 0.3, deltaMax: 0.4 }).preset).toBe('income');
     expect(ccViewWith(DEFAULT_CC_VIEW, { deltaMin: 0.07, deltaMax: 0.4 }).preset).toBe('custom');
+  });
+});
+
+describe('listCcViewHidden', () => {
+  it('lists the calls the view hides, with the reason, nearest to the range first', () => {
+    const e = expIn(30);
+    const c = chain({ [e]: [
+      leg(e, 110, 0.05, 0.40, 0.44),   // delta too low
+      leg(e, 105, 0.27, 1.00, 1.04),   // inside the default view
+      leg(e, 100, 0.50, 3.00, 3.10),   // delta too high
+      leg(e, 112, 0.25, 0.10, 0.40),   // inside delta, too wide
+      leg(e, 90, 0.80, 11, 11.2),      // below the floor: never listed
+    ] });
+    const input = { dteMin: BASE.DTE_MIN, dteMax: BASE.DTE_MAX, stockPrice: 100, costBasis: 95 };
+    const pool = buildCcPool(c, input);
+    const list = listCcViewHidden(pool, DEFAULT_CC_VIEW, input);
+    expect(list.map(x => [x.strike, x.reason])).toEqual([[112, 'width'], [100, 'delta-high'], [110, 'delta-low']]);
+    expect(list).toHaveLength(countCcViewHidden(pool, DEFAULT_CC_VIEW, input));
+    expect(listCcViewHidden(pool, ccViewFromPreset('atm'), input).some(x => x.strike === 100)).toBe(false);
   });
 });
