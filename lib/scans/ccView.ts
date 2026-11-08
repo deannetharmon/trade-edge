@@ -13,7 +13,7 @@ import { ccLegRejection, type CcEligibilityParams } from './covered-call-finder'
 import { ccStrikeFloor } from './ccStrikeFloor';
 import type { CoveredCallCapacity } from './covered-call-capacity';
 
-export type CcViewPresetKey = 'upside' | 'balanced' | 'income' | 'custom';
+export type CcViewPresetKey = 'upside' | 'balanced' | 'income' | 'atm' | 'custom';
 
 /** The view-side controls. Open interest keeps its existing results chip; it is not part of this view. */
 export interface CcView {
@@ -30,6 +30,8 @@ export const CC_VIEW_PRESETS: Array<{ key: Exclude<CcViewPresetKey, 'custom'>; l
   { key: 'upside', label: 'Keep more upside', deltaMin: 0.10, deltaMax: 0.20 },
   { key: 'balanced', label: 'Balanced', deltaMin: 0.20, deltaMax: 0.35 },
   { key: 'income', label: 'More income', deltaMin: 0.30, deltaMax: 0.40 },
+  // Ian: for a trader who expects a dip and wants the most premium, accepting assignment near today's price.
+  { key: 'atm', label: 'At the money', deltaMin: 0.45, deltaMax: 0.55 },
 ];
 
 /** Max-width chip choices (percent of mid). The default is the old pre-scan value, DEFAULT_CC_RULES.WIDTH_PCT_MAX. */

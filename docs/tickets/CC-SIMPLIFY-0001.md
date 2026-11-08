@@ -16,3 +16,7 @@ Descriptions match the engine; a "Left out of the best pick" line on a result (c
 - Parity: `lib/scans/__tests__/ccViewParity.test.ts` (normal, empty window, width, strike floor, earnings, half-cent mid; six views each).
 - Scan modal: DTE only. Research scans keep their own fixed rules.
 - Not done here: removing the S4 fallback (kept; the parity test depends on it).
+
+## Phase 2b (2026-11-07, Dean yes)
+
+"At the money" delta chip (.45-.55) added after More income, for a trader who expects a dip and wants the most premium while accepting assignment near today's price. The strike floor still applies: an underwater stock offers no call below its cost basis under any chip.

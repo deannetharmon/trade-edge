@@ -30,6 +30,13 @@ describe('CcViewControls', () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ preset: 'balanced', widthPctMax: 15 }));
   });
 
+  it('offers an At the money chip that hands back delta .45-.55', async () => {
+    const onChange = vi.fn();
+    render(<CcViewControls view={DEFAULT_CC_VIEW} th={th} hiddenCount={0} onChange={onChange} />);
+    await userEvent.click(screen.getByRole('button', { name: /At the money/ }));
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ preset: 'atm', deltaMin: 0.45, deltaMax: 0.55 }));
+  });
+
   it('shows the hidden count, and Reset returns to the default view', async () => {
     const onChange = vi.fn();
     render(<CcViewControls view={ccViewWith(ccViewFromPreset('income'), { widthPctMax: 5 })} th={th} hiddenCount={12} onChange={onChange} />);

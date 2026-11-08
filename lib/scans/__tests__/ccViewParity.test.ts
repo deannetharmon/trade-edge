@@ -35,6 +35,7 @@ const VIEWS: Array<[string, CcView]> = [
   ['default', DEFAULT_CC_VIEW],
   ['upside', ccViewFromPreset('upside')],
   ['income', ccViewFromPreset('income')],
+  ['at the money', ccViewFromPreset('atm')],
   ['width 15%', ccViewWith(DEFAULT_CC_VIEW, { widthPctMax: 15 })],
   ['width 5%', ccViewWith(DEFAULT_CC_VIEW, { widthPctMax: 5 })],
   ['custom wide delta', ccViewWith(DEFAULT_CC_VIEW, { deltaMin: 0.05, deltaMax: 0.60 })],
@@ -129,6 +130,21 @@ describe('parity: pool + view picks the same call as the old rules', () => {
     const pool = buildCcPool(c, { dteMin: 21, dteMax: 45, stockPrice: 100, costBasis: 90 });
     const strikes = pool.chains[e].map(l => l.strikePrice).sort((a, b) => a - b);
     expect(strikes).toEqual([102, 108, 125]); // 99 is below the floor; 112 has no market (zero OI, bad bid)
+  });
+});
+
+describe('At the money preset', () => {
+  it('is delta .45-.55 and picks the call nearest .50, never below the strike floor', () => {
+    const e = expIn(30);
+    const c = chain({ [e]: [leg(e, 100, 0.52, 3.9, 4.0), leg(e, 104, 0.38, 2.4, 2.5), leg(e, 108, 0.28, 1.2, 1.3)] });
+    const pool = buildCcPool(c, { dteMin: 21, dteMax: 45, stockPrice: 100, costBasis: 90 });
+    const view = ccViewFromPreset('atm');
+    expect(view).toMatchObject({ preset: 'atm', deltaMin: 0.45, deltaMax: 0.55 });
+    expect(detectCcPreset(view)).toBe('atm');
+    expect(findBestCoveredCallWithFallback(pool, { rules: ccViewRules(BASE, view), capacity: capacity(90), stockPrice: 100 })?.shortStrike).toBe(100);
+    // Underwater (basis 120): the floor removes the at-the-money call, so no chip can offer a loss-locking strike.
+    const under = buildCcPool(c, { dteMin: 21, dteMax: 45, stockPrice: 100, costBasis: 120 });
+    expect(Object.keys(under.chains)).toHaveLength(0);
   });
 });
 
