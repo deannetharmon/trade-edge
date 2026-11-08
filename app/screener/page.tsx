@@ -100,8 +100,10 @@ import {
 // TE-0007C — Covered Call as a first-class Screener strategy.
 import { resolveCcBasis, applyTypedBasis } from '@/lib/ccBasis/ccBasisSettings';
 import { fetchCcBasisSettings } from '@/features/screener/useCcBasisSettings';
-import { findBestCoveredCall, diagnoseCcExclusions, formatCcExclusionSummary, formatCcHiddenNote, buildCcGrid } from '@/lib/scans/covered-call-finder';
+import { findBestCoveredCallWithFallback, diagnoseCcExclusions, formatCcExclusionSummary, formatCcHiddenNote, buildCcGrid } from '@/lib/scans/covered-call-finder';
 import { ccStrikeFloor, ccStrikeFloorMessage } from '@/lib/scans/ccStrikeFloor';
+import { DEFAULT_CC_VIEW, buildCcPool, ccScanRules, ccViewFromPreset, ccViewRules, ccViewWith, countCcViewHidden, type CcView } from '@/lib/scans/ccView';
+import { CcViewControls } from '@/features/screener/components/CcViewControls';
 import { resolveResearchEntry, buildResearchCapacity, researchEntryLabel } from '@/lib/scans/ccResearch';
 import { CcStrikeGrid } from '@/features/screener/components/CcStrikeGrid';
 import type { CcGridCell } from '@/lib/scans/ccGridTypes';
@@ -1557,7 +1559,10 @@ function runCcChecklist(
   ccRules: CcRulesType,
   capacity: CoveredCallCapacity,
   trendResult?: TrendResult,
-  basisOpts?: { allowBelowBasis?: boolean; basisSource?: 'typed' | 'broker' | null }
+  basisOpts?: { allowBelowBasis?: boolean; basisSource?: 'typed' | 'broker' | null },
+  // CC-SIMPLIFY-0001 Phase 2: the scan grades wide open (ccRules) so the results-screen view can re-pick; the strike
+  // grid and the "left out" counts keep the user's own rules.
+  gridRules: CcRulesType = ccRules,
 ): ScreenResult {
   const allowBelowBasis = basisOpts?.allowBelowBasis === true;
   const failReasons: string[] = [];
@@ -1581,17 +1586,12 @@ function runCcChecklist(
   // actual selected contract's DTE is known.
   let earningsCheck = buildEarningsPrecheckCheck(earningsDate, chainData.expirations, ccRules);
 
-  let bestCandidate = capacityCheck.status !== 'fail'
-    ? findBestCoveredCall(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis })
-    : null;
   // CC-WHEEL-0001 S4: the delta range is a preference, not a gate. When nothing inside it qualifies, show the
   // closest call outside it (every safety gate still applies) with a note, instead of an empty result.
-  if (!bestCandidate && capacityCheck.status !== 'fail') {
-    const closest = findBestCoveredCall(chainData, { rules: { ...ccRules, DELTA_MIN: 0.01, DELTA_MAX: 0.99 }, capacity, stockPrice: price, earningsDate, allowBelowBasis });
-    if (closest) {
-      bestCandidate = { ...closest, ccOutsideRangeNote: `Delta ${closest.shortDelta.toFixed(2)} is outside your ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} range. Shown because no call inside the range qualified.` };
-    }
-  }
+  // CC-SIMPLIFY-0001: the same shared helper re-picks from the pool when a results-screen chip changes.
+  const bestCandidate = capacityCheck.status !== 'fail'
+    ? findBestCoveredCallWithFallback(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis })
+    : null;
 
   // Contract eligibility is determined only against this selected expiry.
   if (bestCandidate && earningsDate) {
@@ -1642,9 +1642,9 @@ function runCcChecklist(
   return {
     symbol, strategy: 'CC', price, ivr: ivrValue,
     ivx: ivxValue, ivx30: null, ivHv30Diff: null, liquidityRating: null,
-    ccGrid: capacityCheck.status !== 'fail' ? buildCcGrid(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }) : undefined,
+    ccGrid: capacityCheck.status !== 'fail' ? buildCcGrid(chainData, { rules: gridRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }) : undefined,
     ccExclusionNote: bestCandidate && capacityCheck.status !== 'fail'
-      ? formatCcHiddenNote(diagnoseCcExclusions(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }), ccRules)
+      ? formatCcHiddenNote(diagnoseCcExclusions(chainData, { rules: gridRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }), gridRules)
       : null,
     qualified,
     bestCandidate: bestCandidate ? { ...bestCandidate, ccBasisSource: basisOpts?.basisSource ?? null, ccAllowBelowBasis: allowBelowBasis } : bestCandidate,
@@ -1655,6 +1655,33 @@ function runCcChecklist(
   };
 }
 
+
+// CC-SIMPLIFY-0001 Phase 2: re-pick one covered-call result for the active delta/width view. The same checklist (and
+// the same finder + closest-call fallback) runs on the pool of calls the safety gates let through, so the pick at the
+// default view equals the pick the old pre-scan rules made. Only the pick-derived fields change; the strike grid, the
+// scan-time record and everything else stay as scanned.
+function regradeCcResult(r: ScreenResult, view: CcView): ScreenResult {
+  const g = r.ccRegrade;
+  if (!g || r.strategy !== 'CC') return r;
+  const next = runCcChecklist(
+    r.symbol,
+    { expirations: g.pool.expirations, chains: g.pool.chains, isEtfOrIndex: g.isEtfOrIndex, classification: g.classification },
+    g.price, g.metrics, ccViewRules(g.baseRules, view), g.capacity, r.trendResult, g.basisOpts,
+  );
+  const hidden = countCcViewHidden(g.pool, view, {
+    dteMin: g.baseRules.DTE_MIN, dteMax: g.baseRules.DTE_MAX, stockPrice: g.price, costBasis: g.capacity.costBasis, allowBelowBasis: g.basisOpts?.allowBelowBasis,
+  });
+  return {
+    ...r,
+    bestCandidate: next.bestCandidate,
+    qualified: next.qualified,
+    failReasons: next.failReasons,
+    checks: next.checks,
+    ivx: next.ivx,
+    ccExclusionNote: null, // the "N hidden by result filters" banner replaces the scan-time "left out" line
+    ccViewHidden: hidden,
+  };
+}
 
 // ── UI Helpers ─────────────────────────────────────────────────────────────
 const statusColor = (s: string) => s === 'pass' ? 'text-emerald-500' : s === 'fail' ? 'text-red-500' : s === 'warn' ? 'text-yellow-500' : 'text-slate-400';
@@ -9615,9 +9642,14 @@ export default function Home() {
     if (!cspSnapshot || !cspViewActive) return null;
     return cspViewOverride ?? applyIntentToView(cspViewFromPreset(cspSavedPreset, cspSnapshot.dteMin, cspSnapshot.dteMax), cspIntent, false);
   }, [cspSnapshot, cspViewActive, cspViewOverride, cspSavedPreset, cspIntent]);
+  // CC-SIMPLIFY-0001 Phase 2: the covered-call delta/width view. Re-picks each ticker's best call from the scan's pool.
+  const [ccView, setCcView] = useState<CcView>(DEFAULT_CC_VIEW);
+  const ccViewActive = activeSession?.requestedStrategy === 'cc' && scanResults.some(r => !!r.ccRegrade);
   const results = useMemo(
-    () => (cspView ? regradeCspResults(scanResults, cspView) : scanResults),
-    [scanResults, cspView],
+    () => (cspView ? regradeCspResults(scanResults, cspView)
+      : ccViewActive ? scanResults.map(r => regradeCcResult(r, ccView))
+      : scanResults),
+    [scanResults, cspView, ccViewActive, ccView],
   );
   // Exports and the order/lookup context describe the VIEW the trader is looking at, not the wide scan rules.
   const viewSession = useMemo(
@@ -11365,6 +11397,7 @@ export default function Home() {
 
   const runCcScan = async (bypassUniverse = false, rules: CcRulesType = ccRules, research?: { tickers: string[]; entryPrice: number | null }) => {
     clearResultsCache();
+    setCcView(DEFAULT_CC_VIEW); // every new scan starts on the default view (today's rules)
     setError('');
     setScreenMode('filter');
     try { localStorage.setItem(LS_SCREEN_MODE, 'filter'); } catch {}
@@ -11516,7 +11549,19 @@ export default function Home() {
             // CC-WHEEL-0001 S2b: a basis the trader typed wins over the broker's; the opt-in is per position.
             const resolvedBasis = resolveCcBasis(ccBasisSettings, symbol, brokerCapacity);
             const capacity = applyTypedBasis(ccBasisSettings, symbol, brokerCapacity);
-            result = runCcChecklist(symbol, chainData, price, metrics, rules, capacity, trendResult, { allowBelowBasis: resolvedBasis.allowBelowBasis, basisSource: resolvedBasis.source });
+            // CC-SIMPLIFY-0001 Phase 2: the scan only fetches (tickers + DTE). It grades wide open and keeps the pool of
+            // calls the safety gates let through; delta and width are a view the results screen applies without a rescan.
+            const basisOpts = { allowBelowBasis: resolvedBasis.allowBelowBasis, basisSource: resolvedBasis.source };
+            const ccPool = buildCcPool(chainData, { dteMin: rules.DTE_MIN, dteMax: rules.DTE_MAX, stockPrice: price, costBasis: capacity.costBasis, allowBelowBasis: resolvedBasis.allowBelowBasis });
+            const scanned = runCcChecklist(symbol, chainData, price, metrics, ccScanRules(rules), capacity, trendResult, basisOpts, rules);
+            result = {
+              ...scanned,
+              ccRegrade: {
+                pool: ccPool, price,
+                metrics: { ivRank: metrics?.ivRank ?? null, earningsExpectedDate: metrics?.earningsExpectedDate ?? null, expirationIvxMap: metrics?.expirationIvxMap ?? null },
+                capacity, basisOpts, baseRules: rules, isEtfOrIndex: chainData.isEtfOrIndex ?? false, classification: chainData.classification,
+              },
+            };
           }
           s = recordSymbolEvaluated(s, symbol, [result]);
         } catch (e: any) {
@@ -12522,7 +12567,7 @@ export default function Home() {
               {activeSession?.requestedStrategy === 'cc' && ccReceipt?.sessionId === activeSession.sessionId && (
                 <CollapsiblePanel id="active-rules-cc" title="Active rules">
                 <ActiveCcRules
-                  values={{ rules: ccReceipt.rules }}
+                  values={{ rules: ccViewActive ? ccViewRules(ccReceipt.rules, ccView) : ccReceipt.rules }}
                   counts={summarizeCcResults(results)}
                   onEdit={() => { setCcBypassUniverse(opportunityUniverse.length === 0); setShowCcScanModal(true); void loadCcCapacity(); }}
                 />
@@ -12742,6 +12787,14 @@ export default function Home() {
                         here per Ian's explicit call: covered-call yield
                         math doesn't translate cleanly to the same
                         credit-ratio threshold CSP/BPS/BCS use. */}
+                    {ccViewActive && (
+                      <CcViewControls
+                        view={ccView}
+                        th={th}
+                        hiddenCount={results.reduce((sum, r) => sum + (r.ccViewHidden ?? 0), 0)}
+                        onChange={setCcView}
+                      />
+                    )}
                     <FilteredResultControls
                       results={results}
                       qualifiedTotal={qualified.length}

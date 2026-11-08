@@ -33,16 +33,13 @@ const criterion = (id: string) => document.querySelector(`[data-cc-criterion="${
 const pill = (group: string, name: string) => within(screen.getByRole('group', { name: group })).getByRole('button', { name });
 
 describe('lifecycle tags say what the engine does', () => {
-  it('DTE, delta, and width are search ranges; delta is called a hard limit', () => {
+  // CC-SIMPLIFY-0001 Phase 2: DTE is the only scan setting. Delta range and max width moved to chips on the results screen.
+  it('DTE is the only search setting; delta and width are said to live on the results screen', () => {
     open();
-    for (const id of ['dte', 'delta', 'width']) expect(within(criterion(id)).getByText('SEARCH RANGE · RESCAN')).toBeInTheDocument();
-    expect(criterion('delta')).toHaveTextContent(/hard limit for covered calls/);
-  });
-
-  it('open interest is advisory and states that the results view defaults to Any', () => {
-    open();
-    expect(within(criterion('oi')).getByText('ADVISORY')).toBeInTheDocument();
-    expect(criterion('oi')).toHaveTextContent(/Call OI: Any/);
+    expect(within(criterion('dte')).getByText('SEARCH RANGE · RESCAN')).toBeInTheDocument();
+    for (const id of ['delta', 'width', 'widthCeiling', 'oi']) expect(criterion(id)).toBeFalsy();
+    expect(screen.getByTestId('cc-view-note')).toHaveTextContent(/chips on the results screen/);
+    expect(screen.getByTestId('cc-view-note')).toHaveTextContent(/without a rescan/);
   });
 
   it('minimum strike, quote validity, and earnings are fixed; capacity is read-only', () => {
@@ -60,11 +57,10 @@ describe('lifecycle tags say what the engine does', () => {
 });
 
 describe('controls keep their accessible names and behavior', () => {
-  it('shows the six original inputs, by their original names', () => {
+  it('shows only the DTE inputs; delta, width and OI are not scan settings any more', () => {
     open();
-    for (const name of ['Min DTE', 'Max DTE', 'Min Δ', 'Max Δ', 'OI pref.', 'Max width']) expect(screen.getByLabelText(name)).toBeInTheDocument();
-    expect(screen.getByLabelText('Max width')).toHaveValue('10');
-    expect(screen.getByLabelText('Width ceiling')).toHaveValue('0.5');
+    for (const name of ['Min DTE', 'Max DTE']) expect(screen.getByLabelText(name)).toBeInTheDocument();
+    for (const name of ['Min Δ', 'Max Δ', 'OI pref.', 'Max width', 'Width ceiling']) expect(screen.queryByLabelText(name)).not.toBeInTheDocument();
   });
 
   it('Run is enabled by default and hands back every rule, unchanged', async () => {
@@ -88,35 +84,18 @@ describe('quick-select pills follow the shared pill and input contract', () => {
     expect(pill('DTE range quick select', '7–45')).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('a delta pill sets the range and reaches the request', async () => {
+  it('a DTE change reaches the request and the default delta and width ride along unchanged', async () => {
     const onRun = vi.fn();
     open({ onRun });
-    await userEvent.click(pill('Delta range quick select', 'Δ .30–.40'));
-    expect(screen.getByLabelText('Min Δ')).toHaveValue('0.3');
-    expect(screen.getByLabelText('Max Δ')).toHaveValue('0.4');
+    await userEvent.click(pill('DTE range quick select', '7–14'));
     await userEvent.click(screen.getByRole('button', { name: 'RUN CC SCAN →' }));
-    expect(onRun.mock.calls[0][0].rules).toMatchObject({ DELTA_MIN: 0.3, DELTA_MAX: 0.4 });
+    expect(onRun.mock.calls[0][0].rules).toMatchObject({ DTE_MIN: 7, DTE_MAX: 14, DELTA_MIN: 0.2, DELTA_MAX: 0.35, WIDTH_PCT_MAX: 10, WIDTH_CEILING: 0.5, OI_MIN: 100 });
   });
 
-  // SCAN-MODAL-UX-0001: width, ceiling and OI are typed values now (their quick selects only repeated the input).
-  it('the width percent, the dollar ceiling, and the OI preference are typed and reach the request', async () => {
-    const onRun = vi.fn();
-    open({ onRun });
-    for (const [name, text] of [['Max width', '15'], ['Width ceiling', '0.75'], ['OI pref.', '300']] as const) {
-      await userEvent.clear(screen.getByLabelText(name));
-      await userEvent.type(screen.getByLabelText(name), text);
-      expect(screen.getByLabelText(name)).toHaveValue(text);
-    }
-    await userEvent.click(screen.getByRole('button', { name: 'RUN CC SCAN →' }));
-    expect(onRun.mock.calls[0][0].rules).toMatchObject({ WIDTH_PCT_MAX: 15, WIDTH_CEILING: 0.75, OI_MIN: 300 });
-  });
-
-  it('only DTE and delta keep quick selects, and a click in one group never changes the other', async () => {
+  it('DTE is the only quick select', () => {
     open();
     expect(screen.getAllByRole('group').map(g => g.getAttribute('aria-label')).filter(l => l?.endsWith('quick select')))
-      .toEqual(['DTE range quick select', 'Delta range quick select']);
-    await userEvent.click(pill('Delta range quick select', 'Δ .10–.20'));
-    expect(pill('DTE range quick select', '21–45')).toHaveAttribute('aria-pressed', 'true');
+      .toEqual(['DTE range quick select']);
   });
 });
 
@@ -156,10 +135,10 @@ describe('the recap is built from the registry and updates as you edit', () => {
     open();
     const summary = screen.getByTestId('cc-rule-preview');
     expect(summary).toHaveTextContent('21–45 DTE');
-    expect(summary).toHaveTextContent('Δ 0.20–0.35');
-    expect(summary).toHaveTextContent('width ≤ 10% of mid (min $0.05) · cap $0.50');
+    expect(summary).not.toHaveTextContent('Δ');
+    expect(summary).not.toHaveTextContent('width');
     expect(summary).not.toHaveTextContent('strike ≥ stock price');
-    expect(summary).toHaveTextContent('OI 100');
+    expect(summary).not.toHaveTextContent('OI 100');
     // Two positions with capacity (AAA 4 + BBB 2 = 6); the fully covered one is not counted.
     expect(summary).toHaveTextContent('2 positions selected · up to 6 contracts');
     await userEvent.click(pill('DTE range quick select', '7–14'));
@@ -192,13 +171,6 @@ describe('invalid ranges are announced and block Run', () => {
     expect(screen.getByRole('button', { name: 'RUN CC SCAN →' })).toBeEnabled();
   });
 
-  it('a delta above 1 names its own field', async () => {
-    open();
-    await userEvent.clear(screen.getByLabelText('Max Δ'));
-    await userEvent.type(screen.getByLabelText('Max Δ'), '1.5');
-    expect(screen.getByText('Max delta must be 1 or less.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'RUN CC SCAN →' })).toBeDisabled();
-  });
 });
 
 describe('holdings and Run', () => {

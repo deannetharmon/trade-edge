@@ -241,6 +241,10 @@ export interface ScreenResult {
   ccGrid?: import('./ccGridTypes').CcGrid;
   /** CC-SIMPLIFY-0001: what the scan left out of the best pick (covered-call results that found a call). */
   ccExclusionNote?: string | null;
+  /** CC-SIMPLIFY-0001 Phase 2: what the results screen needs to re-pick this ticker's best call for a new delta/width view. */
+  ccRegrade?: import('./ccView').CcRegradeInput;
+  /** Calls the active delta/width view hides for this ticker (covered-call results only). */
+  ccViewHidden?: number;
   symbol: string; strategy: string; price: number | null; ivr: number | null;
   ivx?: number | null; ivx30?: number | null; ivHv30Diff?: number | null; liquidityRating?: number | null;
   qualified: boolean; bestCandidate: SpreadCandidate | null;

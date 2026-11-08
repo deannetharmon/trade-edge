@@ -27,6 +27,7 @@ import type { CoveredCallCapacity } from './covered-call-capacity';
 import type { EligibilityDecision } from '@/lib/decision/types';
 import { buildCandidateId } from './candidateIdentity';
 import { ccStrikeFloor } from './ccStrikeFloor';
+import { ccPremiumPerShare } from './ccPremium';
 import type { CcGrid, CcGridCell } from './ccGridTypes';
 import { assessOiLiquidity } from './oiLiquidity';
 import { evaluateHybridSpread } from './hybridSpread';
@@ -242,7 +243,7 @@ function buildCcSpreadCandidate(
   costBasis: number | null,
 ): SpreadCandidate {
   const contracts = params.capacity.availableCoveredContracts;
-  const premiumPerShare = parseFloat(best.mid.toFixed(4));
+  const premiumPerShare = ccPremiumPerShare(best.mid); // Ian: mid rounded down to the cent, same number everywhere
   const premiumPerContract = parseFloat((premiumPerShare * 100).toFixed(2));
   const totalPremium = parseFloat((premiumPerContract * contracts).toFixed(2));
 
@@ -370,6 +371,22 @@ export function findBestCoveredCall(
   return buildCcSpreadCandidate(best, params, price, costBasis);
 }
 
+/**
+ * The best covered call for a rule set, with the CC-WHEEL-0001 S4 fallback: when nothing inside the delta range
+ * qualifies, the closest call outside it (every safety gate and the width rule still apply) with a note. Shared by the
+ * scan and by the results-screen view, so both pick the same call for the same rules.
+ */
+export function findBestCoveredCallWithFallback(
+  chain: { expirations: string[]; chains: Record<string, WheelChainLeg[]> },
+  params: CcFindParams,
+): SpreadCandidate | null {
+  const best = findBestCoveredCall(chain, params);
+  if (best) return best;
+  const closest = findBestCoveredCall(chain, { ...params, rules: { ...params.rules, DELTA_MIN: 0.01, DELTA_MAX: 0.99 } });
+  if (!closest) return null;
+  return { ...closest, ccOutsideRangeNote: `Delta ${closest.shortDelta.toFixed(2)} is outside your ${params.rules.DELTA_MIN}-${params.rules.DELTA_MAX} range. Shown because no call inside the range qualified.` };
+}
+
 // ── CC-WHEEL-0001 S4: the strike grid ───────────────────────────────────
 // Every call in the DTE window that passes the SAFETY gates, laid out by expiration and strike. Preference rules
 // (delta range, bid/ask width, open interest) do not remove anything here: they tag a cell (wide, thin OI) or are
@@ -410,7 +427,7 @@ export function buildCcGrid(
       if (cells.length >= GRID_MAX_CELLS) { left.truncated += 1; continue; }
 
       const mid = (leg.bid + leg.ask) / 2;
-      const premiumPerShare = Math.round(mid * 100) / 100;
+      const premiumPerShare = ccPremiumPerShare(mid);
       const premiumTotal = Math.round(premiumPerShare * 100 * contracts * 100) / 100;
       const calledAwayTotal = basis === null ? null : Math.round(((leg.strikePrice - basis) * 100 * contracts + premiumTotal) * 100) / 100;
       cells.push({

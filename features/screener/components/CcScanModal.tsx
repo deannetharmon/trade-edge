@@ -214,11 +214,9 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
   // The recap: what the registry says about the settings that can be changed, plus the capacity line.
   const recapLines = useMemo(() => {
     const settings: string[] = [];
-    for (const card of ['search', 'advisory'] as const) {
-      for (const c of ccCriteriaForCard(card)) {
-        const text = c.summary(values);
-        if (text) settings.push(text);
-      }
+    {
+      const text = getCcCriterion('dte').summary(values);
+      if (text) settings.push(text);
     }
     const capacity = getCcCriterion('capacity').summary(values);
     return { settings: settings.join(' · '), capacity };
@@ -315,17 +313,9 @@ export function CcScanModal({ th, selectedTickerCount, holdings, hiddenSymbols, 
 
         <section aria-label="Search and preferences" data-cc-card="search" className={`grid grid-cols-1 gap-x-5 gap-y-3 border-t ${th.border} pt-3 sm:grid-cols-2`}>
           {rangeCell(getCcCriterion('dte'), 'left')}
-          <p className="self-end pb-1 text-[10px] leading-snug text-neutral-400">
-            Days to expiration is the only setting that decides which expirations are fetched. Delta and width limit which call is picked as the best opportunity (if none fits, the closest call is shown with a note). Open interest below your minimum is kept with a warning. The strike grid shows more calls than the pick.
+          <p data-testid="cc-view-note" className="self-end pb-1 text-[10px] leading-snug text-neutral-400">
+            Days to expiration is the only setting that decides which expirations are fetched. Delta range and max width are chips on the results screen: change them there and the best call is re-picked without a rescan.
           </p>
-          <details data-testid="cc-more-settings" className="sm:col-span-2">
-            <summary className="cursor-pointer text-[10px] font-bold uppercase tracking-wider text-neutral-400">More settings (delta, width, open interest)</summary>
-            <div className="mt-2 grid grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2">
-              {rangeCell(getCcCriterion('delta'), 'left')}
-              {widthCell()}
-              {ruleCell(getCcCriterion('oi'), 'right')}
-            </div>
-          </details>
         </section>
 
         <AlwaysAppliedStrip th={th} items={alwaysItems} />
