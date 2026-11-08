@@ -20,3 +20,7 @@ Descriptions match the engine; a "Left out of the best pick" line on a result (c
 ## Phase 2b (2026-11-07, Dean yes)
 
 "At the money" delta chip (.45-.55) added after More income, for a trader who expects a dip and wants the most premium while accepting assignment near today's price. The strike floor still applies: an underwater stock offers no call below its cost basis under any chip.
+
+## Phase 2c (2026-11-07)
+
+Fix: the accounting bar (qualified / caution / disqualified) now counts the regraded rows when the covered-call view is active. Found on a live scan: the bar said "2 qualified, 0 disqualified" while the list showed 1 qualified and 1 disqualified, because the bar read scan-time counts graded wide open.

@@ -11925,6 +11925,9 @@ export default function Home() {
   // QUAL-STATES-0001: Ranked and Targeted spread scans show three states, always derived from each
   // row's checks so saved and fresh scans agree.
   const spreadStateCounts = (() => {
+    // CC-SIMPLIFY-0001: the scan-time accounting counts were graded wide open; once the delta/width view re-picks each
+    // ticker's best call, the bar must count the same regraded rows the list shows.
+    if (ccViewActive) return results.length > 0 ? countQualificationStates(results) : null;
     if (screenMode === 'filter' || activeSession?.requestedStrategy === 'csp') return null;
     const list = screenMode === 'targeted' ? targetedResults.map(entry => entry.screenResult) : results;
     return list.length > 0 ? countQualificationStates(list) : null;
