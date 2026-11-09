@@ -73,6 +73,7 @@ import { evaluateEventRisk, type EventRiskResult } from '@/lib/scans/eventRisk';
 import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
 import { HeldCompareForPairs } from '@/features/screener/components/HeldCompareCard';
+import { CcDecideBoxes } from '@/features/screener/components/CcDecideBoxes';
 import { heldIncomeSummary, heldStrikeBelowLeapLine, excludedContractPremiumText, heldLeapOtmTag, selectLongLegBlockerLine, isUncoveredHeldShort, heldUncoveredSkippedLine, preferenceNoteGates } from '@/lib/scans/pmccHeldUnderwaterDisplay';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { TradeLookupModal } from '@/features/screener/components/TradeLookupModal';
@@ -7121,6 +7122,7 @@ const strategyScores = useMemo(() => {
 
           {c && c.strategy === 'CC' && (
             <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
+              <CcDecideBoxes input={{ symbol: result.symbol, spot: result.price, strike: c.shortStrike, delta: c.shortDelta, dte: c.dte, expiration: c.expiration, premiumPerContract: c.ccPremiumPerContract, contracts: c.ccAvailableCoveredContracts, costBasis: c.ccCostBasis, ivxPct: c.expirationIvx ?? null }} />
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div><span className={th.label}>Premium: </span><span className="text-emerald-400 font-bold">${c.ccPremiumPerContract?.toFixed(2) ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(per contract)</span></div>
                 <div><span className={th.label}>Available contracts: </span><span className="font-bold text-emerald-400">{c.ccAvailableCoveredContracts ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(quantity used for this candidate)</span></div>
