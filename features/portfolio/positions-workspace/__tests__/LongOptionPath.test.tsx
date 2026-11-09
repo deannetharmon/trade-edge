@@ -129,3 +129,29 @@ describe('card chips for a bought LEAP call', () => {
     expect([by('moneyness').tone, by('breakeven').tone, by('chance').tone]).toEqual(['bad', 'bad', 'bad']);
   });
 });
+
+describe('IV source (0001D): the contract first, the stock as fallback', () => {
+  const withIv = (legIv: number | null | undefined, stockIv: number | null) => buildLongOptionPath({ ...pos(63.42, { currentIv: legIv }), iv: stockIv, dte: 313 } as Position)!;
+  it('uses the contract IV when the broker supplied it', () => {
+    const p = withIv(28, 35);
+    expect(p.ivPct).toBe(28);
+    expect(p.ivSource).toBe('contract');
+    expect(p.probability).toBeCloseTo(breakevenProbability('C', 63.42, 90.85, 28, 313)!, 6);
+  });
+  it('falls back to the stock IV, and says so', () => {
+    const p = withIv(null, 35);
+    expect(p.ivPct).toBe(35);
+    expect(p.ivSource).toBe('stock');
+    render(<LongOptionPathPanel path={p} textFaint="" />);
+    expect(screen.getByTestId('path-chance')).toHaveTextContent("the stock's IV");
+  });
+  it('the panel names the contract IV when used', () => {
+    render(<LongOptionPathPanel path={withIv(28, 35)} textFaint="" />);
+    expect(screen.getByTestId('path-chance')).toHaveTextContent("28% this contract's IV");
+  });
+  it('no IV from either source: no chance, no source', () => {
+    const p = withIv(undefined, null);
+    expect(p.probability).toBeNull();
+    expect(p.ivSource).toBeNull();
+  });
+});

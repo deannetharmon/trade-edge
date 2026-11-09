@@ -38,7 +38,7 @@ export function LongOptionPathPanel({ path, textFaint }: { path: LongOptionPath;
       {path.probability != null && (
         <p data-testid="path-chance" className={`mt-2 text-xs font-bold ${TONE_TEXT[breakevenTone(path.probability)]}`}>
           {probabilityLabel(path.probability)} chance {symbol} finishes {kind === 'C' ? 'above' : 'below'} {usd(path.breakeven)} at expiration
-          <span className={`ml-1 font-normal ${textFaint}`}>(needs {Math.abs(path.neededMovePct).toFixed(2)}% {path.neededMovePct >= 0 ? (kind === 'C' ? 'up' : 'down') : 'cushion'} · model from {path.ivPct}% IV and {path.dte} days, not a forecast)</span>
+          <span className={`ml-1 font-normal ${textFaint}`}>(needs {Math.abs(path.neededMovePct).toFixed(2)}% {path.neededMovePct >= 0 ? (kind === 'C' ? 'up' : 'down') : 'cushion'} · model from {path.ivPct!.toFixed(0)}% {path.ivSource === 'contract' ? "this contract's" : "the stock's"} IV and {path.dte} days, not a forecast)</span>
         </p>
       )}
       <dl className="mt-2 grid grid-cols-2 gap-2 text-xs text-white">

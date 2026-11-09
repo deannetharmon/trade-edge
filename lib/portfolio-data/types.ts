@@ -38,6 +38,8 @@ export interface PositionLeg {
   // for per-leg risk display; net position delta (Position.netDelta) is
   // netted against the long leg and is not a substitute for this.
   currentDelta: number | null;
+  /** LONG-OPTION-PATH-0001D: this contract's own implied volatility, percent, from the broker quote. Absent when not supplied. */
+  currentIv?: number | null;
 }
 
 

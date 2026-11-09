@@ -114,6 +114,7 @@ export function scorePortfolioPositionHealth(pos: Position): PositionHealthScore
 // synchronous (pos.snapshotHistory is attached before either caller runs --
 // see attachSnapshotHistory), so no new fetch/integration is needed.
 import type { PositionLifecycleType } from '@/lib/portfolio/positionLifecycle';
+import { normalizeIv } from '@/lib/scans/scan-utils';
 
 // LEAPS (TE-0007D-adjacent fix): a standalone long call has no credit-received basis at all --
 // it's a debit position, not a sold-premium one -- so it does not semantically belong in
@@ -1410,6 +1411,8 @@ export async function loadPositions(
   const gammaMap: Record<string, number> = {};
   const deltaMap: Record<string, number> = {};
   const vegaMap:  Record<string, number> = {};
+  // LONG-OPTION-PATH-0001D: each contract's own implied volatility (percent) from the same quote call.
+  const legIvMap: Record<string, number> = {};
   if (allOptionSymbols.length > 0) {
     try {
       for (let i = 0; i < allOptionSymbols.length; i += 50) {
@@ -1448,6 +1451,8 @@ export async function loadPositions(
           if (!isNaN(gamma)) gammaMap[sym] = gamma;
           if (!isNaN(delta)) deltaMap[sym] = delta;
           if (!isNaN(vega))  vegaMap[sym]  = vega;
+          const legIv = normalizeIv(item.volatility);
+          if (legIv != null && legIv >= 1 && legIv <= 500) legIvMap[sym] = legIv;
         }
       }
     } catch {}
@@ -1883,6 +1888,7 @@ export async function loadPositions(
         avgOpenPrice: parseBrokerEntryPremium(l['average-open-price']),
         currentPrice: currentPrices[l.symbol?.replace(/\s+/g, '')] ?? null,
         currentDelta: deltaMap[l.symbol?.replace(/\s+/g, '')] ?? null,
+        currentIv: legIvMap[l.symbol?.replace(/\s+/g, '')] ?? null,
         // PORTFOLIO-SUMMARY-0001: the broker's previous-close mark and the
         // leg's open time, for the 1-day P/L change (TastyTrade's P/L Day basis).
         closePrice: parseBrokerEntryPremium(l['close-price']),

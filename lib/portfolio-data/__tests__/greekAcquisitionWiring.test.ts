@@ -129,4 +129,24 @@ describe('PM-0002 live acquisition Greek and entry-economics wiring', () => {
       maxRiskReliable: false,
     });
   });
+
+  it('LONG-OPTION-PATH-0001D: each leg carries its own contract IV (percent) from the quote; absent when the broker omits it', async () => {
+    broker.ttFetch.mockImplementation(async (path: string) => {
+      if (path === '/customers/me/accounts') return { data: { items: [{ account: { 'account-number': 'A1' } }] } };
+      if (path.startsWith('/accounts/A1/positions')) return { data: { items: [leg(SHORT, 'Short', '2.52'), leg(LONG, 'Long', '0.00')] } };
+      if (path.startsWith('/market-data/by-type?equity-option=')) return { data: { items: [
+        { symbol: SHORT, bid: '3.00', ask: '3.20', mark: '3.10', theta: '-0.07', gamma: '0.001', delta: '-0.20', vega: '0.08', volatility: '0.4123', 'updated-at': '2026-08-11T15:59:30.000Z' },
+        { symbol: LONG, bid: '1.40', ask: '1.60', mark: '1.50', theta: '-0.024', gamma: '0.001', delta: '-0.10', vega: '0.05', 'updated-at': '2026-08-11T15:59:35.000Z' },
+      ] } };
+      if (path.startsWith('/market-data/by-type?equity=MU')) return { data: { items: [{ symbol: 'MU', bid: '861.50', ask: '861.70', mark: '861.60' }] } };
+      if (path.startsWith('/market-metrics?')) return { data: { items: [] } };
+      return { data: { items: [] } };
+    });
+    const { positions } = await loadPositions();
+    const legs = positions[0].legs;
+    const shortLeg = legs.find(l => l.direction === 'Short')!;
+    const longLeg = legs.find(l => l.direction === 'Long')!;
+    expect(shortLeg.currentIv).toBeCloseTo(41.23, 6);
+    expect(longLeg.currentIv ?? null).toBeNull();
+  });
 });

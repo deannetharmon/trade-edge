@@ -34,6 +34,8 @@ export interface LongOptionPath {
   /** Model estimate (0..1) of finishing past breakeven at expiration; null without a usable IV or time left. */
   probability: number | null;
   ivPct: number | null;
+  /** Where the IV came from: this contract's own quote, or the stock's current IV as a fallback. */
+  ivSource: 'contract' | 'stock' | null;
   dte: number | null;
 }
 
@@ -96,9 +98,13 @@ export function buildLongOptionPath(p: Pick<Position, 'symbol' | 'stockPrice' | 
       ? `${sym} is ${beyond} your strike, so ${usd(intrinsic)} of this option's value is intrinsic.${extrinsic !== null ? ` The other ${usd(extrinsic)} is time and volatility value.` : ''} At expiration, ${sym} must be ${beyond} ${usd(breakeven)} to recover your original cost.`
       : `${sym} is ${beyond} your ${usd(breakeven)} breakeven. Held to expiration at today's price, this option would recover its cost.`;
 
-  const ivPct = p.iv != null && Number.isFinite(p.iv) && p.iv > 0 ? p.iv : null;
+  // The contract's own IV first (a LEAP's IV differs from the stock's near-term IV); the stock's IV only as a fallback.
+  const contractIv = leg.currentIv != null && Number.isFinite(leg.currentIv) && leg.currentIv > 0 ? leg.currentIv : null;
+  const stockIv = p.iv != null && Number.isFinite(p.iv) && p.iv > 0 ? p.iv : null;
+  const ivPct = contractIv ?? stockIv;
+  const ivSource: 'contract' | 'stock' | null = contractIv != null ? 'contract' : stockIv != null ? 'stock' : null;
   const dte = p.dte != null && Number.isFinite(p.dte) ? p.dte : null;
-  return { symbol: sym, kind: leg.optionType, stock, strike, premium, breakeven, toStrike, toBreakeven, value: mark, intrinsic, extrinsic, hasIntrinsic, pastBreakeven, status, neededMovePct: (toBreakeven / stock) * 100, probability: breakevenProbability(leg.optionType, stock, breakeven, ivPct, dte), ivPct, dte };
+  return { symbol: sym, kind: leg.optionType, stock, strike, premium, breakeven, toStrike, toBreakeven, value: mark, intrinsic, extrinsic, hasIntrinsic, pastBreakeven, status, neededMovePct: (toBreakeven / stock) * 100, probability: breakevenProbability(leg.optionType, stock, breakeven, ivPct, dte), ivPct, ivSource, dte };
 }
 
 /** Chip text for a bought option's distance to its strike: plain direction, never "OTM", which reads as a protective buffer. */

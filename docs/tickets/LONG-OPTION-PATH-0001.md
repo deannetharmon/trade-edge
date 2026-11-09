@@ -29,3 +29,12 @@ strike makes the trade profitable. NFLX Sep-17-2027 $70 call bought at $20.85, N
   40%+ green, 20-40% amber, under 20% red; no estimate is neutral. Other bought options keep their previous strike-chip colour.
 - Detail: a line "~12% chance NFLX finishes above $90.85 at expiration (needs 43.25% up · model from 35% IV and 313 days, not a forecast)".
 - Reference values (python, independent): 63.42 vs 90.85 at 35% IV, 313 d = 12.197%; at 50% IV = 17.523%; put 80 vs 65, 40% IV, 200 d = 26.525%.
+
+## 0001D -- the LEAP's own IV (Dean)
+
+Dean: the chance should use the contract's own implied volatility, which the position already has. The portfolio quote call
+(`/market-data/by-type`) already supplies delta and vega per contract; it also returns `volatility` (the LEAPS discovery scan reads it).
+- `loadPositions` reads `volatility` per option into `PositionLeg.currentIv` (percent, 1-500 only; absent when the broker omits it).
+- `buildLongOptionPath` uses the contract IV first and the stock's current IV only as a fallback; `ivSource` records which.
+- The detail line says which: "model from 28% this contract's IV" or "the stock's IV". No IV from either: no chance chip.
+- Checked siblings: the other readers of `Position.iv` (POP on short positions) are unchanged; they keep the stock IV.
