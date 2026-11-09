@@ -73,3 +73,17 @@ describe('LongOptionPathPanel', () => {
     expect(screen.getByText(/Profit at expiration begins above strike \+ premium paid/)).toBeInTheDocument();
   });
 });
+
+import { PositionCards } from '../PositionCards';
+import { vi } from 'vitest';
+vi.mock('@/components/portfolio-data/useHoldingRsi', () => ({ useHoldingRsi: () => ({}) }));
+
+describe('breakeven chip placement', () => {
+  it('sits in the same group as the distance-to-strike chip', () => {
+    render(<PositionCards positions={[{ ...pos(63.42), key: 'k1', dte: 313, entryDte: 313, strategy: 'Long Call' } as unknown as Position]} order={c => c} pctOfTarget={() => null} th={{ textFaint: '', textMuted: '', border: '' }} emptyText="none" />);
+    const strike = screen.getByTestId('card-moneyness');
+    expect(strike).toHaveTextContent('below strike');
+    expect(strike.parentElement).toContainElement(screen.getByTestId('card-breakeven'));
+    expect(screen.getByTestId('card-breakeven')).toHaveTextContent('Breakeven $90.85');
+  });
+});

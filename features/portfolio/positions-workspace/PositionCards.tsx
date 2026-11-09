@@ -89,7 +89,8 @@ function CardItem({ pmccOpportunity, onFindPmccShortCall, rsi, cutoff, card, th,
   const horizon = standaloneLongOptionLabel(p);
   const suggested = p.recommendation ? canonicalRecommendationToAction(p.recommendation.kind) : null;
   const moneyness = card.chips.find(c => c.id === 'moneyness');
-  const sideChips = card.chips.filter(c => c.id !== 'moneyness');
+  const breakeven = card.chips.find(c => c.id === 'breakeven');
+  const sideChips = card.chips.filter(c => c.id !== 'moneyness' && c.id !== 'breakeven');
   const pnlTone = card.pnl == null || Math.abs(card.pnl) < 0.005 ? SEMANTIC_TONE_CLASS.neutral : card.pnl > 0 ? SEMANTIC_TONE_CLASS.positive : SEMANTIC_TONE_CLASS.negative;
   return (
     <article aria-label={`${p.symbol} ${horizon ?? p.strategy} position`} className={`rounded-xl border border-l-4 ${th.border} ${EDGE_CLASS[card.bucket]} bg-white/[0.02] p-4`}>
@@ -110,7 +111,7 @@ function CardItem({ pmccOpportunity, onFindPmccShortCall, rsi, cutoff, card, th,
           )}
         </div>
         {/* CARD-MONEYNESS-CENTER-0001: ITM / OTM sits at the centre of the card, level with the ticker, where it is not lost among the signals. */}
-        <div className="flex flex-col items-start gap-2 sm:items-center sm:pt-0.5">{moneyness && <span data-testid="card-moneyness" className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-bold ${CHIP_CLASS[moneyness.tone]}`}>{moneyness.label}</span>}{renderNote && <div data-testid="card-note" className="w-44 max-w-full">{renderNote(p)}</div>}</div>
+        <div className="flex flex-col items-start gap-2 sm:items-center sm:pt-0.5">{moneyness && <span className="flex flex-wrap items-center gap-1.5 sm:justify-center"><span data-testid="card-moneyness" className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-bold ${CHIP_CLASS[moneyness.tone]}`}>{moneyness.label}</span>{breakeven && <span data-testid="card-breakeven" className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-bold ${CHIP_CLASS[breakeven.tone]}`}>{breakeven.label}</span>}</span>}{renderNote && <div data-testid="card-note" className="w-44 max-w-full">{renderNote(p)}</div>}</div>
         <div className="sm:max-w-[30rem] sm:justify-self-end sm:text-right">
           <b data-testid="card-pnl" className={`block text-xl ${pnlTone}`}>{usd(card.pnl)}</b>
           <span className={`block text-[11px] ${card.unverifiedQuote ? 'text-amber-300' : th.textFaint}`}>{card.pnlNote}</span>
