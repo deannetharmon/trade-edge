@@ -102,6 +102,8 @@ import {
 // TE-0007C — Covered Call as a first-class Screener strategy.
 import { resolveCcBasis, applyTypedBasis } from '@/lib/ccBasis/ccBasisSettings';
 import { computeAdjustedBasis, hasOpenLongCall } from '@/lib/ccBasis/adjustedBasis';
+import { listCcBlockedCalls } from '@/lib/scans/ccBlocked';
+import { CcBlockedCalls } from '@/features/screener/components/CcBlockedCalls';
 import { fetchAndReconstructTrades } from '@/lib/tradeLog/reconstructTrades';
 import { fetchCcBasisSettings } from '@/features/screener/useCcBasisSettings';
 import { findBestCoveredCall, findNearestCoveredCall, diagnoseCcExclusions, formatCcExclusionSummary, formatCcHiddenNote, buildCcGrid } from '@/lib/scans/covered-call-finder';
@@ -7130,6 +7132,7 @@ const strategyScores = useMemo(() => {
           )}
 
           {!c && result.strategy === 'CC' && result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} />}
+          {!c && result.strategy === 'CC' && result.ccBlocked && <CcBlockedCalls symbol={result.symbol} {...result.ccBlocked} className={th.textFaint} />}
 
           {c && c.strategy === 'CC' && (
             <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
@@ -7154,6 +7157,7 @@ const strategyScores = useMemo(() => {
               </details>
               {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
               {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} initial={c.expiration ? { expiration: c.expiration, strike: c.shortStrike } : null} onAnchorChange={setPickedCcCell} />}
+              {result.strategy === 'CC' && result.ccBlocked && <CcBlockedCalls symbol={result.symbol} {...result.ccBlocked} className={`pt-1 ${th.textFaint}`} />}
               {result.strategy === 'CC' && result.ccCommitted && <CommittedCallsLine symbol={result.symbol} {...result.ccCommitted} className={`pt-1 ${th.textFaint}`} />}
               {result.ccExclusionNote && <p data-testid="cc-exclusion-note" className={`text-[10px] pt-1 ${th.textFaint}`}>{result.ccExclusionNote}</p>}
               {c.ccResearch && <p className="text-[9px] text-cyan-300 font-bold pt-1">RESEARCH — not an order, and not counted in Best Opportunities. Entry price: {researchEntryLabel(c.ccEntrySource ?? null)}.</p>}
@@ -11592,6 +11596,7 @@ export default function Home() {
             const scanned = runCcChecklist(symbol, chainData, price, metrics, ccScanRules(rules), capacity, trendResult, basisOpts, rules);
             result = {
               ...scanned,
+              ccBlocked: listCcBlockedCalls(chainData, { dteMin: rules.DTE_MIN, dteMax: rules.DTE_MAX, stockPrice: price }),
               ccCommitted: { sharesOwned: brokerCapacity.sharesOwned, gross: brokerCapacity.grossCoveredContracts, available: brokerCapacity.availableCoveredContracts, calls: committedCallsMap?.[symbol] ?? [] },
               ccRegrade: {
                 pool: ccPool, price,
