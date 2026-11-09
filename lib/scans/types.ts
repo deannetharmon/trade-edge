@@ -245,6 +245,8 @@ export interface ScreenResult {
   ccViewHidden?: number;
   /** CC-SIMPLIFY-0001G: one-line reason a covered-call ticker did not qualify (the long text stays in failReasons). */
   ccBrief?: string;
+  /** CC-VISIBILITY-0001: the strike floor behind a covered-call result, so a no-result row can explain it and offer the below-basis opt-in. */
+  ccFloorInfo?: { floor: number | null; price: number | null; allowBelowBasis: boolean };
   symbol: string; strategy: string; price: number | null; ivr: number | null;
   ivx?: number | null; ivx30?: number | null; ivHv30Diff?: number | null; liquidityRating?: number | null;
   qualified: boolean; bestCandidate: SpreadCandidate | null;

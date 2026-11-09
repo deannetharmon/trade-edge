@@ -19,6 +19,7 @@ import { useId, type ReactNode } from 'react';
 import type { ScreenResult } from '@/lib/scans/types';
 import { useDisclosureA11y } from '../lib/useDisclosureA11y';
 import { CspFundamentalsRow } from './CspFundamentalsRow';
+import { CcBelowBasisToggle } from './CcBelowBasisToggle';
 import { ExpirationDisclosure } from './ExpirationDisclosure';
 
 export interface DisqualifiedSectionProps {
@@ -125,6 +126,11 @@ function DisqualifiedCard({
           {expanded ? 'Hide checks' : 'Show checks'}
         </button>
       </div>
+      {result.strategy === 'CC' && result.ccFloorInfo && (
+        <div className="px-3 pb-2">
+          <CcBelowBasisToggle symbol={result.symbol} floor={result.ccFloorInfo.floor} price={result.ccFloorInfo.price} allowBelowBasis={result.ccFloorInfo.allowBelowBasis} />
+        </div>
+      )}
       {result.bestCandidate && (
         <CspFundamentalsRow
           candidate={result.bestCandidate}

@@ -1655,6 +1655,7 @@ function runCcChecklist(
       deltaMin: ccRules.DELTA_MIN, deltaMax: ccRules.DELTA_MAX,
       nearest: nearestCandidate ? { strike: nearestCandidate.shortStrike, delta: nearestCandidate.shortDelta } : null, floor: ccFloor.floor, price,
     }),
+    ccFloorInfo: { floor: ccFloor.floor, price, allowBelowBasis },
     ccGrid: capacityCheck.status !== 'fail' ? buildCcGrid(chainData, { rules: gridRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }) : undefined,
     ccExclusionNote: bestCandidate && capacityCheck.status !== 'fail'
       ? formatCcHiddenNote(diagnoseCcExclusions(chainData, { rules: gridRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }), gridRules)
@@ -1690,6 +1691,7 @@ function regradeCcResult(r: ScreenResult, view: CcView): ScreenResult {
     qualified: next.qualified,
     failReasons: next.failReasons,
     ccBrief: next.ccBrief,
+    ccFloorInfo: next.ccFloorInfo,
     checks: next.checks,
     ivx: next.ivx,
     ccExclusionNote: null, // the "N hidden by result filters" banner replaces the scan-time "left out" line
