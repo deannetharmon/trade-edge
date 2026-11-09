@@ -72,6 +72,7 @@ import { PMCC_DECISION_POLICY_VERSION, pmccDecisionRankEligible, unavailablePmcc
 import { evaluateEventRisk, type EventRiskResult } from '@/lib/scans/eventRisk';
 import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
+import { HeldCompareForPairs } from '@/features/screener/components/HeldCompareCard';
 import { heldIncomeSummary, heldStrikeBelowLeapLine, excludedContractPremiumText, heldLeapOtmTag, selectLongLegBlockerLine, isUncoveredHeldShort, heldUncoveredSkippedLine, preferenceNoteGates } from '@/lib/scans/pmccHeldUnderwaterDisplay';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { TradeLookupModal } from '@/features/screener/components/TradeLookupModal';
@@ -13109,6 +13110,9 @@ export default function Home() {
                         pmccBestFit={pmccBestFitWinner?.result === r ? { profile: pmccBestFitProfile, score: pmccBestFitWinner.score, runnerUp: pmccBestFitRanked[1]?.result ?? null, earningsBlocksRecommendation: pmccEarningsBlocksBestFit(r) } : undefined} />
                       {(filteredOiByResult.get(r)?.protectiveLegWarnings ?? []).map((w, wi) => <p key={wi} className="mt-1 text-[9px] text-amber-400" data-testid="oi-protective-leg-warning">⚠ {w}</p>)}
                       </TopOpportunityFrame>
+                      {r.pmccPair?.entryMode === 'covered-short-call-against-held-leaps' && filteredQualified.find(q => q.symbol === r.symbol && q.pmccPair?.entryMode === 'covered-short-call-against-held-leaps') === r && (
+                        <div className="mt-2"><HeldCompareForPairs pairs={filteredQualified.filter(q => q.symbol === r.symbol).map(q => q.pmccPair)} spot={r.price} symbol={r.symbol} th={th} /></div>
+                      )}
                     </div>
                   );
                 };
@@ -13432,6 +13436,9 @@ export default function Home() {
                                   itemLabel={heldLeapCandidatesOnly ? 'short-call candidate' : 'near-miss structure'}
                                   summaryLine={heldSummaryOwner.get(symbol) === 'near-miss' ? heldPmccPlan?.summaryBySymbol.get(symbol) : null}
                                   defaultOpen={heldLeapCandidatesOnly} borderClassName={th.border}>
+                                  {!filteredQualified.some(q => q.symbol === symbol && q.pmccPair?.entryMode === 'covered-short-call-against-held-leaps') && (
+                                    <HeldCompareForPairs pairs={group.map(r => r.pmccPair)} spot={group[0]?.price} symbol={symbol} th={th} />
+                                  )}
                                   {group.map((result, groupIndex) => (
                                     <PmccResultCard key={result.candidateId} result={result} th={th} rules={runtimeStockRules}
                                       hideLeapNotes={groupIndex > 0 || filteredQualified.some(q => q.symbol === result.symbol && q.pmccPair?.entryMode === 'covered-short-call-against-held-leaps')}
