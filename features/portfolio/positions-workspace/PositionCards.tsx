@@ -6,6 +6,10 @@
 'use client';
 
 import { useMemo, useState, type ReactNode } from 'react';
+import { useHoldingRsi } from '@/components/portfolio-data/useHoldingRsi';
+import { useCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
+import type { StockRsi } from '@/lib/portfolio/stockRsi';
+import { LeapRsiChips, LeapRsiDetail, isLeapCall } from './LeapRsi';
 import { IntentSelect } from './IntentSelect';
 import { SalvageEntry } from './salvage/SalvagePanel';
 import { buildPositionCard, shortDate, stopNotExpected, type CardBucket, type CardChipTone, type PositionCard } from './model/cardModel';
@@ -66,11 +70,14 @@ export interface PositionCardsProps {
 
 export function PositionCards({ positions, order, pctOfTarget, netLiquidity, getManagementActions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart, renderNote, th, emptyText }: PositionCardsProps) {
   const cards = useMemo(() => order(positions.map(p => buildPositionCard(p, { pctOfTarget: pctOfTarget(p), netLiquidity }))), [positions, order, pctOfTarget, netLiquidity]);
+  // STOCK-RSI-0002: daily RSI of the underlying, for held LEAP calls only (one fetch per symbol, shared with the scans).
+  const [ccRsiCutoff] = useCcRsiCutoff();
+  const rsiBySymbol = useHoldingRsi(positions.filter(isLeapCall).map(p => p.symbol));
   if (cards.length === 0) return <p role="status" className={`rounded-xl border ${th.border} p-6 text-center text-sm ${th.textFaint}`}>{emptyText}</p>;
-  return <div data-testid="position-cards" className="grid gap-3 lg:grid-cols-2">{cards.map(card => <CardItem key={card.key} card={card} th={th} actions={getManagementActions?.(card.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} onIntentChange={onIntentChange} onRefresh={onRefresh} renderChart={renderChart} renderNote={renderNote} />)}</div>;
+  return <div data-testid="position-cards" className="grid gap-3 lg:grid-cols-2">{cards.map(card => <CardItem key={card.key} card={card} th={th} rsi={isLeapCall(card.position) ? rsiBySymbol[card.position.symbol.trim().toUpperCase()] : undefined} cutoff={ccRsiCutoff} actions={getManagementActions?.(card.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} onIntentChange={onIntentChange} onRefresh={onRefresh} renderChart={renderChart} renderNote={renderNote} />)}</div>;
 }
 
-function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart, renderNote }: { card: PositionCard; th: PositionCardsProps['th']; actions: ActionType[]; onExecute?: PositionCardsProps['onExecute']; renderStopControl?: PositionCardsProps['renderStopControl']; onAnalyze?: PositionCardsProps['onAnalyze']; onIntentChange?: PositionCardsProps['onIntentChange']; onRefresh?: () => void; renderChart?: (position: Position) => ReactNode; renderNote?: (position: Position) => ReactNode }) {
+function CardItem({ rsi, cutoff, card, th, actions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart, renderNote }: { rsi?: StockRsi | null; cutoff: number; card: PositionCard; th: PositionCardsProps['th']; actions: ActionType[]; onExecute?: PositionCardsProps['onExecute']; renderStopControl?: PositionCardsProps['renderStopControl']; onAnalyze?: PositionCardsProps['onAnalyze']; onIntentChange?: PositionCardsProps['onIntentChange']; onRefresh?: () => void; renderChart?: (position: Position) => ReactNode; renderNote?: (position: Position) => ReactNode }) {
   const p = card.position;
   const [detailOpen, setDetailOpen] = useState(false);
   const horizon = standaloneLongOptionLabel(p);
@@ -101,12 +108,14 @@ function CardItem({ card, th, actions, onExecute, renderStopControl, onAnalyze, 
         <div className="sm:max-w-[30rem] sm:justify-self-end sm:text-right">
           <b data-testid="card-pnl" className={`block text-xl ${pnlTone}`}>{usd(card.pnl)}</b>
           <span className={`block text-[11px] ${card.unverifiedQuote ? 'text-amber-300' : th.textFaint}`}>{card.pnlNote}</span>
+          {isLeapCall(p) && <LeapRsiChips position={p} rsi={rsi} cutoff={cutoff} textFaint={th.textFaint} />}
           {sideChips.length > 0 && (() => {
             const last = Math.max(...sideChips.map(c => c.row));
             return <div aria-label="Signals" className="mt-2 space-y-1.5 sm:flex sm:flex-col sm:items-end">{([1, 2] as const).filter(r => r <= last && sideChips.some(c => c.row === r)).map(r => <ul key={r} className="flex min-h-[22px] flex-wrap gap-1.5 sm:justify-end">{sideChips.filter(c => c.row === r).map(chip => <li key={chip.id} className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${CHIP_CLASS[chip.tone]}`}>{chip.label}</li>)}</ul>)}</div>;
           })()}
         </div>
       </div>
+      {detailOpen && isLeapCall(p) && rsi !== undefined && <LeapRsiDetail position={p} rsi={rsi} cutoff={cutoff} textFaint={th.textFaint} />}
       {detailOpen && <dl data-testid="card-detail" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">{card.stats.map(stat => {
         const warn = stat.label === '% of account' && card.overSizing;
         return <div key={stat.label} className={`rounded-lg border px-3 py-2 ${warn ? 'border-amber-400/60 bg-amber-400/10' : 'border-white/10 bg-white/[0.03]'}`}><dt className={`text-[10px] uppercase tracking-wider ${th.textFaint}`}>{stat.label}</dt><dd className={`text-sm font-bold ${warn ? 'text-amber-200' : 'text-white'}`}>{stat.value}</dd></div>;
