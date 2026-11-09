@@ -2,12 +2,12 @@
 // CC-WHEEL-0001 S2a -- per-user typed cost basis and per-position "allow strikes below my basis" opt-in.
 //
 // Pure: validation and the overlay onto broker capacity. Storage is app/api/cc-basis/route.ts (Redis per user).
-// Precedence for a covered call's cost basis: typed > broker (a proven adjusted basis joins in S5). The source is
+// Precedence for a covered call's cost basis: typed > adjusted (proven from assignment history, S5) > broker. The source is
 // always carried so the screen can say which number it is using.
 
 import type { CoveredCallCapacity } from '@/lib/scans/covered-call-capacity';
 
-export type CcBasisSource = 'typed' | 'broker';
+export type CcBasisSource = 'typed' | 'adjusted' | 'broker';
 
 export interface CcBasisEntry {
   /** Per-share cost basis the trader typed ("your basis"); null means none typed. */
@@ -57,11 +57,12 @@ export interface ResolvedCcBasis {
 }
 
 /** The basis a covered call is judged against for one symbol, and where it came from. */
-export function resolveCcBasis(settings: CcBasisSettings, symbol: string, capacity: CoveredCallCapacity | null): ResolvedCcBasis {
+export function resolveCcBasis(settings: CcBasisSettings, symbol: string, capacity: CoveredCallCapacity | null, adjustedBasis: number | null = null): ResolvedCcBasis {
   const key = normalizeCcBasisSymbol(symbol);
   const entry = key ? settings[key] : undefined;
   const allowBelowBasis = entry?.allowBelowBasis === true;
   if (entry && entry.basis !== null) return { basis: entry.basis, source: 'typed', allowBelowBasis };
+  if (adjustedBasis !== null && adjustedBasis > 0) return { basis: adjustedBasis, source: 'adjusted', allowBelowBasis };
   const broker = capacity && capacity.costBasisComplete && capacity.costBasis !== null && capacity.costBasis > 0 ? capacity.costBasis : null;
   return { basis: broker, source: broker === null ? null : 'broker', allowBelowBasis };
 }
@@ -70,8 +71,8 @@ export function resolveCcBasis(settings: CcBasisSettings, symbol: string, capaci
  * Capacity with the typed basis laid over the broker's. Share counts, existing and working calls are never touched.
  * With no typed basis the capacity is returned unchanged.
  */
-export function applyTypedBasis(settings: CcBasisSettings, symbol: string, capacity: CoveredCallCapacity): CoveredCallCapacity {
-  const resolved = resolveCcBasis(settings, symbol, capacity);
-  if (resolved.source !== 'typed') return capacity;
+export function applyTypedBasis(settings: CcBasisSettings, symbol: string, capacity: CoveredCallCapacity, adjustedBasis: number | null = null): CoveredCallCapacity {
+  const resolved = resolveCcBasis(settings, symbol, capacity, adjustedBasis);
+  if (resolved.source !== 'typed' && resolved.source !== 'adjusted') return capacity;
   return { ...capacity, costBasis: resolved.basis, costBasisComplete: true };
 }

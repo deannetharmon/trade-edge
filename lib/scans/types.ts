@@ -164,7 +164,7 @@ export interface SpreadCandidate {
   ccAvailableCoveredContracts?: number;
   ccCostBasis?: number | null;
   /** CC-WHEEL-0001 S2b: where ccCostBasis came from, and whether the trader opted in to strikes below it. */
-  ccBasisSource?: 'typed' | 'broker' | null;
+  ccBasisSource?: 'typed' | 'adjusted' | 'broker' | null;
   ccAllowBelowBasis?: boolean;
   ccPremiumPerShare?: number;
   ccPremiumPerContract?: number;

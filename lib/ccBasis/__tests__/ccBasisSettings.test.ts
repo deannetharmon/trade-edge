@@ -80,3 +80,16 @@ describe('resolveCcBasis / applyTypedBasis', () => {
     expect(applyTypedBasis(settings, 'SOXL', cap)).toBe(cap);
   });
 });
+
+describe('adjusted basis precedence (S5)', () => {
+  const cap = { costBasis: 78.75, costBasisComplete: true, sharesOwned: 200 } as never;
+  it('typed beats adjusted beats broker', () => {
+    expect(resolveCcBasis({ TQQQ: { basis: 70, allowBelowBasis: false } }, 'TQQQ', cap, 74.95)).toMatchObject({ basis: 70, source: 'typed' });
+    expect(resolveCcBasis({}, 'TQQQ', cap, 74.95)).toMatchObject({ basis: 74.95, source: 'adjusted' });
+    expect(resolveCcBasis({}, 'TQQQ', cap, null)).toMatchObject({ basis: 78.75, source: 'broker' });
+  });
+  it('the adjusted basis overlays the capacity the scan uses', () => {
+    expect(applyTypedBasis({}, 'TQQQ', cap, 74.95)).toMatchObject({ costBasis: 74.95, costBasisComplete: true });
+    expect(applyTypedBasis({}, 'TQQQ', cap, null)).toBe(cap);
+  });
+});

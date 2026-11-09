@@ -23,7 +23,7 @@ function positive(n: number | null | undefined): n is number {
 export function resolveResearchEntry(input: {
   typedForScan?: number | null;
   /** The user's own position basis for this symbol, when they hold it and it is known. */
-  position?: { basis: number | null; source: 'typed' | 'broker' | null } | null;
+  position?: { basis: number | null; source: 'typed' | 'adjusted' | 'broker' | null } | null;
   stockPrice: number | null | undefined;
 }): CcResearchEntry {
   if (positive(input.typedForScan)) return { entry: input.typedForScan, source: 'typed-for-scan' };

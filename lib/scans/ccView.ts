@@ -115,7 +115,7 @@ export interface CcRegradeInput {
   price: number | null;
   metrics: { ivRank?: number | null; earningsExpectedDate?: string | null; expirationIvxMap?: Record<string, number> | null };
   capacity: CoveredCallCapacity;
-  basisOpts?: { allowBelowBasis?: boolean; basisSource?: 'typed' | 'broker' | null };
+  basisOpts?: { allowBelowBasis?: boolean; basisSource?: 'typed' | 'adjusted' | 'broker' | null };
   /** The scan's rules (DTE and OI minimum); the view supplies delta and width. */
   baseRules: CcRulesType;
   isEtfOrIndex: boolean;

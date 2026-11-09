@@ -101,6 +101,8 @@ import {
 } from '@/lib/screener/opportunityUniverse';
 // TE-0007C — Covered Call as a first-class Screener strategy.
 import { resolveCcBasis, applyTypedBasis } from '@/lib/ccBasis/ccBasisSettings';
+import { computeAdjustedBasis, hasOpenLongCall } from '@/lib/ccBasis/adjustedBasis';
+import { fetchAndReconstructTrades } from '@/lib/tradeLog/reconstructTrades';
 import { fetchCcBasisSettings } from '@/features/screener/useCcBasisSettings';
 import { findBestCoveredCall, findNearestCoveredCall, diagnoseCcExclusions, formatCcExclusionSummary, formatCcHiddenNote, buildCcGrid } from '@/lib/scans/covered-call-finder';
 import { ccStrikeFloor, ccStrikeFloorMessage } from '@/lib/scans/ccStrikeFloor';
@@ -1566,7 +1568,7 @@ function runCcChecklist(
   ccRules: CcRulesType,
   capacity: CoveredCallCapacity,
   trendResult?: TrendResult,
-  basisOpts?: { allowBelowBasis?: boolean; basisSource?: 'typed' | 'broker' | null },
+  basisOpts?: { allowBelowBasis?: boolean; basisSource?: 'typed' | 'adjusted' | 'broker' | null },
   // CC-SIMPLIFY-0001 Phase 2: the scan grades wide open (ccRules) so the results-screen view can re-pick; the strike
   // grid and the "left out" counts keep the user's own rules.
   gridRules: CcRulesType = ccRules,
@@ -7135,7 +7137,7 @@ const strategyScores = useMemo(() => {
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div><span className={th.label}>Premium: </span><span className="text-emerald-400 font-bold">${c.ccPremiumPerContract?.toFixed(2) ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(per contract)</span></div>
                 <div><span className={th.label}>Available contracts: </span><span className="font-bold text-emerald-400">{c.ccAvailableCoveredContracts ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(quantity used for this candidate)</span></div>
-                <div><span className={th.label}>Cost basis: </span><span className={th.text}>{c.ccCostBasis != null ? `$${c.ccCostBasis.toFixed(2)}` : 'Unavailable'}</span>{c.ccBasisSource && <span className={`${th.textFaint} ml-1 text-[10px]`}>({c.ccBasisSource === 'typed' ? 'typed by you' : 'broker'}{c.ccAllowBelowBasis ? ' · below-basis OK' : ''})</span>}</div>
+                <div><span className={th.label}>Cost basis: </span><span className={th.text}>{c.ccCostBasis != null ? `$${c.ccCostBasis.toFixed(2)}` : 'Unavailable'}</span>{c.ccBasisSource && <span className={`${th.textFaint} ml-1 text-[10px]`}>({c.ccBasisSource === 'typed' ? 'typed by you' : c.ccBasisSource === 'adjusted' ? 'after put premium' : 'broker'}{c.ccAllowBelowBasis ? ' · below-basis OK' : ''})</span>}</div>
               </div>
               <details data-testid="cc-details" className="text-xs" onClick={(e) => e.stopPropagation()}>
                 <summary className={`cursor-pointer text-[10px] ${th.textFaint}`}>Details (owned shares, existing calls, assignment proceeds, IV, yield)</summary>
@@ -11466,6 +11468,10 @@ export default function Home() {
 
       // CC-WHEEL-0001 S2b: typed cost basis and below-basis opt-ins, read once per scan.
       const ccBasisSettings = await fetchCcBasisSettings();
+      // CC-WHEEL-0001 S5: the basis after put premium, proven from the last 12 months of broker transactions. Any failure
+      // (network, unprovable lot) just means the typed or broker basis is used, as before.
+      let ccTransactions: Array<Record<string, any>> | null = null;
+      try { ccTransactions = (await fetchAndReconstructTrades('12m')).transactions; } catch { ccTransactions = null; }
 
       // TE-0007: the Opportunity Universe may narrow this set (intersect
       // with verified eligible holdings) but can NEVER create eligibility
@@ -11573,8 +11579,12 @@ export default function Home() {
           } else {
             const brokerCapacity: CoveredCallCapacity = capacityBySymbolMap![symbol];
             // CC-WHEEL-0001 S2b: a basis the trader typed wins over the broker's; the opt-in is per position.
-            const resolvedBasis = resolveCcBasis(ccBasisSettings, symbol, brokerCapacity);
-            const capacity = applyTypedBasis(ccBasisSettings, symbol, brokerCapacity);
+            const adjusted = ccTransactions && brokerCapacity.costBasisComplete
+              ? computeAdjustedBasis({ transactions: ccTransactions, symbol, sharesOwned: brokerCapacity.sharesOwned, brokerBasis: brokerCapacity.costBasis, hasLongCallOnSymbol: hasOpenLongCall(ccTransactions, symbol) })
+              : null;
+            const adjustedBasisValue = adjusted && adjusted.ok ? adjusted.basis : null;
+            const resolvedBasis = resolveCcBasis(ccBasisSettings, symbol, brokerCapacity, adjustedBasisValue);
+            const capacity = applyTypedBasis(ccBasisSettings, symbol, brokerCapacity, adjustedBasisValue);
             // CC-SIMPLIFY-0001 Phase 2: the scan only fetches (tickers + DTE). It grades wide open and keeps the pool of
             // calls the safety gates let through; delta and width are a view the results screen applies without a rescan.
             const basisOpts = { allowBelowBasis: resolvedBasis.allowBelowBasis, basisSource: resolvedBasis.source };
