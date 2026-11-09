@@ -113,6 +113,7 @@ import { ccRsiChip } from '@/lib/scans/ccRsiChip';
 import { ccBriefReason } from '@/lib/scans/ccBrief';
 import { LiveRsiCallsChips, RsiCallsChips } from '@/features/screener/components/RsiCallsChips';
 import { useCcRsiCutoff, readCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
+import { useRsiGuard } from '@/features/screener/components/RsiStopDialog';
 import { ccRankValue } from '@/lib/scans/ccRank';
 import { CcRsiCutoffControl } from '@/features/screener/components/CcRsiCutoffControl';
 import { buildCcOiCheck } from '@/lib/scans/ccOiDisplay';
@@ -5861,6 +5862,8 @@ function PmccComparisonRow({ rank, result, th, isBest, children }: {
 }
 
 function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, hideLeapNotes, onRefreshPortfolio }: ResultCardProps) {
+  const [pmccRsiCutoff] = useCcRsiCutoff();
+  const rsiGuard = useRsiGuard({ symbol: result.symbol, rsi: trendRsiForDisplay(result.trendResult?.metrics), cutoff: pmccRsiCutoff });
   const [expanded, setExpanded] = useState(false);
   const [heldRefreshState, setHeldRefreshState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
   const [showPairLookup, setShowPairLookup] = useState(false);
@@ -6266,12 +6269,13 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
       )}
       {heldLong && heldTradeAllowed && (
         <button
-          onClick={(e) => { e.stopPropagation(); onTrade?.(result); }}
+          onClick={(e) => { e.stopPropagation(); rsiGuard.request(() => onTrade?.(result)); }}
           className="w-full py-2 rounded-lg border border-amber-500 text-amber-300 text-xs font-bold tracking-widest hover:bg-amber-500/10 transition-colors"
         >
           SELL SHORT CALL
         </button>
       )}
+      {rsiGuard.dialog}
       {heldLong && !heldTradeAllowed && !heldOutcome && <p className="rounded border border-cyan-800 bg-cyan-950/20 px-3 py-2 text-[11px] text-cyan-200">Wait / Monitor — this structure isn't ready to act on; see qualification detail above. Selling the short call is blocked until it qualifies.</p>}
       <button
         onClick={(e) => { e.stopPropagation(); setShowPairLookup(true); }}
@@ -6591,6 +6595,7 @@ const strategyScores = useMemo(() => {
     trendRsiForDisplay(cachedEntry?.trendResult?.metrics) ??
     trendRsiForDisplay((cachedEntry as any)?.metrics) ??
     null;
+  const ccRsiGuard = useRsiGuard({ symbol: result.symbol, rsi: rsi14, cutoff: ccRsiCutoff });
 
   const scoreBorderL = qualDerivation?.state === 'disqualified' ? 'border-l-4 border-l-red-500'
     : qualDerivation?.state === 'caution' ? 'border-l-4 border-l-amber-500'
@@ -7257,7 +7262,7 @@ const strategyScores = useMemo(() => {
                 };
                 return (
                   <button
-                    onClick={(e) => { e.stopPropagation(); onTradeCc(result, order); }}
+                    onClick={(e) => { e.stopPropagation(); ccRsiGuard.request(() => onTradeCc(result, order)); }}
                     className="flex-1 py-2.5 rounded-xl text-xs tracking-widest transition-colors bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
                   >
                     {'\u26A1'} TRADE THIS{cell ? ` · $${cell.strike} CALL · ${cell.expiration.slice(5)}` : ''}
@@ -7272,6 +7277,8 @@ const strategyScores = useMemo(() => {
           </div>
         </div>
       )}
+
+      {ccRsiGuard.dialog}
 
       {/* Sector concentration note — plain fact, no severity/dismiss. Same-symbol
           detail is already covered by the always-visible "Open Position" banner
