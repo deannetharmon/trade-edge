@@ -18,6 +18,7 @@ import { buildCcOrderLeg, buildCreditEntryOto, ccProfitBuyback } from '@/lib/sca
 import { costBasisFromReports, guardCcOrder, submitCcOrderIfSafe, type CcOrderRequest } from '@/lib/scans/ccOrderSubmission';
 import type { CoverageReports } from '@/lib/tradeLookup/loadLookup';
 import { ccOutcomeLines, computeCcOutcome } from '@/lib/scans/ccOutcome';
+import { CommittedCallsLine } from './CommittedCallsLine';
 
 export interface CcOrderInput {
   symbol: string;
@@ -268,6 +269,17 @@ export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
         >
           {!coverageLoaded ? 'Checking your shares and LEAPs…' : guard.allowed ? guard.coverage.message : guard.coverage && guard.coverage.canOrder ? guard.coverage.message : guard.reason}
         </p>
+
+        {/* CC-VISIBILITY-0001: which short calls already hold your contracts, from the same fresh broker read. */}
+        {coverageLoaded && Number.isFinite(reports?.capacity?.bySymbol?.[order.symbol]?.grossCoveredContracts) && (() => {
+          const capacityReport = reports?.capacity;
+          const cap = capacityReport?.bySymbol?.[order.symbol];
+          if (!capacityReport || !cap) return null;
+          return (
+            <CommittedCallsLine symbol={order.symbol} sharesOwned={cap.sharesOwned} gross={cap.grossCoveredContracts} available={cap.availableCoveredContracts}
+              calls={capacityReport.committedCallsBySymbol?.[order.symbol] ?? []} className={`mb-3 -mt-1 px-1 ${th.textMuted}`} />
+          );
+        })()}
 
         {/* SELL-CC-0001 A: plain-language outcome (shares-covered calls only). */}
         {!viaLeap && coverageLoaded && guard.coverage !== null && guard.coverage.status === 'covered_by_shares' && (

@@ -12492,6 +12492,14 @@ export default function Home() {
               ) : screenMode === 'filter' ? (
                 <p className="text-sm font-bold tracking-wide text-amber-400">⬢ FILTERED SCAN</p>
               ) : null}
+              {/* CC-VISIBILITY-0001: the expirations this covered-call scan actually looked at, so a result is never read against the wrong window. */}
+              {ccViewActive && (() => {
+                const rg = scanResults.find(r => !!r.ccRegrade)?.ccRegrade;
+                const lo = rg?.baseRules?.DTE_MIN, hi = rg?.baseRules?.DTE_MAX;
+                return typeof lo === 'number' && typeof hi === 'number'
+                  ? <p data-testid="cc-scan-dte-range" className={`text-[9px] tracking-wide ${th.textFaint}`}>Expirations scanned: <span className="font-medium">{lo}–{hi} DTE</span></p>
+                  : null;
+              })()}
               <div className="flex items-center justify-between">
                 <div className="flex gap-4 text-[10px] tracking-wider font-medium">
                   {screenMode === 'filter' || activeSession?.requestedStrategy === 'csp' ? (

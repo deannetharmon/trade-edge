@@ -173,4 +173,18 @@ describe('CcTradeModal', () => {
     await open(makeDeps(), { ...order, occSymbol: '' });
     expect((screen.getByRole('button', { name: 'DRY RUN' }) as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it('lists the short call already holding a contract (CC-VISIBILITY-0001)', async () => {
+    const r = reports();
+    (r.capacity as any).bySymbol.BITX = { ...(r.capacity as any).bySymbol.BITX, sharesOwned: 200, grossCoveredContracts: 2, availableCoveredContracts: 1 };
+    (r.capacity as any).committedCallsBySymbol = { BITX: [{ status: 'filled', quantity: 1, strike: 62, expiration: '2099-11-27', premiumPerShare: 1.55, unclassified: false }] };
+    await open(makeDeps({ readCoverage: async () => r }));
+    expect(screen.getByTestId('cc-committed-BITX')).toHaveTextContent('1 of 2 contracts free');
+    expect(screen.getByTestId('cc-committed-BITX')).toHaveTextContent('Short $62 call · Nov 27');
+  });
+
+  it('shows no contract line when the coverage read carries no share counts', async () => {
+    await open(makeDeps());
+    expect(screen.queryByTestId('cc-committed-BITX')).not.toBeInTheDocument();
+  });
 });
