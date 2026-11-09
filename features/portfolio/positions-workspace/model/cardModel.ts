@@ -13,6 +13,7 @@ import { nextEarningsLine } from './nextEarnings';
 import { profitTargetOrderPct } from './orderPercents';
 import { buildPositionPnlBases, wideMarketNote } from './pnlBases';
 import { buildCapitalViewModel, buildMoneynessViewModel, buildPositionMoneyness, stopPresentationForPosition } from './presentation';
+import { buildLongOptionPath, longStrikeChipLabel } from './longOptionPath';
 import { structuralChipOf } from './strategyChips';
 import { netEdgeLive } from '@/lib/portfolio-data/acquisition';
 import { parseSymbolList } from './filters';
@@ -27,7 +28,7 @@ export type CardBucket = VerdictBucket | 'Unjudged';
 export type CardChipTone = 'bad' | 'warn' | 'ok' | 'info';
 /** row: chips always sit on the same line when present — 1 position status, 2 flags (earnings, net edge, quote quality). Never more than two rows. */
 export interface CardChip { id: string; label: string; tone: CardChipTone; row: 1 | 2 }
-const CHIP_ORDER = ['moneyness', 'buffer', 'target', 'no-stop', 'earnings', 'net-edge', 'wide', 'verify'];
+const CHIP_ORDER = ['moneyness', 'breakeven', 'buffer', 'target', 'no-stop', 'earnings', 'net-edge', 'wide', 'verify'];
 
 /** Most urgent first. Unjudged (no recommendation) sorts last: it is unknown, not calm. */
 const BUCKET_RANK: Record<CardBucket, number> = { Close: 0, Roll: 1, Manage: 2, Hold: 3, Unjudged: 4 };
@@ -141,7 +142,10 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
   // Every option shows where it sits against its strike (long options too); the tone follows the position's own risk.
   if (moneyness) {
     const tone: CardChipTone = moneyness.tone === 'negative' ? 'bad' : moneyness.tone === 'warning' ? 'warn' : moneyness.tone === 'positive' ? 'ok' : 'info';
-    chips.push({ id: 'moneyness', label: moneyness.state === 'ATM' ? 'ATM' : `${moneyness.state} ${moneyness.distancePct.toFixed(1)}%`, tone, row: 1 });
+    const path = buildLongOptionPath(p);
+    // LONG-OPTION-PATH-0001: a bought option shows plain distance to its strike, and its expiration breakeven beside it.
+    chips.push({ id: 'moneyness', label: moneyness.state === 'ATM' ? 'ATM' : path ? longStrikeChipLabel(path, moneyness.distancePct) : `${moneyness.state} ${moneyness.distancePct.toFixed(1)}%`, tone, row: 1 });
+    if (path) chips.push({ id: 'breakeven', label: `Breakeven $${path.breakeven.toFixed(2)}`, tone: 'info', row: 1 });
   }
   if (shortSingle && moneyness && moneyness.state !== 'ITM' && structure === 'csp') {
     const buffer = priceBufferFor(breakeven, p.stockPrice);

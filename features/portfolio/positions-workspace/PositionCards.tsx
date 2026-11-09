@@ -10,6 +10,8 @@ import { useHoldingRsi } from '@/components/portfolio-data/useHoldingRsi';
 import { useCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
 import type { StockRsi } from '@/lib/portfolio/stockRsi';
 import { LeapRsiChips, LeapRsiDetail, isLeapCall } from './LeapRsi';
+import { LongOptionPathPanel } from './LongOptionPathPanel';
+import { buildLongOptionPath } from './model/longOptionPath';
 import { IntentSelect } from './IntentSelect';
 import { SalvageEntry } from './salvage/SalvagePanel';
 import { buildPositionCard, shortDate, stopNotExpected, type CardBucket, type CardChipTone, type PositionCard } from './model/cardModel';
@@ -119,6 +121,7 @@ function CardItem({ pmccOpportunity, onFindPmccShortCall, rsi, cutoff, card, th,
           })()}
         </div>
       </div>
+      {detailOpen && (() => { const path = buildLongOptionPath(p); return path ? <LongOptionPathPanel path={path} textFaint={th.textFaint} /> : null; })()}
       {detailOpen && isLeapCall(p) && rsi !== undefined && <LeapRsiDetail position={p} rsi={rsi} cutoff={cutoff} textFaint={th.textFaint} />}
       {detailOpen && <dl data-testid="card-detail" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">{card.stats.map(stat => {
         const warn = stat.label === '% of account' && card.overSizing;
