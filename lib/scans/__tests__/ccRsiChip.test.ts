@@ -30,6 +30,10 @@ describe('ccRsiChip', () => {
     expect(ccRsiChip({ rsi: 45, price: 90, costBasis: 80, cutoff: 40 }).state).toBe('ready');
     expect(ccRsiChip({ rsi: 45, price: 90, costBasis: 80, cutoff: 60 }).state).toBe('wait');
   });
+  it('names the completed bar in the tooltip when given, and leaves it unchanged otherwise', () => {
+    expect(ccRsiChip({ rsi: 30, price: 57, costBasis: 78, asOf: 'Fri 11/6' }).reason).toContain("(close of Fri 11/6; today's session is not included)");
+    expect(ccRsiChip({ rsi: 30, price: 57, costBasis: 78 }).reason).not.toContain('close of');
+  });
 });
 
 describe('sanitizeCcRsiCutoff', () => {

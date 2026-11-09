@@ -21,18 +21,20 @@ export function sanitizeCcRsiCutoff(value: unknown): number {
   return typeof n === 'number' && Number.isFinite(n) && n >= 1 && n <= 99 ? n : DEFAULT_CC_RSI_CUTOFF;
 }
 
-export function ccRsiChip(input: { rsi: number | null | undefined; price: number | null | undefined; costBasis: number | null | undefined; cutoff?: number }): CcRsiChip {
+/** `asOf` (e.g. "Fri 11/6") names the completed daily bar the RSI is from; when given, the tooltip says so and that today's session is not included. */
+export function ccRsiChip(input: { rsi: number | null | undefined; price: number | null | undefined; costBasis: number | null | undefined; cutoff?: number; asOf?: string | null }): CcRsiChip {
   const cutoff = sanitizeCcRsiCutoff(input.cutoff);
   const { rsi } = input;
   if (typeof rsi !== 'number' || !Number.isFinite(rsi)) {
     return { state: 'wait', label: 'Wait', reason: 'Daily RSI is unavailable, so timing cannot be confirmed.' };
   }
+  const bar = input.asOf ? ` (close of ${input.asOf}; today's session is not included)` : '';
   if (rsi < cutoff) {
-    return { state: 'wait', label: 'Wait', reason: `Daily RSI ${rsi.toFixed(0)} is below your ${cutoff} cutoff: the stock is weak, and a call sold now may leave you selling a bounce too cheaply.` };
+    return { state: 'wait', label: 'Wait', reason: `Daily RSI ${rsi.toFixed(0)}${bar} is below your ${cutoff} cutoff: the stock is weak, and a call sold now may leave you selling a bounce too cheaply.` };
   }
   const basisKnown = typeof input.costBasis === 'number' && input.costBasis > 0;
   if (basisKnown && typeof input.price === 'number' && input.price > 0 && input.price < (input.costBasis as number)) {
-    return { state: 'recovery', label: 'Recovery', reason: `Daily RSI ${rsi.toFixed(0)} is at or above your ${cutoff} cutoff, but the price is below your cost basis. Only calls above your basis make sense.` };
+    return { state: 'recovery', label: 'Recovery', reason: `Daily RSI ${rsi.toFixed(0)}${bar} is at or above your ${cutoff} cutoff, but the price is below your cost basis. Only calls above your basis make sense.` };
   }
-  return { state: 'ready', label: 'Ready', reason: `Daily RSI ${rsi.toFixed(0)} is at or above your ${cutoff} cutoff.` };
+  return { state: 'ready', label: 'Ready', reason: `Daily RSI ${rsi.toFixed(0)}${bar} is at or above your ${cutoff} cutoff.` };
 }

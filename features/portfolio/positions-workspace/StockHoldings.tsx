@@ -21,7 +21,7 @@ import { marketMetricsPath, parseMarketMetricsEarnings, type StockEarnings } fro
 import { nextEarningsLine } from './model/nextEarnings';
 import type { PositionIntent } from '@/lib/portfolio-data/types';
 import type { StockAiAnalysis, StockAnalysisContext } from '@/lib/portfolio/stockAnalysis';
-import { rsiAtEntry, type StockRsi } from '@/lib/portfolio/stockRsi';
+import { rsiAsOfLabel, rsiAtEntry, type StockRsi } from '@/lib/portfolio/stockRsi';
 import { ccRsiChip } from '@/lib/scans/ccRsiChip';
 import { useCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
 import { useHoldingRsi } from '@/components/portfolio-data/useHoldingRsi';
@@ -54,10 +54,10 @@ type SaveEntryDate = (accountNumber: string, key: string, entryDate: string | nu
 /** The RSI-since-entry text and chip for one holding. Never estimates: no date, or a date outside the loaded window, shows the current RSI only. */
 function rsiView(row: StockHoldingRow, rsi: StockRsi | null | undefined, cutoff: number, entryDate: string | null) {
   const chip = rsi && row.direction === 'Long'
-    ? ccRsiChip({ rsi: rsi.rsi, price: row.price, costBasis: row.basisComplete ? row.avgCost : null, cutoff })
+    ? ccRsiChip({ rsi: rsi.rsi, price: row.price, costBasis: row.basisComplete ? row.avgCost : null, cutoff, asOf: rsiAsOfLabel(rsi.points)?.long ?? null })
     : null;
   const atEntry = rsi ? rsiAtEntry(rsi.points, entryDate) : null;
-  return { chip, atEntry };
+  return { chip, atEntry, asOf: rsi ? rsiAsOfLabel(rsi.points) : null };
 }
 
 function StockEntryDateEditor({ id, symbol, savedDate, onSave }: { id: string; symbol: string; savedDate: string | null; onSave: (entryDate: string | null) => Promise<void> }) {
@@ -204,7 +204,7 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
   const [detailOpen, setDetailOpen] = useState(false);
   const pnlTone = row.pnl == null ? 'text-white/40' : row.pnl >= 0 ? 'text-emerald-400' : 'text-red-400';
   const canSellCovered = row.covered.kind === 'available';
-  const { chip: rsiChip, atEntry } = rsiView(row, rsi, cutoff, entryDate);
+  const { chip: rsiChip, atEntry, asOf: rsiAsOf } = rsiView(row, rsi, cutoff, entryDate);
   const rsiArrow = rsi ? RSI_ARROW[rsi.direction] : null;
   const priceMove = row.basisComplete && row.avgCost != null && row.price != null && row.avgCost > 0
     ? ((row.price - row.avgCost) / row.avgCost) * 100 : null;
@@ -233,6 +233,7 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
           RSI <b>{rsi ? Math.round(rsi.rsi) : '—'}</b>
           {rsiArrow && <span className={`ml-1 text-[10px] ${th.textFaint}`} aria-label={rsiArrow.label}>{rsiArrow.glyph}</span>}
           {atEntry && rsi && <span className={th.textFaint}> · {Math.round(atEntry.rsi)} at entry</span>}
+          {rsiAsOf && <span className={th.textFaint} title="Daily RSI(14) on the last completed bar. Today's session is not included."> · {rsiAsOf.short}</span>}
         </li>}
         {rsiChip && <li title={rsiChip.reason} className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${RSI_CHIP_TONE[rsiChip.state]}`}>Calls: {rsiChip.label}</li>}
         {row.stale && <li className="rounded-full border border-amber-400/50 bg-amber-400/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">Stale price</li>}

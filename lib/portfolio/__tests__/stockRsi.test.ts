@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { completedDailyCloses } from '@/lib/indicators/completedBars';
 import { rsiSeries } from '@/lib/indicators/rsi';
-import { stockRsiDirection, stockRsiFromBars } from '../stockRsi';
+import { rsiAsOfLabel, stockRsiDirection, stockRsiFromBars } from '../stockRsi';
 
 // Daily bars at 9:30 ET, one per weekday-ish day, far in the past so every bar is "completed".
 const DAY = 86_400;
@@ -40,6 +40,19 @@ describe('stockRsiFromBars', () => {
     const withToday = [...history, todayBar];
     // the 11:00 ET partial bar (close 1) must not move the number
     expect(stockRsiFromBars(withToday, open)!.rsi).toBe(stockRsiFromBars(history, open)!.rsi);
+  });
+});
+
+describe('rsiAsOfLabel', () => {
+  it('names the last completed bar by weekday and date', () => {
+    const points = [{ date: '2026-11-05', rsi: 31 }, { date: '2026-11-06', rsi: 29.95 }];
+    expect(rsiAsOfLabel(points)).toEqual({ short: 'Fri close', long: 'Fri 11/6' });
+  });
+
+  it('is null with no points or a malformed date, never a guess', () => {
+    expect(rsiAsOfLabel(undefined)).toBeNull();
+    expect(rsiAsOfLabel([])).toBeNull();
+    expect(rsiAsOfLabel([{ date: 'nope', rsi: 1 }])).toBeNull();
   });
 });
 

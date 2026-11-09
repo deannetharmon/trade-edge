@@ -59,6 +59,14 @@ describe('stock card RSI', () => {
     expect(screen.getByTestId('stock-price-move-equity:MRVL:long')).toHaveTextContent('+24.2% since you bought');
   });
 
+  it('labels the RSI with the completed bar it comes from', () => {
+    rsiMap.MRVL = { rsi: 30, previous: 31, direction: 'down', points: [{ date: '2026-11-05', rsi: 31 }, { date: '2026-11-06', rsi: 30 }] };
+    render(<StockHoldings {...props(holding())} />);
+    expect(screen.getByTestId('stock-rsi-equity:MRVL:long')).toHaveTextContent('RSI 30');
+    expect(screen.getByTestId('stock-rsi-equity:MRVL:long')).toHaveTextContent('Fri close');
+    expect(screen.getByText('Calls: Wait')).toHaveAttribute('title', expect.stringContaining('Fri 11/6'));
+  });
+
   it('shows a dash while RSI cannot be computed and no chip', () => {
     rsiMap.MRVL = null;
     render(<StockHoldings {...props(holding())} />);

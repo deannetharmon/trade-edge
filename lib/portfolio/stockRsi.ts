@@ -58,6 +58,21 @@ export function stockRsiFromBars(bars: unknown, now: Date = new Date()): StockRs
   return { rsi, previous, direction: stockRsiDirection(rsi, previous), points: points.length === series.length ? points : undefined };
 }
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
+/**
+ * Which completed bar the RSI belongs to, from the last point's New York date (YYYY-MM-DD): `{ short: 'Fri close', long: 'Fri 11/6' }`.
+ * Null when the date is unknown. Display only: the RSI itself always comes from completed bars, so today's session is never in it.
+ */
+export function rsiAsOfLabel(points: StockRsiPoint[] | undefined): { short: string; long: string } | null {
+  const date = points && points.length > 0 ? points[points.length - 1].date : null;
+  const m = date ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(date) : null;
+  if (!m) return null;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const weekday = WEEKDAYS[new Date(Date.UTC(year, month - 1, day, 12)).getUTCDay()];
+  return { short: `${weekday} close`, long: `${weekday} ${month}/${day}` };
+}
+
 /**
  * RSI on the last completed bar on or before `entryDate` (YYYY-MM-DD). Null when the date is outside the loaded window
  * (older than the first RSI value, or after the latest completed bar), so an unknowable entry is never estimated.
