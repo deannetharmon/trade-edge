@@ -18,3 +18,14 @@ strike makes the trade profitable. NFLX Sep-17-2027 $70 call bought at $20.85, N
 - The face of the card stays light (Dean's few-words rule): two chips. The full path and sentence live in Show detail.
 - Puts mirror the call (breakeven below the strike; "above/below" swapped).
 - Applies to every bought single option, not only LEAPs: the confusion is the same at any expiry.
+
+## 0001C -- needed move, chance of breakeven, colour (Dean, Ian, Alan)
+
+- Breakeven chip: `Breakeven $90.85 · +43.25%` (the move needed from today's price).
+- New chip `~12% chance`: model chance of finishing past breakeven at expiration. Alan: lognormal, risk-neutral drift, the position's
+  current IV, 4% rate (`PMCC_START_PRICE_RISK_FREE_RATE`). `<1%` / `>99%` at the ends. Null (no chip) without IV or time left.
+  Labeled a model estimate, not a forecast (tooltip and detail line).
+- Ian's colour rule: on a LEAP call the strike chip, Breakeven chip and chance chip share one colour from that chance:
+  40%+ green, 20-40% amber, under 20% red; no estimate is neutral. Other bought options keep their previous strike-chip colour.
+- Detail: a line "~12% chance NFLX finishes above $90.85 at expiration (needs 43.25% up · model from 35% IV and 313 days, not a forecast)".
+- Reference values (python, independent): 63.42 vs 90.85 at 35% IV, 313 d = 12.197%; at 50% IV = 17.523%; put 80 vs 65, 40% IV, 200 d = 26.525%.

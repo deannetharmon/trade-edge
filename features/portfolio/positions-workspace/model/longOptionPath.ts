@@ -6,6 +6,8 @@
 // null when anything needed is missing, never an estimate.
 
 import type { Position } from '@/lib/portfolio-data/types';
+import { normalCdf } from '@/lib/scans/scan-utils';
+import { PMCC_START_PRICE_RISK_FREE_RATE } from '@/lib/scans/pmccStartPrice';
 
 export interface LongOptionPath {
   symbol: string;
@@ -27,11 +29,42 @@ export interface LongOptionPath {
   /** True when the stock is already past the expiration breakeven. */
   pastBreakeven: boolean;
   status: string;
+  /** Percent the stock must move from today's price to reach breakeven; positive = still to go. */
+  neededMovePct: number;
+  /** Model estimate (0..1) of finishing past breakeven at expiration; null without a usable IV or time left. */
+  probability: number | null;
+  ivPct: number | null;
+  dte: number | null;
+}
+
+/**
+ * Chance the stock finishes past breakeven at expiration: lognormal, risk-neutral drift, the position's current IV.
+ * A model estimate, not a forecast. Null when IV or time to expiration is missing.
+ */
+export function breakevenProbability(kind: 'C' | 'P', stock: number, breakeven: number, ivPct: number | null | undefined, dte: number | null | undefined, rate = PMCC_START_PRICE_RISK_FREE_RATE): number | null {
+  if (ivPct == null || !Number.isFinite(ivPct) || ivPct <= 0 || dte == null || !Number.isFinite(dte) || dte <= 0) return null;
+  if (!(breakeven > 0) || !(stock > 0)) return null;
+  const sigma = ivPct / 100;
+  const t = dte / 365;
+  const d2 = (Math.log(stock / breakeven) + (rate - 0.5 * sigma * sigma) * t) / (sigma * Math.sqrt(t));
+  return kind === 'C' ? normalCdf(d2) : normalCdf(-d2);
+}
+
+/** "~12%", "<1%", ">99%". */
+export function probabilityLabel(probability: number): string {
+  const pct = probability * 100;
+  return pct < 1 ? '<1%' : pct > 99 ? '>99%' : `~${Math.round(pct)}%`;
+}
+
+/** Chip tone from the chance of reaching breakeven: 40%+ green, 20-40% amber, under 20% red; no estimate is neutral. */
+export function breakevenTone(probability: number | null): 'ok' | 'warn' | 'bad' | 'info' {
+  if (probability == null) return 'info';
+  return probability >= 0.4 ? 'ok' : probability >= 0.2 ? 'warn' : 'bad';
 }
 
 const usd = (n: number) => `$${Math.abs(n).toFixed(2)}`;
 
-export function buildLongOptionPath(p: Pick<Position, 'symbol' | 'stockPrice' | 'legs'>): LongOptionPath | null {
+export function buildLongOptionPath(p: Pick<Position, 'symbol' | 'stockPrice' | 'legs'> & Partial<Pick<Position, 'iv' | 'dte'>>): LongOptionPath | null {
   const legs = p.legs ?? [];
   if (legs.length !== 1) return null;
   const leg = legs[0];
@@ -63,7 +96,9 @@ export function buildLongOptionPath(p: Pick<Position, 'symbol' | 'stockPrice' | 
       ? `${sym} is ${beyond} your strike, so ${usd(intrinsic)} of this option's value is intrinsic.${extrinsic !== null ? ` The other ${usd(extrinsic)} is time and volatility value.` : ''} At expiration, ${sym} must be ${beyond} ${usd(breakeven)} to recover your original cost.`
       : `${sym} is ${beyond} your ${usd(breakeven)} breakeven. Held to expiration at today's price, this option would recover its cost.`;
 
-  return { symbol: sym, kind: leg.optionType, stock, strike, premium, breakeven, toStrike, toBreakeven, value: mark, intrinsic, extrinsic, hasIntrinsic, pastBreakeven, status };
+  const ivPct = p.iv != null && Number.isFinite(p.iv) && p.iv > 0 ? p.iv : null;
+  const dte = p.dte != null && Number.isFinite(p.dte) ? p.dte : null;
+  return { symbol: sym, kind: leg.optionType, stock, strike, premium, breakeven, toStrike, toBreakeven, value: mark, intrinsic, extrinsic, hasIntrinsic, pastBreakeven, status, neededMovePct: (toBreakeven / stock) * 100, probability: breakevenProbability(leg.optionType, stock, breakeven, ivPct, dte), ivPct, dte };
 }
 
 /** Chip text for a bought option's distance to its strike: plain direction, never "OTM", which reads as a protective buffer. */

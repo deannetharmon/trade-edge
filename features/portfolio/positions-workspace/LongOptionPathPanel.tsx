@@ -3,7 +3,9 @@
 // LONG-OPTION-PATH-0001 -- the price path for a bought option: stock, strike, expiration breakeven, in price order, with
 // the distance from the stock to each, what today's value is made of, and a plain-language status. Display only.
 
-import type { LongOptionPath } from './model/longOptionPath';
+import { breakevenTone, probabilityLabel, type LongOptionPath } from './model/longOptionPath';
+
+const TONE_TEXT = { ok: 'text-emerald-300', warn: 'text-amber-300', bad: 'text-red-300', info: 'text-white' } as const;
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
@@ -33,6 +35,12 @@ export function LongOptionPathPanel({ path, textFaint }: { path: LongOptionPath;
           </li>
         ))}
       </ol>
+      {path.probability != null && (
+        <p data-testid="path-chance" className={`mt-2 text-xs font-bold ${TONE_TEXT[breakevenTone(path.probability)]}`}>
+          {probabilityLabel(path.probability)} chance {symbol} finishes {kind === 'C' ? 'above' : 'below'} {usd(path.breakeven)} at expiration
+          <span className={`ml-1 font-normal ${textFaint}`}>(needs {Math.abs(path.neededMovePct).toFixed(2)}% {path.neededMovePct >= 0 ? (kind === 'C' ? 'up' : 'down') : 'cushion'} · model from {path.ivPct}% IV and {path.dte} days, not a forecast)</span>
+        </p>
+      )}
       <dl className="mt-2 grid grid-cols-2 gap-2 text-xs text-white">
         <div><dt className={`text-[10px] ${textFaint}`}>Intrinsic value (locked in)</dt><dd className="font-bold">{usd(path.intrinsic)}</dd><dd className={`text-[10px] ${textFaint}`}>Begins at the strike</dd></div>
         <div><dt className={`text-[10px] ${textFaint}`}>Extrinsic value (future possibility)</dt><dd className="font-bold">{path.extrinsic === null ? '—' : usd(path.extrinsic)}</dd><dd className={`text-[10px] ${textFaint}`}>Profit at expiration begins {kind === 'C' ? 'above' : 'below'} strike {kind === 'C' ? '+' : '−'} premium paid ({usd(path.premium)})</dd></div>

@@ -87,3 +87,45 @@ describe('breakeven chip placement', () => {
     expect(screen.getByTestId('card-breakeven')).toHaveTextContent('Breakeven $90.85');
   });
 });
+
+import { breakevenProbability, breakevenTone, probabilityLabel } from '../model/longOptionPath';
+import { buildPositionCard } from '../model/cardModel';
+
+describe('breakeven probability (Alan: lognormal, risk-neutral, 4% rate)', () => {
+  it('matches the reference values', () => {
+    expect(breakevenProbability('C', 63.42, 90.85, 35, 313)).toBeCloseTo(0.12197, 4);
+    expect(breakevenProbability('C', 63.42, 90.85, 50, 313)).toBeCloseTo(0.17523, 4);
+    expect(breakevenProbability('P', 80, 65, 40, 200)).toBeCloseTo(0.26525, 4);
+  });
+  it('is null without IV or time left, never a guess', () => {
+    expect(breakevenProbability('C', 63.42, 90.85, null, 313)).toBeNull();
+    expect(breakevenProbability('C', 63.42, 90.85, 35, 0)).toBeNull();
+    expect(breakevenProbability('C', 63.42, 90.85, 0, 313)).toBeNull();
+  });
+  it('labels and bands', () => {
+    expect(probabilityLabel(0.122)).toBe('~12%');
+    expect(probabilityLabel(0.004)).toBe('<1%');
+    expect(probabilityLabel(0.995)).toBe('>99%');
+    expect(breakevenTone(0.45)).toBe('ok');
+    expect(breakevenTone(0.2)).toBe('warn');
+    expect(breakevenTone(0.12)).toBe('bad');
+    expect(breakevenTone(null)).toBe('info');
+  });
+  it('the path carries the needed move and the probability', () => {
+    const p = buildLongOptionPath({ ...pos(63.42), iv: 35, dte: 313 } as Position)!;
+    expect(p.neededMovePct).toBeCloseTo(43.25, 2);
+    expect(p.probability).toBeCloseTo(0.12197, 4);
+  });
+});
+
+describe('card chips for a bought LEAP call', () => {
+  const leap = { ...pos(63.42), key: 'k1', dte: 313, entryDte: 313, iv: 35, strategy: 'Long Call' } as unknown as Position;
+  it('breakeven chip shows the needed move; chance chip shows the model estimate; all three share a tone', () => {
+    const chips = buildPositionCard(leap, { pctOfTarget: null }).chips;
+    const by = (id: string) => chips.find(c => c.id === id)!;
+    expect(by('moneyness').label).toBe('10.4% below strike');
+    expect(by('breakeven').label).toBe('Breakeven $90.85 · +43.25%');
+    expect(by('chance').label).toBe('~12% chance');
+    expect([by('moneyness').tone, by('breakeven').tone, by('chance').tone]).toEqual(['bad', 'bad', 'bad']);
+  });
+});
