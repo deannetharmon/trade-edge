@@ -41,6 +41,7 @@
 
 import { resolveOptionType, resolveUnderlyingSymbol } from '@/lib/optionSymbol';
 import { isWorkingOrderStatus } from '@/lib/scans/workingOrderStatus';
+import { listCommittedShortCalls, type CommittedCallsBySymbol } from '@/lib/portfolio-snapshot/committedCalls';
 
 // ── Input shapes (structural — deliberately narrow, mirrors only the raw
 //    broker fields this module reads) ────────────────────────────────────
@@ -369,6 +370,8 @@ export interface CoveredCallCapacityReport {
   bySymbol: Record<string, CoveredCallCapacity>;
   /** SELL-CC-0001 B: shares in WORKING orders to sell the stock itself, by symbol. Present only when there are some. */
   workingStockSellShares?: Record<string, number>;
+  /** CC-VISIBILITY-0001 slice 2: which short calls hold each symbol's contracts (display only; counts above stay the capacity input). */
+  committedCallsBySymbol?: CommittedCallsBySymbol;
   // TE-0007C final corrective pass: account-level diagnostics. warnings is
   // always present (possibly empty); unavailableReason is set only when
   // status === 'unavailable' and carries a message suitable for direct UI
@@ -438,5 +441,5 @@ export function buildCoveredCallCapacityReport(
   }
 
   const stockSells = normalizeWorkingStockSells(rawOrders);
-  return { status: 'ok', bySymbol, warnings: [], ...(Object.keys(stockSells).length > 0 ? { workingStockSellShares: stockSells } : {}) };
+  return { status: 'ok', bySymbol, warnings: [], committedCallsBySymbol: listCommittedShortCalls(rawPositions, rawOrders), ...(Object.keys(stockSells).length > 0 ? { workingStockSellShares: stockSells } : {}) };
 }

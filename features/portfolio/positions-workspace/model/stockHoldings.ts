@@ -9,6 +9,7 @@
 
 import type { EquityHolding } from '@/lib/portfolio-snapshot/types';
 import type { CoveredCallCapacity } from '@/lib/portfolio-snapshot/capacity';
+import type { CommittedCall } from '@/lib/portfolio-snapshot/committedCalls';
 import { computeMaxSellableShares } from '@/lib/portfolio/stockOrderSafety';
 import type { SellableSharesResult } from '@/lib/portfolio/stockOrderSafety';
 import type { CapacityViewModel, SymbolGroupViewModel } from './types';
@@ -36,6 +37,8 @@ export interface StockHoldingRow {
   pnl: number | null;
   pnlPct: number | null;
   covered: CoveredCallCell;
+  /** CC-VISIBILITY-0001 slice 2: the short calls using this holding's contracts (Long holdings with verified capacity only; else empty). */
+  committedCalls: CommittedCall[];
   quoteAsOf: string | null;
   stale: boolean;
   /** STOCKS-ORDERS-0001 -- shares free to sell right now without leaving a covered call uncovered. Never for a Short holding (there is nothing to Sell to Close). */
@@ -109,7 +112,7 @@ export function buildStockHoldingRows(groups: Array<Pick<SymbolGroupViewModel, '
         price: finite(holding.currentPrice) ? holding.currentPrice : null, value: finite(holding.marketValue) ? holding.marketValue : null,
         avgCost: costBasis != null ? holding.basis : null, costBasis, basisComplete: costBasis != null,
         pnl: costBasis != null ? pnl : null, pnlPct: costBasis != null && pnl != null ? (pnl / costBasis) * 100 : null,
-        covered: coveredCell(holding, group), quoteAsOf: holding.quoteAsOf, stale: holding.staleQuote,
+        covered: coveredCell(holding, group), committedCalls: holding.direction === 'Long' && group.capacity.status === 'ok' ? group.capacity.committedCalls ?? [] : [], quoteAsOf: holding.quoteAsOf, stale: holding.staleQuote,
         sellable: sellableShares(holding, group),
       });
     }

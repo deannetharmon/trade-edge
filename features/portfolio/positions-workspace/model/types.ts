@@ -29,6 +29,8 @@ export interface CapacityViewModel {
   basisComplete: boolean;
   blockingReason: string | null;
   unallocatedShares: number;
+  /** CC-VISIBILITY-0001 slice 2: the short calls (filled and pending) using this symbol's contracts. Display only. */
+  committedCalls?: import('@/lib/portfolio-snapshot/committedCalls').CommittedCall[];
 }
 
 export type SymbolAssetComposition = 'equity-only' | 'long-option-only' | 'short-option-only' | 'mixed-options' | 'equity-and-options' | 'ambiguous';

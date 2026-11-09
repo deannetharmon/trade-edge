@@ -111,6 +111,8 @@ import { CcStrikeGrid } from '@/features/screener/components/CcStrikeGrid';
 import type { CcGridCell } from '@/lib/scans/ccGridTypes';
 import { ccRsiChip } from '@/lib/scans/ccRsiChip';
 import { ccBriefReason } from '@/lib/scans/ccBrief';
+import type { CommittedCallsBySymbol } from '@/lib/portfolio-snapshot/committedCalls';
+import { CommittedCallsLine } from '@/features/screener/components/CommittedCallsLine';
 import { LiveRsiCallsChips, RsiCallsChips } from '@/features/screener/components/RsiCallsChips';
 import { useCcRsiCutoff, readCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
 import { useRsiGuard } from '@/features/screener/components/RsiStopDialog';
@@ -7150,6 +7152,7 @@ const strategyScores = useMemo(() => {
               </details>
               {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
               {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} initial={c.expiration ? { expiration: c.expiration, strike: c.shortStrike } : null} onAnchorChange={setPickedCcCell} />}
+              {result.strategy === 'CC' && result.ccCommitted && <CommittedCallsLine symbol={result.symbol} {...result.ccCommitted} className={`pt-1 ${th.textFaint}`} />}
               {result.ccExclusionNote && <p data-testid="cc-exclusion-note" className={`text-[10px] pt-1 ${th.textFaint}`}>{result.ccExclusionNote}</p>}
               {c.ccResearch && <p className="text-[9px] text-cyan-300 font-bold pt-1">RESEARCH — not an order, and not counted in Best Opportunities. Entry price: {researchEntryLabel(c.ccEntrySource ?? null)}.</p>}
               {c.ccLiquidityWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccLiquidityWarning}</p>}
@@ -11368,7 +11371,7 @@ export default function Home() {
   // correct way to guarantee the scan never acts on holdings data that's
   // gone stale while the modal sat open, without introducing shared-state
   // staleness tracking for a single cheap API call.
-  const loadCcCapacity = async (): Promise<{ ok: boolean; eligibleHoldings: typeof ccEligibleHoldings; bySymbol?: Record<string, CoveredCallCapacity>; reason?: string }> => {
+  const loadCcCapacity = async (): Promise<{ ok: boolean; eligibleHoldings: typeof ccEligibleHoldings; bySymbol?: Record<string, CoveredCallCapacity>; committed?: CommittedCallsBySymbol; reason?: string }> => {
     const shadowRequestId = ++ccCapacityShadowRequestRef.current;
     setCcHoldingsLoading(true);
     try {
@@ -11407,7 +11410,7 @@ export default function Home() {
       const blockedHoldings = eligibleEntries.filter(([, c]) => c.availableCoveredContracts === 0).map(([symbol]) => symbol);
       setCcEligibleHoldings(eligibleHoldings);
       setCcBlockedHoldings(blockedHoldings);
-      return { ok: true, eligibleHoldings, bySymbol: capacityReport.bySymbol };
+      return { ok: true, eligibleHoldings, bySymbol: capacityReport.bySymbol, committed: capacityReport.committedCallsBySymbol };
     } catch (e: any) {
       setCcHoldingsLoading(false);
       const reason = e?.message ?? 'Could not load covered-call capacity — holdings or working-order data unavailable.';
@@ -11450,7 +11453,7 @@ export default function Home() {
       const token = await getAccessToken();
 
       pushStatus('Loading eligible holdings...');
-      const { ok, eligibleHoldings, bySymbol: capacityBySymbolMap, reason: capacityFailReason } = await loadCcCapacity();
+      const { ok, eligibleHoldings, bySymbol: capacityBySymbolMap, committed: committedCallsMap, reason: capacityFailReason } = await loadCcCapacity();
       // CC-RESEARCH-0001: a research scan reads holdings only to learn what you already own (shares, basis); it does not
       // need coverage to work, so a failed or partial capacity read does not stop it.
       if ((!ok || !capacityBySymbolMap) && !research) {
@@ -11579,6 +11582,7 @@ export default function Home() {
             const scanned = runCcChecklist(symbol, chainData, price, metrics, ccScanRules(rules), capacity, trendResult, basisOpts, rules);
             result = {
               ...scanned,
+              ccCommitted: { sharesOwned: brokerCapacity.sharesOwned, gross: brokerCapacity.grossCoveredContracts, available: brokerCapacity.availableCoveredContracts, calls: committedCallsMap?.[symbol] ?? [] },
               ccRegrade: {
                 pool: ccPool, price,
                 metrics: { ivRank: metrics?.ivRank ?? null, earningsExpectedDate: metrics?.earningsExpectedDate ?? null, expirationIvxMap: metrics?.expirationIvxMap ?? null },

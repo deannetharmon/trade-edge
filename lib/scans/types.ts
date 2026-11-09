@@ -247,6 +247,8 @@ export interface ScreenResult {
   ccBrief?: string;
   /** CC-VISIBILITY-0001: the strike floor behind a covered-call result, so a no-result row can explain it and offer the below-basis opt-in. */
   ccFloorInfo?: { floor: number | null; price: number | null; allowBelowBasis: boolean };
+  /** CC-VISIBILITY-0001 slice 2: which short calls hold this holding's contracts (broker-verified results only; never for research). */
+  ccCommitted?: { sharesOwned: number; gross: number; available: number; calls: import('@/lib/portfolio-snapshot/committedCalls').CommittedCall[] };
   symbol: string; strategy: string; price: number | null; ivr: number | null;
   ivx?: number | null; ivx30?: number | null; ivHv30Diff?: number | null; liquidityRating?: number | null;
   qualified: boolean; bestCandidate: SpreadCandidate | null;

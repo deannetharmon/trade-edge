@@ -17,6 +17,7 @@ import { SellStockDialog, type SellStockDialogDeps } from './SellStockDialog';
 import { alignedStockColumns } from './model/stockColumnAlignment';
 import { IntentSelectControl } from './IntentSelect';
 import { CcBasisEditor } from './CcBasisEditor';
+import { CommittedCallsLine } from '@/features/screener/components/CommittedCallsLine';
 import { marketMetricsPath, parseMarketMetricsEarnings, type StockEarnings } from './model/stockEarnings';
 import { nextEarningsLine } from './model/nextEarnings';
 import type { PositionIntent } from '@/lib/portfolio-data/types';
@@ -240,6 +241,7 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
         {earnings && <li className="text-[11px]">{earnings}</li>}
       </ul>
       {row.covered.detail && <p className={`mt-1 text-[11px] ${th.textFaint}`}>{row.covered.detail}</p>}
+      {row.committedCalls.length > 0 && <CommittedCallsLine symbol={row.symbol} sharesOwned={Math.abs(row.shares)} gross={Math.floor(Math.abs(row.shares) / 100)} available={Math.max(0, Math.floor(Math.abs(row.shares) / 100) - row.committedCalls.reduce((n, c) => n + c.quantity, 0))} calls={row.committedCalls} showCount={false} className={`mt-1 ${th.textFaint}`} />}
       {priceMove != null && row.price != null && row.avgCost != null && (
         <p data-testid={`stock-price-move-${row.key}`} className={`mt-1 text-[11px] ${th.textFaint}`}>
           <span>{money(row.avgCost)}</span><span className="mx-1" aria-label="to">→</span><b className="text-white">{money(row.price)}</b>

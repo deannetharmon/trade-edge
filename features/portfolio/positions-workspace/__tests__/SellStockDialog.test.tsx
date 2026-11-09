@@ -13,7 +13,7 @@ import type { SnapshotCapacityReport } from '@/lib/portfolio-snapshot/capacity';
 const row: StockHoldingRow = {
   key: 'equity:MRVL:long', accountNumber: 'ACCT-1', symbol: 'MRVL', direction: 'Long', shares: 300, sharesNote: null,
   price: 74.5, value: 22350, avgCost: 60, costBasis: 18000, basisComplete: true, pnl: 4350, pnlPct: 24.2,
-  covered: { kind: 'available', headline: '', detail: null, tone: 'good' }, quoteAsOf: null, stale: false,
+  covered: { kind: 'available', headline: '', detail: null, tone: 'good' }, committedCalls: [], quoteAsOf: null, stale: false,
   sellable: { maxSellableShares: 200, sharesOwned: 300, sharesCommitted: 100, blockedByDataQuality: false, reason: null },
 };
 

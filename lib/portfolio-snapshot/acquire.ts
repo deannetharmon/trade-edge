@@ -27,6 +27,7 @@ import {
   type RawOrderLike,
 } from './normalizeWorkingOrders';
 import { buildDataQuality } from './dataQuality';
+import { listCommittedShortCalls } from './committedCalls';
 
 // Structural union of the raw position fields every normalizer in this module reads. A single
 // fetch's raw items array satisfies all three normalizers' narrower RawPositionLike shapes.
@@ -154,6 +155,7 @@ export async function acquirePortfolioSnapshot(token?: string): Promise<Portfoli
       coverageEvidence: {
         existingShortCallsBySymbol: shortCallResult?.bySymbol ?? {},
         workingShortCallsBySymbol: workingCallResult?.bySymbol ?? {},
+        committedCallsBySymbol: listCommittedShortCalls(rawPositions, rawOrders),
         unclassifiedSymbols: Array.from(new Set([
           ...Array.from(shortCallResult?.unclassifiedSymbols ?? []),
           ...Array.from(workingCallResult?.unclassifiedSymbols ?? []),

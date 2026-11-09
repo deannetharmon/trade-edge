@@ -30,6 +30,8 @@ export interface PortfolioSnapshot {
 export interface SnapshotCoverageEvidence {
   existingShortCallsBySymbol: Record<string, number>;
   workingShortCallsBySymbol: Record<string, number>;
+  /** CC-VISIBILITY-0001 slice 2: which short calls hold each symbol's contracts. Display only; the counts above stay the capacity input. */
+  committedCallsBySymbol?: import('./committedCalls').CommittedCallsBySymbol;
   unclassifiedSymbols: string[];
   complete: boolean;
   warnings: string[];

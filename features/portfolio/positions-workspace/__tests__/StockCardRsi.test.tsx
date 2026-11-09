@@ -67,6 +67,21 @@ describe('stock card RSI', () => {
     expect(screen.getByText('Calls: Wait')).toHaveAttribute('title', expect.stringContaining('Fri 11/6'));
   });
 
+  it('lists the short call holding a contract on the card (CC-VISIBILITY-0001)', () => {
+    rsiMap.MRVL = { rsi: 54.4, previous: 51, direction: 'up', points: realPoints };
+    const withCall = { ...capacity, allocatedContracts: 1, availableContracts: 1, committedCalls: [{ status: 'filled', quantity: 1, strike: 63, expiration: '2099-12-18', premiumPerShare: 2.01, unclassified: false }] } as unknown as CapacityViewModel;
+    const base = props(holding());
+    render(<StockHoldings {...base} groups={[{ ...base.groups[0], capacity: withCall }]} />);
+    expect(screen.getByTestId('cc-committed-MRVL')).toHaveTextContent('Short $63 call · Dec 18');
+    expect(screen.getByTestId('cc-committed-MRVL')).not.toHaveTextContent('contracts free');
+  });
+
+  it('shows no contract list when nothing is committed', () => {
+    rsiMap.MRVL = { rsi: 54.4, previous: 51, direction: 'up', points: realPoints };
+    render(<StockHoldings {...props(holding())} />);
+    expect(screen.queryByTestId('cc-committed-MRVL')).not.toBeInTheDocument();
+  });
+
   it('shows a dash while RSI cannot be computed and no chip', () => {
     rsiMap.MRVL = null;
     render(<StockHoldings {...props(holding())} />);

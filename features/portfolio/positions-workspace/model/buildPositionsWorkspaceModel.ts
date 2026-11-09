@@ -160,6 +160,7 @@ export function buildPositionsWorkspaceModel(input: PositionsWorkspaceInput): Po
         basisComplete: capacity?.costBasisComplete ?? longHolding?.basisComplete ?? false,
         blockingReason: capacityReport?.status === 'unavailable' ? capacityReport.unavailableReason ?? 'Coverage evidence unavailable' : null,
         unallocatedShares,
+        committedCalls: snapshot?.coverageEvidence.committedCallsBySymbol?.[symbol] ?? [],
       },
       needsAttention,
       assignmentNear,
