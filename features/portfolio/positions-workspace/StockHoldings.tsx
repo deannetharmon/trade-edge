@@ -219,7 +219,7 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
     <article aria-label={`${row.symbol} stock holding`} data-testid={`stock-card-${row.key}`} className={`rounded-xl border border-l-4 border-l-white/20 ${th.border} bg-white/[0.02] p-4`}>
       <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
         <div className="min-w-0">
-          <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-white">{row.symbol}<span className="rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">STOCK</span></h3>
+          <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-white">{row.symbol}<span className="rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">STOCK</span>{chart}</h3>
           <p className={`mt-0.5 text-xs ${th.textFaint}`}>{Math.abs(row.shares)} sh · {row.direction.toLowerCase()}{row.price != null ? ` · ${money(row.price)}` : ''}{row.sharesNote ? ` · ${row.sharesNote}` : ''}</p>
         </div>
         <div className="text-right">
@@ -277,7 +277,6 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
           ? <button type="button" data-testid={`sell-button-${row.key}`} onClick={() => onSell(row)} className="min-h-9 rounded-xl border border-red-500/50 px-3 text-xs text-red-300 focus:outline-none focus:ring-2 focus:ring-red-400">Sell</button>
           : <span data-testid={`sell-button-${row.key}`} className={`inline-flex min-h-9 items-center rounded-xl border border-white/10 px-3 text-xs ${th.textFaint}`} aria-disabled="true" title={row.sellable.blockedByDataQuality ? 'Share commitment could not be verified. Selling is blocked until it can be.' : `All ${row.shares} shares are committed to an open call.`}>Sell</span>)}
         {row.direction === 'Long' && canSellCovered && <Link href={`/screener?strategy=covered-call&symbol=${encodeURIComponent(row.symbol)}`} className="inline-flex min-h-9 items-center rounded-xl border border-teal-500/50 px-3 text-xs text-teal-300 focus:ring-2 focus:ring-teal-400">Sell covered call</Link>}
-        {chart}
         <button type="button" aria-expanded={detailOpen} onClick={() => setDetailOpen(open => !open)} className="ml-auto text-xs text-white/70 underline decoration-dotted underline-offset-2 hover:text-white">{detailOpen ? 'Hide detail' : 'Show detail'}</button>
         {intentControl && <span>{intentControl}</span>}
       </div>

@@ -107,4 +107,12 @@ describe('stock card RSI', () => {
     await userEvent.click(screen.getByText('Show detail'));
     await waitFor(() => expect(screen.getByText(/outside the last ~5 months/)).toBeInTheDocument());
   });
+
+  it('CARD-CHART-SLOT-0001: the chart link sits in the ticker line, next to the STOCK badge, not in the action row', () => {
+    render(<StockHoldings {...props(holding())} />);
+    const heading = screen.getByRole('heading', { name: /MRVL/ });
+    expect(heading).toHaveTextContent(/STOCK/);
+    expect(heading.textContent).toMatch(/chart/i);
+    expect(heading.parentElement!.querySelectorAll('button').length).toBeGreaterThan(0);
+  });
 });

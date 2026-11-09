@@ -155,3 +155,23 @@ describe('IV source (0001D): the contract first, the stock as fallback', () => {
     expect(p.ivSource).toBeNull();
   });
 });
+
+describe('CARD-CHART-SLOT-0001: the chart link is in the header line on every card', () => {
+  const th0 = { textFaint: '', textMuted: '', border: '' };
+  it('LEAP card: chart is in the ticker line; the strike / breakeven / chance chips are under it, not in the centre column', () => {
+    const leap = { ...pos(63.42), key: 'k1', dte: 313, entryDte: 313, iv: 35, strategy: 'Long Call' } as unknown as Position;
+    render(<PositionCards positions={[leap]} order={c => c} pctOfTarget={() => null} th={th0} emptyText="none" renderChart={() => <button type="button">chart</button>} />);
+    const heading = screen.getByRole('heading', { name: /NFLX/ });
+    expect(within(heading).getByRole('button', { name: 'chart' })).toBeInTheDocument();
+    expect(heading.className).toMatch(/flex-nowrap/);
+    const left = heading.parentElement!;
+    for (const id of ['card-moneyness', 'card-breakeven', 'card-chance']) expect(left).toContainElement(screen.getByTestId(id));
+  });
+  it('a plain option card keeps its single distance chip in the centre column, chart still in the ticker line', () => {
+    const plain = { symbol: 'SOXL', key: 'k2', stockPrice: 46.3, dte: 11, entryDte: 40, strategy: 'CSP', legs: [{ direction: 'Short', optionType: 'P', strikePrice: 90, avgOpenPrice: 3, currentPrice: 40, quantity: 1 }] } as unknown as Position;
+    render(<PositionCards positions={[plain]} order={c => c} pctOfTarget={() => null} th={th0} emptyText="none" renderChart={() => <button type="button">chart</button>} />);
+    const heading = screen.getByRole('heading', { name: /SOXL/ });
+    expect(within(heading).getByRole('button', { name: 'chart' })).toBeInTheDocument();
+    expect(heading.parentElement).not.toContainElement(screen.getByTestId('card-moneyness'));
+  });
+});
