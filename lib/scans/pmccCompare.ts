@@ -73,6 +73,16 @@ export interface CompareOption {
   oddsAbove: number | null;
   clearsMinimumCredit: boolean | null;
   scenarios: CompareScenario[] | null;
+  /** Profit/loss vs paid across a range of stock prices at the short call's expiration, for the payoff chart. Null for No call. */
+  curve: CompareCurvePoint[] | null;
+}
+
+export interface CompareCurvePoint { spot: number; noCall: number; withCall: number }
+
+export interface CompareVerdict {
+  kind: 'sell' | 'none';
+  headline: string;
+  reason: string;
 }
 
 export interface PmccCompare {
@@ -87,6 +97,7 @@ export interface PmccCompare {
   minCreditPerShare: number;
   defaultStance: CompareStance;
   options: CompareOption[];
+  verdict: CompareVerdict;
 }
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -163,22 +174,57 @@ export function buildPmccCompare(input: CompareInput): PmccCompare | null {
     });
   };
 
-  const options: CompareOption[] = [{ stance: 'none', candidate: null, collect: 0, oddsWorthless: null, oddsAbove: null, clearsMinimumCredit: null, scenarios: scenariosFor(null) }];
+  const curveFor = (c: CompareCandidate): CompareCurvePoint[] | null => {
+    if (!canPrice) return null;
+    const lo = spot * 0.9;
+    const hi = Math.max(c.strike * 1.15, spot * 1.2);
+    const n = 24;
+    return Array.from({ length: n + 1 }, (_, i) => {
+      const x = lo + ((hi - lo) * i) / n;
+      const noCall = (longAt(x) - paid) * 100 * quantity;
+      return { spot: x, noCall, withCall: noCall + (c.credit - Math.max(0, x - c.strike)) * 100 * quantity };
+    });
+  };
+
+  const options: CompareOption[] = [{ stance: 'none', candidate: null, collect: 0, oddsWorthless: null, oddsAbove: null, clearsMinimumCredit: null, scenarios: scenariosFor(null), curve: null }];
   picks.forEach((c, i) => {
     const p = Math.min(1, Math.max(0, Math.abs(c.delta)));
     options.push({
       stance: stanceFor(picks.length, i), candidate: c, collect: c.credit * 100 * quantity,
-      oddsWorthless: 1 - p, oddsAbove: p, clearsMinimumCredit: c.credit >= minCreditPerShare, scenarios: scenariosFor(c),
+      oddsWorthless: 1 - p, oddsAbove: p, clearsMinimumCredit: c.credit >= minCreditPerShare, scenarios: scenariosFor(c), curve: curveFor(c),
     });
   });
 
   const underwater = longValue < paid;
-  const wanted: CompareStance = underwater ? 'bullish' : 'neutral';
-  const defaultStance = options.find(o => o.stance === wanted)?.stance ?? options.find(o => o.stance !== 'none')?.stance ?? 'none';
+  // Never default to a call that fails the minimum credit. Among the calls that pay enough: under water -> the farthest strike
+  // (lowest delta, most upside kept); otherwise the middle one. If none pays enough, the answer is No call.
+  const paying = options.filter(o => o.candidate && o.clearsMinimumCredit);
+  const chosen = paying.length === 0 ? null : underwater ? paying[0] : paying[Math.floor((paying.length - 1) / 2)];
+  const defaultStance: CompareStance = chosen ? chosen.stance : 'none';
+  const dollars = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
+  let verdict: CompareVerdict;
+  if (!chosen || !chosen.candidate) {
+    const best = options.filter(o => o.candidate).sort((a, b) => b.candidate!.credit - a.candidate!.credit)[0];
+    verdict = {
+      kind: 'none',
+      headline: "Don't sell a call right now.",
+      reason: best?.candidate
+        ? `None of the calls pays enough. The best pays ${dollars(best.candidate.credit * 100)} per contract and your minimum is ${dollars(minCreditPerShare * 100)}.`
+        : 'No call above your LEAP strike was found in this scan.',
+    };
+  } else {
+    const c = chosen.candidate;
+    const word = quantity === 1 ? `the $${c.strike} call` : `${quantity} $${c.strike} calls`;
+    verdict = {
+      kind: 'sell',
+      headline: `Sell ${word} for ${dollars(chosen.collect)}.`,
+      reason: `You keep all gains up to $${c.strike}. It only costs you if the stock rallies past $${c.strike} within ${c.dte} days (about a ${Math.round((chosen.oddsAbove ?? 0) * 100)}% chance).`,
+    };
+  }
 
   return {
     quantity, paidTotal: paid * 100 * quantity, worthTotal: longValue * 100 * quantity, downVsPaid: (longValue - paid) * 100 * quantity,
-    underwater, ivPct: iv != null ? iv * 100 : null, shortDte, minCreditPerShare, defaultStance, options,
+    underwater, ivPct: iv != null ? iv * 100 : null, shortDte, minCreditPerShare, defaultStance, options, verdict,
   };
 }
 

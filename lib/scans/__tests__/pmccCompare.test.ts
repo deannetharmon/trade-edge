@@ -70,9 +70,11 @@ describe('buildPmccCompare: UBER fixture (one contract, under water)', () => {
 
 describe('buildPmccCompare: other cases', () => {
   it('defaults to neutral at or above cost', () => {
-    const c = buildPmccCompare({ ...uber, longValue: 24, paid: 21.3 })!;
+    const rich = uberCalls.map(x => ({ ...x, credit: x.credit * 2 }));
+    const c = buildPmccCompare({ ...uber, longValue: 24, paid: 21.3, candidates: rich })!;
     expect(c.underwater).toBe(false);
     expect(c.defaultStance).toBe('neutral');
+    expect(c.verdict.headline).toBe('Sell the $78 call for $142.');
   });
   it('one candidate: single bullish option plus No call', () => {
     const c = buildPmccCompare({ ...uber, candidates: [uberCalls[2]] })!;
@@ -82,6 +84,34 @@ describe('buildPmccCompare: other cases', () => {
     const c = buildPmccCompare({ ...uber, candidates: [{ id: 'x', strike: 60, dte: 38, delta: 0.5, credit: 5 }] })!;
     expect(c.options.map(o => o.stance)).toEqual(['none']);
     expect(c.defaultStance).toBe('none');
+  });
+  it('never defaults to a call that fails the minimum credit: No call, with a plain reason', () => {
+    const weak = [{ id: 'a', strike: 90, dte: 38, delta: 0.03, credit: 0.01 }, { id: 'b', strike: 77, dte: 38, delta: 0.2, credit: 0.11 }];
+    const c = buildPmccCompare({ ...uber, candidates: weak })!;
+    expect(c.defaultStance).toBe('none');
+    expect(c.verdict.kind).toBe('none');
+    expect(c.verdict.headline).toBe("Don't sell a call right now.");
+    expect(c.verdict.reason).toContain('None of the calls pays enough. The best pays $11 per contract');
+  });
+  it('picks the farthest paying call when under water, skipping calls that fail the minimum', () => {
+    const mixed = [{ id: 'a', strike: 90, dte: 38, delta: 0.03, credit: 0.01 }, ...uberCalls];
+    const c = buildPmccCompare({ ...uber, candidates: mixed })!;
+    expect(c.verdict.kind).toBe('sell');
+    expect(c.verdict.headline).toBe('Sell the $79 call for $58.');
+  });
+  it('verdict names the number of contracts when there is more than one', () => {
+    const c = buildPmccCompare({ ...uber, quantity: 2 })!;
+    expect(c.verdict.headline).toBe('Sell 2 $79 calls for $116.');
+  });
+  it('gives each call a payoff curve that matches the scenario math and flattens above the strike', () => {
+    const c = buildPmccCompare(uber)!;
+    const o = c.options.find(x => x.stance === 'bullish')!;
+    expect(o.curve!.length).toBeGreaterThan(10);
+    expect(c.options[0].curve).toBeNull();
+    const first = o.curve![0];
+    expect(first.withCall - first.noCall).toBeCloseTo(58, 6);
+    const last = o.curve![o.curve!.length - 1];
+    expect(last.withCall).toBeLessThan(last.noCall);
   });
   it('scales dollars by contracts', () => {
     const c = buildPmccCompare({ ...uber, quantity: 2 })!;

@@ -25,3 +25,12 @@ LEAP-vs-cost rule only; the RSI chip stays where it is).
 ## Tests
 `lib/scans/__tests__/pmccCompare.test.ts` (UBER fixture, quantity, no-candidate, IV not solvable, other cycle, uncovered strike,
 missing inputs) and `features/screener/components/__tests__/HeldCompareCard.test.tsx`.
+
+## S1b -- one verdict, details behind a toggle (Dean, 2026-11-09)
+Dean ran S1 on UBER: the scenario table was confusing (three near-identical rows, one extreme row) and the default call paid $1
+against a $12 minimum. Changes:
+- The default is never a call that fails the minimum credit. If none pays enough the verdict is "Don't sell a call right now."
+  (best credit vs minimum, per contract). Otherwise: under water -> the farthest paying strike; at or above cost -> the middle one.
+- The card leads with one verdict sentence and its reason; paid/worth, the choices, odds and the chart are behind "Show details".
+- The scenario table is replaced by a payoff chart: profit or loss vs what you paid across stock prices at expiration, no call vs the
+  selected call, with today's price and the strike marked.
