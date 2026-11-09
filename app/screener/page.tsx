@@ -7131,7 +7131,7 @@ const strategyScores = useMemo(() => {
             </div>
           )}
 
-          {!c && result.strategy === 'CC' && result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} />}
+          {!c && result.strategy === 'CC' && result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} belowBasisAllowed={result.ccFloorInfo?.allowBelowBasis === true} />}
           {!c && result.strategy === 'CC' && result.ccBlocked && <CcBlockedCalls symbol={result.symbol} {...result.ccBlocked} className={th.textFaint} />}
 
           {c && c.strategy === 'CC' && (
@@ -7156,7 +7156,7 @@ const strategyScores = useMemo(() => {
                 </div>
               </details>
               {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
-              {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} initial={c.expiration ? { expiration: c.expiration, strike: c.shortStrike } : null} onAnchorChange={setPickedCcCell} />}
+              {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} belowBasisAllowed={result.ccFloorInfo?.allowBelowBasis === true} initial={c.expiration ? { expiration: c.expiration, strike: c.shortStrike } : null} onAnchorChange={setPickedCcCell} />}
               {result.strategy === 'CC' && result.ccBlocked && <CcBlockedCalls symbol={result.symbol} {...result.ccBlocked} className={`pt-1 ${th.textFaint}`} />}
               {result.strategy === 'CC' && result.ccCommitted && <CommittedCallsLine symbol={result.symbol} {...result.ccCommitted} className={`pt-1 ${th.textFaint}`} />}
               {result.ccExclusionNote && <p data-testid="cc-exclusion-note" className={`text-[10px] pt-1 ${th.textFaint}`}>{result.ccExclusionNote}</p>}

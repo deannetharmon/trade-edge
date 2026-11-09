@@ -3,6 +3,7 @@
 // reports the trade the summary describes.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import { CcStrikeGrid } from '../CcStrikeGrid';
 import type { CcGrid, CcGridCell } from '@/lib/scans/ccGridTypes';
@@ -62,5 +63,15 @@ describe('CcStrikeGrid', () => {
     expect(screen.getByTestId('cc-grid-hidden')).toHaveTextContent('1 paying under $25');
     await userEvent.click(screen.getByRole('button', { name: 'Any' }));
     expect(screen.getByLabelText('85 call 2030-01-10')).toBeTruthy();
+  });
+  it('starts with below-basis calls shown when the trader already allowed them, and hidden otherwise', () => {
+    const g: CcGrid = { ...grid, cells: [cell(82), cell(70, { belowFloor: true })] };
+    const { unmount } = render(<CcStrikeGrid grid={g} th={th} belowBasisAllowed />);
+    expect(screen.getByLabelText('70 call 2030-01-10')).toBeInTheDocument();
+    expect((screen.getByLabelText(/Show below cost basis/) as HTMLInputElement).checked).toBe(true);
+    unmount();
+    render(<CcStrikeGrid grid={g} th={th} />);
+    expect(screen.queryByLabelText('70 call 2030-01-10')).not.toBeInTheDocument();
+    expect((screen.getByLabelText(/Show below cost basis/) as HTMLInputElement).checked).toBe(false);
   });
 });

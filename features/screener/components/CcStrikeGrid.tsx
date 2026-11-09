@@ -15,8 +15,10 @@ interface Theme { border: string; text: string; textMuted: string; textFaint: st
 
 const signed = (n: number) => `${n < 0 ? '-' : '+'}$${Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
-export function CcStrikeGrid({ grid: rawGrid, th, symbol, initial, onAnchorChange, hideGoalNote }: {
+export function CcStrikeGrid({ grid: rawGrid, th, symbol, initial, onAnchorChange, hideGoalNote, belowBasisAllowed }: {
   grid: CcGrid; th: Theme; symbol?: string;
+  /** The trader already allowed below-basis calls for this stock, so the grid starts with them shown. The switch still turns them off. */
+  belowBasisAllowed?: boolean;
   /** The card already says the call is outside the delta range, so the grid does not say it again. */
   hideGoalNote?: boolean;
   /** The trade the scan picked: the grid starts on it, so the grid and the Trade button agree from the first frame. */
@@ -29,7 +31,7 @@ export function CcStrikeGrid({ grid: rawGrid, th, symbol, initial, onAnchorChang
   useEffect(() => { try { setMinPayState(sanitizeCcMinPay(window.localStorage.getItem('te-cc-min-pay'))); } catch { /* storage unavailable: default */ } }, []);
   const filtered = useMemo(() => filterCcGrid(rawGrid, { minPay }), [rawGrid, minPay]);
   const grid = filtered.grid;
-  const [showBelowFloor, setShowBelowFloor] = useState(false);
+  const [showBelowFloor, setShowBelowFloor] = useState(belowBasisAllowed === true);
   const [allExpirations, setAllExpirations] = useState(false);
   const [selected, setSelected] = useState<{ expiration: string; strike: number } | null>(initial ?? null);
   // The frame is what the table is drawn around. Clicking a cell moves only the highlight; the frame changes when the goal or the
