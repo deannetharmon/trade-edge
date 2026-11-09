@@ -32,13 +32,15 @@ const tone = (t: Tone) => TONE_CLASS[t];
 const CAPACITY = /^Insufficient CSP capacity/i;
 
 export function CleanCspLine({
-  result, c, th, rsi14, oiBelowFloor, alloc, score, band, scoreOpen, onScore, expanded, positionNote,
+  result, c, th, rsi14, oiBelowFloor, alloc, score, band, scoreOpen, onScore, expanded, positionNote, chartLink,
 }: {
   result: ScreenResult; c: SpreadCandidate; th: CleanTheme; rsi14: number | null; oiBelowFloor: boolean;
   alloc: AllocResult | null; score: number | null; band: ScoreBand | null; scoreOpen: boolean; onScore: () => void;
   expanded: boolean;
   /** POS-NOTE-0001: the existing-position note, shown in the empty middle of the row instead of a separate banner row. */
   positionNote?: ReactNode;
+  /** The chart link, under the ticker like on every other card, so it is there before the card is expanded. */
+  chartLink?: ReactNode;
 }) {
   const price = result.price;
   const beDist = breakevenDistancePct({ price, breakeven: c.breakeven, strike: c.shortStrike, creditPerShare: c.credit / 100 });
@@ -52,6 +54,7 @@ export function CleanCspLine({
       <span className="w-16 shrink-0 text-sm font-bold">
         <span className={th.text}>{result.symbol}</span>
         {price != null && <span className={`block text-xs font-normal ${th.label}`}>${price.toFixed(2)}</span>}
+        {chartLink && <span data-testid="clean-chart-link" className="mt-0.5 block text-xs font-normal">{chartLink}</span>}
       </span>
       {score != null && band ? (
         <button type="button" data-testid="clean-score" aria-expanded={scoreOpen}

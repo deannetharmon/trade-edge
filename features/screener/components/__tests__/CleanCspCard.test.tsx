@@ -30,6 +30,14 @@ describe('CleanCspLine', () => {
     expect(screen.getByText('$9,000')).toBeInTheDocument();
     expect(screen.queryByTestId('clean-fails')).toBeNull();
   });
+  it('CARD-CHART-SLOT-0001: the chart link sits under the ticker on the collapsed row, before the card is opened', () => {
+    render(<CleanCspLine {...base} chartLink={<button type="button">chart</button>} />);
+    const box = screen.getByTestId('clean-chart-link');
+    expect(box).toHaveTextContent('chart');
+    expect(screen.getByTestId('clean-csp-line').firstElementChild!.contains(box)).toBe(true);
+    render(<CleanCspLine {...base} />);
+    expect(screen.getAllByTestId('clean-chart-link')).toHaveLength(1);
+  });
   it('POS-NOTE-0001: the open-position note sits inside the main row, once', () => {
     render(<CleanCspLine {...base} positionNote={<span data-testid="note">Open position LONG_CALL 67.5C</span>} />);
     const line = screen.getByTestId('clean-csp-line');
