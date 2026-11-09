@@ -548,6 +548,11 @@ describe('runLiveCloseOrderSafetyGate', () => {
       expect(result.issues.map(i => i.ruleId)).not.toContain('MATERIAL_PNL_DEVIATION');
       expect(result.ok).toBe(true);
     });
+    it('CLOSE-OVERRIDE-INTENT-0001: an edited GTC target passes as PROFIT_TARGET but trips the drift check as CUSTOM', () => {
+      expect(runLiveCloseOrderSafetyGate(resting('PROFIT_TARGET', 0.30, 'Limit')).ok).toBe(true);
+      const asCustom = runLiveCloseOrderSafetyGate(resting('PROFIT_TARGET', 0.30, 'Limit', 'GTC') && { ...resting('PROFIT_TARGET', 0.30, 'Limit'), pricingIntent: 'CUSTOM' as const });
+      expect(asCustom.issues.map(i => i.ruleId)).toContain('MATERIAL_PNL_DEVIATION');
+    });
     it('a stop at or below the live mid is blocked as wrong-side', () => {
       const result = runLiveCloseOrderSafetyGate(resting('STOP_LOSS', 0.60, 'Stop Limit'));
       expect(result.ok).toBe(false);

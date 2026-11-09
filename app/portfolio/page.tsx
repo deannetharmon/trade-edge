@@ -3507,7 +3507,15 @@ function BatchConfirmModal({
                 identity: i.closeIdentity,
                 requestedQuantity: i.closeIdentity.quantity,
                 closeableQuantity: i.closeIdentity.quantity,
-                pricingIntent: 'CUSTOM',
+                // CLOSE-OVERRIDE-INTENT-0001: re-check with the SAME intent the order was built with (as at submit time).
+                // Hard-coding CUSTOM treated a resting GTC profit target as a marketable close, so any typed edit tripped
+                // MATERIAL_PNL_DEVIATION and disabled Submit.
+                pricingIntent: i.closeIdentity.entryPriceEffect === 'Debit' ? 'MARKETABLE'
+                  : i.action === 'CLOSE_ROLL' ? 'ROLL'
+                  : i.action === 'CUT_LOSSES' ? 'STOP_LOSS'
+                  : i.action === 'PLACE_GTC' ? 'PROFIT_TARGET'
+                  : i.action === 'TAKE_PROFIT' ? 'MARKETABLE'
+                  : 'CUSTOM',
                 requestedClosePriceEffect: closePriceEffect,
                 closePricePointsPerUnit: parsed,
                 quote: closeQuoteForSafety(i.closeIdentity, i.closeQuote, i.quoteFetchedAt ?? null),
@@ -4277,6 +4285,7 @@ function BatchConfirmModal({
                 const verdict = verdicts[item.pos.key];
                 const isStopHigh = verdict?.verdict === 'STOP' && verdict.confidence === 'HIGH';
                 const isOverridden = overrides.has(item.pos.key);
+                const liveSafety = (activeItems.find(a => a.pos.key === item.pos.key) ?? item).safetyCheck;
                 return (
                   <div key={item.pos.key} className={`rounded-lg border transition-all ${
                     isExcluded ? 'opacity-40 border-dashed' :
@@ -4394,7 +4403,7 @@ function BatchConfirmModal({
                         mis-attributed close order visible to the operator
                         BEFORE submission, not just caught after the fact. */}
                     {!isExcluded && (
-                      <div className={`mx-4 mb-2 p-2.5 rounded-lg border ${item.safetyCheck && !item.safetyCheck.ok ? 'border-red-500/50 bg-red-500/10' : 'border-slate-500/20 bg-slate-500/5'}`}>
+                      <div className={`mx-4 mb-2 p-2.5 rounded-lg border ${liveSafety && !liveSafety.ok ? 'border-red-500/50 bg-red-500/10' : 'border-slate-500/20 bg-slate-500/5'}`}>
                         <div className="flex items-center justify-between mb-1">
                           <span className={`text-[9px] font-bold uppercase tracking-wide ${dryRun ? 'text-slate-400' : 'text-red-400'}`}>
                             {dryRun ? 'DRY RUN' : 'LIVE'} · {item.pos.symbol} {item.pos.strategy} · qty {item.pos.quantity}
@@ -4412,9 +4421,9 @@ function BatchConfirmModal({
                             : item.closeQuote?.netAsk != null && ` · Marketable buyback (ask) $${Math.abs(item.closeQuote.netAsk).toFixed(2)}/ct`}
                           {' · fees excluded from all P&L figures shown here'}
                         </p>
-                        {item.safetyCheck && item.safetyCheck.issues.length > 0 && (
+                        {liveSafety && liveSafety.issues.length > 0 && (
                           <div className="mt-1 space-y-0.5">
-                            {item.safetyCheck.issues.map((iss, idx) => (
+                            {liveSafety.issues.map((iss, idx) => (
                               <p key={idx} className={`text-[9px] font-bold ${iss.severity === 'block' ? 'text-red-400' : 'text-yellow-400'}`}>
                                 {iss.severity === 'block' ? '✕ BLOCKED' : '⚠'} [{iss.ruleId}] {iss.message}
                               </p>
