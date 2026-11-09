@@ -243,6 +243,8 @@ export interface ScreenResult {
   ccRegrade?: import('./ccView').CcRegradeInput;
   /** Calls the active delta/width view hides for this ticker (covered-call results only). */
   ccViewHidden?: number;
+  /** CC-SIMPLIFY-0001G: one-line reason a covered-call ticker did not qualify (the long text stays in failReasons). */
+  ccBrief?: string;
   symbol: string; strategy: string; price: number | null; ivr: number | null;
   ivx?: number | null; ivx30?: number | null; ivHv30Diff?: number | null; liquidityRating?: number | null;
   qualified: boolean; bestCandidate: SpreadCandidate | null;

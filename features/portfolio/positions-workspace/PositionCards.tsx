@@ -18,6 +18,7 @@ import { standaloneLongOptionLabel } from '@/lib/portfolio/positionStrategyFilte
 import { canonicalRecommendationToAction } from '@/lib/portfolio/canonicalRecommendationPresentation';
 import { CONTROL_RADIUS } from './ui/chipStyle';
 import type { ActionType, Position, PositionIntent } from '@/lib/portfolio-data/types';
+import type { ExistingIncomeOpportunity } from './model/types';
 
 const ACTION_LABELS: Partial<Record<ActionType, string>> = { TAKE_PROFIT: 'Take Profit Now', PLACE_GTC: 'Set Profit Target', CUT_LOSSES: 'Cut Losses' };
 
@@ -64,20 +65,23 @@ export interface PositionCardsProps {
   renderChart?: (position: Position) => ReactNode;
   /** POS-CARD-NOTE-0001: the same note editor the table uses, so one note shows in both views. */
   renderNote?: (position: Position) => ReactNode;
+  /** PMCC-SELL-0001: held LEAP calls get a Sell PMCC button that opens the Screener's held-LEAP short-call review (same launcher as Existing-position income). */
+  incomeOpportunities?: ExistingIncomeOpportunity[];
+  onFindPmccShortCall?: (opportunity: ExistingIncomeOpportunity) => void;
   th: { textFaint: string; textMuted: string; border: string };
   emptyText: string;
 }
 
-export function PositionCards({ positions, order, pctOfTarget, netLiquidity, getManagementActions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart, renderNote, th, emptyText }: PositionCardsProps) {
+export function PositionCards({ incomeOpportunities, onFindPmccShortCall, positions, order, pctOfTarget, netLiquidity, getManagementActions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart, renderNote, th, emptyText }: PositionCardsProps) {
   const cards = useMemo(() => order(positions.map(p => buildPositionCard(p, { pctOfTarget: pctOfTarget(p), netLiquidity }))), [positions, order, pctOfTarget, netLiquidity]);
   // STOCK-RSI-0002: daily RSI of the underlying, for held LEAP calls only (one fetch per symbol, shared with the scans).
   const [ccRsiCutoff] = useCcRsiCutoff();
   const rsiBySymbol = useHoldingRsi(positions.filter(isLeapCall).map(p => p.symbol));
   if (cards.length === 0) return <p role="status" className={`rounded-xl border ${th.border} p-6 text-center text-sm ${th.textFaint}`}>{emptyText}</p>;
-  return <div data-testid="position-cards" className="grid gap-3 lg:grid-cols-2">{cards.map(card => <CardItem key={card.key} card={card} th={th} rsi={isLeapCall(card.position) ? rsiBySymbol[card.position.symbol.trim().toUpperCase()] : undefined} cutoff={ccRsiCutoff} actions={getManagementActions?.(card.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} onIntentChange={onIntentChange} onRefresh={onRefresh} renderChart={renderChart} renderNote={renderNote} />)}</div>;
+  return <div data-testid="position-cards" className="grid gap-3 lg:grid-cols-2">{cards.map(card => <CardItem key={card.key} pmccOpportunity={isLeapCall(card.position) ? incomeOpportunities?.find(o => o.kind === 'pmcc-short-call' && o.positionKey === card.position.key && !o.pairedShort && !!o.accountNumber && !!o.exactContract) : undefined} onFindPmccShortCall={onFindPmccShortCall} card={card} th={th} rsi={isLeapCall(card.position) ? rsiBySymbol[card.position.symbol.trim().toUpperCase()] : undefined} cutoff={ccRsiCutoff} actions={getManagementActions?.(card.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} onIntentChange={onIntentChange} onRefresh={onRefresh} renderChart={renderChart} renderNote={renderNote} />)}</div>;
 }
 
-function CardItem({ rsi, cutoff, card, th, actions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart, renderNote }: { rsi?: StockRsi | null; cutoff: number; card: PositionCard; th: PositionCardsProps['th']; actions: ActionType[]; onExecute?: PositionCardsProps['onExecute']; renderStopControl?: PositionCardsProps['renderStopControl']; onAnalyze?: PositionCardsProps['onAnalyze']; onIntentChange?: PositionCardsProps['onIntentChange']; onRefresh?: () => void; renderChart?: (position: Position) => ReactNode; renderNote?: (position: Position) => ReactNode }) {
+function CardItem({ pmccOpportunity, onFindPmccShortCall, rsi, cutoff, card, th, actions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart, renderNote }: { pmccOpportunity?: ExistingIncomeOpportunity; onFindPmccShortCall?: (opportunity: ExistingIncomeOpportunity) => void; rsi?: StockRsi | null; cutoff: number; card: PositionCard; th: PositionCardsProps['th']; actions: ActionType[]; onExecute?: PositionCardsProps['onExecute']; renderStopControl?: PositionCardsProps['renderStopControl']; onAnalyze?: PositionCardsProps['onAnalyze']; onIntentChange?: PositionCardsProps['onIntentChange']; onRefresh?: () => void; renderChart?: (position: Position) => ReactNode; renderNote?: (position: Position) => ReactNode }) {
   const p = card.position;
   const [detailOpen, setDetailOpen] = useState(false);
   const horizon = standaloneLongOptionLabel(p);
@@ -134,6 +138,7 @@ function CardItem({ rsi, cutoff, card, th, actions, onExecute, renderStopControl
         })}
         {!stopNotExpected(p) && renderStopControl?.(p)}
         <SalvageEntry position={p} />
+        {pmccOpportunity && onFindPmccShortCall && <button type="button" data-testid="sell-pmcc" onClick={() => onFindPmccShortCall(pmccOpportunity)} className={`min-h-9 ${CONTROL_RADIUS} border border-teal-500/50 px-3 text-xs text-teal-300 focus:ring-2 focus:ring-teal-400`}>Sell PMCC</button>}
         <button type="button" aria-expanded={detailOpen} onClick={() => setDetailOpen(open => !open)} className="ml-auto text-xs text-white/70 underline decoration-dotted underline-offset-2 hover:text-white">{detailOpen ? 'Hide detail' : 'Show detail'}</button>
         <span><IntentSelect position={p} onIntentChange={onIntentChange} /></span>
       </div>

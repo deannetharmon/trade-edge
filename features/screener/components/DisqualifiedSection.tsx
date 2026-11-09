@@ -32,6 +32,8 @@ export interface DisqualifiedSectionProps {
   groupByExpiration?: boolean;
   /** Optional per-row action (e.g. the post-earnings re-screen button), rendered in the collapsed row. */
   renderRowAction?: (result: ScreenResult) => ReactNode;
+  /** Optional per-row info (e.g. RSI), rendered before the reason. */
+  renderRowMeta?: (result: ScreenResult) => ReactNode;
 }
 
 function essentialStructure(result: ScreenResult): string {
@@ -76,10 +78,12 @@ function DisqualifiedCard({
   result,
   th,
   renderRowAction,
+  renderRowMeta,
 }: {
   result: ScreenResult;
   th: { border: string; textFaint: string; textMuted: string };
   renderRowAction?: (result: ScreenResult) => ReactNode;
+  renderRowMeta?: (result: ScreenResult) => ReactNode;
 }) {
   const panelId = useId();
   const candidateLabel = result.bestCandidate
@@ -101,10 +105,11 @@ function DisqualifiedCard({
         <span className={`shrink-0 ${th.textFaint} w-28`}>{essentialStructure(result)}</span>
         {/* Never a bare color badge -- the reason text itself is always
             visible in the collapsed row, color is a secondary cue only. */}
-        <span className="flex-1 text-amber-400/90 truncate" title={primaryReason}>
-          {primaryReason ?? 'Did not qualify'}
+        {renderRowMeta ? <span className="shrink-0">{renderRowMeta(result)}</span> : null}
+        <span className={`flex-1 text-amber-400/90 truncate ${result.ccBrief ? 'text-xs' : ''}`} title={result.ccBrief ?? primaryReason}>
+          {result.ccBrief ?? primaryReason ?? 'Did not qualify'}
         </span>
-        {additional.length > 0 && (
+        {!result.ccBrief && additional.length > 0 && (
           <span className={`shrink-0 ${th.textFaint}`}>+{additional.length} more</span>
         )}
         {renderRowAction ? <span className="shrink-0">{renderRowAction(result)}</span> : null}
@@ -130,10 +135,10 @@ function DisqualifiedCard({
       )}
       {expanded && (
         <div id={panelId} className={`px-3 pb-3 space-y-1 border-t ${th.border} pt-2`}>
-          {result.failReasons.map((reason, i) => (
+          {(result.ccBrief ? [result.ccBrief] : result.failReasons).map((reason, i) => (
             <p key={i} className="text-[9px] text-amber-400/90">✕ {reason}</p>
           ))}
-          {failedChecks.map(([name, check]) => (
+          {failedChecks.filter(([, check]) => !result.failReasons.includes(check.reason)).map(([name, check]) => (
             <p key={name} className={`text-[9px] ${th.textFaint}`}>
               <span className="uppercase tracking-wide">{name}</span>: {check.value} — {check.reason}
             </p>
@@ -153,6 +158,7 @@ export function DisqualifiedSection({
   textMutedClassName = 'text-slate-300',
   groupByExpiration = false,
   renderRowAction,
+  renderRowMeta,
 }: DisqualifiedSectionProps) {
   const th = { border: borderClassName, textFaint: textFaintClassName, textMuted: textMutedClassName };
   const panelId = useId();
@@ -208,7 +214,7 @@ export function DisqualifiedSection({
             <ExpirationDisclosure key={expiration} expiration={expiration}
               dte={group[0]?.bestCandidate?.dte ?? null} candidateCount={group.length}
               kind="disqualified" defaultOpen={false} borderClassName={th.border}>
-              {group.map(r => <DisqualifiedCard key={r.candidateId ?? `${r.symbol}-${r.strategy}`} result={r} th={th} renderRowAction={renderRowAction} />)}
+              {group.map(r => <DisqualifiedCard renderRowMeta={renderRowMeta} key={r.candidateId ?? `${r.symbol}-${r.strategy}`} result={r} th={th} renderRowAction={renderRowAction} />)}
             </ExpirationDisclosure>
           )) : results.map(r => (
             // CSP-WORKFLOW-0001 — candidateId (present for CSP results)
@@ -216,7 +222,7 @@ export function DisqualifiedSection({
             // symbol; other strategies fall back to symbol+strategy exactly
             // as before, since they still produce at most one disqualified
             // ScreenResult per symbol. Closes IMPORTANT-04.
-            <DisqualifiedCard key={r.candidateId ?? `${r.symbol}-${r.strategy}`} result={r} th={th} renderRowAction={renderRowAction} />
+            <DisqualifiedCard renderRowMeta={renderRowMeta} key={r.candidateId ?? `${r.symbol}-${r.strategy}`} result={r} th={th} renderRowAction={renderRowAction} />
           ))}
         </div>
       )}

@@ -108,6 +108,8 @@ import { resolveResearchEntry, buildResearchCapacity, researchEntryLabel } from 
 import { CcStrikeGrid } from '@/features/screener/components/CcStrikeGrid';
 import type { CcGridCell } from '@/lib/scans/ccGridTypes';
 import { ccRsiChip } from '@/lib/scans/ccRsiChip';
+import { ccBriefReason } from '@/lib/scans/ccBrief';
+import { LiveRsiCallsChips, RsiCallsChips } from '@/features/screener/components/RsiCallsChips';
 import { useCcRsiCutoff, readCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
 import { ccRankValue } from '@/lib/scans/ccRank';
 import { CcRsiCutoffControl } from '@/features/screener/components/CcRsiCutoffControl';
@@ -1645,6 +1647,11 @@ function runCcChecklist(
   return {
     symbol, strategy: 'CC', price, ivr: ivrValue,
     ivx: ivxValue, ivx30: null, ivHv30Diff: null, liquidityRating: null,
+    ccBrief: bestCandidate || earningsCheck.reason.includes('no eligible expiration') ? undefined : ccBriefReason({
+      capacityBlocked: capacityCheck.status === 'fail', oversubscribed: capacity.oversubscribed === true, floorMissing: ccFloor.floor === null,
+      deltaMin: ccRules.DELTA_MIN, deltaMax: ccRules.DELTA_MAX,
+      nearest: nearestCandidate ? { strike: nearestCandidate.shortStrike, delta: nearestCandidate.shortDelta } : null, floor: ccFloor.floor, price,
+    }),
     ccGrid: capacityCheck.status !== 'fail' ? buildCcGrid(chainData, { rules: gridRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }) : undefined,
     ccExclusionNote: bestCandidate && capacityCheck.status !== 'fail'
       ? formatCcHiddenNote(diagnoseCcExclusions(chainData, { rules: gridRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }), gridRules)
@@ -1679,6 +1686,7 @@ function regradeCcResult(r: ScreenResult, view: CcView): ScreenResult {
     bestCandidate: next.bestCandidate,
     qualified: next.qualified,
     failReasons: next.failReasons,
+    ccBrief: next.ccBrief,
     checks: next.checks,
     ivx: next.ivx,
     ccExclusionNote: null, // the "N hidden by result filters" banner replaces the scan-time "left out" line
@@ -6016,6 +6024,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
         <span className="text-lg font-bold">{result.symbol}</span><span className={th.textMuted}>{money(result.price)}</span>
         <ScreenerChartLink symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart} sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
         <span className="rounded border border-cyan-500 px-2 py-0.5 text-[9px] font-bold text-cyan-300">{heldLong ? 'HELD LEAP · SHORT-CALL CANDIDATE' : 'PMCC'}</span>
+        <LiveRsiCallsChips symbol={result.symbol} />
         {heldLong && pair && heldLeapOtmTag(pair.longLeg.strike, result.price, pair.longLeg.delta) && (
           <span className="rounded border border-amber-700 px-2 py-0.5 text-[9px] font-bold text-amber-300" data-testid="held-otm-leap-tag">{heldLeapOtmTag(pair.longLeg.strike, result.price, pair.longLeg.delta)}</span>
         )}
@@ -13470,6 +13479,7 @@ export default function Home() {
                       textFaintClassName={th.textFaint}
                       textMutedClassName={th.textMuted}
                       renderRowAction={r => renderCcEarningsRescreen(r, th)}
+                      renderRowMeta={r => r.strategy === 'CC' ? <RsiCallsChips symbol={r.symbol} rsi={trendRsiForDisplay(r.trendResult?.metrics)} price={r.price} costBasis={r.ccRegrade?.capacity.costBasis ?? null} /> : null}
                     />
                   )}
                   {activeSession && (activeSession.requestedStrategy === 'csp' || activeSession.mode === 'filter') ? (
@@ -13756,6 +13766,7 @@ export default function Home() {
                     textFaintClassName={th.textFaint}
                     textMutedClassName={th.textMuted}
                     renderRowAction={r => renderCcEarningsRescreen(r, th)}
+                      renderRowMeta={r => r.strategy === 'CC' ? <RsiCallsChips symbol={r.symbol} rsi={trendRsiForDisplay(r.trendResult?.metrics)} price={r.price} costBasis={r.ccRegrade?.capacity.costBasis ?? null} /> : null}
                   />
                   {activeSession && activeSession.mode === 'rank' && (
                     <SymbolOutcomesDisclosure

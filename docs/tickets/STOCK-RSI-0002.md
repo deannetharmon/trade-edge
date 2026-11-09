@@ -9,3 +9,9 @@ Dean: show RSI on LEAPs too; above the covered-call cutoff means the underlying 
 - At LEAP open uses the broker's leg open date. It never estimates: outside the loaded window it shows a dash and a note.
 - LEAP puts, short and multi-leg positions are unchanged.
 - Files: `LeapRsi.tsx` (new), `PositionCards.tsx`, `__tests__/LeapRsi.test.tsx`.
+
+## Sell PMCC button (PMCC-SELL-0001)
+
+A held LEAP call with no short call open and an exact contract gets a **Sell PMCC** button on its card, beside Salvage. It uses the
+same launcher as Existing-position income (`onFindPmccShortCall`), which opens the Screener's held-LEAP short-call review. No button
+when a short call is already open, the contract is unknown, or the card is not a LEAP call.

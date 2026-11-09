@@ -61,3 +61,35 @@ describe('LEAP RSI', () => {
     expect(screen.getByText(/opened before the last ~5 months/)).toBeInTheDocument();
   });
 });
+
+import { PositionCards } from '../PositionCards';
+import { vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
+
+vi.mock('@/components/portfolio-data/useHoldingRsi', () => ({ useHoldingRsi: () => ({ UBER: rsi }) }));
+
+describe('Sell PMCC on a LEAP card', () => {
+  const th = { textFaint: '', textMuted: '', border: '' };
+  const opp = (over: Record<string, unknown> = {}) => ({ id: 'o1', kind: 'pmcc-short-call', status: 'review-income-call', symbol: 'UBER', positionKey: 'k1', accountNumber: 'A1', exactContract: 'UBER  270917C00067500', ...over });
+  const renderCards = (positions: Position[], opportunities: unknown[], onFind = vi.fn()) => {
+    render(<PositionCards positions={positions} order={c => c} pctOfTarget={() => null} incomeOpportunities={opportunities as never} onFindPmccShortCall={onFind} th={th} emptyText="none" />);
+    return onFind;
+  };
+  it('shows the button on a LEAP with no short call and launches the held-LEAP review', async () => {
+    const onFind = renderCards([pos()], [opp()]);
+    await userEvent.click(screen.getByTestId('sell-pmcc'));
+    expect(onFind).toHaveBeenCalledWith(expect.objectContaining({ id: 'o1' }));
+  });
+  it('no button when a short call is already open, there is no exact contract, or it is not a LEAP', () => {
+    renderCards([pos()], [opp({ pairedShort: { positionKey: 's1' } })]);
+    expect(screen.queryByTestId('sell-pmcc')).not.toBeInTheDocument();
+  });
+  it('no button without an exact contract', () => {
+    renderCards([pos()], [opp({ exactContract: null })]);
+    expect(screen.queryByTestId('sell-pmcc')).not.toBeInTheDocument();
+  });
+  it('no button on a non-LEAP card', () => {
+    renderCards([pos({ dte: 20, entryDte: 20 })], [opp()]);
+    expect(screen.queryByTestId('sell-pmcc')).not.toBeInTheDocument();
+  });
+});

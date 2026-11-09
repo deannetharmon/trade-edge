@@ -37,3 +37,15 @@ Dean could not trust a result with "N calls outside this delta and width view" a
 orderable. Calls below the cost-basis floor and calls with no real market are not listed (never candidates under any
 view); the note says so. Pure selector `listCcViewHidden` in `lib/scans/ccView.ts` uses the same `ccLegRejection` as the
 grader, so the list length equals the banner count (tested).
+
+## Phase 2f -- one-line reasons and RSI on every result (0001G)
+
+Dean: the "no qualifying call" text was tiny and wordy, and RSI never showed on tickers with no call.
+
+- A covered-call ticker with no call in the delta range shows one line: `No call in Δ0.20–0.35 · nearest Δ0.17 at $29 · floor $55`
+  (floor only when the stock is under it). Other plain reasons: `Shares already covered`, `Short calls already cover your shares`,
+  `Cost basis unknown`. Pure `ccBriefReason` in `lib/scans/ccBrief.ts`, stored as `ScreenResult.ccBrief`; the long diagnostic
+  stays in `failReasons`. The earnings advisory keeps its own sentence (it carries the report date).
+- The row text is 12px, not 10px. Expanded, it repeats nothing: the brief once, and only checks that say something new.
+- The disqualified row and the PMCC card header now show `RSI n` and `Calls: Ready/Wait` (same chip and saved cutoff as the stock
+  and LEAP cards). RSI unknown shows a dash. `features/screener/components/RsiCallsChips.tsx`.
