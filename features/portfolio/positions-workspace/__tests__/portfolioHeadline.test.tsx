@@ -28,7 +28,7 @@ describe('buildPortfolioHeadline (golden: Dean 2026-11-02)', () => {
     expect(h.portfolioValue).toBe(35871.71);
     expect(h.cashToDeploy).toBe(2734.11);
     expect(h.deployed).toBe(48268);
-    expect(h.bridge).toEqual({ funded: 51002.11, portfolioValue: 35871.71, gap: 15130.4, openPnl: -13384, other: 1746.4 });
+    expect(h.bridge).toEqual({ funded: 51002.11, portfolioValue: 35871.71, gap: 15130.4, openPnl: -13384, other: 1746.4, reconciles: false }); // RECON-0001: a 3.4% remainder is not fees and rounding
     // Nothing is rounded away: open P&L plus the remainder equals the gap exactly.
     expect(h.bridge!.openPnl * -1 + h.bridge!.other).toBeCloseTo(h.bridge!.gap, 2);
   });

@@ -103,7 +103,7 @@ function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
       {bridge && (
         <p className="mt-2 rounded-md border border-dashed border-teal-400/50 px-3 py-2 text-[12px] text-white/80" data-testid="headline-bridge">
           How it adds up: Deployed {money(headline.deployed as number)} + Cash to deploy {headline.cashToDeploy != null && headline.cashToDeploy < 0 ? '-' : ''}{money(headline.cashToDeploy as number)} = <b>{money(bridge.funded)} funded</b>.
-          {' '}Portfolio Value {money(bridge.portfolioValue)} is {money(bridge.gap)} {bridge.gap >= 0 ? 'below' : 'above'} that: open P&amp;L {signedMoney(bridge.openPnl)}{bridge.other === 0 ? '' : <>, other (fees, rounding) {signedMoney(-bridge.other)}</>}.
+          {' '}Portfolio Value {money(bridge.portfolioValue)} is {money(bridge.gap)} {bridge.gap >= 0 ? 'below' : 'above'} that: open P&amp;L {signedMoney(bridge.openPnl)}{bridge.other === 0 ? '' : bridge.reconciles ? <>, other (fees, rounding) {signedMoney(-bridge.other)}</> : <>. <span className="text-amber-300" data-testid="bridge-mismatch">Doesn&apos;t reconcile by {money(Math.abs(bridge.other))}.</span></>}{bridge.other === 0 || bridge.reconciles ? '.' : ''}
         </p>
       )}
     </section>

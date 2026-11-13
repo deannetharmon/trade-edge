@@ -224,3 +224,67 @@ describe('CONCENTRATION-TIERS-0001', () => {
     expect(s.leveragedCluster).toBeNull();
   });
 });
+
+// RECON-0001: the Portfolio page's "How it adds up" line did not reconcile. A single short call is labelled 'CALL' (not 'CC'), so its
+// capital fell through to max risk (strike x 100 less credit) and counted the covering shares a second time. Figures below are the
+// 2026-11-12 close of the real account.
+describe('RECON-0001 covered call is not counted twice', () => {
+  const shortCall = (symbol: string, over: Partial<Position> = {}) => pos({
+    symbol, key: `${symbol}-CC`, strategy: 'CALL', entryPriceEffect: 'Credit', entryCredit: 155, pnl: -82, maxRisk: 6045, dte: 14,
+    legs: [leg({ optionType: 'C', direction: 'Short', strikePrice: 62, quantity: 1, avgOpenPrice: 1.55, currentPrice: 2.37, closePrice: 2.2 })], ...over,
+  });
+  const csp4 = [
+    csp('SOXL', { maxRisk: 8700, entryCredit: 300, pnl: -1000 }), csp('GGLL', { maxRisk: 7100, entryCredit: 400, pnl: -700 }),
+    csp('NVDL', { maxRisk: 2472, entryCredit: 328, pnl: -1000 }), csp('MULL', { maxRisk: 1900, entryCredit: 200, pnl: -967 }),
+  ]; // capital 20,172, credit 1,228, pnl -3,667
+  const longPut = pos({
+    symbol: 'MRNA', key: 'MRNA', strategy: 'PUT', entryPriceEffect: 'Debit', entryCredit: 2574, pnl: -2557, maxRisk: 2574, dte: 7,
+    legs: [leg({ optionType: 'P', direction: 'Long', strikePrice: 140, avgOpenPrice: 25.74, currentPrice: 0.17, closePrice: 0.05 })],
+  });
+  const leaps = [leap('UBER', { entryCredit: 2130, maxRisk: 2130, pnl: -990 }), leap('NFLX', { entryCredit: 2085, maxRisk: 2085, pnl: -1340 })];
+  const stocks = [
+    equity({ symbol: 'TQQQ', quantity: 200, basis: 78.75, unrealizedPnl: -3759 }),
+    equity({ symbol: 'METU', quantity: 100, basis: 28.5, unrealizedPnl: -619.5 }),
+    equity({ symbol: 'SNDK', quantity: 2, basis: 1591.98, unrealizedPnl: -1326.46 }),
+  ]; // cost 21,783.96
+  const book = (extra: Partial<Parameters<typeof buildPortfolioSummary>[0]> = {}) => buildPortfolioSummary({
+    rows: [...csp4, shortCall('TQQQ'), ...leaps, longPut].map(p => row(p)), equities: stocks, pendingOrders: [],
+    cashBalance: 22497, netLiquidity: 35341, nowMs: NOW, ...extra,
+  });
+
+  it('F1: the real book reconciles; the remainder is rounding, not $6,205', () => {
+    const s = book();
+    expect(s.cashToDeploy).toMatchObject({ value: 1097, excluded: 0 });
+    expect(s.headline.deployed).toBeCloseTo(48589.96, 2);
+    expect(s.headline.bridge!.funded).toBeCloseTo(49686.96, 2);
+    expect(Math.abs(s.headline.bridge!.other)).toBeLessThan(25);
+    expect(s.headline.bridge!.reconciles).toBe(true);
+  });
+
+  it('F2: the covering call adds its premium kept (negative), never strike x 100 less credit', () => {
+    const cc = book().groups.find(g => g.key === 'SHORT_CALLS')!;
+    expect(cc.capital.value).toBe(-155);
+  });
+
+  it('F3: a remainder too large to be fees fails closed instead of being called fees', () => {
+    const s = book({ netLiquidity: 35341 - 6205 });
+    expect(s.headline.bridge!.reconciles).toBe(false);
+  });
+
+  it('F5: concentration is measured on corrected capital', () => {
+    const s = book();
+    expect(s.largest).toMatchObject({ symbol: 'TQQQ', sharePct: 32 });
+  });
+
+  it('F6: a short call with no covering shares is still naked: full max risk, and excluded from cash-securable', () => {
+    const s = buildPortfolioSummary({ rows: [row(shortCall('ZZZ'))], equities: [], pendingOrders: [], cashBalance: 10000, nowMs: NOW });
+    expect(s.groups.find(g => g.key === 'SHORT_CALLS')!.capital.value).toBe(6045);
+    expect(s.cashToDeploy.excluded).toBe(1);
+  });
+
+  it('shares cover a call once: 100 shares, two calls, only the first is covered', () => {
+    const a = shortCall('TQQQ', { key: 'A' }), b = shortCall('TQQQ', { key: 'B' });
+    const s = buildPortfolioSummary({ rows: [row(a), row(b)], equities: [equity({ symbol: 'TQQQ', quantity: 100, basis: 60 })], pendingOrders: [], cashBalance: 10000, nowMs: NOW });
+    expect(s.groups.find(g => g.key === 'SHORT_CALLS')!.capital.value).toBe(-155 + 6045);
+  });
+});

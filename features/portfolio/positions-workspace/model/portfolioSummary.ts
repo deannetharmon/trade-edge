@@ -26,6 +26,9 @@ export const EXPOSURE_AMBER_PCT = 15;
 export type ExposureTier = 'normal' | 'amber' | 'red';
 export const exposureTier = (sharePct: number, redPct: number = DEFAULT_EXPOSURE_LIMIT_PCT): ExposureTier =>
   sharePct >= redPct ? 'red' : sharePct >= Math.min(EXPOSURE_AMBER_PCT, redPct) ? 'amber' : 'normal';
+/** RECON-0001: what the unexplained remainder may be before the page stops calling it fees and rounding. */
+export const BRIDGE_TOLERANCE_USD = 25;
+export const BRIDGE_TOLERANCE_PCT = 0.01;
 const WEEK_DAYS = 7;
 const DAY_MS = 86400 * 1000;
 
@@ -145,6 +148,8 @@ export interface HeadlineBridge {
   openPnl: number;
   /** gap + openPnl: what is left once open P&L is counted (fees, rounding, money moved). Premium kept on open shorts no longer lands here: Cash to deploy holds full collateral (CASH-FREE-0001). */
   other: number;
+  /** RECON-0001: false when `other` is too large to be fees and rounding; the page then says it does not reconcile. */
+  reconciles: boolean;
 }
 
 export interface PortfolioHeadline {
@@ -192,6 +197,8 @@ interface Member {
   week: number | null;
   weekSince: string | null;
   attention: boolean;
+  /** RECON-0001: a short call whose shares are held in Equity. Its shares are already counted there; it only nets its premium. */
+  covered: boolean;
 }
 
 export interface PortfolioSummaryInput {
@@ -231,7 +238,8 @@ export function buildPortfolioHeadline(args: {
     const funded = round2(deployed + cash);
     const gap = round2(funded - portfolioValue);
     const openPnl = args.totalPnl.value as number;
-    bridge = { funded, portfolioValue, gap, openPnl, other: round2(gap + openPnl) };
+    const other = round2(gap + openPnl);
+    bridge = { funded, portfolioValue, gap, openPnl, other, reconciles: Math.abs(other) <= Math.max(BRIDGE_TOLERANCE_USD, BRIDGE_TOLERANCE_PCT * funded) };
   }
   return {
     portfolioValue, cashToDeploy: cash, usingMargin: args.cashToDeploy.usingMargin, deployed, deployedPartial,
@@ -239,7 +247,7 @@ export function buildPortfolioHeadline(args: {
   };
 }
 
-function optionMember(position: Position, attention: boolean, nowMs: number): Member {
+function optionMember(position: Position, attention: boolean, nowMs: number, covered: boolean): Member {
   const capital = buildCapitalViewModel(position);
   const week = positionWeekChange(position, nowMs);
   const day = positionDayChangeDetail(position, nowMs);
@@ -254,13 +262,17 @@ function optionMember(position: Position, attention: boolean, nowMs: number): Me
     pnl: position.pnl != null && Number.isFinite(position.pnl) ? position.pnl : null,
     basisAmount,
     // CC capital is shares, not dollars (`suffix`); it is collateral already counted as equity cost.
-    capital: capital.suffix ? null : capital.value,
+    // RECON-0001: the app labels a single short call 'CALL', so the 'CC' branch above never fires for it and it fell through to
+    // max risk (strike x 100 less credit), counting the covering shares a second time. A covered call carries only its premium kept
+    // (negative capital), the same way a put is held net of premium.
+    capital: covered ? (basisAmount != null ? -basisAmount : null) : capital.suffix ? null : capital.value,
     theta: position.theta != null ? toWholePositionThetaDollars(position.theta) : null,
     day: day.value,
     dayReason: day.reason,
     week: week.value,
     weekSince: week.since,
     attention,
+    covered,
   };
 }
 
@@ -269,7 +281,7 @@ function equityMember(holding: EquityHolding): Member {
   return {
     key: `EQUITY:${holding.symbol}`, kind: 'equity', strategy: 'EQUITY', dte: null,
     group: 'EQUITY', symbol: holding.symbol, pnl: holding.unrealizedPnl, basisAmount: cost, capital: cost,
-    theta: null, day: null, dayReason: EQUITY_DAY_UNAVAILABLE_REASON, week: null, weekSince: null, attention: false,
+    theta: null, day: null, dayReason: EQUITY_DAY_UNAVAILABLE_REASON, week: null, weekSince: null, attention: false, covered: false,
   };
 }
 
@@ -308,9 +320,34 @@ export function openingOrderCash(order: PendingOrder): number | null {
   return null;
 }
 
+/**
+ * RECON-0001: shares held per underlying, handed out to short calls one at a time so shares cover each call only once.
+ * Returns the keys of the short calls that are fully covered by held shares.
+ */
+function coveredCallKeys(rows: PortfolioSummaryInput['rows'], equities: PortfolioSummaryInput['equities']): Set<string> {
+  const sharesLeft = new Map<string, number>();
+  for (const h of equities) {
+    if (h.direction === 'Short') continue;
+    sharesLeft.set(h.symbol, (sharesLeft.get(h.symbol) ?? 0) + Math.abs(h.quantity));
+  }
+  const covered = new Set<string>();
+  for (const { position } of rows) {
+    if (summaryGroupForPosition(position) !== 'SHORT_CALLS') continue;
+    const contracts = splitOptionLegs(position.legs).shortCalls.reduce((n, l) => n + Math.abs(l.quantity), 0);
+    const need = contracts * 100;
+    const have = sharesLeft.get(position.symbol) ?? 0;
+    if (need > 0 && have >= need) {
+      covered.add(position.key);
+      sharesLeft.set(position.symbol, have - need);
+    }
+  }
+  return covered;
+}
+
 function buildMembers(input: Pick<PortfolioSummaryInput, 'rows' | 'equities' | 'nowMs'>): Member[] {
+  const covered = coveredCallKeys(input.rows, input.equities);
   return [
-    ...input.rows.map(r => optionMember(r.position, r.needsAttention, input.nowMs)),
+    ...input.rows.map(r => optionMember(r.position, r.needsAttention, input.nowMs, covered.has(r.position.key))),
     ...input.equities.map(equityMember),
   ];
 }
@@ -355,7 +392,7 @@ export function buildPortfolioSummary(input: PortfolioSummaryInput): PortfolioSu
         if (m.basisAmount == null) premiumUnverified += 1;
       }
     }
-    if (m.group === 'SHORT_CALLS' && m.capital != null) excluded += 1; // naked short calls: not cash-securable
+    if (m.group === 'SHORT_CALLS' && m.capital != null && !m.covered) excluded += 1; // naked short calls: not cash-securable
   }
   for (const order of input.pendingOrders) {
     const cash = openingOrderCash(order);
