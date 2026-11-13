@@ -90,7 +90,7 @@ function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
             {headline.deployedPartial && <span className="text-[11px] font-normal text-white/50"> partial</span>}
           </span>
           <span className="mt-1 block text-[11px] text-white/50">
-            {fundedPct != null && bridge ? `${fundedPct}% of ${money(bridge.funded)} funded · ` : ''}at cost, puts net of premium kept
+            {fundedPct != null && bridge ? `${fundedPct}% of ${money(bridge.funded)} (cash + cost basis) · ` : ''}at cost, puts net of premium kept
           </span>
           {headline.reserve && (
             <span className={`mt-2 block border-t border-white/10 pt-2 text-[11px] ${reserveTone(headline.reserve.tone)}`} data-testid="headline-reserve"
@@ -108,7 +108,7 @@ function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
       </div>
       {bridge && (
         <p className="mt-2 rounded-md border border-dashed border-teal-400/50 px-3 py-2 text-[12px] text-white/80" data-testid="headline-bridge">
-          How it adds up: Deployed {money(headline.deployed as number)} + Cash to deploy {headline.cashToDeploy != null && headline.cashToDeploy < 0 ? '-' : ''}{money(headline.cashToDeploy as number)} = <b>{money(bridge.funded)} funded</b>.
+          How it adds up: Deployed {money(headline.deployed as number)} + Cash to deploy {headline.cashToDeploy != null && headline.cashToDeploy < 0 ? '-' : ''}{money(headline.cashToDeploy as number)} = <b>{money(bridge.funded)} funded</b> (cash plus what open positions cost; not your deposits).
           {' '}Portfolio Value {money(bridge.portfolioValue)} is {money(bridge.gap)} {bridge.gap >= 0 ? 'below' : 'above'} that: open P&amp;L {signedMoney(bridge.openPnl)}{bridge.other === 0 ? '' : bridge.reconciles ? <>, other (fees, rounding) {signedMoney(-bridge.other)}</> : <>. <span className="text-amber-300" data-testid="bridge-mismatch">Doesn&apos;t reconcile by {money(Math.abs(bridge.other))}.</span></>}{bridge.other === 0 || bridge.reconciles ? '.' : ''}
         </p>
       )}

@@ -1065,6 +1065,7 @@ export default function PerformancePage() {
             onOpenTicker={symbol => { try { localStorage.setItem('hunter-tl-f-symbol', symbol); } catch {} window.location.href = '/trade-log'; }}
             positionSize={coachingInput.habits.positionSize}
             onMarkDeliberate={markDeliberate}
+            goal={balanceHistory ? { history: balanceHistory, today, liveNetLiq } : undefined}
           />
         )}
 

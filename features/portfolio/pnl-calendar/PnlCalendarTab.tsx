@@ -13,32 +13,25 @@ import { loadClosedTrades, type LoadedClosedTrades } from '../positions-workspac
 import { todayNewYork } from '@/lib/portfolio-data/balancePerformance';
 import type { EquityRealizedLot } from '@/lib/tradeLog/equityRealized';
 import {
-  buildMonthCalendar, buildMonthlyGoal, buildPace, formatCellMoney, formatSignedMoney, formatSignedPct, monthBaseline, monthOf, shiftMonth,
+  buildMonthCalendar, buildMonthlyGoal, buildPace, formatCellMoney, formatSignedMoney, formatSignedPct, monthOf, resolveMonthBaseline, shiftMonth,
 } from '@/lib/pnlCalendar/buildPnlCalendar';
+import { DEFAULT_GOAL_TARGET_PCT, GOAL_TARGET_MAX_PCT, GOAL_TARGET_MIN_PCT, parseGoalTargetPct, readGoalTargetPct, writeGoalTargetPct } from '@/lib/pnlCalendar/goalSetting';
 
-const TARGET_KEY = 'tradeedge-pnl-calendar-target-pct';
-const DEFAULT_TARGET_PCT = 5;
 const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 
 const tone = (n: number | null) => (n == null ? 'text-white/40' : n >= 0 ? 'text-emerald-400' : 'text-red-400');
 const NO_LOTS: EquityRealizedLot[] = [];
 
-function readTarget(): number {
-  try {
-    const v = Number(localStorage.getItem(TARGET_KEY));
-    return Number.isFinite(v) && v > 0 && v <= 50 ? v : DEFAULT_TARGET_PCT;
-  } catch { return DEFAULT_TARGET_PCT; }
-}
-
-export default function PnlCalendarTab() {
+/** liveNetLiq: today's account value, used to size the goal when no month-start balance is stored (GOAL-0001). */
+export default function PnlCalendarTab({ liveNetLiq = null }: { liveNetLiq?: number | null }) {
   const today = todayNewYork(Date.now());
   const [loaded, setLoaded] = useState<LoadedClosedTrades | null>(null);
   const [history, setHistory] = useState<{ date: string; netLiquidatingValue: number }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [month, setMonth] = useState(monthOf(today));
-  const [targetPct, setTargetPct] = useState(DEFAULT_TARGET_PCT);
+  const [targetPct, setTargetPct] = useState(DEFAULT_GOAL_TARGET_PCT);
 
-  useEffect(() => { setTargetPct(readTarget()); }, []);
+  useEffect(() => { setTargetPct(readGoalTargetPct()); }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,9 +54,10 @@ export default function PnlCalendarTab() {
   const trades = loaded?.trades ?? [];
   const equityLots = loaded?.equityLots ?? NO_LOTS;
   const calendar = useMemo(() => buildMonthCalendar(trades, month, equityLots), [trades, month, equityLots]);
-  const baseline = useMemo(() => monthBaseline(history, month), [history, month]);
+  const resolved = useMemo(() => resolveMonthBaseline(history, month, today, liveNetLiq), [history, month, today, liveNetLiq]);
+  const baseline = resolved.value;
   const goal = useMemo(() => buildMonthlyGoal({ realized: calendar.total, baseline, targetPct, month, today }), [calendar.total, baseline, targetPct, month, today]);
-  const pace = useMemo(() => buildPace(trades, today, monthBaseline(history, monthOf(today)), equityLots), [trades, history, today, equityLots]);
+  const pace = useMemo(() => buildPace(trades, today, resolveMonthBaseline(history, monthOf(today), today, liveNetLiq).value, equityLots), [trades, history, today, equityLots, liveNetLiq]);
 
   const earliest = loaded ? monthOf(loaded.windowFrom) : month;
   const partialStart = loaded != null && month === earliest && loaded.windowFrom.slice(8, 10) !== '01';
@@ -73,10 +67,9 @@ export default function PnlCalendarTab() {
   const barPct = goal.progressPct == null ? 0 : Math.max(0, Math.min(100, goal.progressPct));
 
   const changeTarget = (raw: string) => {
-    const v = Number(raw);
-    if (!Number.isFinite(v) || v <= 0 || v > 50) return;
-    setTargetPct(v);
-    try { localStorage.setItem(TARGET_KEY, String(v)); } catch { /* per-viewer convenience only */ }
+    const v = parseGoalTargetPct(raw);
+    if (v == null) return;
+    setTargetPct(writeGoalTargetPct(v));
   };
 
   return (
@@ -92,7 +85,7 @@ export default function PnlCalendarTab() {
                 <p className="text-base font-semibold text-white">Monthly Goal</p>
                 <p className="mt-0.5 flex items-center gap-1.5 text-xs text-white/50">
                   <span>Target:</span>
-                  <input aria-label="Target percent" type="number" min={0.5} max={50} step={0.5} value={targetPct} onChange={e => changeTarget(e.target.value)}
+                  <input aria-label="Target percent" type="number" min={GOAL_TARGET_MIN_PCT} max={GOAL_TARGET_MAX_PCT} step={0.5} value={targetPct} onChange={e => changeTarget(e.target.value)}
                     className="w-14 rounded border border-white/15 bg-transparent px-1.5 py-0.5 text-xs text-white" />
                   <span>%{goal.targetAmount != null ? ` · ${formatSignedMoney(goal.targetAmount).slice(1)}` : ''}</span>
                 </p>
@@ -102,6 +95,7 @@ export default function PnlCalendarTab() {
                 {goal.returnPct != null
                   ? <p className={`text-sm ${tone(goal.returnPct)}`}>{formatSignedPct(goal.returnPct, 2)} locked in</p>
                   : <p className="text-xs text-white/40">No stored month-start balance, so no goal amount</p>}
+                {resolved.source === 'live' && <p className="text-[10px] text-amber-300/80" data-testid="goal-baseline-live">Sized on today's account value (no stored month-start balance)</p>}
                 {goal.achieved && <p className="text-xs text-white/50">Goal achieved! 🎉</p>}
                 {!goal.achieved && goal.progressPct != null && <p className="text-xs text-white/50">{Math.max(0, Math.round(goal.progressPct))}% of target</p>}
               </div>

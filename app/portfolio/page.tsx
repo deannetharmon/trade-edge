@@ -11343,7 +11343,7 @@ export default function PortfolioPage() {
       )}
 
       {activeTab === 'balances' && <BalancesTab />}
-      {activeTab === 'pnl-calendar' && <PnlCalendarTab />}
+      {activeTab === 'pnl-calendar' && <PnlCalendarTab liveNetLiq={balances?.netLiquidity ?? null} />}
 
       {/* WA-0003: Today's Priorities -- the finite, completion-aware open
           queue (lib/todays-priorities-queue, additive over

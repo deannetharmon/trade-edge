@@ -8,6 +8,9 @@
 import type { PerformanceReport, GroupStats, MethodExit } from '@/lib/tradeLog/performanceMetrics';
 import type { PeriodAccountProfit } from '@/lib/portfolio-data/balancePerformance';
 import type { CoachingInput } from '@/lib/tradeLog/coachingInput';
+import { useEffect, useMemo, useState } from 'react';
+import { buildGoalMonths } from '@/lib/pnlCalendar/goalMonths';
+import { GOAL_TARGET_MAX_PCT, GOAL_TARGET_MIN_PCT, DEFAULT_GOAL_TARGET_PCT, parseGoalTargetPct, readGoalTargetPct, writeGoalTargetPct } from '@/lib/pnlCalendar/goalSetting';
 
 const STRATEGY_LABEL: Record<string, string> = {
   CSP: 'Cash-secured puts', BPS: 'Bull put spreads', BCS: 'Bear call spreads', IC: 'Iron condors', SHORT_CALL: 'Short calls', SPREAD: 'Other spreads', OTHER: 'Other',
@@ -61,7 +64,51 @@ function StatRow({ name, s }: { name: string; s: GroupStats }) {
   );
 }
 
-export function PerformanceReportView({ th, report, accountProfit, periodLabel, onOpenTicker, positionSize, onMarkDeliberate }: {
+/** GOAL-0001: each month's realized profit against the monthly return goal (default 5%, configurable, shared with the P/L Calendar). */
+function MonthlyGoalPanel({ th, report, goal }: { th: Theme; report: PerformanceReport; goal: { history: ReadonlyArray<{ date: string; netLiquidatingValue: number }>; today: string; liveNetLiq: number | null } }) {
+  const [targetPct, setTargetPct] = useState(DEFAULT_GOAL_TARGET_PCT);
+  useEffect(() => { setTargetPct(readGoalTargetPct()); }, []);
+  const summary = useMemo(
+    () => buildGoalMonths(report.byMonth, goal.history, targetPct, { today: goal.today, liveNetLiq: goal.liveNetLiq }),
+    [report.byMonth, goal.history, goal.today, goal.liveNetLiq, targetPct],
+  );
+  if (report.byMonth.length === 0) return null;
+  const change = (raw: string) => { const v = parseGoalTargetPct(raw); if (v != null) setTargetPct(writeGoalTargetPct(v)); };
+  return (
+    <Panel th={th} title="Monthly goal" sub="Realized profit in the month against the goal, as a percent of the account value at the start of the month. Same setting as the P/L Calendar.">
+      <div className="flex items-center gap-2 mb-3 text-xs">
+        <label htmlFor="goal-target-pct" className={th.textMuted}>Goal per month</label>
+        <input id="goal-target-pct" aria-label="Monthly goal percent" type="number" min={GOAL_TARGET_MIN_PCT} max={GOAL_TARGET_MAX_PCT} step={0.5} defaultValue={targetPct} key={targetPct}
+          onBlur={e => change(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') change((e.target as HTMLInputElement).value); }}
+          className="w-16 bg-transparent border border-white/20 rounded px-2 py-1 text-right tabular-nums" />
+        <span className={th.textMuted}>%</span>
+        <span className={`ml-auto ${th.textFaint}`} data-testid="goal-hit-count">{summary.judged > 0 ? `Hit in ${summary.hit} of ${summary.judged} months` : 'No months to judge yet'}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className={`w-full text-xs ${th.text}`}>
+          <thead className={th.textFaint}><tr className="text-[10px] uppercase tracking-wider">
+            <th className="pb-2 pr-3 text-left">Month</th><th className="pb-2 px-3 text-right">Realized</th><th className="pb-2 px-3 text-right">Started at</th>
+            <th className="pb-2 px-3 text-right">Return</th><th className="pb-2 px-3 text-right">Goal</th><th className="pb-2 pl-3 text-right">Result</th>
+          </tr></thead>
+          <tbody>
+            {summary.rows.map(r => (
+              <tr key={r.month} className="border-b border-white/5" data-testid={`goal-row-${r.month}`}>
+                <td className="py-2 pr-3 text-left font-semibold">{r.month}</td>
+                <td className={`py-2 px-3 text-right tabular-nums ${tone(r.realized)}`}>{money(r.realized)}</td>
+                <td className="py-2 px-3 text-right tabular-nums">{r.baseline == null ? 'no balance stored' : `${money(r.baseline, false)}${r.baselineSource === 'live' ? ' (today)' : ''}`}</td>
+                <td className={`py-2 px-3 text-right tabular-nums ${tone(r.returnPct)}`}>{pct(r.returnPct, 1)}</td>
+                <td className="py-2 px-3 text-right tabular-nums">{r.targetAmount == null ? '—' : money(r.targetAmount, false)}</td>
+                <td className={`py-2 pl-3 text-right font-semibold ${r.hit == null ? th.textFaint : r.hit ? 'text-emerald-400' : 'text-amber-400'}`}>{r.hit == null ? '—' : r.hit ? 'Hit' : 'Missed'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+export function PerformanceReportView({ th, report, accountProfit, periodLabel, onOpenTicker, positionSize, onMarkDeliberate, goal }: {
   th: Theme;
   report: PerformanceReport;
   accountProfit: PeriodAccountProfit | null;
@@ -70,6 +117,8 @@ export function PerformanceReportView({ th, report, accountProfit, periodLabel, 
   /** PERF-AI-0001: 25%-of-net-liq rule (Dean); review only, never blocking, override per trade. */
   positionSize?: CoachingInput['habits']['positionSize'];
   onMarkDeliberate?: (tradeId: string) => void;
+  /** GOAL-0001: month-start balances for the Monthly goal panel; the panel is omitted when not supplied. */
+  goal?: { history: ReadonlyArray<{ date: string; netLiquidatingValue: number }>; today: string; liveNetLiq: number | null };
 }) {
   const h = report.headline;
   const realized = h.pnl;
@@ -178,6 +227,8 @@ export function PerformanceReportView({ th, report, accountProfit, periodLabel, 
           </div>
         </Panel>
       )}
+
+      {goal && <MonthlyGoalPanel th={th} report={report} goal={goal} />}
 
       <Panel th={th} title="By strategy">
         <div className="overflow-x-auto">

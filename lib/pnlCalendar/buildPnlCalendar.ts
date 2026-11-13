@@ -205,17 +205,42 @@ export function buildPace(trades: readonly ClosedTrade[], today: string, baselin
   return { pnl, returnPct: hasBaseline ? round2((pnl / (baseline as number)) * 100) : null, from, to: today };
 }
 
+/** GOAL-0001: a stored day further than this from the 1st is not a month-start balance (the Balances history can have long gaps). */
+export const BASELINE_MAX_GAP_DAYS = 4;
+
+const dayGap = (a: string, b: string) => Math.round((utcNoon(b).getTime() - utcNoon(a).getTime()) / 86400000);
+
 /**
  * The month's starting net liquidating value from the stored daily history: the last stored day before the 1st; failing that,
- * the first stored day inside the month; failing that, null (no goal amount is shown rather than a guessed one).
+ * the first stored day inside the month; failing that, null (no goal amount is shown rather than a guessed one). GOAL-0001: a day
+ * more than BASELINE_MAX_GAP_DAYS from the 1st does not count. With history ending 10-06, November's baseline was the 10-06 value
+ * from five weeks earlier.
  */
 export function monthBaseline(history: readonly { date: string; netLiquidatingValue: number }[], month: string): number | null {
   const first = `${month}-01`;
   const usable = history.filter(d => d.date && Number.isFinite(d.netLiquidatingValue) && d.netLiquidatingValue > 0).sort((a, b) => a.date.localeCompare(b.date));
   const before = usable.filter(d => d.date < first);
-  if (before.length) return before[before.length - 1].netLiquidatingValue;
+  if (before.length) {
+    const last = before[before.length - 1];
+    if (dayGap(last.date, first) <= BASELINE_MAX_GAP_DAYS) return last.netLiquidatingValue;
+  }
   const inside = usable.find(d => monthOf(d.date) === month);
-  return inside ? inside.netLiquidatingValue : null;
+  return inside && dayGap(first, inside.date) <= BASELINE_MAX_GAP_DAYS ? inside.netLiquidatingValue : null;
+}
+
+export interface ResolvedBaseline { value: number | null; source: 'stored' | 'live' | null }
+
+/**
+ * GOAL-0001: the stored month-start value when there is one near the 1st; otherwise, for the CURRENT month only, today's account
+ * value (labelled as such, the way GuacTracker sizes its goal); otherwise none. Past months are never guessed.
+ */
+export function resolveMonthBaseline(
+  history: readonly { date: string; netLiquidatingValue: number }[], month: string, today: string, liveNetLiq: number | null | undefined,
+): ResolvedBaseline {
+  const stored = monthBaseline(history, month);
+  if (stored != null) return { value: stored, source: 'stored' };
+  if (month === monthOf(today) && typeof liveNetLiq === 'number' && Number.isFinite(liveNetLiq) && liveNetLiq > 0) return { value: liveNetLiq, source: 'live' };
+  return { value: null, source: null };
 }
 
 const money0 = (n: number) => Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 });
