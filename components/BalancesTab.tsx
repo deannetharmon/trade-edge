@@ -6,7 +6,7 @@ import { buildReserveStatus } from '@/lib/portfolio/reserveStatus';
 import { useEffect, useState, useMemo } from 'react';
 import { getAccessToken } from '@/lib/auth/tastytradeToken';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
-import { balanceChangeRows } from '@/lib/portfolio-data/balanceChange';
+import { balanceChangeRows, BALANCE_GAP_DAYS } from '@/lib/portfolio-data/balanceChange';
 import { closedDaysOnly, extractMoneyMovements, performanceSeries, todayNewYork, withLivePoint, type BalanceDayPoint, type MoneyMovement } from '@/lib/portfolio-data/balancePerformance';
 
 const BASE = 'https://api.tastytrade.com';
@@ -63,7 +63,7 @@ function fmtSignedMoney(value: number | null | undefined): string {
   return `${sign}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; accountNumber: string; movements: MoneyMovement[] }> {
+async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; accountNumber: string; movements: MoneyMovement[]; syncError: string | null }> {
   const token = await getAccessToken();
   const accountNumber = await requireActiveBrokerAccount(token, ttFetch, { forceValidation: true });
 
@@ -76,6 +76,8 @@ async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; 
     optionBuyingPower: (() => { const v = parseFloat(b['derivative-buying-power'] ?? b['option-buying-power'] ?? 'NaN'); return Number.isFinite(v) ? v : null; })(),
   };
 
+  // RECON-0003: the sync used to fail silently, so a stretch with no stored days had no visible cause. The reason is kept and shown.
+  let syncError: string | null = null;
   try {
     const snapData = await ttFetch(`/accounts/${accountNumber}/balance-snapshots`, token);
     const items = snapData?.data?.items ?? [];
@@ -91,14 +93,18 @@ async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; 
     const closed = closedDaysOnly(days, todayNewYork(Date.now()));
 
     if (closed.length > 0) {
-      await fetch('/api/balance-history', {
+      const saved = await fetch('/api/balance-history', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ days: closed }),
       });
+      if (!saved.ok) syncError = `Saving balance history failed (${saved.status}).`;
+    } else {
+      syncError = 'The broker returned no completed balance days.';
     }
-  } catch {
+  } catch (e) {
     // History sync is best-effort -- current balances above already loaded fine.
+    syncError = e instanceof Error ? `Balance history sync failed: ${e.message.slice(0, 160)}` : 'Balance history sync failed.';
   }
 
   // BALANCE-CHART-0001: deposits / withdrawals, so the performance line does not treat them as gains or losses.
@@ -118,7 +124,7 @@ async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; 
     movements = [];
   }
 
-  return { current, accountNumber, movements };
+  return { current, accountNumber, movements, syncError };
 }
 
 async function fetchHistory(): Promise<BalanceDay[]> {
@@ -134,7 +140,7 @@ async function fetchHistory(): Promise<BalanceDay[]> {
 
 type ChartMode = 'PERFORMANCE' | 'NET_LIQ';
 
-function BalanceChart({ history, movements, range, mode }: { history: BalanceDayPoint[]; movements: MoneyMovement[]; range: RangeKey; mode: ChartMode }) {
+export function BalanceChart({ history, movements, range, mode }: { history: BalanceDayPoint[]; movements: MoneyMovement[]; range: RangeKey; mode: ChartMode }) {
   const rangeConfig = RANGES.find(r => r.key === range)!;
   const [hover, setHover] = useState<number | null>(null);
   const filtered = useMemo(() => {
@@ -162,7 +168,11 @@ function BalanceChart({ history, movements, range, mode }: { history: BalanceDay
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min || 1;
-  const xOf = (i: number) => padLeft + (i / (series.length - 1)) * (width - padLeft - pad);
+  // RECON-0003: x follows the calendar, so a 38-day stretch with no stored days is 38 days wide, not one step like a normal day.
+  const dayNo = (date: string) => Math.round(Date.parse(`${date}T12:00:00Z`) / 86400000);
+  const day0 = dayNo(series[0].date);
+  const daySpan = Math.max(1, dayNo(series[series.length - 1].date) - day0);
+  const xOf = (i: number) => padLeft + ((dayNo(series[i].date) - day0) / daySpan) * (width - padLeft - pad);
   const yOf = (v: number) => height - pad - ((v - min) / span) * (height - pad * 2);
   const points = series.map((d, i) => ({ x: xOf(i), y: yOf(d.netLiquidatingValue), d }));
   const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
@@ -177,6 +187,7 @@ function BalanceChart({ history, movements, range, mode }: { history: BalanceDay
     .map(m => ({ m, index: series.findIndex(d => d.date >= m.date) }))
     .filter(x => x.index >= 0);
   const ticks = [max, (max + min) / 2, min];
+  const gaps = points.slice(1).map((p, k) => ({ a: points[k], b: p, days: dayNo(p.d.date) - dayNo(points[k].d.date) })).filter(g => g.days > BALANCE_GAP_DAYS);
   const hovered = hover != null ? series[hover] : null;
   const hoveredRaw = hover != null ? filtered[hover] : null;
   const hoveredMarks = hovered ? marks.filter(x => x.index === hover).map(x => x.m.label) : [];
@@ -190,8 +201,9 @@ function BalanceChart({ history, movements, range, mode }: { history: BalanceDay
         onMouseMove={e => {
           const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
           const x = ((e.clientX - rect.left) / rect.width) * width;
-          const i = Math.round(((x - padLeft) / (width - padLeft - pad)) * (series.length - 1));
-          setHover(Math.max(0, Math.min(series.length - 1, i)));
+          let nearest = 0;
+          for (let k = 1; k < points.length; k += 1) if (Math.abs(points[k].x - x) < Math.abs(points[nearest].x - x)) nearest = k;
+          setHover(nearest);
         }}
       >
         <defs>
@@ -208,6 +220,9 @@ function BalanceChart({ history, movements, range, mode }: { history: BalanceDay
         ))}
         <path d={areaD} fill="url(#balanceFill)" />
         <path d={pathD} fill="none" stroke={lineColor} strokeWidth="2" />
+        {gaps.map((g, i) => (
+          <line key={`g${i}`} x1={g.a.x} y1={g.a.y} x2={g.b.x} y2={g.b.y} stroke="#fbbf24" strokeWidth="2" strokeDasharray="5 5" data-testid="balance-gap"><title>No stored days for {g.days} days: the line between is a straight estimate</title></line>
+        ))}
         {marks.map((x, i) => (
           <circle key={`m${i}`} cx={points[x.index].x} cy={points[x.index].y} r={4} fill="#fbbf24" data-testid="money-movement-marker"><title>{x.m.label} ({x.m.date})</title></circle>
         ))}
@@ -222,6 +237,7 @@ function BalanceChart({ history, movements, range, mode }: { history: BalanceDay
           {hoveredMarks.map(l => <p key={l} className="text-amber-300">{l}</p>)}
         </div>
       )}
+      {gaps.length > 0 && <p className="mt-1 text-[10px] text-amber-300/80" data-testid="balance-gap-note">Dashed: no stored days for {gaps.map(g => `${g.a.d.date} → ${g.b.d.date} (${g.days} days)`).join(', ')}. The line there is a straight estimate.</p>}
       <div className="flex justify-between text-[10px] text-white/40 mt-1 pl-[8%]">
         <span>{series[0].date}</span>
         <span>{series[series.length - 1].date} (live)</span>
@@ -254,13 +270,14 @@ function BalanceChangeTable({ history, current, movements }: { history: BalanceD
           <tbody>
             {rows.map((r) => (
               <tr key={r.toDate} className="border-t border-white/5">
-                <td className="px-2 py-1 text-white/70">{r.fromDate.slice(5)} → {r.live ? 'now' : r.toDate.slice(5)}{r.gapDays > 4 ? <span className="ml-1 text-amber-400/80">({r.gapDays} days)</span> : null}</td>
+                <td className="px-2 py-1 text-white/70">{r.fromDate.slice(5)} → {r.live ? 'now' : r.toDate.slice(5)}{r.unreliable ? <span className="ml-1 text-amber-400/80">({r.gapDays} days)</span> : null}</td>
                 {cell(r.netLiq)}{cell(r.cash)}{cell(r.options)}{cell(r.other)}{cell(r.moved)}{cell(r.trading)}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {rows.some(r => r.unreliable) && <p className="mt-2 text-[10px] text-amber-300/80" data-testid="balance-gap-table-note">Rows marked with days cover a stretch with no stored days, so they lump several days together. Money moved still comes from your transactions.</p>}
     </div>
   );
 }
@@ -272,12 +289,14 @@ export default function BalancesTab() {
   const [mode, setMode] = useState<ChartMode>('PERFORMANCE');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [range, setRange] = useState<RangeKey>('3M');
 
   useEffect(() => {
     (async () => {
       try {
-        const { current: cur, movements: moves } = await loadCurrentAndSyncHistory();
+        const { current: cur, movements: moves, syncError: syncErr } = await loadCurrentAndSyncHistory();
+        setSyncError(syncErr);
         setCurrent(cur);
         setMovements(moves);
         const hist = await fetchHistory();
@@ -356,6 +375,7 @@ export default function BalancesTab() {
             </div>
             <BalanceChart history={withLivePoint(history, todayNewYork(Date.now()), current.netLiquidatingValue)} movements={movements} range={range} mode={mode} />
           </div>
+          {syncError && <p className="text-[11px] text-amber-300" data-testid="balance-sync-error">{syncError} History may be missing days.</p>}
           <BalanceChangeTable history={history} current={current} movements={movements} />
         </>
       )}

@@ -31,3 +31,26 @@ describe('BALANCE-CHANGE-0001', () => {
     expect(balanceChangeRows(many, null, '2026-10-16', [], 5)).toHaveLength(5);
   });
 });
+
+// RECON-0003: the live account showed one -$9,336 row over 38 days with nothing stored in between.
+describe('RECON-0003 gap rows', () => {
+  const history = [day('2026-10-05', 40700, 37000, -1000), day('2026-10-06', 40686, 37080, -1032)];
+  const live = { netLiquidatingValue: 31350, cashBalance: 23011, netOptionsValue: -5302 };
+
+  it('flags a row that spans more than four days as a lump', () => {
+    const rows = balanceChangeRows(history, live, '2026-11-13', []);
+    expect(rows[0].unreliable).toBe(false);
+    expect(rows[1]).toMatchObject({ fromDate: '2026-10-06', gapDays: 38, live: true, unreliable: true });
+  });
+
+  it('a four-day stretch is still a normal row', () => {
+    const rows = balanceChangeRows([day('2026-10-02', 100, 100, 0), day('2026-10-06', 90, 90, 0)], null, '2026-10-09', []);
+    expect(rows[0]).toMatchObject({ gapDays: 4, unreliable: false });
+  });
+
+  it('money moved inside the gap is still taken out of trading', () => {
+    const rows = balanceChangeRows(history, live, '2026-11-13', [{ date: '2026-10-20', amount: -5000, label: 'withdrawal' }]);
+    expect(rows[1].moved).toBe(-5000);
+    expect(rows[1].trading).toBeCloseTo(rows[1].netLiq + 5000, 2);
+  });
+});

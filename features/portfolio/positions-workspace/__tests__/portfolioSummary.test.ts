@@ -288,3 +288,21 @@ describe('RECON-0001 covered call is not counted twice', () => {
     expect(s.groups.find(g => g.key === 'SHORT_CALLS')!.capital.value).toBe(-155 + 6045);
   });
 });
+
+// RECON-0002 / RECON-0004
+describe('RECON-0002 cash free vs buying-power reserve', () => {
+  it('cash free is cash to deploy over portfolio value, not buying power', () => {
+    const put = csp('P', { maxRisk: 4800, entryCredit: 200, pnl: -300 });
+    const s = buildPortfolioSummary({ rows: [row(put)], equities: [], pendingOrders: [], cashBalance: 5200, netLiquidity: 20000, optionBuyingPower: 6000, nowMs: NOW });
+    expect(s.headline.cashToDeploy).toBe(200);
+    expect(s.headline.cashFreePct).toBeCloseTo(1, 2);
+    expect(s.headline.reserve!.pct).toBeCloseTo(30, 2); // the margin-based figure stays as it was
+  });
+
+  it('cash free is unavailable when collateral exceeds cash (margin) or portfolio value is missing', () => {
+    const s = buildPortfolioSummary({ rows: [row(csp('A'))], equities: [], pendingOrders: [], cashBalance: 5000, netLiquidity: 20000, nowMs: NOW });
+    expect(s.headline.cashFreePct).toBeNull();
+    const t = buildPortfolioSummary({ rows: [], equities: [], pendingOrders: [], cashBalance: 5000, nowMs: NOW });
+    expect(t.headline.cashFreePct).toBeNull();
+  });
+});

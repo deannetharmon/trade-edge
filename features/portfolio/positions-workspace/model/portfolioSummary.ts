@@ -163,6 +163,8 @@ export interface PortfolioHeadline {
   cashBalance: number | null;
   optionBuyingPower: number | null;
   reserve: ReserveStatus | null;
+  /** RECON-0002: Cash to deploy as a share of Portfolio Value, percent. With no margin this is the reserve that is really free; null when either figure is unavailable or cash is short. */
+  cashFreePct: number | null;
   bridge: HeadlineBridge | null;
 }
 
@@ -243,7 +245,9 @@ export function buildPortfolioHeadline(args: {
   }
   return {
     portfolioValue, cashToDeploy: cash, usingMargin: args.cashToDeploy.usingMargin, deployed, deployedPartial,
-    cashBalance, optionBuyingPower, reserve: buildReserveStatus(optionBuyingPower, portfolioValue), bridge,
+    cashBalance, optionBuyingPower, reserve: buildReserveStatus(optionBuyingPower, portfolioValue),
+    cashFreePct: cash != null && cash >= 0 && portfolioValue != null && portfolioValue > 0 ? round2((cash / portfolioValue) * 100) : null,
+    bridge,
   };
 }
 

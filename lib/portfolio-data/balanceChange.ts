@@ -6,6 +6,9 @@
 
 import type { MoneyMovement } from './balancePerformance';
 
+/** RECON-0003: more calendar days than this between two stored days and the row lumps several days together. */
+export const BALANCE_GAP_DAYS = 4;
+
 export interface BalanceSnapshot {
   date: string; // YYYY-MM-DD
   netLiquidatingValue: number;
@@ -24,6 +27,8 @@ export interface BalanceChangeRow {
   moved: number; // deposits (+) and withdrawals (-) dated after fromDate and up to toDate
   trading: number; // netLiq - moved: the change from trading and marks, with money movements taken out
   live: boolean;
+  /** True when the row spans more than BALANCE_GAP_DAYS: no stored days in between, so the split is a lump. */
+  unreliable: boolean;
 }
 
 function daysBetween(a: string, b: string): number {
@@ -68,6 +73,7 @@ export function balanceChangeRows(
       moved: round2(moved),
       trading: round2(netLiq - moved),
       live: b.live,
+      unreliable: daysBetween(a.date, b.date) > BALANCE_GAP_DAYS,
     });
   }
   return rows.slice(-limit);

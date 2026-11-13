@@ -43,7 +43,7 @@ function TileBody({ tile, weekSince }: { tile: SummaryTile; weekSince: string | 
       </span>
       <span className="mt-0.5 block text-[11px] text-white/50">
         {tile.capital.value != null
-          ? <span className="text-[13px] font-bold text-white" data-testid="tile-capital">{`Capital ${money(tile.capital.value)}${tile.key !== 'TOTAL' && tile.capitalSharePct != null ? ` · ${tile.capitalSharePct}%` : ''}${partial(tile.capital)}`}</span>
+          ? <span className="text-[13px] font-bold text-white" data-testid="tile-capital">{`Capital ${tile.capital.value < 0 ? '-' : ''}${money(tile.capital.value)}${tile.capital.value < 0 ? ' premium kept' : ''}${tile.key !== 'TOTAL' && tile.capitalSharePct != null && tile.capital.value > 0 ? ` · ${tile.capitalSharePct}%` : ''}${partial(tile.capital)}`}</span>
           : 'Capital unavailable'}
         {tile.thetaPerDay.value != null && ` · θ ${signedMoney(tile.thetaPerDay.value)}/day`}
       </span>
@@ -96,6 +96,12 @@ function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
             <span className={`mt-2 block border-t border-white/10 pt-2 text-[11px] ${reserveTone(headline.reserve.tone)}`} data-testid="headline-reserve"
               title="Option Buying Power as a share of Portfolio Value, against your reserve rule (never below 10%, 20-30% preferred).">
               Reserve {Math.round(headline.reserve.pct)}% · {headline.reserve.label}
+            </span>
+          )}
+          {headline.cashFreePct != null && (
+            <span className="mt-1 block text-[11px] text-white/60" data-testid="headline-cash-free"
+              title="Cash to deploy as a share of Portfolio Value. You run no margin, so this is the reserve you can actually use. The Reserve line above is the broker's margin-based buying power.">
+              Cash free {headline.cashFreePct < 10 ? headline.cashFreePct.toFixed(1) : Math.round(headline.cashFreePct)}% (no margin)
             </span>
           )}
         </div>
