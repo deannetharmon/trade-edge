@@ -127,6 +127,8 @@ export function ccExpirationLabel(iso: string): string {
 const price = (n: number) => (Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`);
 const dollars = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
 const perShare = (n: number) => `$${n.toFixed(2)}`;
+/** The middle price rounded DOWN to the cent, the same number the premium at fill uses. */
+export const ccMidPerShare = (bid: number, ask: number) => Math.floor(((bid + ask) / 2) * 100 + 1e-9) / 100;
 
 /** Trader notation: $56C. */
 export function ccStrikeLabel(strike: number): string {
@@ -196,7 +198,7 @@ export function buildCcCardView(i: CcCardViewInput): CcCardView {
   const collect: CcFact = {
     label: 'COLLECT',
     big: verdict === 'wide' ? `About ${dollars(n.premiumTotal)}` : dollars(n.premiumTotal),
-    sub: `${verdict === 'wide' ? 'the bid price · ' : ''}bid ${perShare(cell.bid)} · mid ${perShare((cell.bid + cell.ask) / 2)} · ask ${perShare(cell.ask)}`,
+    sub: `${verdict === 'wide' ? 'the bid price · ' : ''}bid ${perShare(cell.bid)} · mid ${perShare(ccMidPerShare(cell.bid, cell.ask))} · ask ${perShare(cell.ask)}`,
     tone,
   };
   const keep: CcFact = {

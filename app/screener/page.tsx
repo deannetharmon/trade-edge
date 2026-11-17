@@ -1654,17 +1654,20 @@ function runCcChecklist(
   // already look this up for their own candidate's specific expiration;
   // CC was the one place still missing it.
   const ivxValue: number | null = bestCandidate ? (metrics.expirationIvxMap?.[bestCandidate.expiration] ?? null) : null;
+  const ccGridBuilt = capacityCheck.status !== 'fail' ? buildCcGrid(chainData, { rules: gridRules, capacity, stockPrice: price, earningsDate }) : undefined;
+  // CC-PMCC-GUIDANCE-0001: calls inside the POP range that fail only on price gap, so the reason line names the real blocker.
+  const widePopInRange = (ccGridBuilt?.cells ?? []).filter(g => g.wide && !g.thinOi && Math.abs(g.delta) >= ccRules.DELTA_MIN && Math.abs(g.delta) <= ccRules.DELTA_MAX).length;
   return {
     symbol, strategy: 'CC', price, ivr: ivrValue,
     ivx: ivxValue, ivx30: null, ivHv30Diff: null, liquidityRating: null,
     ccBrief: bestCandidate || earningsCheck.reason.includes('no eligible expiration') ? undefined : ccBriefReason({
       capacityBlocked: capacityCheck.status === 'fail', oversubscribed: capacity.oversubscribed === true, floorMissing: ccFloor.floor === null,
       deltaMin: ccRules.DELTA_MIN, deltaMax: ccRules.DELTA_MAX,
-      nearest: nearestCandidate ? { strike: nearestCandidate.shortStrike, delta: nearestCandidate.shortDelta } : null, floor: ccFloor.floor, price,
+      nearest: nearestCandidate ? { strike: nearestCandidate.shortStrike, delta: nearestCandidate.shortDelta } : null, widePopInRange, floor: ccFloor.floor, price,
     }),
     ccFloorInfo: { floor: ccFloor.floor, price },
     ccBasis: { basis: capacity.costBasis ?? null, source: basisOpts?.basisSource ?? null },
-    ccGrid: capacityCheck.status !== 'fail' ? buildCcGrid(chainData, { rules: gridRules, capacity, stockPrice: price, earningsDate }) : undefined,
+    ccGrid: ccGridBuilt,
     ccExclusionNote: bestCandidate && capacityCheck.status !== 'fail'
       ? formatCcHiddenNote(diagnoseCcExclusions(chainData, { rules: gridRules, capacity, stockPrice: price, earningsDate }), gridRules)
       : null,
