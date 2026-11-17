@@ -37,8 +37,10 @@ export function ccFloorExplanation(i: CcFloorExplanationInput): string | null {
 export function ccBriefReason(i: CcBriefInput): string {
   if (i.capacityBlocked) return i.oversubscribed ? 'Short calls already cover your shares' : 'Shares already covered';
   if (i.floorMissing) return 'Cost basis unknown';
-  const parts = [`No call in Δ${d2(i.deltaMin)}–${d2(i.deltaMax)}`];
-  if (i.nearest) parts.push(`nearest Δ${d2(i.nearest.delta)} at ${usd(i.nearest.strike)}`);
+  // CC-PMCC-GUIDANCE-0001: POP, not delta. POP = (1 - delta) x 100.
+  const pop = (d: number) => Math.round((1 - d) * 100);
+  const parts = [`No call with POP ${pop(i.deltaMax)}–${pop(i.deltaMin)}%`];
+  if (i.nearest) parts.push(`nearest POP ${pop(i.nearest.delta)}% at ${usd(i.nearest.strike)}`);
   if (i.floor !== null && i.price !== null && i.floor > i.price) parts.push(`floor ${usd(i.floor)}`);
   return parts.join(' · ');
 }

@@ -12,8 +12,6 @@ import { trendRsiForDisplay } from '@/lib/scans/trendRsi';
 import { useCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
 import { CcBasisLine } from './CcBasisLine';
 
-const CHIP = { Ready: 'border-emerald-500/50 text-emerald-300', Wait: 'border-amber-500/50 text-amber-300', Recovery: 'border-sky-500/50 text-sky-300' } as const;
-
 export function CcOutsideView({ result, textFaint }: { result: ScreenResult; textFaint: string }) {
   const [cutoff] = useCcRsiCutoff();
   const [open, setOpen] = useState(false);
@@ -24,8 +22,8 @@ export function CcOutsideView({ result, textFaint }: { result: ScreenResult; tex
   const { lo, hi } = ccGoalPopRange(DEFAULT_CC_GOAL);
   return (
     <div data-testid="cc-outside-view" className="space-y-1 px-3 pb-2 text-[13px]">
-      <p><span className={`rounded-full border px-2 py-0.5 font-semibold ${CHIP[note.chip]}`}>Calls: {note.chip}</span></p>
-      <CcBasisLine basis={result.ccBasis} floor={result.ccFloorInfo?.floor} price={result.ccFloorInfo?.price} />
+      {/* The row already carries the Calls chip; the floor sentence is left out when a timing line says the same thing. */}
+      <CcBasisLine basis={result.ccBasis} floor={note.lines.length > 0 ? undefined : result.ccFloorInfo?.floor} price={note.lines.length > 0 ? undefined : result.ccFloorInfo?.price} />
       {note.lines.map(l => <p key={l} className="text-amber-300">{l}</p>)}
       {outside.length > 0 && (
         <div>

@@ -41,13 +41,13 @@ const dq = (over: Partial<ScreenResult> = {}): ScreenResult => ({
 describe('disqualified covered-call row', () => {
   it('shows the one-line reason and the RSI meta, not the long sentence, and does not repeat it when expanded', async () => {
     const { default: userEvent } = await import('@testing-library/user-event');
-    render(<DisqualifiedSection results={[dq({ ccBrief: 'No call in Δ0.20–0.35 · nearest Δ0.17 at $29' })]} hasQualifiedCandidates={false}
+    render(<DisqualifiedSection results={[dq({ ccBrief: 'No call with POP 65–80% · nearest POP 83% at $29' })]} hasQualifiedCandidates={false}
       renderRowMeta={r => <RsiCallsChips symbol={r.symbol} rsi={54} />} />);
-    expect(screen.getByText('No call in Δ0.20–0.35 · nearest Δ0.17 at $29')).toBeInTheDocument();
+    expect(screen.getByText('No call with POP 65–80% · nearest POP 83% at $29')).toBeInTheDocument();
     expect(screen.queryByText(/long diagnostic/)).not.toBeInTheDocument();
     expect(screen.getByTestId('rsi-calls-METU')).toHaveTextContent('RSI 54');
     await userEvent.click(screen.getByRole('button', { name: /Show checks for METU/ }));
-    expect(screen.getAllByText(/No call in Δ0.20–0.35/)).toHaveLength(2);
+    expect(screen.getAllByText(/No call with POP 65–80%/)).toHaveLength(2);
     expect(screen.queryByText(/long diagnostic/)).not.toBeInTheDocument();
   });
   it('a row with no brief keeps its own reason text', () => {
