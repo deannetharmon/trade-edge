@@ -20,7 +20,7 @@ import type { ScreenResult } from '@/lib/scans/types';
 import { useDisclosureA11y } from '../lib/useDisclosureA11y';
 import { CspFundamentalsRow } from './CspFundamentalsRow';
 import { CommittedCallsLine } from './CommittedCallsLine';
-import { CcBasisLine } from './CcBasisLine';
+import { CcOutsideView } from './CcOutsideView';
 import { ExpirationDisclosure } from './ExpirationDisclosure';
 
 export interface DisqualifiedSectionProps {
@@ -130,11 +130,7 @@ function DisqualifiedCard({
       {result.strategy === 'CC' && result.ccCommitted && (
         <div className="px-3 pb-1"><CommittedCallsLine symbol={result.symbol} {...result.ccCommitted} className={th.textFaint} /></div>
       )}
-      {result.strategy === 'CC' && result.ccFloorInfo && (
-        <div className="px-3 pb-2">
-          <CcBasisLine basis={result.ccBasis} floor={result.ccFloorInfo.floor} price={result.ccFloorInfo.price} />
-        </div>
-      )}
+      {result.strategy === 'CC' && (result.ccFloorInfo || result.ccBasis) && <CcOutsideView result={result} textFaint={th.textFaint} />}
       {result.bestCandidate && (
         <CspFundamentalsRow
           candidate={result.bestCandidate}

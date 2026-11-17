@@ -13,7 +13,8 @@
 //   cost basis (the grid never holds a strike below it) and has POP of CC_SMALL_SAFE_MIN_POP or more.
 
 import type { CcGrid, CcGridCell } from './ccGridTypes';
-import { ccCellNumbers, ccStockMovePct } from './ccGridView';
+import { ccCellNumbers, ccStockMovePct, CC_GOALS, type CcGoal } from './ccGridView';
+import { ccRsiChip, type CcRsiChipState } from './ccRsiChip';
 import { DEFAULT_CC_RULES } from './constants';
 
 /** POP at or above this is "safe" for a Small & safe call (Dean, 2026-11-16: 90%). */
@@ -233,4 +234,61 @@ export function buildCcCardView(i: CcCardViewInput): CcCardView {
     : null;
 
   return { verdict, tag: verdict === 'small_safe' ? 'SMALL & SAFE' : null, headline, note, collect, keep, fill: fillFact, canReview, why, reviewOffNote };
+}
+
+// ── Timing and "outside your view" (CC-PMCC-GUIDANCE-0001 slice A2: stock card and scan row) ──────────────────────────
+
+
+export interface CcTimingNote {
+  state: CcRsiChipState;
+  /** "Ready", "Wait" or "Recovery": the chip text after "Calls:". */
+  chip: 'Ready' | 'Wait' | 'Recovery';
+  /** Null when calls are fine to look at (Ready); otherwise "NO CALL TO SELL YET". */
+  title: string | null;
+  lines: string[];
+}
+
+/** Plain-words timing for a holding: RSI against the cutoff, then price against the cost basis. Never a block, a signal. */
+export function ccTimingNote(i: { symbol: string; rsi: number | null | undefined; price: number | null | undefined; basis: number | null | undefined; cutoff: number }): CcTimingNote {
+  const chip = ccRsiChip({ rsi: i.rsi, price: i.price, costBasis: i.basis, cutoff: i.cutoff });
+  const lines: string[] = [];
+  const below = typeof i.basis === 'number' && i.basis > 0 && typeof i.price === 'number' && i.price > 0 && i.price < i.basis;
+  if (chip.state === 'wait') {
+    lines.push(typeof i.rsi === 'number' ? `${i.symbol} RSI is ${Math.round(i.rsi)}, below your ${i.cutoff} cutoff. Wait for RSI to reach ${i.cutoff}.` : 'Daily RSI is unavailable, so timing cannot be confirmed.');
+  }
+  if (below) {
+    const pct = (((i.basis as number) - (i.price as number)) / (i.basis as number)) * 100;
+    lines.push(`${chip.state === 'wait' ? 'Even then, no' : 'No'} call above your $${(i.basis as number).toFixed(2)} cost fits yet: ${i.symbol} is at $${(i.price as number).toFixed(2)}, ${pct.toFixed(1)}% below it.`);
+  }
+  return { state: chip.state, chip: chip.label, title: lines.length > 0 ? 'NO CALL TO SELL YET' : null, lines };
+}
+
+/** The POP range a goal asks for, e.g. "65 to 80%". */
+export function ccGoalPopRange(goal: CcGoal): { lo: number; hi: number } {
+  return { lo: Math.round((1 - CC_GOALS[goal].max) * 100), hi: Math.round((1 - CC_GOALS[goal].min) * 100) };
+}
+
+export interface CcOutsideRow { cell: CcGridCell; why: string }
+
+/** Every call that is not in the goal's POP range, or whose price gap is too big, with one plain sentence each. Information only, never a pick. */
+export function ccOutsideTheView(grid: CcGrid, goal: CcGoal): CcOutsideRow[] {
+  const { lo, hi } = ccGoalPopRange(goal);
+  const rows: CcOutsideRow[] = [];
+  for (const cell of grid.cells) {
+    const pop = ccPopPct(cell.delta);
+    if (cell.wide) {
+      const gap = ccPriceGapPct(cell.bid, cell.ask);
+      rows.push({ cell, why: `Price gap too big: ${gap === null ? 'unknown' : `${Math.round(gap)}%`}, limit is ${DEFAULT_CC_RULES.WIDTH_PCT_MAX}%` });
+    } else if (pop > hi) {
+      rows.push({ cell, why: `Strike too far above the price: POP ${pop}%, your view wants ${lo} to ${hi}%` });
+    } else if (pop < lo) {
+      rows.push({ cell, why: `Strike too close to the price: POP ${pop}%, your view wants ${lo} to ${hi}%` });
+    }
+  }
+  return rows.sort((a, b) => a.cell.expiration.localeCompare(b.cell.expiration) || a.cell.strike - b.cell.strike);
+}
+
+/** ccStockMovePct, kept here so callers import one module. */
+export function ccStockMovePctSafe(grid: CcGrid, cell: Pick<CcGridCell, 'strike'>): number | null {
+  return ccStockMovePct(grid, cell);
 }

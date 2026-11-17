@@ -189,3 +189,41 @@ describe('R3 basis line', () => {
     expect(ccBasisText(undefined)).toBe('Cost basis unknown. No call without one.');
   });
 });
+
+import { ccTimingNote, ccOutsideTheView, ccGoalPopRange } from '../ccGuidance';
+
+describe('stock card and scan row timing (METU: price 21.97, basis 26.94, RSI 42, cutoff 50)', () => {
+  it('Wait: RSI under the cutoff, then price below cost', () => {
+    const n = ccTimingNote({ symbol: 'METU', rsi: 42, price: 21.97, basis: 26.94, cutoff: 50 });
+    expect(n.chip).toBe('Wait');
+    expect(n.title).toBe('NO CALL TO SELL YET');
+    expect(n.lines).toEqual([
+      'METU RSI is 42, below your 50 cutoff. Wait for RSI to reach 50.',
+      'Even then, no call above your $26.94 cost fits yet: METU is at $21.97, 18.4% below it.',
+    ]);
+  });
+  it('Recovery: RSI fine but price below cost', () => {
+    const n = ccTimingNote({ symbol: 'METU', rsi: 55, price: 21.97, basis: 26.94, cutoff: 50 });
+    expect(n.chip).toBe('Recovery');
+    expect(n.lines).toEqual(['No call above your $26.94 cost fits yet: METU is at $21.97, 18.4% below it.']);
+  });
+  it('Ready: nothing to warn about', () => {
+    const n = ccTimingNote({ symbol: 'XYZ', rsi: 60, price: 52.4, basis: 48.1, cutoff: 50 });
+    expect(n.chip).toBe('Ready'); expect(n.title).toBeNull(); expect(n.lines).toEqual([]);
+  });
+  it('unknown RSI fails closed to Wait with its own sentence', () => {
+    expect(ccTimingNote({ symbol: 'X', rsi: null, price: 10, basis: 8, cutoff: 50 }).lines[0]).toBe('Daily RSI is unavailable, so timing cannot be confirmed.');
+  });
+});
+
+describe('calls outside your view', () => {
+  const mk = (strike: number, delta: number, bid: number, ask: number) => cell({ strike, delta, bid, ask, expiration: '2026-12-04', dte: 18 });
+  const g: CcGrid = { ...xyz([mk(27, 0.11, 0.23, 0.24), mk(28, 0.08, 0.2, 0.21), mk(30, 0.3, 0.31, 0.52), mk(26, 0.3, 0.5, 0.52)]), basis: 26.94, stockPrice: 21.97, floor: 26.94 };
+  it('balanced wants POP 65 to 80%', () => { expect(ccGoalPopRange('balanced')).toEqual({ lo: 65, hi: 80 }); });
+  it('lists too-high POP and too-wide calls with a plain reason, leaves in-view calls out', () => {
+    const rows = ccOutsideTheView(g, 'balanced');
+    expect(rows.map(r => r.cell.strike)).toEqual([27, 28, 30]);
+    expect(rows[0].why).toBe('Strike too far above the price: POP 89%, your view wants 65 to 80%');
+    expect(rows[2].why).toBe('Price gap too big: 51%, limit is 10%');
+  });
+});
