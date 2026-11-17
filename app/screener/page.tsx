@@ -6157,6 +6157,31 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
       ))}
       {heldLong && <p className="mt-2 text-[10px] text-cyan-300">Held LEAP · proposed short call only — not an existing PMCC. No order ticket is available.</p>}
     </button>
+    {/* PMCC-TRADE-VISIBLE-0001: trade actions live outside the expandable detail so every recommended card shows them collapsed. */}
+    <div className="space-y-2 px-4 pb-4 text-xs">
+        {tradeAllowed && !heldLong && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onTrade?.(result); }}
+            className={`w-full py-2 rounded-lg border text-xs font-bold tracking-widest transition-colors ${
+              marketClosedOnly
+                ? 'border-amber-500 text-amber-300 hover:bg-amber-500/10'
+                : 'border-cyan-500 text-cyan-300 hover:bg-cyan-500/10'
+            }`}
+          >
+            {marketClosedOnly ? 'REVIEW PMCC — MARKET CLOSED' : 'REVIEW PMCC'}
+          </button>
+        )}
+        {heldLong && heldTradeAllowed && (
+          <button
+            onClick={(e) => { e.stopPropagation(); rsiGuard.request(() => onTrade?.(result)); }}
+            className="w-full py-2 rounded-lg border border-amber-500 text-amber-300 text-xs font-bold tracking-widest hover:bg-amber-500/10 transition-colors"
+          >
+            SELL SHORT CALL
+          </button>
+        )}
+        {rsiGuard.dialog}
+        {heldLong && !heldTradeAllowed && !heldOutcome && <p className="rounded border border-cyan-800 bg-cyan-950/20 px-3 py-2 text-[11px] text-cyan-200">Wait / Monitor — this structure isn't ready to act on; see qualification detail above. Selling the short call is blocked until it qualifies.</p>}
+    </div>
     {expanded && <div className={`border-t ${th.border} p-4 text-xs space-y-3`}>
       <p className={`rounded border ${readiness.border} ${readiness.text} px-3 py-2`}>
         {readinessState === 'ready'
@@ -6269,28 +6294,6 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
         <p>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Trend/readiness: {result.trendResult?.trend ?? 'not available'}</p>
       </div>}
 
-      {tradeAllowed && !heldLong && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onTrade?.(result); }}
-          className={`w-full py-2 rounded-lg border text-xs font-bold tracking-widest transition-colors ${
-            marketClosedOnly
-              ? 'border-amber-500 text-amber-300 hover:bg-amber-500/10'
-              : 'border-cyan-500 text-cyan-300 hover:bg-cyan-500/10'
-          }`}
-        >
-          {marketClosedOnly ? 'REVIEW PMCC — MARKET CLOSED' : 'REVIEW PMCC'}
-        </button>
-      )}
-      {heldLong && heldTradeAllowed && (
-        <button
-          onClick={(e) => { e.stopPropagation(); rsiGuard.request(() => onTrade?.(result)); }}
-          className="w-full py-2 rounded-lg border border-amber-500 text-amber-300 text-xs font-bold tracking-widest hover:bg-amber-500/10 transition-colors"
-        >
-          SELL SHORT CALL
-        </button>
-      )}
-      {rsiGuard.dialog}
-      {heldLong && !heldTradeAllowed && !heldOutcome && <p className="rounded border border-cyan-800 bg-cyan-950/20 px-3 py-2 text-[11px] text-cyan-200">Wait / Monitor — this structure isn't ready to act on; see qualification detail above. Selling the short call is blocked until it qualifies.</p>}
       <button
         onClick={(e) => { e.stopPropagation(); setShowPairLookup(true); }}
         className="w-full py-1.5 rounded-lg border border-neutral-700 text-neutral-400 text-[10px] font-bold tracking-wider hover:border-neutral-500 transition-colors"
@@ -6611,6 +6614,73 @@ const strategyScores = useMemo(() => {
     trendRsiForDisplay((cachedEntry as any)?.metrics) ??
     null;
   const ccRsiGuard = useRsiGuard({ symbol: result.symbol, rsi: rsi14, cutoff: ccRsiCutoff });
+
+  // TRADE-VISIBLE-0001: every strategy shows its trade action in one row under the card header, collapsed.
+  // Gating is unchanged. A disqualified row keeps its "Trade anyway (override)" button inside the detail section only.
+  const tradeAction = (placement: 'row' | 'detail') => {
+    if (!c || c.strategy === 'CC') return null;
+    const disqualifiedState = qualDerivation?.state === 'disqualified';
+    if (placement === 'row' ? disqualifiedState : !disqualifiedState) return null;
+    const handler = c.strategy === 'CSP' ? onTradeCsp : onTrade;
+    const label = disqualifiedState ? 'Trade anyway (override)'
+      : qualDerivation?.state === 'caution' ? `TRADE ${c.strategy} · CAUTION`
+      : `TRADE ${c.strategy}`;
+    return (
+      <button
+        type="button"
+        data-testid={placement === 'row' ? 'trade-action' : 'trade-override'}
+        onClick={(e) => {
+          e.stopPropagation();
+          // OI-LIQUIDITY-CHOICE-0001: an OI warn is disclosed and acknowledged with the real numbers. QUAL-STATES-0001: rows with a three-state verdict acknowledge inside the order window instead.
+          if (!qualDerivation && result.checks.oi.status === 'warn') {
+            const proceed = window.confirm(`${result.checks.oi.reason}. Trade anyway?`);
+            if (!proceed) return;
+          }
+          handler?.(result);
+        }}
+        className={`${placement === 'row' ? 'w-full' : 'flex-1'} min-h-[44px] rounded-xl text-xs tracking-widest transition-colors ${
+          disqualifiedState ? 'border border-slate-600 text-slate-400 hover:bg-slate-500/10 font-medium'
+          : qualDerivation?.state === 'caution' ? 'border border-amber-500 text-amber-400 hover:bg-amber-500/10 font-bold'
+          : 'border border-cyan-500 text-cyan-300 hover:bg-cyan-500/10 font-bold'}`}
+      >
+        {label}
+      </button>
+    );
+  };
+  // CC: the same row shows the call the grid summary describes (SELL-CC-0001), or the one-line reason there is no button.
+  // CC-ORDERS-0001E: CcTradeModal re-proves coverage from a fresh broker read; ccRsiGuard still wraps the click.
+  const ccTradeRow = (() => {
+    if (!c || c.strategy !== 'CC' || !onTradeCc) return null;
+    const base = ccOrderInputFromScanResult(result);
+    if (base === null) return null;
+    const cell = pickedCcCell;
+    const isScanPick = !cell || (cell.expiration === base.expiration && cell.strike === base.strike);
+    const verdict = cell && result.ccGrid ? ccCellVerdict(result.ccGrid, cell, ccMinPay) : null;
+    if (!cell || (verdict !== 'pick' && verdict !== 'small_safe')) {
+      return (
+        <p data-testid="cc-trade-blocked" className="flex min-h-[44px] items-center rounded-xl border border-dashed border-slate-600 px-3.5 text-[13px] font-medium text-amber-300">
+          {!cell ? 'No call fits your minimum. Lower it or pick another call.' : verdict === 'wide' ? 'Price gap too big. Pick a green-outline call.' : 'Pays under your minimum. Lower it to review this call.'}
+        </p>
+      );
+    }
+    const order: CcOrderInput | undefined = isScanPick ? undefined : {
+      symbol: result.symbol, occSymbol: cell.occSymbol, strike: cell.strike, expiration: cell.expiration, dte: cell.dte,
+      delta: cell.delta, midPerShare: parseFloat(cell.premiumPerShare.toFixed(2)), isIndex: result.underlyingType === 'index',
+      initialQuantity: base.initialQuantity, stockPrice: base.stockPrice, typedBasis: base.typedBasis,
+      bidPerShare: cell.bid, askPerShare: cell.ask, wide: cell.wide,
+    };
+    return (
+      <button
+        type="button"
+        data-testid="trade-action"
+        onClick={(e) => { e.stopPropagation(); ccRsiGuard.request(() => onTradeCc(result, order)); }}
+        className="w-full min-h-[44px] rounded-xl border border-cyan-500 text-xs font-bold tracking-widest text-cyan-300 transition-colors hover:bg-cyan-500/10"
+      >
+        TRADE CC · {ccStrikeLabel(cell.strike)} · Exp {ccExpirationLabel(cell.expiration)}
+      </button>
+    );
+  })();
+  const rowAction = c?.strategy === 'CC' ? ccTradeRow : tradeAction('row');
 
   const scoreBorderL = qualDerivation?.state === 'disqualified' ? 'border-l-4 border-l-red-500'
     : qualDerivation?.state === 'caution' ? 'border-l-4 border-l-amber-500'
@@ -6938,29 +7008,18 @@ const strategyScores = useMemo(() => {
         </div>
       )}
 
+      {rowAction && (
+        <div className={`border-t ${th.border} px-4 py-3`} onClick={e => e.stopPropagation()}>
+          {rowAction}
+        </div>
+      )}
+
       {/* CLEAN-CARD-0001: Clean expanded grid (each fact once). Full keeps the section below unchanged. */}
       {expanded && cleanCsp && c && (
         <CleanCspDetails result={result} c={c} th={th} bidAskMax={rules.BID_ASK_MAX} ivrMin={rules.IVR_MIN} alloc={cleanAlloc}
           actions={<>
             <StockResearchButton research={research} th={th} />
-            <button type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (!qualDerivation && result.checks.oi.status === 'warn') {
-                  const proceed = window.confirm(`${result.checks.oi.reason}. Trade anyway?`);
-                  if (!proceed) return;
-                }
-                onTradeCsp?.(result);
-              }}
-              className={`ml-auto min-h-[44px] rounded-xl px-5 text-xs font-bold tracking-widest transition-colors ${
-                qualDerivation?.state === 'disqualified' ? 'border border-slate-600 text-slate-400 hover:bg-slate-500/10'
-                : qualDerivation?.state === 'caution' ? 'border border-amber-500 text-amber-400 hover:bg-amber-500/10'
-                : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
-            >
-              {qualDerivation?.state === 'disqualified' ? 'Trade anyway (override)'
-                : qualDerivation?.state === 'caution' ? '⚡ TRADE THIS (CAUTION)'
-                : '⚡ TRADE THIS'}
-            </button>
+            {tradeAction('detail')}
           </>} />
       )}
 
@@ -7186,57 +7245,8 @@ const strategyScores = useMemo(() => {
 
           {/* Action Buttons */}
           <div className="flex gap-2 mt-2">
-            {c && c.strategy !== 'CSP' && c.strategy !== 'CC' && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // OI-LIQUIDITY-CHOICE-0001, Phase 1: OI never hard-fails
-                  // (see assessOiLiquidity) -- but a warn on it used to be
-                  // silently ignored here, the button never checked it at
-                  // all. Now it's disclosed and requires acknowledgment,
-                  // stating the real numbers, before proceeding -- Dean's
-                  // own choice to make, not a silent gate either way.
-                  // QUAL-STATES-0001: rows with a three-state verdict acknowledge inside the order window instead.
-                  if (!qualDerivation && result.checks.oi.status === 'warn') {
-                    const proceed = window.confirm(`${result.checks.oi.reason}. Trade anyway?`);
-                    if (!proceed) return;
-                  }
-                  onTrade?.(result);
-                }}
-                className={`flex-1 py-2.5 rounded-xl text-xs tracking-widest transition-colors ${
-                  qualDerivation?.state === 'disqualified' ? 'border border-slate-600 text-slate-400 hover:bg-slate-500/10 font-medium'
-                  : qualDerivation?.state === 'caution' ? 'border border-amber-500 text-amber-400 hover:bg-amber-500/10 font-bold'
-                  : 'bg-emerald-600 hover:bg-emerald-500 text-white font-bold'}`}
-              >
-                {qualDerivation?.state === 'disqualified' ? 'Trade anyway (override)'
-                  : qualDerivation?.state === 'caution' ? '⚡ TRADE THIS (CAUTION)'
-                  : '⚡ TRADE THIS'}
-              </button>
-            )}
-            {/* CSP-ORDERS-0001 -- live order placement, via the dedicated
-                CspTradeModal (see its own comment for why it is not folded
-                into the generic multi-leg TradeModal). */}
-            {c && c.strategy === 'CSP' && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // QUAL-STATES-0001 phase 3: a CSP with a three-state verdict acknowledges inside the order window.
-                  if (!qualDerivation && result.checks.oi.status === 'warn') {
-                    const proceed = window.confirm(`${result.checks.oi.reason}. Trade anyway?`);
-                    if (!proceed) return;
-                  }
-                  onTradeCsp?.(result);
-                }}
-                className={`flex-1 py-2.5 rounded-xl text-xs tracking-widest transition-colors ${
-                  qualDerivation?.state === 'disqualified' ? 'border border-slate-600 text-slate-400 hover:bg-slate-500/10 font-medium'
-                  : qualDerivation?.state === 'caution' ? 'border border-amber-500 text-amber-400 hover:bg-amber-500/10 font-bold'
-                  : 'bg-emerald-600 hover:bg-emerald-500 text-white font-bold'}`}
-              >
-                {qualDerivation?.state === 'disqualified' ? 'Trade anyway (override)'
-                  : qualDerivation?.state === 'caution' ? '⚡ TRADE THIS (CAUTION)'
-                  : '⚡ TRADE THIS'}
-              </button>
-            )}
+            {/* TRADE-VISIBLE-0001: the trade button moved to the row under the header; only the disqualified override stays here. */}
+            {tradeAction('detail')}
             {c && c.strategy !== 'CSP' && c.strategy !== 'CC' && (
               <button
                 onClick={(e) => { e.stopPropagation(); setShowBestFinder(true); }}
@@ -7255,43 +7265,11 @@ const strategyScores = useMemo(() => {
                 "Find Better" for CSP is not yet wired up
               </p>
             )}
-            {c && c.strategy === 'CC' && (onTradeCc && ccOrderInputFromScanResult(result) !== null ? (
-              // CC-ORDERS-0001E: ordering is enabled through CcTradeModal, which re-proves coverage from a fresh
-              // broker read at open, before the dry run and inside the submit gate (TE-0007C's "proof of share
-              // coverage at execution time" requirement).
-              // SELL-CC-0001: the button trades the call the grid summary describes (the scan's pick until a cell is clicked).
-              (() => {
-                const base = ccOrderInputFromScanResult(result)!;
-                const cell = pickedCcCell;
-                const isScanPick = !cell || (cell.expiration === base.expiration && cell.strike === base.strike);
-                const verdict = cell && result.ccGrid ? ccCellVerdict(result.ccGrid, cell, ccMinPay) : null;
-                if (!cell || (verdict !== 'pick' && verdict !== 'small_safe')) {
-                  return (
-                    <p data-testid="cc-trade-blocked" className="flex-1 py-2.5 text-center text-[13px] font-medium text-amber-300">
-                      {!cell ? 'No call fits your minimum. Lower it or pick another call.' : verdict === 'wide' ? 'Price gap too big. Pick a green-outline call.' : 'Pays under your minimum. Lower it to review this call.'}
-                    </p>
-                  );
-                }
-                const order: CcOrderInput | undefined = isScanPick || !cell ? undefined : {
-                  symbol: result.symbol, occSymbol: cell.occSymbol, strike: cell.strike, expiration: cell.expiration, dte: cell.dte,
-                  delta: cell.delta, midPerShare: parseFloat(cell.premiumPerShare.toFixed(2)), isIndex: result.underlyingType === 'index',
-                  initialQuantity: base.initialQuantity, stockPrice: base.stockPrice, typedBasis: base.typedBasis,
-                  bidPerShare: cell.bid, askPerShare: cell.ask, wide: cell.wide,
-                };
-                return (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); ccRsiGuard.request(() => onTradeCc(result, order)); }}
-                    className="flex-1 py-2.5 rounded-xl text-xs tracking-widest transition-colors bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
-                  >
-                    Review order · {ccStrikeLabel(cell.strike)} · Exp {ccExpirationLabel(cell.expiration)}
-                  </button>
-                );
-              })()
-            ) : (
+            {c && c.strategy === 'CC' && !(onTradeCc && ccOrderInputFromScanResult(result) !== null) && (
               <p className={`flex-1 text-[9px] ${th.textFaint} italic py-2.5 text-center`}>
                 Analysis only — this call cannot be ordered from here
               </p>
-            ))}
+            )}
           </div>
         </div>
       )}

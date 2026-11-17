@@ -1,6 +1,6 @@
 // app/screener/__tests__/CspTradeModal.test.tsx
 //
-// CSP-ORDERS-0001 -- the CSP "TRADE THIS" button now opens a real,
+// CSP-ORDERS-0001 -- the CSP "TRADE CSP" button now opens a real,
 // dedicated CspTradeModal (not the generic multi-leg TradeModal). Proves
 // Diane's mock fields render and the modal is genuinely reachable from the
 // result card, without exercising the live broker dry-run/submit network
@@ -63,7 +63,7 @@ function chain() {
   };
 }
 
-async function runCspScan() {
+async function runCspScan(expandCard = true) {
   getChainMock.mockResolvedValue(chain());
   getMarketMetricsMock.mockResolvedValue([{ symbol: 'MRVL', price: 263.58, ivRank: 35, earningsExpectedDate: null, expirationIvxMap: {} }]);
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true, result: { recommendations: [] } }) }));
@@ -76,20 +76,26 @@ async function runCspScan() {
   await userEvent.click(await screen.findByRole('button', { name: /RUN CSP SCAN/i }));
   await waitFor(() => expect(getMarketMetricsMock).toHaveBeenCalled());
   await waitFor(() => expect(screen.getAllByText(/QUALIFIED/).length).toBeGreaterThan(0));
-  // The result card's detail (including the action buttons) is collapsed
-  // until the card itself is clicked.
+  // TRADE-VISIBLE-0001: the trade button no longer needs the card opened; only the detail section does.
+  if (!expandCard) return;
   const cards = screen.getAllByText('MRVL');
   await userEvent.click(cards[cards.length - 1]);
-  await waitFor(() => expect(screen.getByRole('button', { name: /TRADE THIS/ })).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByRole('button', { name: /TRADE CSP/ })).toBeInTheDocument());
 }
 
 // CI-FLAKY-0001 follow-up: the first test flaked under load on the ScreenerPage cold start; warm it once here.
 beforeAll(() => warmScreenerPage(async () => { await runCspScan(); }), WARM_HOOK_TIMEOUT_MS);
 
 describe('CSP-ORDERS-0001: the CSP result card offers real trade placement', () => {
-  it('shows a real "TRADE THIS" button for CSP, not the old "not yet wired up" message', async () => {
+  it('TRADE-VISIBLE-0001: the TRADE CSP button is on the collapsed card, without clicking it open', async () => {
+    await runCspScan(false);
+    expect(await screen.findByRole('button', { name: /TRADE CSP/ })).toBeInTheDocument();
+    expect(screen.queryByText('"Find Better" for CSP is not yet wired up')).not.toBeInTheDocument();
+  });
+
+  it('shows a real "TRADE CSP" button for CSP, not the old "not yet wired up" message', async () => {
     await runCspScan();
-    await waitFor(() => expect(screen.getByRole('button', { name: /TRADE THIS/ })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: /TRADE CSP/ })).toBeInTheDocument());
     expect(screen.queryByText(/CSP trade placement.*not yet wired up/)).not.toBeInTheDocument();
     // "Find Better" for CSP is still explicitly deferred, separate scope.
     expect(screen.getByText('"Find Better" for CSP is not yet wired up')).toBeInTheDocument();
@@ -121,7 +127,7 @@ describe('CSP-ORDERS-0001: the CSP result card offers real trade placement', () 
 
   it('opens CspTradeModal with Diane\'s mocked fields: strike line, Cash Required (not Max Loss as the label), and the assignment warning verbatim', async () => {
     await runCspScan();
-    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE CSP/ }));
 
     expect(await screen.findByText('PLACE CSP ORDER — MRVL')).toBeInTheDocument();
     const modal = screen.getByText('PLACE CSP ORDER — MRVL').closest('div[class*="rounded-2xl"]') as HTMLElement;
@@ -134,7 +140,7 @@ describe('CSP-ORDERS-0001: the CSP result card offers real trade placement', () 
 
   it('quantity and entry-limit controls work, and DRY RUN is the first action (matching the spread modal\'s confirm -> dry run flow)', async () => {
     await runCspScan();
-    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE CSP/ }));
     await screen.findByText('PLACE CSP ORDER — MRVL');
 
     const modal = screen.getByText('PLACE CSP ORDER — MRVL').closest('div[class*="rounded-2xl"]') as HTMLElement;
@@ -150,7 +156,7 @@ describe('CSP-ORDERS-0001: the CSP result card offers real trade placement', () 
   // CSP-STOP-0001 (Ian): a CSP has no stop unless the trader opts in; assignment is an acceptable outcome.
   it('starts with no stop: the opt-in is unchecked, the stop controls are hidden, and the no-stop note shows', async () => {
     await runCspScan();
-    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE CSP/ }));
     await screen.findByText('PLACE CSP ORDER — MRVL');
 
     const modal = screen.getByText('PLACE CSP ORDER — MRVL').closest('div[class*="rounded-2xl"]') as HTMLElement;
@@ -162,7 +168,7 @@ describe('CSP-ORDERS-0001: the CSP result card offers real trade placement', () 
 
   it('opting in shows the stop slider, the trigger/limit, and the stock-price breakeven (not an order); opting out hides them again', async () => {
     await runCspScan();
-    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE CSP/ }));
     await screen.findByText('PLACE CSP ORDER — MRVL');
 
     const modal = screen.getByText('PLACE CSP ORDER — MRVL').closest('div[class*="rounded-2xl"]') as HTMLElement;
@@ -182,7 +188,7 @@ describe('CSP-ORDERS-0001: the CSP result card offers real trade placement', () 
   it('shows the three assignment-cash labels verbatim with the order added to what is already committed', async () => {
     assignmentSnapshotMock.mockResolvedValue({ cashBalance: 1_000_000, positions: [shortPutPosition(100, 10)], pendingOrders: [] });
     await runCspScan();
-    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE CSP/ }));
     await screen.findByText('PLACE CSP ORDER — MRVL');
     const modal = screen.getByText('PLACE CSP ORDER — MRVL').closest('div[class*="rounded-2xl"]') as HTMLElement;
     expect(within(modal).getByText('Assignment cash after this trade')).toBeInTheDocument();
@@ -197,7 +203,7 @@ describe('CSP-ORDERS-0001: the CSP result card offers real trade placement', () 
   it('blocks the order when assignment cash would exceed usable cash, and says by how much', async () => {
     assignmentSnapshotMock.mockResolvedValue({ cashBalance: 1_000_000, positions: [shortPutPosition(9400, 1)], pendingOrders: [] });
     await runCspScan();
-    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE CSP/ }));
     await screen.findByText('PLACE CSP ORDER — MRVL');
     const modal = screen.getByText('PLACE CSP ORDER — MRVL').closest('div[class*="rounded-2xl"]') as HTMLElement;
     // 940,000 + 23,500 = 963,500 against 950,000 usable: short 13,500.
@@ -208,7 +214,7 @@ describe('CSP-ORDERS-0001: the CSP result card offers real trade placement', () 
   it('between 90% and 100% the order waits for an explicit acknowledgment', async () => {
     assignmentSnapshotMock.mockResolvedValue({ cashBalance: 1_000_000, positions: [shortPutPosition(9000, 1)], pendingOrders: [] });
     await runCspScan();
-    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE CSP/ }));
     await screen.findByText('PLACE CSP ORDER — MRVL');
     const modal = screen.getByText('PLACE CSP ORDER — MRVL').closest('div[class*="rounded-2xl"]') as HTMLElement;
     const ack = await within(modal).findByTestId('assignment-acknowledge');
@@ -220,7 +226,7 @@ describe('CSP-ORDERS-0001: the CSP result card offers real trade placement', () 
   it('fails closed: if funding data cannot be loaded the order cannot proceed', async () => {
     assignmentSnapshotMock.mockResolvedValue({ cashBalance: null, positions: null, pendingOrders: null });
     await runCspScan();
-    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE CSP/ }));
     await screen.findByText('PLACE CSP ORDER — MRVL');
     const modal = screen.getByText('PLACE CSP ORDER — MRVL').closest('div[class*="rounded-2xl"]') as HTMLElement;
     expect(await within(modal).findByTestId('assignment-cannot-verify')).toBeInTheDocument();
@@ -229,7 +235,7 @@ describe('CSP-ORDERS-0001: the CSP result card offers real trade placement', () 
 
   it('closes without side effects', async () => {
     await runCspScan();
-    await userEvent.click(await screen.findByRole('button', { name: /TRADE THIS/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /TRADE CSP/ }));
     await screen.findByText('PLACE CSP ORDER — MRVL');
     await userEvent.click(screen.getByRole('button', { name: 'CANCEL' }));
     await waitFor(() => expect(screen.queryByText('PLACE CSP ORDER — MRVL')).not.toBeInTheDocument());
