@@ -20,7 +20,7 @@ import {
 import { chanceOfProfit } from '@/lib/trademap/pop';
 import { evaluateGate, type GateQuote } from '@/lib/trademap/realtimeGate';
 import { DEFAULT_PRICING_PARAMS, buildDateAxis, buildPriceAxis, computeGrid } from '@/lib/trademap/gridModel';
-import { DISPLAY_MODES, formatModeValue, modeValue, type DisplayMode } from '@/lib/trademap/displayModes';
+import { DISPLAY_MODES, PRIMARY_MODES, formatModeValue, modeValue, type DisplayMode } from '@/lib/trademap/displayModes';
 import { expiryMetrics } from '@/lib/trademap/strategyLegs';
 import {
   STRATEGIES, buildTradeLegs, defaultAnchorStrike, defaultWidthSteps, legSpecs, type StrategyId,
@@ -28,7 +28,7 @@ import {
 
 const POLL_MS = 5000;
 const ROWS = 11;
-const COLS = 9;
+const COLS = 5;
 
 const fetcher = (path: string) => ttFetch(path, '');
 
@@ -261,24 +261,26 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
               <div className={`text-[11px] ${th.textFaint}`}>
                 {em.maxProfit != null && em.maxLoss != null && em.maxLoss > 0 ? `Max profit ÷ max loss ${(em.maxProfit / em.maxLoss).toFixed(2)}× · ` : ''}
                 Earnings: {metrics?.earningsDate && metrics.earningsDate <= exp.date ? `${shortDate(metrics.earningsDate)} (before expiry)` : metrics?.earningsDate ? `${shortDate(metrics.earningsDate)} (after expiry)` : 'none listed'}
-                {' · '}Black-Scholes estimate (early exercise ignored; dividends approximate). Not an order price.
+                {' · '}Based on Black-Scholes{expiryIv != null ? ` · IV ${Math.round(expiryIv * 100 * ivMult)}%` : ''} (early exercise ignored; dividends approximate). Not an order price.
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {DISPLAY_MODES.map(m => <button key={m.id} onClick={() => setMode(m.id)} className={chip(mode === m.id)}>{m.label}</button>)}
+                {DISPLAY_MODES.filter(m => PRIMARY_MODES.indexOf(m.id) >= 0).map(m => <button key={m.id} onClick={() => setMode(m.id)} className={chip(mode === m.id)}>{m.label}</button>)}
               </div>
               <div className={`${th.card} ${th.border} border rounded-lg overflow-x-auto`}>
                 <table className="w-full text-xs text-center">
                   <thead>
                     <tr className={th.textFaint}>
                       <th className="p-1.5 text-left">Price</th>
-                      {grid.dates.map(d => <th key={d} className="p-1.5 font-normal">{shortDate(d)}</th>)}
+                      {grid.dates.map(d => (
+                        <th key={d} className="p-1.5 font-normal">{shortDate(d)}<div className="text-[10px]">{d === grid.earliestExpiration ? 'Exp' : `${Math.round((Date.parse(d) - Date.parse(today)) / 86400000)}D`}</div></th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
                     {grid.prices.map((p, i) => (
                       <tr key={p}>
-                        <td className={`p-1.5 text-left ${th.textMuted}`}>${p.toFixed(2)} <span className={th.textFaint}>{axisSpot ? `${(((p / axisSpot) - 1) * 100).toFixed(0)}%` : ''}</span></td>
+                        <td className={`p-1.5 text-left ${axisSpot != null && Math.abs(p - axisSpot) === Math.min.apply(null, grid.prices.map(x => Math.abs(x - axisSpot))) ? 'font-bold text-[var(--accent,#3b82f6)]' : th.textMuted}`}>${p.toFixed(2)} <span className={th.textFaint}>{axisSpot ? `${(((p / axisSpot) - 1) * 100).toFixed(0)}%` : ''}</span></td>
                         {grid.cells[i].map((c, j) => (
                           <td key={j} className={`p-1.5 ${th.text}`} style={cellStyle(c ? c.pl : null)}>
                             {formatModeValue(mode, modeValue(mode, c, basis))}

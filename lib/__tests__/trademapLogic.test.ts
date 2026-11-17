@@ -252,12 +252,13 @@ describe('OPTMAP-0001 S2: display modes', () => {
     expect(modeValue('pl-pct', cell, basis)).toBeCloseTo(-33.3333333, 6);
     expect(modeValue('pct-max-risk', cell, basis)).toBeCloseTo(-33.3333333, 6);
   });
-  it('credit trade: % uses max loss, not the (negative) debit', () => {
-    expect(modeValue('pl-pct', { value: -50, pl: 30 }, { netDebit: -80, maxLoss: 420 })).toBeCloseTo(7.142857, 5);
+  it('credit trade: % is of the credit received (+50% = profit exit, -100% = 2x-credit stop)', () => {
+    expect(modeValue('pl-pct', { value: -50, pl: 40 }, { netDebit: -80, maxLoss: 420 })).toBeCloseTo(50, 9);
+    expect(modeValue('pl-pct', { value: -160, pl: -80 }, { netDebit: -80, maxLoss: 420 })).toBeCloseTo(-100, 9);
   });
   it('fails closed: unbounded or zero basis, null cell', () => {
     expect(modeValue('pct-max-risk', cell, { netDebit: -80, maxLoss: null })).toBeNull();
-    expect(modeValue('pl-pct', cell, { netDebit: -80, maxLoss: null })).toBeNull();
+    expect(modeValue('pl-pct', cell, { netDebit: 0, maxLoss: null })).toBeNull();
     expect(modeValue('pl-dollar', null, { netDebit: 1, maxLoss: 1 })).toBeNull();
   });
   it('formats dollars and percents', () => {
