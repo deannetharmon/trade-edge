@@ -10,7 +10,7 @@
 //   Delta range        isEligibleCcLeg -- a call outside the window is never a candidate. UNLIKE CSP
 //                      (where delta is a preference) and PMCC (where short delta guides rank).
 //   Max bid/ask width  isEligibleCcLeg -- SCAN-ALIGN-0001C2 hybrid rule via lib/scans/hybridSpread.ts:
-//                      excluded when width > max($0.05, WIDTH_PCT_MAX % of mid), or when width is over
+//                      excluded when width > max($0.01, WIDTH_PCT_MAX % of mid), or when width is over
 //                      the WIDTH_CEILING ($ per share). (BID_ASK_MAX is the CSP dollar key; CC no
 //                      longer uses it.)
 //   Minimum strike     findBestCoveredCall -- strike below max(stock price, cost basis) is excluded;
@@ -131,12 +131,12 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
     rescan: true,
     card: 'search',
     summaryGroup: 'search',
-    hint: 'The best pick never comes from a call wider than max(10% of mid, $0.05), or over the ceiling. The strike grid still shows it.',
+    hint: 'The best pick never comes from a call wider than max(10% of mid, 1 cent), or over the ceiling. The strike grid still shows it.',
     control: {
-      kind: 'rule', key: 'WIDTH_PCT_MAX', label: 'Max width', title: 'Widest bid/ask spread, as a percent of the mid price (never below $0.05)', step: '1', unit: '% of mid',
+      kind: 'rule', key: 'WIDTH_PCT_MAX', label: 'Max width', title: 'Widest bid/ask spread, as a percent of the mid price (never below 1 cent)', step: '1', unit: '% of mid',
       presets: [{ label: '5%', value: 5 }, { label: '10%', value: 10 }, { label: '15%', value: 15 }],
     },
-    summary: (v) => `width ≤ ${num(v.rules.WIDTH_PCT_MAX)}% of mid (min $0.05)`,
+    summary: (v) => `width ≤ ${num(v.rules.WIDTH_PCT_MAX)}% of mid (min $0.01)`,
   },
   {
     id: 'widthCeiling',

@@ -55,7 +55,7 @@ export const DEFAULT_CC_RULES = {
   OI_MIN: 100,
   // SCAN-ALIGN-0001C2 -- hybrid bid/ask width (lib/scans/hybridSpread.ts). NEW field names on
   // purpose: BID_ASK_MAX is the CSP/rinse-repeat/lib/screener.ts dollar key and is NOT used by CC.
-  // Reject when width > max($0.05, WIDTH_PCT_MAX % of mid) or width > WIDTH_CEILING ($ per share).
+  // Reject when width > max($0.01, WIDTH_PCT_MAX % of mid) or width > WIDTH_CEILING ($ per share).
   WIDTH_PCT_MAX: 10, WIDTH_CEILING: 0.50,
 };
 export type CcRulesType = typeof DEFAULT_CC_RULES;
