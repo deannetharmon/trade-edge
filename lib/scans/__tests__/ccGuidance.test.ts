@@ -71,7 +71,7 @@ describe('XYZ qualified card', () => {
     expect(v.headline).toBe('Sell 2 $56C · Exp Dec 11');
     expect(v.collect.big).toBe('$210'); expect(v.collect.sub).toBe('bid $1.04 · mid $1.05 · ask $1.06');
     expect(v.keep.big).toBe('POP 71%'); expect(v.keep.sub).toBe('called only if XYZ rises 6.9%, to $56');
-    expect(v.fill.big).toBe('Good'); expect(v.fill.sub).toBe('price gap 1.9% · expect $208 to $210');
+    expect(v.fill.big).toBe('Good'); expect(v.fill.sub).toBe('price gap 2¢ (1.9%) · expect $208 to $210');
     expect(v.why[0]).toBe('If called: shares sold at $56, a gain of $1,790 on your $48.10 cost, including the $210 you collect.');
     expect(v.why[1]).toBe('If not called: you keep the $210 and your cost drops to $47.05 a share.');
     expect(v.why[2]).toBe('Yield: 2.0% in 25 days, about 29% a year.');
@@ -83,7 +83,7 @@ describe('XYZ qualified card', () => {
     expect(v.headline).toBe('$58C · Exp Dec 11 · not a pick');
     expect(v.collect.big).toBe('About $60');
     expect(v.fill.big).toBe('Price gap too big');
-    expect(v.fill.sub).toBe('58.8% of the price (limit 10%) · the $85 middle price is not real');
+    expect(v.fill.sub).toBe('gap 25¢ = 58.8% of the price, the most allowed is 5¢ · the $85 middle price is not real');
     expect(v.canReview).toBe(false);
     expect(v.reviewOffNote).toBe('Pick a green-outline cell instead.');
     expect(ccMidTotal(g, c58)).toBe(85);
@@ -142,7 +142,7 @@ describe('Small & safe (ABC: price 40, basis 36.50, 1 contract, minimum $25)', (
     expect(v.note).toBe('Nothing pays $25. Best call with POP 90%+ above your cost.');
     expect(v.collect.big).toBe('$14'); expect(v.collect.sub).toBe('bid $0.14 · mid $0.14 · ask $0.15');
     expect(v.keep.big).toBe('POP 93%'); expect(v.keep.sub).toBe('called only if ABC rises 7.5%, to $43');
-    expect(v.fill.big).toBe('OK'); expect(v.fill.sub).toBe('price gap 6.9% · expect about $14');
+    expect(v.fill.big).toBe('OK'); expect(v.fill.sub).toBe('price gap 1¢ (6.9%) · expect about $14');
     expect(v.why[0]).toBe('If called: shares sold at $43, a gain of $664 on your $36.50 cost, including the $14 you collect.');
     expect(v.why[2]).toBe('Yield: 0.4% in 7 days, about 18% a year.');
     expect(v.canReview).toBe(true);
@@ -190,7 +190,7 @@ describe('R3 basis line', () => {
   });
 });
 
-import { ccTimingNote, ccOutsideTheView, ccGoalPopRange } from '../ccGuidance';
+import { ccGapLimitCents, ccTimingNote, ccOutsideTheView, ccGoalPopRange } from '../ccGuidance';
 
 describe('stock card and scan row timing (METU: price 21.97, basis 26.94, RSI 42, cutoff 50)', () => {
   it('Wait: RSI under the cutoff, then price below cost', () => {
@@ -224,7 +224,7 @@ describe('calls outside your view', () => {
     const rows = ccOutsideTheView(g, 'balanced');
     expect(rows.map(r => r.cell.strike)).toEqual([27, 28, 30]);
     expect(rows[0].why).toBe('Strike too far above the price: POP 89%, your view wants 65 to 80%');
-    expect(rows[2].why).toBe('Price gap too big (limit 10%)');
+    expect(rows[2].why).toBe('Price gap 21¢, the most allowed here is 5¢');
   });
 });
 
@@ -235,5 +235,13 @@ describe('METU $27C Dec 4 (matches TastyTrade: bid 0.15, mid 0.40, ask 0.65)', (
     const v = buildCcCardView({ grid: g, cell: c, minPay: 25, symbol: 'METU' });
     expect(v.collect.sub).toBe('the bid price · bid $0.15 · mid $0.40 · ask $0.65');
     expect(ccPriceGapPct(0.15, 0.65)).toBe(125);
+  });
+});
+
+describe('the most gap allowed: the larger of 5 cents and 10% of the mid', () => {
+  it('cheap options allow 5 cents; pricier ones allow 10%; never over 50 cents', () => {
+    expect(ccGapLimitCents(0.1, 0.4)).toBe(5);     // mid 0.25 -> 2.5 cents, floor 5
+    expect(ccGapLimitCents(2.0, 2.4)).toBe(22);    // mid 2.20 -> 22 cents
+    expect(ccGapLimitCents(9.0, 11.0)).toBe(50);   // mid 10 -> 100 cents, capped at 50
   });
 });

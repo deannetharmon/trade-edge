@@ -128,6 +128,17 @@ const price = (n: number) => (Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`
 const dollars = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
 const perShare = (n: number) => `$${n.toFixed(2)}`;
 /** The middle price rounded DOWN to the cent, the same number the premium at fill uses. */
+/** The bid/ask gap in cents, e.g. "30¢". */
+export const ccGapCents = (bid: number, ask: number): string => `${Math.round((ask - bid) * 100)}¢`;
+/**
+ * The widest bid/ask gap that still passes, in cents: the larger of 5 cents and 10% of the mid (hybridSpread.ts), and never
+ * over the 50 cent ceiling. A gap of 5 cents or less always passes, however big it is as a percent of a cheap option.
+ */
+export function ccGapLimitCents(bid: number, ask: number): number {
+  const mid = (bid + ask) / 2;
+  const limit = Math.max(0.05, (DEFAULT_CC_RULES.WIDTH_PCT_MAX / 100) * mid);
+  return Math.round(Math.min(limit, DEFAULT_CC_RULES.WIDTH_CEILING) * 100);
+}
 export const ccMidPerShare = (bid: number, ask: number) => Math.floor(((bid + ask) / 2) * 100 + 1e-9) / 100;
 
 /** Trader notation: $56C. */
@@ -207,12 +218,13 @@ export function buildCcCardView(i: CcCardViewInput): CcCardView {
     sub: move !== null && move > 0 ? `called only if ${sym} rises ${move.toFixed(1)}%, to ${price(cell.strike)}` : `called only if ${sym} finishes above ${price(cell.strike)}`,
     tone: ccPopTone(pop) === 'green' ? 'green' : 'amber',
   };
-  const gap = fill.gapPct === null ? '' : `${fill.gapPct.toFixed(1)}%`;
+  const gap = fill.gapPct === null ? '' : `${ccGapCents(cell.bid, cell.ask)} (${fill.gapPct.toFixed(1)}%)`;
+  const gapOnly = fill.gapPct === null ? '' : `${ccGapCents(cell.bid, cell.ask)} = ${fill.gapPct.toFixed(1)}%`;
   const fillFact: CcFact =
     fill.label === 'too_big'
       ? {
           label: 'FILL', big: CC_FILL_TEXT.too_big, tone: 'amber',
-          sub: `${gap} of the price (limit ${DEFAULT_CC_RULES.WIDTH_PCT_MAX}%) · the ${dollars(ccMidTotal(grid, cell))} middle price is not real`,
+          sub: `gap ${gapOnly} of the price, the most allowed is ${ccGapLimitCents(cell.bid, cell.ask)}¢ · the ${dollars(ccMidTotal(grid, cell))} middle price is not real`,
         }
       : {
           label: 'FILL', big: CC_FILL_TEXT[fill.label], tone: 'green',
@@ -279,7 +291,7 @@ export function ccOutsideTheView(grid: CcGrid, goal: CcGoal): CcOutsideRow[] {
   for (const cell of grid.cells) {
     const pop = ccPopPct(cell.delta);
     if (cell.wide) {
-      rows.push({ cell, why: `Price gap too big (limit ${DEFAULT_CC_RULES.WIDTH_PCT_MAX}%)` });
+      rows.push({ cell, why: `Price gap ${ccGapCents(cell.bid, cell.ask)}, the most allowed here is ${ccGapLimitCents(cell.bid, cell.ask)}¢` });
     } else if (pop > hi) {
       rows.push({ cell, why: `Strike too far above the price: POP ${pop}%, your view wants ${lo} to ${hi}%` });
     } else if (pop < lo) {
