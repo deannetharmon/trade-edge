@@ -97,7 +97,16 @@ describe('parity: shared function, isEligibleCcLeg and evaluatePmccQuoteQuality 
     expect(q.status === 'wide_warning').toBe(shared.warn);
     expect(q.structurallyUsable).toBe(expected !== 'reject');
     // The covered-call leg is a short leg: same reject decision with the ceiling applied.
-    if (role === 'short') expect(ccEligible(bid, ask)).toBe(!shared.reject);
+    // Covered calls pass one tick (1 cent) instead of 5 cents (Ian, 2026-11-16), so they match the shared function with that floor.
+    if (role === 'short') expect(ccEligible(bid, ask)).toBe(!evaluateHybridSpread(bid, ask, { ...POLICY, ceiling: ceilingFor(role), floorDollars: 0.01 }).reject);
+  });
+});
+
+describe('covered calls: one tick of gap, then strict 10%', () => {
+  it('a 5 cent gap on a 40 cent call is rejected (12.5%)', () => { expect(ccEligible(0.375, 0.425)).toBe(false); });
+  it('a 1 cent gap on a 15 cent call passes (6.7%)', () => { expect(ccEligible(0.14, 0.15)).toBe(true); });
+  it('PMCC keeps the 5 cent allowance', () => {
+    expect(evaluatePmccQuoteQuality(pmccLeg(0.375, 0.425), DEFAULT_PMCC_QUOTE_POLICY, asOf, 'open', 'short').structurallyUsable).toBe(true);
   });
 });
 

@@ -83,7 +83,7 @@ describe('XYZ qualified card', () => {
     expect(v.headline).toBe('$58C · Exp Dec 11 · not a pick');
     expect(v.collect.big).toBe('About $60');
     expect(v.fill.big).toBe('Price gap too big');
-    expect(v.fill.sub).toBe('gap 25¢ = 58.8% of the price, the most allowed is 5¢ · the $85 middle price is not real');
+    expect(v.fill.sub).toBe('gap 25¢ = 58.8% of the price, the most allowed is 4¢ · the $85 middle price is not real');
     expect(v.canReview).toBe(false);
     expect(v.reviewOffNote).toBe('Pick a green-outline cell instead.');
     expect(ccMidTotal(g, c58)).toBe(85);
@@ -224,7 +224,7 @@ describe('calls outside your view', () => {
     const rows = ccOutsideTheView(g, 'balanced');
     expect(rows.map(r => r.cell.strike)).toEqual([27, 28, 30]);
     expect(rows[0].why).toBe('Strike too far above the price: POP 89%, your view wants 65 to 80%');
-    expect(rows[2].why).toBe('Price gap 21¢, the most allowed here is 5¢');
+    expect(rows[2].why).toBe('Price gap 21¢, the most allowed here is 4¢');
   });
 });
 
@@ -240,7 +240,7 @@ describe('METU $27C Dec 4 (matches TastyTrade: bid 0.15, mid 0.40, ask 0.65)', (
 
 describe('the most gap allowed: the larger of 5 cents and 10% of the mid', () => {
   it('cheap options allow 5 cents; pricier ones allow 10%; never over 50 cents', () => {
-    expect(ccGapLimitCents(0.1, 0.4)).toBe(5);     // mid 0.25 -> 2.5 cents, floor 5
+    expect(ccGapLimitCents(0.1, 0.4)).toBe(3);     // mid 0.25 -> 2.5 cents, rounds to 3
     expect(ccGapLimitCents(2.0, 2.4)).toBe(22);    // mid 2.20 -> 22 cents
     expect(ccGapLimitCents(9.0, 11.0)).toBe(50);   // mid 10 -> 100 cents, capped at 50
   });
