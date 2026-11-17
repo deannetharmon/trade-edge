@@ -78,7 +78,7 @@ describe('registry structure: every criterion declares what it is', () => {
 describe('receipts are built from the registry', () => {
   it('groups the search range, always-applied limits, advisory, and capacity', () => {
     const groups = byKey(buildCcReceipt(values()));
-    expect(groups.search.items).toEqual(['21–45 DTE', 'Δ 0.20–0.35', 'width ≤ 10% of mid (min $0.05)', 'cap $0.50']);
+    expect(groups.search.items).toEqual(['21–45 DTE', 'POP 65–80%', 'width ≤ 10% of mid (min $0.05)', 'cap $0.50']);
     expect(groups.search.label).toContain('rescan to change');
     expect(groups.always.items).toEqual(['strike ≥ stock price and your cost basis', 'two-sided quotes', 'expires 10+ days before earnings']);
     expect(groups.advisory.items).toEqual(['OI 100']);
@@ -97,7 +97,7 @@ describe('receipts are built from the registry', () => {
 
   it('reflects the configured rules', () => {
     const groups = byKey(buildCcReceipt(values({ rules: { ...DEFAULT_CC_RULES, DTE_MIN: 14, DTE_MAX: 21, WIDTH_PCT_MAX: 5, WIDTH_CEILING: 0.3, OI_MIN: 500 } })));
-    expect(groups.search.items).toEqual(['14–21 DTE', 'Δ 0.20–0.35', 'width ≤ 5% of mid (min $0.05)', 'cap $0.30']);
+    expect(groups.search.items).toEqual(['14–21 DTE', 'POP 65–80%', 'width ≤ 5% of mid (min $0.05)', 'cap $0.30']);
     expect(groups.advisory.items).toEqual(['OI 500']);
   });
 

@@ -119,7 +119,8 @@ export const CC_CRITERIA: readonly CcCriterion[] = [
         { label: 'Δ .30–.40', min: 0.3, max: 0.4 },
       ],
     },
-    summary: (v) => `Δ ${v.rules.DELTA_MIN.toFixed(2)}–${v.rules.DELTA_MAX.toFixed(2)}`,
+    // POP = (1 - delta) x 100: the receipt speaks POP; the edit control above still takes delta.
+    summary: (v) => `POP ${Math.round((1 - v.rules.DELTA_MAX) * 100)}–${Math.round((1 - v.rules.DELTA_MIN) * 100)}%`,
   },
   {
     id: 'width',

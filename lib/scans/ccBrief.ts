@@ -41,6 +41,6 @@ export function ccBriefReason(i: CcBriefInput): string {
   const pop = (d: number) => Math.round((1 - d) * 100);
   const parts = [`No call with POP ${pop(i.deltaMax)}–${pop(i.deltaMin)}%`];
   if (i.nearest) parts.push(`nearest POP ${pop(i.nearest.delta)}% at ${usd(i.nearest.strike)}`);
-  if (i.floor !== null && i.price !== null && i.floor > i.price) parts.push(`floor ${usd(i.floor)}`);
+  // The floor is not repeated here: the cost line and the timing line under the row already say it.
   return parts.join(' · ');
 }
