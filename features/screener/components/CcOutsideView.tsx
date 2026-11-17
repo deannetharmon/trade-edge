@@ -7,7 +7,7 @@
 import { useState } from 'react';
 import type { ScreenResult } from '@/lib/scans/types';
 import { ccCellNumbers, DEFAULT_CC_GOAL } from '@/lib/scans/ccGridView';
-import { ccGapCents, ccMidPerShare, ccExpirationLabel, ccGoalPopRange, ccOutsideTheView, ccPopPct, ccPriceGapPct, ccStockMovePctSafe, ccStrikeLabel, ccTimingNote } from '@/lib/scans/ccGuidance';
+import { ccGapCents, ccIfCalledLabel, ccMidPerShare, ccExpirationLabel, ccGoalPopRange, ccOutsideTheView, ccPopPct, ccPriceGapPct, ccStockMovePctSafe, ccStrikeLabel, ccTimingNote } from '@/lib/scans/ccGuidance';
 import { trendRsiForDisplay } from '@/lib/scans/trendRsi';
 import { useCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
 import { CcBasisLine } from './CcBasisLine';
@@ -33,7 +33,7 @@ export function CcOutsideView({ result, textFaint }: { result: ScreenResult; tex
             <div className="mt-1 overflow-x-auto">
               <p className={textFaint}>Information only, never a pick.</p>
               <table data-testid="cc-outside-table" className="w-full border-collapse">
-                <thead><tr className={textFaint}>{['Expiry', 'Strike', '% above price', 'POP', 'You would collect', 'Price gap', 'Why outside your view'].map(h => <th key={h} className="p-1 text-left font-medium">{h}</th>)}</tr></thead>
+                <thead><tr className={textFaint}>{['Expiry', 'Strike', '% above price', 'POP', 'You would collect', 'Total if called', 'Price gap', 'Why outside your view'].map(h => <th key={h} className="p-1 text-left font-medium">{h}</th>)}</tr></thead>
                 <tbody>
                   {outside.map(({ cell, why }) => {
                     const n = ccCellNumbers(grid, cell);
@@ -46,6 +46,7 @@ export function CcOutsideView({ result, textFaint }: { result: ScreenResult; tex
                         <td className="p-1">{up !== null ? `${up.toFixed(1)}%` : '—'}</td>
                         <td className="p-1">{ccPopPct(cell.delta)}%</td>
                         <td className="p-1">${Math.round(n.premiumTotal)} <span className="opacity-70">(bid {cell.bid.toFixed(2)} · mid {ccMidPerShare(cell.bid, cell.ask).toFixed(2)} · ask {cell.ask.toFixed(2)})</span></td>
+                        <td className="p-1">{ccIfCalledLabel(grid, cell, n.premiumTotal)}</td>
                         <td className="p-1">{gap !== null ? `${ccGapCents(cell.bid, cell.ask)} (${gap.toFixed(1)}%)` : '—'}</td>
                         <td className="p-1">{why}</td>
                       </tr>
