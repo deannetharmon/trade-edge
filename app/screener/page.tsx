@@ -70,6 +70,7 @@ import { leapsReviewTradeDisabledReason } from '@/lib/leaps-analysis/tradeQualif
 import { computePmccScore } from '@/lib/scans/pmccScore';
 import { PMCC_DECISION_POLICY_VERSION, pmccDecisionRankEligible, unavailablePmccDecision } from '@/lib/scans/pmccDecision';
 import { evaluateEventRisk, type EventRiskResult } from '@/lib/scans/eventRisk';
+import { detectPmccFilterConflict } from '@/lib/scans/pmccFilterConflict';
 import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
 import { HeldCompareForPairs } from '@/features/screener/components/HeldCompareCard';
@@ -5997,6 +5998,8 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
     const deltaRemovedNotice = selectDeltaRemovedNotice(result.pmccDeltaRemoval, false, earningsRemovedNotice != null);
     // PMCC-HELD-UNDERWATER-0001A: a long-leg blocker gets its own line, so an earnings or delta banner never hides it.
     const longLegBlockerLine = earningsRemovedNotice || deltaRemovedNotice ? selectLongLegBlockerLine(result.pmccLegRejections, result.pmccPairingCounts) : null;
+    // PMCC-FILTER-CONFLICT-0001: when the trader's own delta range and above-price floor cannot both be met, say so with the real numbers.
+    const filterConflict = !earningsRemovedNotice ? detectPmccFilterConflict(result.pmccLegRejections) : null;
     return <article className={`rounded-xl border ${th.border} p-4`} data-testid="pmcc-audit-card">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-bold">{result.symbol}</span>
@@ -6015,6 +6018,7 @@ function PmccResultCard({ result, th, onTrade, pmccBestFit, heldLeapHasResults, 
               <p className={`mt-2 text-xs ${th.textMuted}`} data-testid="held-delta-removed-reason">{deltaRemovedNotice.reasonLine}</p>
             </>
           : <p className={`mt-2 text-xs ${th.textMuted}`}>{result.failReasons.join(' · ')}</p>}
+      {filterConflict && <div className="mt-2 rounded border border-amber-700 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200" data-testid="pmcc-filter-conflict">{filterConflict.line}</div>}
       {longLegBlockerLine && <p className={`mt-2 text-xs ${th.textMuted}`} data-testid="pmcc-long-leg-blocker">{longLegBlockerLine}</p>}
       <p className={`mt-2 text-[10px] ${th.textFaint}`}>Scan timestamp: {result.pmccAsOf ?? '—'} · Earnings: {result.earningsDate ?? 'not available'} · Readiness: no executable pair</p>
       {counts && <p className={`mt-2 text-[10px] ${th.textFaint}`}>Eligible long/short: {counts.eligibleLongLegs}/{counts.eligibleShortLegs} · evaluated {counts.combinationsEvaluated}/{counts.potentialCombinations} combinations · safety omitted {counts.combinationsOmittedBySafetyLimit} · retention omitted {counts.qualifiedPairsOmittedByRetention + counts.nearMissPairsOmittedByRetention}</p>}
