@@ -35,6 +35,8 @@ export interface HybridSpreadParams {
   warnPct: number;
   /** Absolute reject ceiling, dollars per share. null/undefined = no ceiling (LEAP legs). */
   ceiling?: number | null;
+  /** Dollars of gap that always pass, whatever the percent. Default $0.05; covered calls pass $0.01 (one tick). */
+  floorDollars?: number;
 }
 
 export interface HybridSpreadResult {
@@ -70,7 +72,8 @@ export function evaluateHybridSpread(
 
   // Fail closed on a nonsensical percent rather than letting NaN comparisons pass everything.
   if (!(Number.isFinite(params.rejectPct) && params.rejectPct >= 0)) return result('too_wide');
-  if (w * 200 > Math.max(200 * ONE_TICK_FLOOR_UNITS, params.rejectPct * s)) return result('too_wide');
+  const floorUnits = params.floorDollars === undefined ? ONE_TICK_FLOOR_UNITS : toUnits(params.floorDollars);
+  if (w * 200 > Math.max(200 * floorUnits, params.rejectPct * s)) return result('too_wide');
 
   const ceiling = params.ceiling;
   if (ceiling != null) {

@@ -36,6 +36,8 @@ import { earningsOnOrBeforeExpiration, EARNINGS_MIN_DAYS_AFTER_EXPIRY } from './
 // SCAN-ALIGN-0001C2 -- the warn percent is unused for CC eligibility (CC has no width warning);
 // the shared function only needs it to be well-formed.
 const CC_WARN_PCT_UNUSED = 5;
+/** Covered calls allow one tick (1 cent) of gap whatever the percent; the shared default is 5 cents. Decided with Ian 2026-11-16. */
+export const CC_GAP_FLOOR_DOLLARS = 0.01;
 
 function daysUntil(dateStr: string): number {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -113,7 +115,7 @@ export function ccLegRejection(leg: WheelChainLeg, dte: number, p: CcEligibility
 
   // SCAN-ALIGN-0001C2 -- hybrid width rule + $0.50-style ceiling via the shared function (the
   // same one evaluatePmccQuoteQuality uses for the PMCC short leg). The old fixed dollar cap is gone.
-  if (evaluateHybridSpread(leg.bid, leg.ask, { rejectPct: p.widthPctMax, warnPct: CC_WARN_PCT_UNUSED, ceiling: p.widthCeiling }).reject) return 'WIDTH';
+  if (evaluateHybridSpread(leg.bid, leg.ask, { rejectPct: p.widthPctMax, warnPct: CC_WARN_PCT_UNUSED, ceiling: p.widthCeiling, floorDollars: CC_GAP_FLOOR_DOLLARS }).reject) return 'WIDTH';
   // OI-LIQUIDITY-CHOICE-0001, Phase 2 -- OI *below the minimum* is deliberately NOT a gate: it is disclosed by
   // ccLiquidityWarning at the point a candidate is selected (see buildCcSpreadCandidate).
   return null;
@@ -428,7 +430,7 @@ export function buildCcGrid(
       cells.push({
         expiration: expDate, dte, strike: leg.strikePrice, delta, bid: leg.bid, ask: leg.ask, premiumPerShare,
         openInterest: leg.openInterest, occSymbol: leg.occSymbol,
-        wide: evaluateHybridSpread(leg.bid, leg.ask, { rejectPct: params.rules.WIDTH_PCT_MAX, warnPct: CC_WARN_PCT_UNUSED, ceiling: params.rules.WIDTH_CEILING }).reject,
+        wide: evaluateHybridSpread(leg.bid, leg.ask, { rejectPct: params.rules.WIDTH_PCT_MAX, warnPct: CC_WARN_PCT_UNUSED, ceiling: params.rules.WIDTH_CEILING, floorDollars: CC_GAP_FLOOR_DOLLARS }).reject,
         thinOi: !(typeof leg.openInterest === 'number' && leg.openInterest >= params.rules.OI_MIN),
         calledAwayTotal,
         calledAwayPct: calledAwayTotal === null || basis === null ? null : Math.round((calledAwayTotal / (basis * 100 * contracts)) * 10000) / 100,

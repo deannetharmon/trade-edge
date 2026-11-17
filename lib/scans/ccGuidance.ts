@@ -6,7 +6,7 @@
 //
 // Rules (Ian, Alan, Dean 2026-11-16):
 //   POP = (1 - |delta|) x 100. A model estimate from the broker's delta (which reflects IV), not a guarantee.
-//   Price gap = (ask - bid) / mid. Fails the shared hybrid rule at max($0.05, 10% of mid) or over $0.50 (see hybridSpread.ts).
+//   Price gap = (ask - bid) / mid. Fails the hybrid rule at max($0.01, 10% of mid) for covered calls or over $0.50 (see hybridSpread.ts).
 //   Fill label: Good (gap under 5%), OK (5 to 10%, expect a few cents less), Price gap too big (fails the rule; never a pick).
 //   A call is a pick only when it is not wide and pays at least Dean's minimum (his chip, never below CC_HARD_MIN_PAY).
 //   "Small & safe" is offered only when no call is a pick: the highest-paying call that is not wide, sits at or above the
@@ -16,6 +16,7 @@ import type { CcGrid, CcGridCell } from './ccGridTypes';
 import { ccCellNumbers, ccStockMovePct, CC_GOALS, type CcGoal } from './ccGridView';
 import { ccRsiChip, type CcRsiChipState } from './ccRsiChip';
 import { DEFAULT_CC_RULES } from './constants';
+import { CC_GAP_FLOOR_DOLLARS } from './covered-call-finder';
 
 /** POP at or above this is "safe" for a Small & safe call (Dean, 2026-11-16: 90%). */
 export const CC_SMALL_SAFE_MIN_POP = 90;
@@ -131,12 +132,12 @@ const perShare = (n: number) => `$${n.toFixed(2)}`;
 /** The bid/ask gap in cents, e.g. "30¢". */
 export const ccGapCents = (bid: number, ask: number): string => `${Math.round((ask - bid) * 100)}¢`;
 /**
- * The widest bid/ask gap that still passes, in cents: the larger of 5 cents and 10% of the mid (hybridSpread.ts), and never
- * over the 50 cent ceiling. A gap of 5 cents or less always passes, however big it is as a percent of a cheap option.
+ * The widest bid/ask gap that still passes, in cents: the larger of 1 cent (one tick) and 10% of the mid, and never over the
+ * 50 cent ceiling.
  */
 export function ccGapLimitCents(bid: number, ask: number): number {
   const mid = (bid + ask) / 2;
-  const limit = Math.max(0.05, (DEFAULT_CC_RULES.WIDTH_PCT_MAX / 100) * mid);
+  const limit = Math.max(CC_GAP_FLOOR_DOLLARS, (DEFAULT_CC_RULES.WIDTH_PCT_MAX / 100) * mid);
   return Math.round(Math.min(limit, DEFAULT_CC_RULES.WIDTH_CEILING) * 100);
 }
 export const ccMidPerShare = (bid: number, ask: number) => Math.floor(((bid + ask) / 2) * 100 + 1e-9) / 100;

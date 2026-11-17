@@ -119,7 +119,7 @@ describe('parity: pool + view picks the same call as a scan with those rules', (
   });
 
   it('6. half-cent mid: premium is the mid rounded DOWN, in the pick and everywhere', () => {
-    const c = chain({ [e]: [leg(e, 108, 0.28, 0.10, 0.15)] });
+    const c = chain({ [e]: [leg(e, 108, 0.28, 0.12, 0.13)] });
     const { pool, cap } = expectParity('half cent', c, 100, 90);
     const pick = findBestCoveredCallWithFallback(pool, { rules: ccViewRules(BASE, DEFAULT_CC_VIEW), capacity: cap, stockPrice: 100 });
     expect(pick?.ccPremiumPerShare).toBe(0.12);
