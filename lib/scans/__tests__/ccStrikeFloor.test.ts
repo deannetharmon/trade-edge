@@ -27,10 +27,10 @@ describe('ccStrikeFloor', () => {
     expect(ccStrikeFloorMessage('NO_STOCK_PRICE')).toMatch(/stock price unavailable/i);
   });
 
-  it('opt-in drops the floor to the stock price but still needs a known basis', () => {
-    expect(ccStrikeFloor(62.85, 82, { allowBelowBasis: true })).toEqual({ floor: 62.85, missing: null });
-    expect(ccStrikeFloor(62.85, null, { allowBelowBasis: true })).toEqual({ floor: null, missing: 'NO_COST_BASIS' });
-    expect(ccStrikeFloor(null, 82, { allowBelowBasis: true })).toEqual({ floor: null, missing: 'NO_STOCK_PRICE' });
-    expect(ccStrikeFloor(62.85, 82, { allowBelowBasis: false }).floor).toBe(82);
+  it('R1: there is no opt-in; the floor is always the higher of price and basis, and a basis must be known', () => {
+    expect(ccStrikeFloor(62.85, 82)).toEqual({ floor: 82, missing: null });
+    expect(ccStrikeFloor(62.85, null)).toEqual({ floor: null, missing: 'NO_COST_BASIS' });
+    expect(ccStrikeFloor(null, 82)).toEqual({ floor: null, missing: 'NO_STOCK_PRICE' });
+    expect(ccStrikeFloor(90, 82).floor).toBe(90);
   });
 });

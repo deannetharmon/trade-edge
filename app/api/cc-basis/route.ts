@@ -48,7 +48,7 @@ export async function GET(_req: NextRequest) {
   }
 }
 
-// POST /api/cc-basis   Body: { settings: { SYMBOL: { basis: number | null, allowBelowBasis: boolean } } }
+// POST /api/cc-basis   Body: { settings: { SYMBOL: { basis: number | null } } }
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// DELETE /api/cc-basis  ->  clears every typed basis and opt-in
+// DELETE /api/cc-basis  ->  clears every typed basis
 export async function DELETE(_req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

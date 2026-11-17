@@ -1,5 +1,6 @@
 // lib/ccBasis/ccBasisSettings.ts
-// CC-WHEEL-0001 S2a -- per-user typed cost basis and per-position "allow strikes below my basis" opt-in.
+// CC-WHEEL-0001 S2a -- per-user typed cost basis. (The per-position "allow strikes below my basis" opt-in was removed by
+// CC-PMCC-GUIDANCE-0001 R1: a stored allowBelowBasis from an older save is read and ignored, never honored.)
 //
 // Pure: validation and the overlay onto broker capacity. Storage is app/api/cc-basis/route.ts (Redis per user).
 // Precedence for a covered call's cost basis: typed > adjusted (proven from assignment history, S5) > broker. The source is
@@ -12,8 +13,6 @@ export type CcBasisSource = 'typed' | 'adjusted' | 'broker';
 export interface CcBasisEntry {
   /** Per-share cost basis the trader typed ("your basis"); null means none typed. */
   basis: number | null;
-  /** Trader accepts strikes below the basis for this position (a loss if called). Never implied. */
-  allowBelowBasis: boolean;
 }
 
 export type CcBasisSettings = Record<string, CcBasisEntry>;
@@ -33,7 +32,7 @@ function sanitizeBasis(raw: unknown): number | null {
   return Math.round(raw * 10000) / 10000;
 }
 
-/** Drops anything malformed. An entry with no typed basis and no opt-in is dropped (it says nothing). */
+/** Drops anything malformed, and any legacy allowBelowBasis. An entry with no typed basis is dropped (it says nothing). */
 export function sanitizeCcBasisSettings(raw: unknown): CcBasisSettings {
   const out: CcBasisSettings = {};
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
@@ -43,9 +42,8 @@ export function sanitizeCcBasisSettings(raw: unknown): CcBasisSettings {
     if (!symbol || !value || typeof value !== 'object') continue;
     const v = value as Record<string, unknown>;
     const basis = sanitizeBasis(v.basis);
-    const allowBelowBasis = v.allowBelowBasis === true;
-    if (basis === null && !allowBelowBasis) continue;
-    out[symbol] = { basis, allowBelowBasis };
+    if (basis === null) continue;
+    out[symbol] = { basis };
   }
   return out;
 }
@@ -53,18 +51,16 @@ export function sanitizeCcBasisSettings(raw: unknown): CcBasisSettings {
 export interface ResolvedCcBasis {
   basis: number | null;
   source: CcBasisSource | null;
-  allowBelowBasis: boolean;
 }
 
 /** The basis a covered call is judged against for one symbol, and where it came from. */
 export function resolveCcBasis(settings: CcBasisSettings, symbol: string, capacity: CoveredCallCapacity | null, adjustedBasis: number | null = null): ResolvedCcBasis {
   const key = normalizeCcBasisSymbol(symbol);
   const entry = key ? settings[key] : undefined;
-  const allowBelowBasis = entry?.allowBelowBasis === true;
-  if (entry && entry.basis !== null) return { basis: entry.basis, source: 'typed', allowBelowBasis };
-  if (adjustedBasis !== null && adjustedBasis > 0) return { basis: adjustedBasis, source: 'adjusted', allowBelowBasis };
+  if (entry && entry.basis !== null) return { basis: entry.basis, source: 'typed' };
+  if (adjustedBasis !== null && adjustedBasis > 0) return { basis: adjustedBasis, source: 'adjusted' };
   const broker = capacity && capacity.costBasisComplete && capacity.costBasis !== null && capacity.costBasis > 0 ? capacity.costBasis : null;
-  return { basis: broker, source: broker === null ? null : 'broker', allowBelowBasis };
+  return { basis: broker, source: broker === null ? null : 'broker' };
 }
 
 /**

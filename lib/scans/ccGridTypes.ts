@@ -12,8 +12,6 @@ export interface CcGridCell {
   premiumPerShare: number;
   openInterest: number;
   occSymbol: string;
-  /** Strike is below the cost basis: a loss if called away. Hidden by default in the grid. */
-  belowFloor: boolean;
   /** The bid/ask spread is wider than the width rule. Shown, tagged; never hidden. */
   wide: boolean;
   /** Open interest is below the preference. Shown, tagged. */
@@ -37,5 +35,5 @@ export interface CcGrid {
   expirations: Array<{ expiration: string; dte: number }>;
   cells: CcGridCell[];
   /** Calls left out of the grid, with the reason, so nothing disappears without a count. */
-  left: { inTheMoney: number; unusableQuote: number; earnings: number; farOtm: number; truncated: number };
+  left: { inTheMoney: number; belowCost: number; unusableQuote: number; earnings: number; farOtm: number; truncated: number };
 }

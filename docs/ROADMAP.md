@@ -26,7 +26,8 @@ Why: the status lines in tickets and docs/TICKET-STATUS.md (last swept 2026-09-2
 - RSI-ENTRY-0001: slices P, A0, A1, A1b on main (2026-10-01). A2 (UI wiring) and B are not on main (A2a branch only). Step 0 (close-adjustment check on a Vercel preview) is still open.
 - RSI-CALL-GATE-0001: covered-call side shipped inside CC-WHEEL S3. PMCC short-call side not built; no RSI in the PMCC short-call code.
 - QUOTE-GUARD-0001: slice A done. Width scan control and IC ratio display still open.
-- CC-WHEEL-0001 open: S5 (adjusted basis from assignment history) and S6 (Income Engine and AI aligned). Not started.
+- CC-WHEEL-0001 open: S6 (Income Engine and AI aligned). S5 (adjusted basis from assignment history) shipped.
+- CC-PMCC-GUIDANCE-0001 slice A (CC decision area, POP, price gap, minimum pay, Small & safe, no below-cost calls): built, awaiting preview. Slice B (yield floor) and PMCC P1-P2 not started.
 
 ### Not built (verified: no code on main)
 - PORTFOLIO-AI-0003 (structured Portfolio Advisor report): draft v2. Today only the docked "Ask AI" chat exists (PORTFOLIO-AI-0001). No report UI and no flag.

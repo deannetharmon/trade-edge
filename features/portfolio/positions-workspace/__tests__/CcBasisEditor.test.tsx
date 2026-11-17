@@ -22,14 +22,14 @@ describe('CcBasisEditor', () => {
     expect(await screen.findByText(/Calls use \$80(\.00)? \(broker\)/)).toBeTruthy();
   });
 
-  it('saves a typed basis and opt-in, then labels it as typed', async () => {
+  it('saves a typed basis (no below-basis option exists), then labels it as typed', async () => {
     render(<CcBasisEditor symbol="TQQQ" brokerBasis={80} th={th} />);
     fireEvent.click(await screen.findByText('Edit'));
     fireEvent.change(screen.getByLabelText('TQQQ cost basis per share'), { target: { value: '76.5' } });
-    fireEvent.click(screen.getByRole('checkbox'));
+    expect(screen.queryByRole('checkbox')).toBeNull();
     fireEvent.click(screen.getByText('Save'));
-    await waitFor(() => expect(stored).toEqual({ TQQQ: { basis: 76.5, allowBelowBasis: true } }));
-    expect(await screen.findByText(/typed by you\) · below-basis OK/)).toBeTruthy();
+    await waitFor(() => expect(stored).toEqual({ TQQQ: { basis: 76.5 } }));
+    expect(await screen.findByText(/typed by you\)/)).toBeTruthy();
   });
 
   it('rejects a bad number without saving', async () => {

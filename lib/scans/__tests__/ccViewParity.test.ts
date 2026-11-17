@@ -48,8 +48,8 @@ function expectParity(name: string, c: Chain, price: number, basis: number, earn
   const pool = buildCcPool(c, { dteMin: BASE.DTE_MIN, dteMax: BASE.DTE_MAX, stockPrice: price, costBasis: basis });
   for (const [label, view] of VIEWS) {
     const rules = ccViewRules(BASE, view);
-    const old = findBestCoveredCallWithFallback(c, { rules, capacity: cap, stockPrice: price, earningsDate, allowBelowBasis: false });
-    const viaPool = findBestCoveredCallWithFallback(pool, { rules, capacity: cap, stockPrice: price, earningsDate, allowBelowBasis: false });
+    const old = findBestCoveredCallWithFallback(c, { rules, capacity: cap, stockPrice: price, earningsDate });
+    const viaPool = findBestCoveredCallWithFallback(pool, { rules, capacity: cap, stockPrice: price, earningsDate });
     expect(viaPool, `${name} / ${label}`).toEqual(old);
   }
   return { pool, cap };

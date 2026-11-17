@@ -7,10 +7,10 @@ import type { CcGrid, CcGridCell } from './ccGridTypes';
 
 export type CcGoal = 'upside' | 'balanced' | 'income';
 
-export const CC_GOALS: Record<CcGoal, { label: string; min: number; max: number }> = {
-  upside: { label: 'Keep more upside', min: 0.10, max: 0.20 },
-  balanced: { label: 'Balanced', min: 0.20, max: 0.35 },
-  income: { label: 'More income', min: 0.30, max: 0.40 },
+export const CC_GOALS: Record<CcGoal, { label: string; min: number; max: number; pop: string }> = {
+  upside: { label: 'Keep more upside', min: 0.10, max: 0.20, pop: 'POP 80–90%' },
+  balanced: { label: 'Balanced', min: 0.20, max: 0.35, pop: 'POP 65–80%' },
+  income: { label: 'More income', min: 0.30, max: 0.40, pop: 'POP 60–70%' },
 };
 
 export const DEFAULT_CC_GOAL: CcGoal = 'balanced';
@@ -24,7 +24,6 @@ export function cellInGoal(cell: Pick<CcGridCell, 'delta'>, goal: CcGoal): boole
 }
 
 export interface CcGridWindowOptions {
-  showBelowFloor: boolean;
   /** Show every expiration instead of the first few. */
   allExpirations: boolean;
   /** The selected cell, when the user clicked one. Otherwise the best cell for the goal is used. */
@@ -40,7 +39,6 @@ export interface CcGridWindow {
   cell: (expiration: string, strike: number) => CcGridCell | undefined;
   /** The cell the summary describes. */
   anchor: CcGridCell | null;
-  hiddenBelowFloor: number;
   moreExpirations: number;
   moreStrikesAbove: number;
   moreStrikesBelow: number;
@@ -73,11 +71,6 @@ export function ccStockMovePct(grid: CcGrid, cell: Pick<CcGridCell, 'strike'>): 
   return typeof grid.stockPrice === 'number' && grid.stockPrice > 0 ? Math.round((cell.strike / grid.stockPrice - 1) * 1000) / 10 : null;
 }
 
-/** The market's estimate of the chance this call finishes in the money, as a whole percent. An estimate, not a guarantee. */
-export function ccChanceCalledPct(cell: Pick<CcGridCell, 'delta'>): number {
-  return Math.round(cell.delta * 100);
-}
-
 /**
  * Best cell to describe by default: cells in the goal's delta range first (else all), then the ones with a tight spread,
  * then the one closest to the middle of the goal's delta range, then the larger premium. The biggest total if called away
@@ -99,8 +92,7 @@ export function pickDefaultAnchor(cells: CcGridCell[], goal: CcGoal): CcGridCell
 }
 
 export function selectCcGridWindow(grid: CcGrid, goal: CcGoal, opts: CcGridWindowOptions): CcGridWindow {
-  const hiddenBelowFloor = opts.showBelowFloor ? 0 : grid.cells.filter(c => c.belowFloor).length;
-  const visible = grid.cells.filter(c => opts.showBelowFloor || !c.belowFloor);
+  const visible = grid.cells;
   const shownExpirations = grid.expirations.filter(e => visible.some(c => c.expiration === e.expiration));
   // The selected trade's expiration is always shown, even when it is past the first few.
   const expirations = opts.allExpirations
@@ -126,26 +118,9 @@ export function selectCcGridWindow(grid: CcGrid, goal: CcGoal, opts: CcGridWindo
     moreStrikesAbove = allStrikes.length - 1 - hi;
   }
   return {
-    expirations, strikes, cell: (e, k) => byKey.get(`${e}|${k}`), anchor, hiddenBelowFloor,
+    expirations, strikes, cell: (e, k) => byKey.get(`${e}|${k}`), anchor,
     moreExpirations, moreStrikesAbove, moreStrikesBelow, anyInGoal: inShown.some(c => cellInGoal(c, goal)),
   };
-}
-
-const usd = (n: number) => '$' + Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 });
-
-/** One plain sentence for the selected trade. */
-export function ccGridSummary(grid: CcGrid, cell: CcGridCell, symbol?: string): string {
-  const n = ccCellNumbers(grid, cell);
-  const per = grid.contracts === 1 ? 'one call' : `${grid.contracts} calls`;
-  const head = `Sell ${per}${symbol ? ' on ' + symbol : ''} expiring in ${cell.dte} days at the $${cell.strike} strike and collect ${usd(n.premiumTotal)}${n.usedBid ? ' (at the bid: the spread is wide)' : ''}.`;
-  if (n.calledAwayTotal === null) return head;
-  const move = ccStockMovePct(grid, cell);
-  const needs = move !== null && move > 0 ? ` and ${symbol ?? 'the stock'} would have to rise ${move.toFixed(0)}% to get there` : '';
-  const total = n.calledAwayTotal;
-  const tail = total >= 0
-    ? ` If the shares are called away${needs} you make ${usd(total)} in total against your cost.`
-    : ` If the shares are called away you lose ${usd(total)} in total against your cost: this strike is below it.`;
-  return head + tail;
 }
 
 export interface CcSellPricePick {
@@ -156,17 +131,17 @@ export interface CcSellPricePick {
 
 /**
  * "I would be happy to sell my shares at $X": the call to sell. Within one expiration (the one the trader is looking at)
- * it takes the lowest strike at or above X, which keeps the most premium for a price the trader accepts. A strike below
- * the cost basis is never offered unless the grid is allowed to show it. Pure.
+ * it takes the lowest strike at or above X, which keeps the most premium for a price the trader accepts. The grid never holds
+ * a strike below the cost basis (CC-PMCC-GUIDANCE-0001 R1). Pure.
  */
 export function pickCellForSellPrice(
   grid: CcGrid,
   sellPrice: number,
-  opts: { expiration: string; allowBelowFloor: boolean },
+  opts: { expiration: string },
 ): CcSellPricePick {
   if (!Number.isFinite(sellPrice) || sellPrice <= 0) return { cell: null, note: 'Enter a price above 0.' };
   const pool = grid.cells
-    .filter(c => c.expiration === opts.expiration && (opts.allowBelowFloor || !c.belowFloor))
+    .filter(c => c.expiration === opts.expiration)
     .sort((a, b) => a.strike - b.strike);
   if (pool.length === 0) return { cell: null, note: 'No strikes are available for this expiration.' };
   const atOrAbove = pool.find(c => c.strike >= sellPrice);
@@ -191,11 +166,10 @@ export const CC_QUICK_PICKS: Array<{ kind: CcQuickPickKind; label: string }> = [
 ];
 
 /**
- * One-click picks over the whole grid. Wide-spread cells never win (their numbers use the bid and are shaky), and below-basis
- * cells only compete when the grid is showing them. Returns null when nothing qualifies. Pure.
+ * One-click picks over the whole grid. Wide-spread cells never win (their numbers use the bid and are shaky), Returns null when nothing qualifies. Pure.
  */
-export function pickQuickCell(grid: CcGrid, kind: CcQuickPickKind, opts: { allowBelowFloor: boolean }): CcGridCell | null {
-  const pool = grid.cells.filter(c => !c.wide && (opts.allowBelowFloor || !c.belowFloor));
+export function pickQuickCell(grid: CcGrid, kind: CcQuickPickKind): CcGridCell | null {
+  const pool = grid.cells.filter(c => !c.wide);
   if (pool.length === 0) return null;
   const total = (c: CcGridCell) => ccCellNumbers(grid, c).premiumTotal;
   const best = (list: CcGridCell[], score: (c: CcGridCell) => number) =>
@@ -222,21 +196,17 @@ export interface CcFilteredGrid {
   grid: CcGrid;
   /** Calls left out because their open interest is under the scan's minimum. */
   hiddenThinOi: number;
-  /** Calls left out because they pay less than the minimum, in total, for the contracts. */
-  hiddenLowPay: number;
 }
 
 /**
- * Leaves out calls nobody can reasonably fill (open interest under the scan's minimum) and calls that pay too little to
- * bother with. Each call is counted once, open interest first, so the footnote adds up. Pure.
+ * Leaves out calls nobody can reasonably fill (open interest under the scan's minimum). CC-PMCC-GUIDANCE-0001: a call that
+ * pays under Dean's minimum is no longer hidden here; the grid shows it muted and ccGuidance decides what it is. Pure.
  */
-export function filterCcGrid(grid: CcGrid, opts: { minPay: number }): CcFilteredGrid {
+export function filterCcGrid(grid: CcGrid): CcFilteredGrid {
   let hiddenThinOi = 0;
-  let hiddenLowPay = 0;
   const cells = grid.cells.filter(c => {
     if (c.thinOi) { hiddenThinOi++; return false; }
-    if (opts.minPay > 0 && ccCellNumbers(grid, c).premiumTotal < opts.minPay) { hiddenLowPay++; return false; }
     return true;
   });
-  return { grid: { ...grid, cells }, hiddenThinOi, hiddenLowPay };
+  return { grid: { ...grid, cells }, hiddenThinOi };
 }

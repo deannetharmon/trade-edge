@@ -2,7 +2,7 @@
 // CC-WHEEL-0001 S1 -- the one covered-call strike floor.
 //
 // A covered call may never be offered at a strike below max(stock price, cost
-// basis). The floor needs BOTH numbers. When either is missing the floor is
+// basis). CC-PMCC-GUIDANCE-0001 R1: there is no opt-in and no switch for this. The floor needs BOTH numbers. When either is missing the floor is
 // unknown and the caller must return no candidates (fail closed); it must never
 // fall back to the one number it has, because that would offer a strike that
 // locks in a loss against a basis nobody checked.
@@ -17,23 +17,13 @@ function isPositive(n: number | null | undefined): n is number {
   return typeof n === 'number' && Number.isFinite(n) && n > 0;
 }
 
-export interface CcStrikeFloorOptions {
-  /**
-   * The trader opted in, for this position, to strikes below the cost basis (a loss if called). The floor then
-   * drops to the stock price (never in the money). The basis must still be known: opting in does not excuse
-   * a missing basis.
-   */
-  allowBelowBasis?: boolean;
-}
-
 export function ccStrikeFloor(
   stockPrice: number | null | undefined,
   costBasis: number | null | undefined,
-  options: CcStrikeFloorOptions = {},
 ): CcStrikeFloor {
   if (!isPositive(stockPrice)) return { floor: null, missing: 'NO_STOCK_PRICE' };
   if (!isPositive(costBasis)) return { floor: null, missing: 'NO_COST_BASIS' };
-  return { floor: options.allowBelowBasis === true ? stockPrice : Math.max(stockPrice, costBasis), missing: null };
+  return { floor: Math.max(stockPrice, costBasis), missing: null };
 }
 
 export function ccStrikeFloorMessage(missing: CcStrikeFloorMissing): string {

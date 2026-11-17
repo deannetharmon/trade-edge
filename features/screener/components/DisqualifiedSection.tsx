@@ -19,8 +19,8 @@ import { useId, type ReactNode } from 'react';
 import type { ScreenResult } from '@/lib/scans/types';
 import { useDisclosureA11y } from '../lib/useDisclosureA11y';
 import { CspFundamentalsRow } from './CspFundamentalsRow';
-import { CcBelowBasisToggle } from './CcBelowBasisToggle';
 import { CommittedCallsLine } from './CommittedCallsLine';
+import { CcBasisLine } from './CcBasisLine';
 import { ExpirationDisclosure } from './ExpirationDisclosure';
 
 export interface DisqualifiedSectionProps {
@@ -132,7 +132,7 @@ function DisqualifiedCard({
       )}
       {result.strategy === 'CC' && result.ccFloorInfo && (
         <div className="px-3 pb-2">
-          <CcBelowBasisToggle symbol={result.symbol} floor={result.ccFloorInfo.floor} price={result.ccFloorInfo.price} allowBelowBasis={result.ccFloorInfo.allowBelowBasis} />
+          <CcBasisLine basis={result.ccBasis} floor={result.ccFloorInfo.floor} price={result.ccFloorInfo.price} />
         </div>
       )}
       {result.bestCandidate && (
