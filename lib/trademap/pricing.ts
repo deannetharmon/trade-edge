@@ -123,3 +123,11 @@ export function bsPrice(
     ? discountedSpot * normCdf(d1) - discountedStrike * normCdf(d2)
     : discountedStrike * normCdf(-d2) - discountedSpot * normCdf(-d1);
 }
+
+/** Implied volatility as a fraction (1.84 = 184%) from the broker's raw value; null when missing or not positive. */
+export function ivToFraction(raw: unknown): number | null {
+  if (raw == null || raw === '') return null;
+  const n = typeof raw === 'number' ? raw : parseFloat(String(raw));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n <= 5 ? n : n / 100; // same threshold as lib/ivUnits: up to 500% is already a fraction
+}

@@ -11,6 +11,7 @@ export type TabId =
   | 'screener'
   | 'research'
   | 'market'
+  | 'trade-map'
   | 'engine'
   | 'wheel'
   | 'rinse-repeat'
@@ -37,6 +38,7 @@ export const TABS: TabDef[] = [
   { id: 'screener',        label: 'SCREENER',          href: '/screener',        desc: 'Scan tickers for BPS, BCS, IC setups',             hideable: false },
   { id: 'research',        label: 'RESEARCH',          href: '/research',        desc: 'Look up any stock: price, chart and key stats',    hideable: true  },
   { id: 'market',          label: 'MARKET MAP',        href: '/market',          desc: 'Live S&P 500, Dow and Nasdaq map with your positions', hideable: true  },
+  { id: 'trade-map',       label: 'TRADE MAP',         href: '/trade-map',       desc: 'Build an options trade on live quotes and see its P/L map', hideable: true  },
   { id: 'engine',          label: 'INCOME ENGINE',     href: '/engine',          desc: 'SPX spread suggestions and capital allocation',    hideable: true  },
   { id: 'wheel',           label: 'WHEEL',             href: '/wheel',           desc: 'Wheel candidates and defaults',                    hideable: true  },
   { id: 'rinse-repeat',    label: 'REPEAT', href: '/rinse-repeat',    desc: 'Re-screen past winners and track cycles',          hideable: true  },

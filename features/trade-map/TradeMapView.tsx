@@ -1,0 +1,298 @@
+// features/trade-map/TradeMapView.tsx
+//
+// OPTMAP-0001 S2: read-only Trade Map. Pick a symbol, strategy, expiry and
+// strikes from the live TastyTrade chain, see a price x date P/L grid, chance
+// of profit and max profit / max loss. Polls quotes every 5s and shows the
+// real-time gate status. Planning only: there is no Send button and no order
+// path in this slice. Stale data is labelled, controls stay enabled so the
+// tool works after hours.
+
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ttFetch } from '@/lib/tastytrade/client';
+import type { Theme } from '@/lib/theme';
+import { THEMES } from '@/lib/theme';
+import {
+  fetchMetrics, fetchNestedChain, fetchOptionQuotes, fetchUnderlyingQuote, symbolKey,
+  type ChainExpiration, type OptionQuote, type UnderlyingMetrics, type UnderlyingQuote,
+} from '@/lib/trademap/chain';
+import { chanceOfProfit } from '@/lib/trademap/pop';
+import { evaluateGate, type GateQuote } from '@/lib/trademap/realtimeGate';
+import { DEFAULT_PRICING_PARAMS, buildDateAxis, buildPriceAxis, computeGrid } from '@/lib/trademap/gridModel';
+import { DISPLAY_MODES, formatModeValue, modeValue, type DisplayMode } from '@/lib/trademap/displayModes';
+import { expiryMetrics } from '@/lib/trademap/strategyLegs';
+import {
+  STRATEGIES, buildTradeLegs, defaultAnchorStrike, defaultWidthSteps, legSpecs, type StrategyId,
+} from '@/lib/trademap/strategies';
+
+const POLL_MS = 5000;
+const ROWS = 11;
+const COLS = 9;
+
+const fetcher = (path: string) => ttFetch(path, '');
+
+function localIso(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function shortDate(iso: string): string {
+  const [, m, d] = iso.split('-');
+  return `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(m) - 1]} ${Number(d)}`;
+}
+
+function money(v: number | null): string {
+  if (v == null) return '—';
+  return `${v < 0 ? '-' : ''}$${Math.round(Math.abs(v)).toLocaleString('en-US')}`;
+}
+
+export default function TradeMapView({ theme }: { theme: Theme }) {
+  const th = THEMES[theme];
+  const [symbolInput, setSymbolInput] = useState('SPY');
+  const [symbol, setSymbol] = useState<string | null>(null);
+  const [chain, setChain] = useState<ChainExpiration[]>([]);
+  const [metrics, setMetrics] = useState<UnderlyingMetrics | null>(null);
+  const [underlying, setUnderlying] = useState<UnderlyingQuote | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const [strategy, setStrategy] = useState<StrategyId>('bps');
+  const [expiry, setExpiry] = useState<string | null>(null);
+  const [anchor, setAnchor] = useState<number | null>(null);
+  const [widthSteps, setWidthSteps] = useState(1);
+  const [rangePct, setRangePct] = useState<number | null>(null);
+  const [ivMult, setIvMult] = useState(1);
+  const [mode, setMode] = useState<DisplayMode>('pl-dollar');
+
+  const [quotes, setQuotes] = useState<Record<string, OptionQuote>>({});
+  const [lastSuccessMs, setLastSuccessMs] = useState<number | null>(null);
+  const [successfulPolls, setSuccessfulPolls] = useState(0);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [axisSpot, setAxisSpot] = useState<number | null>(null);
+
+  const today = localIso(new Date(nowMs));
+  const exp = useMemo(() => chain.find(c => c.date === expiry) ?? null, [chain, expiry]);
+  const spot = underlying?.price ?? null;
+  const expiryIv = exp && metrics ? metrics.ivByExpiration[exp.date] ?? null : null;
+  const expectedMove = expiryIv != null && exp ? expiryIv * Math.sqrt(exp.dte / 365) : null;
+
+  const specs = useMemo(
+    () => (exp && anchor != null && spot != null ? legSpecs(strategy, exp, anchor, spot, widthSteps) : null),
+    [exp, anchor, spot, strategy, widthSteps],
+  );
+  const symbolsKey = specs ? specs.map(s => s.symbol).join('|') : '';
+
+  const load = useCallback(async () => {
+    const sym = symbolInput.trim().toUpperCase();
+    if (!sym) return;
+    setLoading(true); setLoadError(null);
+    try {
+      const t = localIso(new Date());
+      const [c, m, u] = await Promise.all([fetchNestedChain(fetcher, sym, t), fetchMetrics(fetcher, sym), fetchUnderlyingQuote(fetcher, sym)]);
+      if (c.length === 0) throw new Error('No listed expirations found for that symbol');
+      if (!u) throw new Error('No stock quote available for that symbol');
+      const nearest30 = c.reduce((best, e) => (Math.abs(e.dte - 30) < Math.abs(best.dte - 30) ? e : best), c[0]);
+      setSymbol(sym); setChain(c); setMetrics(m); setUnderlying(u);
+      setExpiry(nearest30.date); setRangePct(null); setIvMult(1);
+      setQuotes({}); setLastSuccessMs(null); setSuccessfulPolls(0);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Load failed');
+    } finally { setLoading(false); }
+  }, [symbolInput]);
+
+  // Choose default strikes when the symbol, expiry or strategy changes (not on every price tick).
+  const spotRef = useRef<number | null>(null);
+  spotRef.current = spot;
+  useEffect(() => {
+    if (!exp || spotRef.current == null) return;
+    const strikes = exp.strikes.map(s => s.strike);
+    const move = metrics && metrics.ivByExpiration[exp.date] != null ? metrics.ivByExpiration[exp.date] * Math.sqrt(exp.dte / 365) : null;
+    setAnchor(defaultAnchorStrike(strategy, strikes, spotRef.current, move));
+    setWidthSteps(defaultWidthSteps(strikes, spotRef.current));
+    setAxisSpot(spotRef.current);
+    setRangePct(null);
+  }, [exp, strategy, metrics]);
+
+  // Poll quotes every 5s for the stock and the strategy's legs.
+  useEffect(() => {
+    if (!symbol || !specs) return;
+    let cancelled = false;
+    setSuccessfulPolls(0);
+    const poll = async () => {
+      try {
+        const [u, q] = await Promise.all([fetchUnderlyingQuote(fetcher, symbol), fetchOptionQuotes(fetcher, specs.map(s => s.symbol))]);
+        if (cancelled) return;
+        if (u) setUnderlying(u);
+        setQuotes(q);
+        setLastSuccessMs(Date.now());
+        setSuccessfulPolls(n => n + 1);
+        setPollError(null);
+      } catch (e) {
+        if (!cancelled) setPollError(e instanceof Error ? e.message : 'Poll failed');
+      }
+    };
+    poll();
+    const id = setInterval(poll, POLL_MS);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [symbol, symbolsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const built = useMemo(() => (specs && exp ? buildTradeLegs(specs, exp.date, quotes) : null), [specs, exp, quotes]);
+  const legs = built?.legs ?? null;
+  const em = legs ? expiryMetrics(legs) : null;
+  const params = useMemo(() => ({ ...DEFAULT_PRICING_PARAMS, dividendYield: metrics?.dividendYield ?? 0, ivMultiplier: ivMult }), [metrics, ivMult]);
+  const effRange = rangePct ?? (expectedMove != null ? Math.min(0.9, Math.max(0.05, expectedMove)) : 0.2);
+
+  const grid = useMemo(() => {
+    if (!legs || !exp || axisSpot == null) return null;
+    const prices = buildPriceAxis(axisSpot, effRange, ROWS);
+    const dates = buildDateAxis(today, exp.date, COLS);
+    return prices && dates ? computeGrid(legs, prices, dates, params) : null;
+  }, [legs, exp, axisSpot, effRange, params, today]);
+
+  const pop = useMemo(
+    () => (legs && spot != null && expiryIv != null ? chanceOfProfit(legs, spot, today, expiryIv, params.riskFreeRate, params.dividendYield) : null),
+    [legs, spot, expiryIv, today, params],
+  );
+
+  const gate = useMemo(() => {
+    const toGate = (q: OptionQuote | undefined, sym: string): GateQuote => ({ symbol: sym, updatedAtMs: q?.updatedAtMs ?? null, halted: q?.halted ?? null, bid: q?.bid ?? null, ask: q?.ask ?? null });
+    return evaluateGate({
+      nowMs,
+      legs: (specs ?? []).map(s => toGate(quotes[symbolKey(s.symbol)], s.symbol)),
+      others: underlying ? [{ symbol: underlying.symbol, updatedAtMs: underlying.updatedAtMs, halted: false, bid: null, ask: null }] : [],
+      lastSuccessMs, pollIntervalMs: POLL_MS, successfulPolls,
+    });
+  }, [nowMs, specs, quotes, underlying, lastSuccessMs, successfulPolls]);
+
+  const basis = { netDebit: grid?.netDebit ?? 0, maxLoss: em?.maxLoss ?? null };
+  const band = (em?.maxLoss ?? (grid ? Math.abs(grid.netDebit) : 0)) * 0.05;
+  const cellStyle = (pl: number | null): React.CSSProperties => {
+    if (pl == null) return {};
+    const scale = Math.max(1, em?.maxLoss ?? Math.abs(grid?.netDebit ?? 1));
+    const a = Math.min(0.55, 0.08 + (Math.abs(pl) / scale) * 0.5);
+    if (Math.abs(pl) <= band) return { background: 'rgba(245,158,11,0.30)' };
+    return { background: pl > 0 ? `rgba(16,185,129,${a})` : `rgba(244,63,94,${a})` };
+  };
+
+  const statusColor = gate.status === 'live' ? 'bg-emerald-500' : gate.status === 'warming' ? 'bg-amber-500' : 'bg-rose-500';
+  const statusLabel = gate.status === 'live' ? 'LIVE' : gate.status === 'warming' ? 'WARMING UP' : 'STALE';
+  const ageSec = lastSuccessMs != null ? Math.max(0, Math.round((nowMs - lastSuccessMs) / 1000)) : null;
+  const strikesList = exp?.strikes.map(s => s.strike) ?? [];
+  const sel = `${th.input} ${th.inputBorder} ${th.text} border rounded px-2 py-1 text-xs`;
+  const chip = (on: boolean) => `px-2.5 py-1 text-xs rounded border ${on ? 'border-[var(--accent,#3b82f6)] text-[var(--accent,#3b82f6)]' : `${th.border} ${th.textFaint}`}`;
+  const money2 = (v: number | null | undefined, unbounded: boolean | undefined) => (unbounded ? 'Unlimited' : money(v ?? null));
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className={`${th.card} ${th.border} border rounded-lg p-3 flex flex-wrap items-center gap-3`}>
+        <input value={symbolInput} onChange={e => setSymbolInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') load(); }} className={`${sel} w-24 uppercase`} aria-label="Symbol" />
+        <button onClick={load} disabled={loading} className={chip(true)}>{loading ? 'Loading…' : 'Load'}</button>
+        {symbol && underlying && <span className={`text-sm font-semibold ${th.text}`}>{symbol} ${underlying.price.toFixed(2)}</span>}
+        {symbol && (
+          <span className={`ml-auto flex items-center gap-2 text-xs ${th.textFaint}`} title={gate.reasons.join('; ')}>
+            <span className={`inline-block w-2 h-2 rounded-full ${statusColor}`} />
+            {statusLabel}{ageSec != null ? ` · updated ${ageSec}s ago` : ''}
+          </span>
+        )}
+      </div>
+      {loadError && <div className="text-xs text-rose-400">{loadError}</div>}
+
+      {symbol && exp && (
+        <>
+          <div className={`${th.card} ${th.border} border rounded-lg p-3 flex flex-col gap-3`}>
+            <div className="flex flex-wrap gap-2">
+              {STRATEGIES.map(s => <button key={s.id} onClick={() => setStrategy(s.id)} className={chip(strategy === s.id)}>{s.label}</button>)}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {chain.slice(0, 24).map(c => <button key={c.date} onClick={() => setExpiry(c.date)} className={chip(c.date === expiry)}>{shortDate(c.date)} · {c.dte}d</button>)}
+            </div>
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <label className={th.textFaint}>Strike{' '}
+                <select className={sel} value={anchor ?? ''} onChange={e => setAnchor(Number(e.target.value))}>
+                  {strikesList.map(k => <option key={k} value={k}>{k}</option>)}
+                </select>
+              </label>
+              {STRATEGIES.find(s => s.id === strategy)?.hasWidth && (
+                <label className={th.textFaint}>Width (strikes){' '}
+                  <select className={sel} value={widthSteps} onChange={e => setWidthSteps(Number(e.target.value))}>
+                    {[1, 2, 3, 4, 5, 6, 8, 10].map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
+              )}
+              <label className={th.textFaint}>Range ±{Math.round(effRange * 100)}%{' '}
+                <input type="range" min={5} max={90} value={Math.round(effRange * 100)} onChange={e => { setRangePct(Number(e.target.value) / 100); }} />
+              </label>
+              <label className={th.textFaint}>IV ×{ivMult.toFixed(2)}{' '}
+                <input type="range" min={50} max={300} step={5} value={Math.round(ivMult * 100)} onChange={e => setIvMult(Number(e.target.value) / 100)} />
+              </label>
+            </div>
+            {specs && <div className={`text-xs ${th.textFaint}`}>{specs.map(s => `${s.side === 'long' ? '+' : '−'}${s.strike}${s.right}`).join('  ')}</div>}
+          </div>
+
+          {gate.status !== 'live' && (
+            <div className="text-xs text-amber-400">
+              {gate.status === 'warming' ? 'Waiting for fresh quotes. ' : 'Quotes are not live: '}
+              {gate.reasons.slice(0, 2).join('; ')}. Planning only; nothing here can place an order.
+            </div>
+          )}
+          {pollError && <div className="text-xs text-rose-400">Quote refresh failed: {pollError}</div>}
+          {built?.error && <div className="text-xs text-rose-400">{built.error}</div>}
+
+          {legs && em && grid && (
+            <>
+              <div className={`${th.card} ${th.border} border rounded-lg p-3 grid grid-cols-2 md:grid-cols-5 gap-3 text-center`}>
+                {[
+                  { k: grid.netDebit > 0 ? 'NET DEBIT' : 'NET CREDIT', v: money(Math.abs(grid.netDebit)) },
+                  { k: 'MAX LOSS', v: money2(em.maxLoss, em.maxLossUnbounded) },
+                  { k: 'MAX PROFIT', v: money2(em.maxProfit, em.maxProfitUnbounded) },
+                  { k: 'CHANCE OF PROFIT', v: pop == null ? '—' : `${Math.round(pop * 100)}%` },
+                  { k: 'BREAKEVEN', v: em.breakevens.length ? em.breakevens.map(b => `$${b.toFixed(2)}`).join(' / ') : '—' },
+                ].map(m => (
+                  <div key={m.k}><div className={`text-[10px] tracking-wider ${th.textFaint}`}>{m.k}</div><div className={`text-sm font-semibold ${th.text}`}>{m.v}</div></div>
+                ))}
+              </div>
+              <div className={`text-[11px] ${th.textFaint}`}>
+                {em.maxProfit != null && em.maxLoss != null && em.maxLoss > 0 ? `Max profit ÷ max loss ${(em.maxProfit / em.maxLoss).toFixed(2)}× · ` : ''}
+                Earnings: {metrics?.earningsDate && metrics.earningsDate <= exp.date ? `${shortDate(metrics.earningsDate)} (before expiry)` : metrics?.earningsDate ? `${shortDate(metrics.earningsDate)} (after expiry)` : 'none listed'}
+                {' · '}Black-Scholes estimate (early exercise ignored; dividends approximate). Not an order price.
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {DISPLAY_MODES.map(m => <button key={m.id} onClick={() => setMode(m.id)} className={chip(mode === m.id)}>{m.label}</button>)}
+              </div>
+              <div className={`${th.card} ${th.border} border rounded-lg overflow-x-auto`}>
+                <table className="w-full text-xs text-center">
+                  <thead>
+                    <tr className={th.textFaint}>
+                      <th className="p-1.5 text-left">Price</th>
+                      {grid.dates.map(d => <th key={d} className="p-1.5 font-normal">{shortDate(d)}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {grid.prices.map((p, i) => (
+                      <tr key={p}>
+                        <td className={`p-1.5 text-left ${th.textMuted}`}>${p.toFixed(2)} <span className={th.textFaint}>{axisSpot ? `${(((p / axisSpot) - 1) * 100).toFixed(0)}%` : ''}</span></td>
+                        {grid.cells[i].map((c, j) => (
+                          <td key={j} className={`p-1.5 ${th.text}`} style={cellStyle(c ? c.pl : null)}>
+                            {formatModeValue(mode, modeValue(mode, c, basis))}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

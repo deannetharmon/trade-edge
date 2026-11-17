@@ -10,6 +10,7 @@ export const config = {
     '/trade-log/:path*',
     '/performance/:path*',
     '/wheel-simulator/:path*',
+    '/trade-map/:path*',
     '/profile/:path*',
   ],
 };
