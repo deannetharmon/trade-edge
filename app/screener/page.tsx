@@ -1656,7 +1656,8 @@ function runCcChecklist(
   const ivxValue: number | null = bestCandidate ? (metrics.expirationIvxMap?.[bestCandidate.expiration] ?? null) : null;
   const ccGridBuilt = capacityCheck.status !== 'fail' ? buildCcGrid(chainData, { rules: gridRules, capacity, stockPrice: price, earningsDate }) : undefined;
   // CC-PMCC-GUIDANCE-0001: calls inside the POP range that fail only on price gap, so the reason line names the real blocker.
-  const widePopInRange = (ccGridBuilt?.cells ?? []).filter(g => g.wide && !g.thinOi && Math.abs(g.delta) >= ccRules.DELTA_MIN && Math.abs(g.delta) <= ccRules.DELTA_MAX).length;
+  // Counts the same calls the "Show the calls" table lists (thin open interest included), so the line and the table agree.
+  const widePopInRange = (ccGridBuilt?.cells ?? []).filter(g => g.wide && Math.abs(g.delta) >= ccRules.DELTA_MIN && Math.abs(g.delta) <= ccRules.DELTA_MAX).length;
   return {
     symbol, strategy: 'CC', price, ivr: ivrValue,
     ivx: ivxValue, ivx30: null, ivHv30Diff: null, liquidityRating: null,

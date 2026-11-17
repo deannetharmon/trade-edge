@@ -240,7 +240,8 @@ describe('METU $27C Dec 4 (matches TastyTrade: bid 0.15, mid 0.40, ask 0.65)', (
 
 describe('the most gap allowed: the larger of 5 cents and 10% of the mid', () => {
   it('cheap options allow 5 cents; pricier ones allow 10%; never over 50 cents', () => {
-    expect(ccGapLimitCents(0.1, 0.4)).toBe(3);     // mid 0.25 -> 2.5 cents, rounds to 3
+    expect(ccGapLimitCents(0.1, 0.4)).toBe(2);     // mid 0.25 -> 2.5 cents, rounds down to 2
+    expect(ccGapLimitCents(0.5, 0.85)).toBe(6);    // mid 0.675 -> 6.75 cents, rounds down to 6
     expect(ccGapLimitCents(2.0, 2.4)).toBe(22);    // mid 2.20 -> 22 cents
     expect(ccGapLimitCents(9.0, 11.0)).toBe(50);   // mid 10 -> 100 cents, capped at 50
   });
