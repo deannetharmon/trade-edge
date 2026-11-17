@@ -45,7 +45,7 @@ export function CcOutsideView({ result, textFaint }: { result: ScreenResult; tex
                         <td className="p-1">{ccStrikeLabel(cell.strike)}</td>
                         <td className="p-1">{up !== null ? `${up.toFixed(1)}%` : '—'}</td>
                         <td className="p-1">{ccPopPct(cell.delta)}%</td>
-                        <td className="p-1">${Math.round(n.premiumTotal)} <span className="opacity-70">(bid {cell.bid.toFixed(2)} / ask {cell.ask.toFixed(2)})</span></td>
+                        <td className="p-1">${Math.round(n.premiumTotal)} <span className="opacity-70">(bid {cell.bid.toFixed(2)} · mid {((cell.bid + cell.ask) / 2).toFixed(2)} · ask {cell.ask.toFixed(2)})</span></td>
                         <td className="p-1">{gap !== null ? `${gap.toFixed(1)}%` : '—'}</td>
                         <td className="p-1">{why}</td>
                       </tr>

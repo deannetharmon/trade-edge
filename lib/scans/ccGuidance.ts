@@ -196,7 +196,7 @@ export function buildCcCardView(i: CcCardViewInput): CcCardView {
   const collect: CcFact = {
     label: 'COLLECT',
     big: verdict === 'wide' ? `About ${dollars(n.premiumTotal)}` : dollars(n.premiumTotal),
-    sub: `${verdict === 'wide' ? 'the bid price · ' : ''}bid ${perShare(cell.bid)} · ask ${perShare(cell.ask)}`,
+    sub: `${verdict === 'wide' ? 'the bid price · ' : ''}bid ${perShare(cell.bid)} · mid ${perShare((cell.bid + cell.ask) / 2)} · ask ${perShare(cell.ask)}`,
     tone,
   };
   const keep: CcFact = {
