@@ -138,7 +138,8 @@ export const ccGapCents = (bid: number, ask: number): string => `${Math.round((a
 export function ccGapLimitCents(bid: number, ask: number): number {
   const mid = (bid + ask) / 2;
   const limit = Math.max(CC_GAP_FLOOR_DOLLARS, (DEFAULT_CC_RULES.WIDTH_PCT_MAX / 100) * mid);
-  return Math.round(Math.min(limit, DEFAULT_CC_RULES.WIDTH_CEILING) * 100);
+  // Whole cents, rounded down: gaps come in whole cents, so a 6.75 cent limit means 6 cents is the most that passes.
+  return Math.floor(Math.min(limit, DEFAULT_CC_RULES.WIDTH_CEILING) * 100 + 1e-9);
 }
 export const ccMidPerShare = (bid: number, ask: number) => Math.floor(((bid + ask) / 2) * 100 + 1e-9) / 100;
 
