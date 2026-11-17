@@ -4918,6 +4918,9 @@ function HeldPmccOrderModal({ result, th, onClose, shortDeltaMin, shortDeltaMax,
   const [orderId, setOrderId] = useState('');
   const [entryLimit, setEntryLimit] = useState(parseFloat(pair.shortLeg.executablePrice.toFixed(2)));
   const [occAcknowledgedAt, setOccAcknowledgedAt] = useState<string | null>(null);
+  // PMCC-EVENT-NOTE-0001: say why the event-calendar check did not verify, instead of leaving the button grey with no reason.
+  const [eventCalendarNote, setEventCalendarNote] = useState<string | null>(null);
+  const [eventRetry, setEventRetry] = useState(0);
   const [eventRisk, setEventRisk] = useState<EventRiskResult>(() => evaluateEventRisk({
     now: new Date().toISOString(), shortExpiration: pair.shortLeg.expiration, longExpiration: pair.longLeg.expiration,
     quoteAgeSeconds: null, tradingHalted: null, eventCheckedAt: null, earningsDate: null, exDividendDate: null,
@@ -4947,9 +4950,15 @@ function HeldPmccOrderModal({ result, th, onClose, shortDeltaMin, shortDeltaMax,
     const from = new Date().toISOString().slice(0, 10);
     const to = pair.shortLeg.expiration;
     fetch(`/api/event-risk?symbol=${encodeURIComponent(result.symbol)}&from=${from}&to=${to}`)
-      .then(async response => response.ok ? response.json() : Promise.reject(new Error('Event calendar unavailable')))
+      .then(async response => {
+        if (response.ok) return response.json();
+        const body = await response.json().catch(() => null);
+        throw new Error(typeof body?.error === 'string' ? body.error : `Event calendar request failed (${response.status})`);
+      })
       .then(data => {
-        if (cancelled || !data?.verified || !data?.events) return;
+        if (cancelled) return;
+        if (!data?.verified || !data?.events) { setEventCalendarNote('The event calendar returned data this app does not recognize, so earnings, dividend and split dates could not be verified.'); return; }
+        setEventCalendarNote(null);
         const events = data.events;
         setEventRisk(evaluateEventRisk({
           now: new Date().toISOString(), shortExpiration: pair.shortLeg.expiration, longExpiration: pair.longLeg.expiration,
@@ -4961,9 +4970,9 @@ function HeldPmccOrderModal({ result, th, onClose, shortDeltaMin, shortDeltaMax,
           standardContract: null, occAcknowledgedAt,
         }, { version: 'event-risk-v1', quoteMaxAgeSeconds: 15, eventMaxAgeMinutes: 15 }));
       })
-      .catch(() => { /* falls back to the unknown-age default state set above */ });
+      .catch((e: unknown) => { if (!cancelled) setEventCalendarNote(e instanceof Error ? e.message : 'Event calendar unavailable'); });
     return () => { cancelled = true; };
-  }, [occAcknowledgedAt, pair.longLeg.expiration, pair.shortLeg.expiration, pair.shortLeg.quote.ageSeconds, pair.shortLeg.strike, result.price, result.symbol]);
+  }, [eventRetry, occAcknowledgedAt, pair.longLeg.expiration, pair.shortLeg.expiration, pair.shortLeg.quote.ageSeconds, pair.shortLeg.strike, result.price, result.symbol]);
 
   const money = (value: number | null | undefined) => value == null ? '—' : `$${value.toFixed(2)}`;
   const plDollar = positionSnapshot?.avgOpenPrice != null && positionSnapshot?.currentPrice != null
@@ -5090,6 +5099,12 @@ function HeldPmccOrderModal({ result, th, onClose, shortDeltaMin, shortDeltaMax,
 
         {(eventRisk.blockers.length > 0 || eventRisk.cautions.length > 0) && (
           <p className={`text-xs rounded border px-3 py-2 mb-3 ${eventRisk.status === 'NOT_QUALIFIED' ? 'border-red-700 text-red-300' : 'border-amber-700 text-amber-300'}`}>{[...eventRisk.blockers, ...eventRisk.cautions].join(' · ')}</p>
+        )}
+        {eventCalendarNote && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-amber-700 px-3 py-2 text-xs text-amber-300" data-testid="event-calendar-note">
+            <span>Event calendar check failed: {eventCalendarNote}</span>
+            <button type="button" onClick={() => { setEventCalendarNote(null); setEventRetry(n => n + 1); }} className="ml-auto rounded border border-amber-600 px-2 py-0.5 text-[11px] font-bold hover:bg-amber-500/10">Retry</button>
+          </div>
         )}
 
         <div className="rounded-lg border border-amber-700 bg-amber-500/5 p-3 mb-3">
