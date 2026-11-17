@@ -10,7 +10,7 @@ describe('ActiveCcRules: the covered-call result receipt', () => {
     render(<ActiveCcRules values={{ rules: { ...DEFAULT_CC_RULES, DTE_MIN: 30, DTE_MAX: 45, WIDTH_PCT_MAX: 5, WIDTH_CEILING: 0.3 } }} onEdit={vi.fn()} />);
     const receipt = screen.getByTestId('active-cc-rules');
     expect(receipt).toHaveTextContent('Search range · rescan to change');
-    expect(receipt).toHaveTextContent('30–45 DTE · POP 65–80% · width ≤ 5% of mid (min $0.05) · cap $0.30');
+    expect(receipt).toHaveTextContent('30–45 DTE · POP 65–80% · width ≤ 5% of mid (min $0.01) · cap $0.30');
     expect(receipt).toHaveTextContent('strike ≥ stock price and your cost basis · two-sided quotes · expires 10+ days before earnings');
     expect(receipt).toHaveTextContent('OI 100');
     expect(receipt).toHaveTextContent('POP · OTM · IVR · Call OI chips · sort');
