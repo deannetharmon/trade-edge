@@ -190,7 +190,7 @@ describe('R3 basis line', () => {
   });
 });
 
-import { ccGapLimitCents, ccTimingNote, ccOutsideTheView, ccGoalPopRange } from '../ccGuidance';
+import { ccGapLimitCents, ccIfCalledLabel, ccTimingNote, ccOutsideTheView, ccGoalPopRange } from '../ccGuidance';
 
 describe('stock card and scan row timing (METU: price 21.97, basis 26.94, RSI 42, cutoff 50)', () => {
   it('Wait: RSI under the cutoff, then price below cost', () => {
@@ -244,5 +244,15 @@ describe('the most gap allowed: the larger of 5 cents and 10% of the mid', () =>
     expect(ccGapLimitCents(0.5, 0.85)).toBe(6);    // mid 0.675 -> 6.75 cents, rounds down to 6
     expect(ccGapLimitCents(2.0, 2.4)).toBe(22);    // mid 2.20 -> 22 cents
     expect(ccGapLimitCents(9.0, 11.0)).toBe(50);   // mid 10 -> 100 cents, capped at 50
+  });
+});
+
+describe('total if called, outside-view table', () => {
+  const g = { ...xyz([]), basis: 26.94, contracts: 1 } as CcGrid;
+  it('adds what the shares gain to the premium collected', () => {
+    expect(ccIfCalledLabel(g, { strike: 28 }, 35)).toBe('+$141 ($106 on the shares + $35 collected)');
+  });
+  it('a dash when the basis is unknown', () => {
+    expect(ccIfCalledLabel({ ...g, basis: null }, { strike: 28 }, 35)).toBe('—');
   });
 });

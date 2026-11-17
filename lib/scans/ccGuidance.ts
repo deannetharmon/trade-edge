@@ -71,6 +71,20 @@ export function ccExpectedFill(grid: CcGrid, cell: CcGridCell): { low: number; h
   return { low: Math.min(bidTotal, high), high };
 }
 
+/**
+ * "Total if called" for the outside-view table: the premium you collect plus what the shares gain (strike minus cost basis),
+ * e.g. "+$263 ($253 on the shares + $10 collected)". Every strike in that table is at or above basis, so the shares part is not a loss.
+ * Null basis -> a dash, never a guess.
+ */
+export function ccIfCalledLabel(grid: CcGrid, cell: Pick<CcGridCell, 'strike'>, premiumTotal: number): string {
+  if (grid.basis === null) return '—';
+  const shares = Math.round((cell.strike - grid.basis) * 100 * grid.contracts);
+  const premium = Math.round(premiumTotal);
+  const total = shares + premium;
+  const sign = (n: number) => (n < 0 ? `-$${Math.abs(n)}` : `$${n}`);
+  return `${total < 0 ? '-' : '+'}$${Math.abs(total)} (${sign(shares)} on the shares + $${premium} collected)`;
+}
+
 /** What the middle price would pay for the whole order (shown only to say it is not real on a wide spread). */
 export function ccMidTotal(grid: CcGrid, cell: Pick<CcGridCell, 'bid' | 'ask'>): number {
   return Math.round(((cell.bid + cell.ask) / 2) * 100 * grid.contracts * 100) / 100;
