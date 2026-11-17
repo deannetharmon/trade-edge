@@ -224,6 +224,6 @@ describe('calls outside your view', () => {
     const rows = ccOutsideTheView(g, 'balanced');
     expect(rows.map(r => r.cell.strike)).toEqual([27, 28, 30]);
     expect(rows[0].why).toBe('Strike too far above the price: POP 89%, your view wants 65 to 80%');
-    expect(rows[2].why).toBe('Price gap too big: 51%, limit is 10%');
+    expect(rows[2].why).toBe('Price gap too big (limit 10%)');
   });
 });

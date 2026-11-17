@@ -277,8 +277,7 @@ export function ccOutsideTheView(grid: CcGrid, goal: CcGoal): CcOutsideRow[] {
   for (const cell of grid.cells) {
     const pop = ccPopPct(cell.delta);
     if (cell.wide) {
-      const gap = ccPriceGapPct(cell.bid, cell.ask);
-      rows.push({ cell, why: `Price gap too big: ${gap === null ? 'unknown' : `${Math.round(gap)}%`}, limit is ${DEFAULT_CC_RULES.WIDTH_PCT_MAX}%` });
+      rows.push({ cell, why: `Price gap too big (limit ${DEFAULT_CC_RULES.WIDTH_PCT_MAX}%)` });
     } else if (pop > hi) {
       rows.push({ cell, why: `Strike too far above the price: POP ${pop}%, your view wants ${lo} to ${hi}%` });
     } else if (pop < lo) {
