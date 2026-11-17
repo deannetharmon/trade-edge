@@ -7,8 +7,8 @@ describe('ccBriefReason', () => {
   it('names the delta range and the nearest valid call', () => {
     expect(ccBriefReason({ ...base, nearest: { strike: 29, delta: 0.17 } })).toBe('No call with POP 65–80% · nearest POP 83% at $29');
   });
-  it('adds the floor only when the stock is under it', () => {
-    expect(ccBriefReason({ ...base, nearest: { strike: 29, delta: 0.17 }, floor: 55, price: 30 })).toBe('No call with POP 65–80% · nearest POP 83% at $29 · floor $55');
+  it('does not repeat the floor (the cost line says it)', () => {
+    expect(ccBriefReason({ ...base, nearest: { strike: 29, delta: 0.17 }, floor: 55, price: 30 })).toBe('No call with POP 65–80% · nearest POP 83% at $29');
     expect(ccBriefReason({ ...base, floor: 90, price: 100 })).toBe('No call with POP 65–80%');
   });
   it('explains a basis floor above the price with the numbers (TQQQ: $78.75 floor, $57.35 price)', () => {
