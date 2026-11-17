@@ -59,11 +59,22 @@ const VALIDATION_WINDOW_MS = 15000;
 const money0 = (n: number) => '$' + Math.round(n).toLocaleString();
 const moneySigned = (n: number) => (n < 0 ? '−' : '+') + '$' + Math.abs(Math.round(n)).toLocaleString();
 
-/** The limit the dialog starts at: the mid, except on a wide spread where the mid is unlikely to fill, so the bid. */
+/**
+ * The limit the dialog starts at (CC-PMCC-GUIDANCE-0001, Ian): the mid rounded DOWN to the cent, never below the bid. On a
+ * wide spread the mid is unlikely to fill, so the bid. The dialog steps one cent at a time and never goes below the bid.
+ */
 export function ccStartingLimit(order: Pick<CcOrderInput, 'midPerShare' | 'bidPerShare' | 'wide'>): number {
   const bid = order.bidPerShare;
-  if (order.wide === true && typeof bid === 'number' && Number.isFinite(bid) && bid > 0) return parseFloat(bid.toFixed(2));
-  return parseFloat(order.midPerShare.toFixed(2));
+  const hasBid = typeof bid === 'number' && Number.isFinite(bid) && bid > 0;
+  if (order.wide === true && hasBid) return parseFloat(bid.toFixed(2));
+  const mid = Math.floor(order.midPerShare * 100 + 1e-9) / 100;
+  return parseFloat((hasBid ? Math.max(mid, bid) : mid).toFixed(2));
+}
+
+/** The lowest limit the stepper allows: the bid when known, else one cent. */
+export function ccLimitFloor(order: Pick<CcOrderInput, 'bidPerShare'>): number {
+  const bid = order.bidPerShare;
+  return typeof bid === 'number' && Number.isFinite(bid) && bid >= 0.01 ? parseFloat(bid.toFixed(2)) : 0.01;
 }
 
 export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
@@ -224,9 +235,9 @@ export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
           <div className="flex justify-between text-xs items-center">
             <span className={th.textFaint}>Entry limit / share <span className="text-[10px]">(${(entryLimit * 100).toLocaleString()} / contract)</span></span>
             <div className="flex items-center gap-1">
-              <button aria-label="Lower limit price" onClick={() => setEntryLimit((v) => parseFloat(Math.max(0.01, v - 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs`}>{'−'}</button>
+              <button aria-label="Lower limit price" onClick={() => setEntryLimit((v) => parseFloat(Math.max(ccLimitFloor(order), v - 0.01).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs`}>{'−'}</button>
               <span data-testid="cc-entry-limit" className="text-emerald-400 font-bold text-xs w-12 text-center">${entryLimit.toFixed(2)}</span>
-              <button aria-label="Raise limit price" onClick={() => setEntryLimit((v) => parseFloat((v + 0.05).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs`}>+</button>
+              <button aria-label="Raise limit price" onClick={() => setEntryLimit((v) => parseFloat((v + 0.01).toFixed(2)))} className={`w-5 h-5 rounded border ${th.border} ${th.textMuted} text-xs`}>+</button>
             </div>
           </div>
           {order.wide === true && typeof order.bidPerShare === 'number' && typeof order.askPerShare === 'number' && (

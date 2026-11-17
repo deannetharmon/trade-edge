@@ -87,9 +87,9 @@ export interface CcPool {
  */
 export function buildCcPool(
   chain: { expirations: string[]; chains: Record<string, WheelChainLeg[]> },
-  input: { dteMin: number; dteMax: number; stockPrice: number | null; costBasis: number | null; allowBelowBasis?: boolean; today?: Date },
+  input: { dteMin: number; dteMax: number; stockPrice: number | null; costBasis: number | null; today?: Date },
 ): CcPool {
-  const floor = ccStrikeFloor(input.stockPrice, input.costBasis, { allowBelowBasis: input.allowBelowBasis === true }).floor;
+  const floor = ccStrikeFloor(input.stockPrice, input.costBasis).floor;
   const chains: Record<string, WheelChainLeg[]> = {};
   if (floor === null) return { expirations: chain.expirations, chains };
   const wide: CcEligibilityParams = {
@@ -115,7 +115,7 @@ export interface CcRegradeInput {
   price: number | null;
   metrics: { ivRank?: number | null; earningsExpectedDate?: string | null; expirationIvxMap?: Record<string, number> | null };
   capacity: CoveredCallCapacity;
-  basisOpts?: { allowBelowBasis?: boolean; basisSource?: 'typed' | 'adjusted' | 'broker' | null };
+  basisOpts?: { basisSource?: 'typed' | 'adjusted' | 'broker' | null };
   /** The scan's rules (DTE and OI minimum); the view supplies delta and width. */
   baseRules: CcRulesType;
   isEtfOrIndex: boolean;
@@ -123,8 +123,8 @@ export interface CcRegradeInput {
 }
 
 /** How many pooled calls the view's delta range or width hides (the "N hidden by result filters" count). */
-export function countCcViewHidden(pool: CcPool, view: CcView, input: { dteMin: number; dteMax: number; stockPrice: number | null; costBasis: number | null; allowBelowBasis?: boolean; today?: Date }): number {
-  const floor = ccStrikeFloor(input.stockPrice, input.costBasis, { allowBelowBasis: input.allowBelowBasis === true }).floor;
+export function countCcViewHidden(pool: CcPool, view: CcView, input: { dteMin: number; dteMax: number; stockPrice: number | null; costBasis: number | null; today?: Date }): number {
+  const floor = ccStrikeFloor(input.stockPrice, input.costBasis).floor;
   if (floor === null) return 0;
   const params: CcEligibilityParams = {
     deltaTarget: { min: view.deltaMin, max: view.deltaMax },
@@ -158,10 +158,10 @@ export interface CcHiddenCall {
 /**
  * The calls the active view hides, for the "show me what's outside the view" list. Information only: never a pick and
  * never orderable. Strikes below the cost-basis floor and calls with no real market are not listed (they were never
- * candidates under any view); the strike grid's "Show below cost basis" covers the floor. Nearest to the view first.
+ * candidates under any view); the strike floor is a hard rule with no switch. Nearest to the view first.
  */
-export function listCcViewHidden(pool: CcPool, view: CcView, input: { dteMin: number; dteMax: number; stockPrice: number | null; costBasis: number | null; allowBelowBasis?: boolean; today?: Date }): CcHiddenCall[] {
-  const floor = ccStrikeFloor(input.stockPrice, input.costBasis, { allowBelowBasis: input.allowBelowBasis === true }).floor;
+export function listCcViewHidden(pool: CcPool, view: CcView, input: { dteMin: number; dteMax: number; stockPrice: number | null; costBasis: number | null; today?: Date }): CcHiddenCall[] {
+  const floor = ccStrikeFloor(input.stockPrice, input.costBasis).floor;
   if (floor === null) return [];
   const params: CcEligibilityParams = {
     deltaTarget: { min: view.deltaMin, max: view.deltaMax },

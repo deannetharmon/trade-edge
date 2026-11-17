@@ -164,9 +164,8 @@ export interface SpreadCandidate {
   ccWorkingShortCallContracts?: number;
   ccAvailableCoveredContracts?: number;
   ccCostBasis?: number | null;
-  /** CC-WHEEL-0001 S2b: where ccCostBasis came from, and whether the trader opted in to strikes below it. */
+  /** CC-WHEEL-0001 S2b: where ccCostBasis came from. */
   ccBasisSource?: 'typed' | 'adjusted' | 'broker' | null;
-  ccAllowBelowBasis?: boolean;
   ccPremiumPerShare?: number;
   ccPremiumPerContract?: number;
   ccPeriodYieldOnShares?: number | null;
@@ -246,8 +245,10 @@ export interface ScreenResult {
   ccViewHidden?: number;
   /** CC-SIMPLIFY-0001G: one-line reason a covered-call ticker did not qualify (the long text stays in failReasons). */
   ccBrief?: string;
-  /** CC-VISIBILITY-0001: the strike floor behind a covered-call result, so a no-result row can explain it and offer the below-basis opt-in. */
-  ccFloorInfo?: { floor: number | null; price: number | null; allowBelowBasis: boolean };
+  /** CC-VISIBILITY-0001: the strike floor behind a covered-call result, so a no-result row can explain it. */
+  ccFloorInfo?: { floor: number | null; price: number | null };
+  /** CC-PMCC-GUIDANCE-0001 R3: the cost basis a covered-call decision is judged against and where it came from, on every row (qualified or not). */
+  ccBasis?: { basis: number | null; source: 'typed' | 'adjusted' | 'broker' | null };
   /** CC-VISIBILITY-0001 slice 4: calls the safety checks kept out of the grid, with reasons (display only). */
   ccBlocked?: { calls: CcBlockedCall[]; total: number };
   /** CC-VISIBILITY-0001 slice 2: which short calls hold this holding's contracts (broker-verified results only; never for research). */

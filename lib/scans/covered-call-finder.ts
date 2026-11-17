@@ -202,8 +202,6 @@ export interface CcFindParams {
   capacity: CoveredCallCapacity; // availableCoveredContracts caps quantity; never exceeded
   stockPrice: number | null;
   earningsDate?: string | null;
-  /** CC-WHEEL-0001 S2a: the trader opted in, for this position, to strikes below the cost basis. */
-  allowBelowBasis?: boolean;
 }
 
 // CC-EARNINGS-SEARCH-0002 (Ian/Paul approved) — earnings safety is now
@@ -348,7 +346,7 @@ export function findBestCoveredCall(
   const costBasis = params.capacity.costBasis;
   // CC-WHEEL-0001 S1: the floor needs both the stock price and a known cost basis. Unknown means no
   // candidates (fail closed), never a floor built from whichever number happens to be present.
-  const strikeFloor = ccStrikeFloor(price, costBasis, { allowBelowBasis: params.allowBelowBasis });
+  const strikeFloor = ccStrikeFloor(price, costBasis);
   if (strikeFloor.floor === null) return null;
   const minStrike = strikeFloor.floor;
 
@@ -387,9 +385,9 @@ export function findNearestCoveredCall(
 // Every call in the DTE window that passes the SAFETY gates, laid out by expiration and strike. Preference rules
 // (delta range, bid/ask width, open interest) do not remove anything here: they tag a cell (wide, thin OI) or are
 // applied by the screen as a highlight. Safety gates that do remove a call, each counted in `left`:
-//   in the money (strike below the stock price), no usable two-sided quote, an expiry too close to earnings, and
-//   very far out of the money (delta under 0.02), plus a cap on the cell count. A strike below the cost basis stays
-//   in, marked `belowFloor`, because hiding it is a screen choice (the switch), not a safety gate.
+//   in the money (strike below the stock price), below the cost basis (CC-PMCC-GUIDANCE-0001 R1: never offered, no switch),
+//   no usable two-sided quote, an expiry too close to earnings, and very far out of the money (delta under 0.02), plus a
+//   cap on the cell count.
 const GRID_MIN_DELTA = 0.02;
 const GRID_MAX_DELTA = 0.70;
 const GRID_MAX_CELLS = 400;
@@ -402,7 +400,7 @@ export function buildCcGrid(
   const basis = params.capacity.costBasis != null && params.capacity.costBasis > 0 ? params.capacity.costBasis : null;
   const contracts = Math.max(1, params.capacity.availableCoveredContracts);
   const floorInfo = ccStrikeFloor(price, basis);
-  const left = { inTheMoney: 0, unusableQuote: 0, earnings: 0, farOtm: 0, truncated: 0 };
+  const left = { inTheMoney: 0, belowCost: 0, unusableQuote: 0, earnings: 0, farOtm: 0, truncated: 0 };
   const cells: CcGridCell[] = [];
   const expirations: Array<{ expiration: string; dte: number }> = [];
   // Fail closed like the scan: with no known stock price or cost basis there is no floor, so there is no grid.
@@ -417,6 +415,7 @@ export function buildCcGrid(
       if (leg.delta == null || !Number.isFinite(leg.delta) || !Number.isFinite(leg.strikePrice)) { left.unusableQuote += 1; continue; }
       if (!Number.isFinite(leg.bid) || !Number.isFinite(leg.ask) || !(leg.bid > 0) || !(leg.ask > 0) || leg.ask < leg.bid) { left.unusableQuote += 1; continue; }
       if (price != null && leg.strikePrice < price) { left.inTheMoney += 1; continue; }
+      if (leg.strikePrice < floorInfo.floor) { left.belowCost += 1; continue; }
       if (!isEarningsSafeForExpiration(params.earningsDate, expDate)) { left.earnings += 1; continue; }
       const delta = Math.abs(leg.delta);
       if (delta < GRID_MIN_DELTA || delta > GRID_MAX_DELTA) { left.farOtm += 1; continue; }
@@ -429,7 +428,6 @@ export function buildCcGrid(
       cells.push({
         expiration: expDate, dte, strike: leg.strikePrice, delta, bid: leg.bid, ask: leg.ask, premiumPerShare,
         openInterest: leg.openInterest, occSymbol: leg.occSymbol,
-        belowFloor: floorInfo.floor !== null && leg.strikePrice < floorInfo.floor,
         wide: evaluateHybridSpread(leg.bid, leg.ask, { rejectPct: params.rules.WIDTH_PCT_MAX, warnPct: CC_WARN_PCT_UNUSED, ceiling: params.rules.WIDTH_CEILING }).reject,
         thinOi: !(typeof leg.openInterest === 'number' && leg.openInterest >= params.rules.OI_MIN),
         calledAwayTotal,
@@ -464,7 +462,7 @@ export function diagnoseCcExclusions(
   chain: { expirations: string[]; chains: Record<string, WheelChainLeg[]> },
   params: CcFindParams,
 ): CcExclusionReport {
-  const strikeFloor = ccStrikeFloor(params.stockPrice, params.capacity.costBasis, { allowBelowBasis: params.allowBelowBasis });
+  const strikeFloor = ccStrikeFloor(params.stockPrice, params.capacity.costBasis);
   const eligibility: CcEligibilityParams = {
     deltaTarget: { min: params.rules.DELTA_MIN, max: params.rules.DELTA_MAX },
     dteTarget: { min: params.rules.DTE_MIN, max: params.rules.DTE_MAX },
@@ -603,7 +601,7 @@ export function findAllCoveredCalls(
   const price = params.stockPrice;
   const costBasis = params.capacity.costBasis;
   // CC-WHEEL-0001 S1: same fail-closed floor as findBestCoveredCall.
-  const strikeFloor = ccStrikeFloor(price, costBasis, { allowBelowBasis: params.allowBelowBasis });
+  const strikeFloor = ccStrikeFloor(price, costBasis);
   if (strikeFloor.floor === null) return { results: [] };
   const minStrike = strikeFloor.floor;
 

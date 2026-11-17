@@ -73,7 +73,6 @@ import { evaluateEventRisk, type EventRiskResult } from '@/lib/scans/eventRisk';
 import { computePmccBestFit, describePmccBestFitComparison, type PmccBestFitProfile } from '@/lib/scans/pmccBestFit';
 import { summarizePmccLegRejections } from '@/lib/scans/pmccAuditSummary';
 import { HeldCompareForPairs } from '@/features/screener/components/HeldCompareCard';
-import { CcDecideBoxes } from '@/features/screener/components/CcDecideBoxes';
 import { heldIncomeSummary, heldStrikeBelowLeapLine, excludedContractPremiumText, heldLeapOtmTag, selectLongLegBlockerLine, isUncoveredHeldShort, heldUncoveredSkippedLine, preferenceNoteGates } from '@/lib/scans/pmccHeldUnderwaterDisplay';
 import { PmccPairLookupModal } from '@/features/screener/components/PmccPairLookupModal';
 import { TradeLookupModal } from '@/features/screener/components/TradeLookupModal';
@@ -111,6 +110,9 @@ import { ccStrikeFloor, ccStrikeFloorMessage } from '@/lib/scans/ccStrikeFloor';
 import { DEFAULT_CC_VIEW, buildCcPool, ccScanRules, ccViewFromPreset, ccViewRules, ccViewWith, countCcViewHidden, listCcViewHidden, type CcView } from '@/lib/scans/ccView';
 import { CcViewControls } from '@/features/screener/components/CcViewControls';
 import { resolveResearchEntry, buildResearchCapacity, researchEntryLabel } from '@/lib/scans/ccResearch';
+import { CcBasisLine } from '@/features/screener/components/CcBasisLine';
+import { useCcMinPay } from '@/features/screener/useCcMinPay';
+import { ccCellVerdict, ccStrikeLabel, ccExpirationLabel } from '@/lib/scans/ccGuidance';
 import { CcStrikeGrid } from '@/features/screener/components/CcStrikeGrid';
 import type { CcGridCell } from '@/lib/scans/ccGridTypes';
 import { ccRsiChip } from '@/lib/scans/ccRsiChip';
@@ -1570,12 +1572,11 @@ function runCcChecklist(
   ccRules: CcRulesType,
   capacity: CoveredCallCapacity,
   trendResult?: TrendResult,
-  basisOpts?: { allowBelowBasis?: boolean; basisSource?: 'typed' | 'adjusted' | 'broker' | null },
+  basisOpts?: { basisSource?: 'typed' | 'adjusted' | 'broker' | null },
   // CC-SIMPLIFY-0001 Phase 2: the scan grades wide open (ccRules) so the results-screen view can re-pick; the strike
   // grid and the "left out" counts keep the user's own rules.
   gridRules: CcRulesType = ccRules,
 ): ScreenResult {
-  const allowBelowBasis = basisOpts?.allowBelowBasis === true;
   const failReasons: string[] = [];
   const ivrValue = metrics.ivRank;
   const earningsDate = metrics.earningsExpectedDate;
@@ -1601,10 +1602,10 @@ function runCcChecklist(
   // is not qualified (no closest-call fallback); the nearest valid call below is information, not a pick.
   // The same finder re-picks from the pool when a results-screen chip changes.
   const bestCandidate = capacityCheck.status !== 'fail'
-    ? findBestCoveredCall(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis })
+    ? findBestCoveredCall(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate })
     : null;
   const nearestCandidate = !bestCandidate && capacityCheck.status !== 'fail'
-    ? findNearestCoveredCall(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis })
+    ? findNearestCoveredCall(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate })
     : null;
 
   // Contract eligibility is determined only against this selected expiry.
@@ -1615,11 +1616,11 @@ function runCcChecklist(
   }
   // CC-WHEEL-0001 S1: the finder fails closed when the cost basis (or price) is unknown; say so instead of
   // the generic "no qualifying call" text, which would read as a delta/DTE problem.
-  const ccFloor = ccStrikeFloor(price, capacity.costBasis, { allowBelowBasis });
+  const ccFloor = ccStrikeFloor(price, capacity.costBasis);
   if (!bestCandidate && !failReasons.length && ccFloor.floor === null) failReasons.push(ccStrikeFloorMessage(ccFloor.missing));
   else if (!bestCandidate && !failReasons.length) failReasons.push(earningsCheck.reason.includes('no eligible expiration')
     ? earningsCheck.reason
-    : `No qualifying call found in delta ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} / DTE ${ccRules.DTE_MIN}-${ccRules.DTE_MAX} window above stock price / cost basis. ${formatCcExclusionSummary(diagnoseCcExclusions(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }), ccRules)}${nearestCandidate ? ` Nearest valid call: $${nearestCandidate.shortStrike} ${nearestCandidate.expiration}, Δ${nearestCandidate.shortDelta.toFixed(2)}${ccFloor.floor !== null && price != null && ccFloor.floor > price ? ` (lowest allowed strike is $${ccFloor.floor.toFixed(2)}, your cost basis)` : ''}. Shown for information only, not a pick.` : ''}`);
+    : `No qualifying call found in delta ${ccRules.DELTA_MIN}-${ccRules.DELTA_MAX} / DTE ${ccRules.DTE_MIN}-${ccRules.DTE_MAX} window above stock price / cost basis. ${formatCcExclusionSummary(diagnoseCcExclusions(chainData, { rules: ccRules, capacity, stockPrice: price, earningsDate }), ccRules)}${nearestCandidate ? ` Nearest valid call: $${nearestCandidate.shortStrike} ${nearestCandidate.expiration}, Δ${nearestCandidate.shortDelta.toFixed(2)}${ccFloor.floor !== null && price != null && ccFloor.floor > price ? ` (lowest allowed strike is $${ccFloor.floor.toFixed(2)}, your cost basis)` : ''}. Shown for information only, not a pick.` : ''}`);
   if (earningsCheck.status === 'fail') failReasons.push(earningsCheck.reason);
 
   const oiCheck: CheckResult = !bestCandidate
@@ -1661,13 +1662,14 @@ function runCcChecklist(
       deltaMin: ccRules.DELTA_MIN, deltaMax: ccRules.DELTA_MAX,
       nearest: nearestCandidate ? { strike: nearestCandidate.shortStrike, delta: nearestCandidate.shortDelta } : null, floor: ccFloor.floor, price,
     }),
-    ccFloorInfo: { floor: ccFloor.floor, price, allowBelowBasis },
-    ccGrid: capacityCheck.status !== 'fail' ? buildCcGrid(chainData, { rules: gridRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }) : undefined,
+    ccFloorInfo: { floor: ccFloor.floor, price },
+    ccBasis: { basis: capacity.costBasis ?? null, source: basisOpts?.basisSource ?? null },
+    ccGrid: capacityCheck.status !== 'fail' ? buildCcGrid(chainData, { rules: gridRules, capacity, stockPrice: price, earningsDate }) : undefined,
     ccExclusionNote: bestCandidate && capacityCheck.status !== 'fail'
-      ? formatCcHiddenNote(diagnoseCcExclusions(chainData, { rules: gridRules, capacity, stockPrice: price, earningsDate, allowBelowBasis }), gridRules)
+      ? formatCcHiddenNote(diagnoseCcExclusions(chainData, { rules: gridRules, capacity, stockPrice: price, earningsDate }), gridRules)
       : null,
     qualified,
-    bestCandidate: bestCandidate ? { ...bestCandidate, ccBasisSource: basisOpts?.basisSource ?? null, ccAllowBelowBasis: allowBelowBasis } : bestCandidate,
+    bestCandidate: bestCandidate ? { ...bestCandidate, ccBasisSource: basisOpts?.basisSource ?? null } : bestCandidate,
     failReasons,
     earningsDate, trendResult, isEtf: chainData.isEtfOrIndex ?? false,
     underlyingType: chainData.classification ?? 'stock', ruleSetApplied: 'CC',
@@ -1689,7 +1691,7 @@ function regradeCcResult(r: ScreenResult, view: CcView): ScreenResult {
     g.price, g.metrics, ccViewRules(g.baseRules, view), g.capacity, r.trendResult, g.basisOpts,
   );
   const hidden = countCcViewHidden(g.pool, view, {
-    dteMin: g.baseRules.DTE_MIN, dteMax: g.baseRules.DTE_MAX, stockPrice: g.price, costBasis: g.capacity.costBasis, allowBelowBasis: g.basisOpts?.allowBelowBasis,
+    dteMin: g.baseRules.DTE_MIN, dteMax: g.baseRules.DTE_MAX, stockPrice: g.price, costBasis: g.capacity.costBasis,
   });
   return {
     ...r,
@@ -6369,6 +6371,7 @@ function CspReturnThisCycleRow({ candidate }: { candidate: SpreadCandidate }) {
 function GenericResultCard({ result, th, rules, screenMode, rankConfig, onTrade, onTradeCsp, onTradeCc, cachedEntry, existingPositions, allocBook }: ResultCardProps) {
   const cardView = useCardView();
   const [pickedCcCell, setPickedCcCell] = useState<CcGridCell | null>(null);
+  const [ccMinPay] = useCcMinPay();
   const [expanded, setExpanded] = useState(false);
   const [showBestFinder, setShowBestFinder] = useState(false);
   const [showCspScore, setShowCspScore] = useState(false);
@@ -7131,16 +7134,15 @@ const strategyScores = useMemo(() => {
             </div>
           )}
 
-          {!c && result.strategy === 'CC' && result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} belowBasisAllowed={result.ccFloorInfo?.allowBelowBasis === true} />}
+          {!c && result.strategy === 'CC' && result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} basisInfo={result.ccBasis ?? null} />}
           {!c && result.strategy === 'CC' && result.ccBlocked && <CcBlockedCalls symbol={result.symbol} {...result.ccBlocked} className={th.textFaint} />}
 
           {c && c.strategy === 'CC' && (
             <div className={`pt-2 border-t ${th.border} space-y-1.5`}>
-              <CcDecideBoxes input={{ symbol: result.symbol, spot: result.price, strike: c.shortStrike, delta: c.shortDelta, dte: c.dte, expiration: c.expiration, premiumPerContract: c.ccPremiumPerContract, contracts: c.ccAvailableCoveredContracts, costBasis: c.ccCostBasis, ivxPct: c.expirationIvx ?? null }} />
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div><span className={th.label}>Premium: </span><span className="text-emerald-400 font-bold">${c.ccPremiumPerContract?.toFixed(2) ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(per contract)</span></div>
                 <div><span className={th.label}>Available contracts: </span><span className="font-bold text-emerald-400">{c.ccAvailableCoveredContracts ?? '—'}</span><span className={`${th.textFaint} ml-1 text-[10px]`}>(quantity used for this candidate)</span></div>
-                <div><span className={th.label}>Cost basis: </span><span className={th.text}>{c.ccCostBasis != null ? `$${c.ccCostBasis.toFixed(2)}` : 'Unavailable'}</span>{c.ccBasisSource && <span className={`${th.textFaint} ml-1 text-[10px]`}>({c.ccBasisSource === 'typed' ? 'typed by you' : c.ccBasisSource === 'adjusted' ? 'after put premium' : 'broker'}{c.ccAllowBelowBasis ? ' · below-basis OK' : ''})</span>}</div>
+                <CcBasisLine basis={result.ccBasis ?? { basis: c.ccCostBasis ?? null, source: c.ccBasisSource ?? null }} />
               </div>
               <details data-testid="cc-details" className="text-xs" onClick={(e) => e.stopPropagation()}>
                 <summary className={`cursor-pointer text-[10px] ${th.textFaint}`}>Details (owned shares, existing calls, assignment proceeds, IV, yield)</summary>
@@ -7156,7 +7158,7 @@ const strategyScores = useMemo(() => {
                 </div>
               </details>
               {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
-              {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} belowBasisAllowed={result.ccFloorInfo?.allowBelowBasis === true} initial={c.expiration ? { expiration: c.expiration, strike: c.shortStrike } : null} onAnchorChange={setPickedCcCell} />}
+              {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} basisInfo={result.ccBasis ?? null} initial={c.expiration ? { expiration: c.expiration, strike: c.shortStrike } : null} onAnchorChange={setPickedCcCell} />}
               {result.strategy === 'CC' && result.ccBlocked && <CcBlockedCalls symbol={result.symbol} {...result.ccBlocked} className={`pt-1 ${th.textFaint}`} />}
               {result.strategy === 'CC' && result.ccCommitted && <CommittedCallsLine symbol={result.symbol} {...result.ccCommitted} className={`pt-1 ${th.textFaint}`} />}
               {result.ccExclusionNote && <p data-testid="cc-exclusion-note" className={`text-[10px] pt-1 ${th.textFaint}`}>{result.ccExclusionNote}</p>}
@@ -7258,10 +7260,11 @@ const strategyScores = useMemo(() => {
                 const base = ccOrderInputFromScanResult(result)!;
                 const cell = pickedCcCell;
                 const isScanPick = !cell || (cell.expiration === base.expiration && cell.strike === base.strike);
-                if (!isScanPick && cell && cell.belowFloor) {
+                const verdict = cell && result.ccGrid ? ccCellVerdict(result.ccGrid, cell, ccMinPay) : null;
+                if (!cell || (verdict !== 'pick' && verdict !== 'small_safe')) {
                   return (
-                    <p data-testid="cc-trade-blocked" className="flex-1 py-2.5 text-center text-[10px] font-medium text-amber-300">
-                      ${cell.strike} is below your cost basis, so it cannot be ordered from here. Pick a strike at or above it.
+                    <p data-testid="cc-trade-blocked" className="flex-1 py-2.5 text-center text-[13px] font-medium text-amber-300">
+                      {!cell ? 'No call fits your minimum. Lower it or pick another call.' : verdict === 'wide' ? 'Price gap too big. Pick a green-outline call.' : 'Pays under your minimum. Lower it to review this call.'}
                     </p>
                   );
                 }
@@ -7276,7 +7279,7 @@ const strategyScores = useMemo(() => {
                     onClick={(e) => { e.stopPropagation(); ccRsiGuard.request(() => onTradeCc(result, order)); }}
                     className="flex-1 py-2.5 rounded-xl text-xs tracking-widest transition-colors bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
                   >
-                    {'\u26A1'} TRADE THIS{cell ? ` · $${cell.strike} CALL · ${cell.expiration.slice(5)}` : ''}
+                    Review order · {ccStrikeLabel(cell.strike)} · Exp {ccExpirationLabel(cell.expiration)}
                   </button>
                 );
               })()
@@ -11591,8 +11594,8 @@ export default function Home() {
             const capacity = applyTypedBasis(ccBasisSettings, symbol, brokerCapacity, adjustedBasisValue);
             // CC-SIMPLIFY-0001 Phase 2: the scan only fetches (tickers + DTE). It grades wide open and keeps the pool of
             // calls the safety gates let through; delta and width are a view the results screen applies without a rescan.
-            const basisOpts = { allowBelowBasis: resolvedBasis.allowBelowBasis, basisSource: resolvedBasis.source };
-            const ccPool = buildCcPool(chainData, { dteMin: rules.DTE_MIN, dteMax: rules.DTE_MAX, stockPrice: price, costBasis: capacity.costBasis, allowBelowBasis: resolvedBasis.allowBelowBasis });
+            const basisOpts = { basisSource: resolvedBasis.source };
+            const ccPool = buildCcPool(chainData, { dteMin: rules.DTE_MIN, dteMax: rules.DTE_MAX, stockPrice: price, costBasis: capacity.costBasis });
             const scanned = runCcChecklist(symbol, chainData, price, metrics, ccScanRules(rules), capacity, trendResult, basisOpts, rules);
             result = {
               ...scanned,
@@ -12849,8 +12852,8 @@ export default function Home() {
                         loadHidden={() => results.flatMap(r => {
                           const g = r.ccRegrade;
                           if (!g) return [];
-                          const input = { dteMin: g.baseRules.DTE_MIN, dteMax: g.baseRules.DTE_MAX, stockPrice: g.price, costBasis: g.capacity.costBasis, allowBelowBasis: g.basisOpts?.allowBelowBasis };
-                          return [{ symbol: r.symbol, floor: ccStrikeFloor(g.price, g.capacity.costBasis, { allowBelowBasis: g.basisOpts?.allowBelowBasis === true }).floor, calls: listCcViewHidden(g.pool, ccView, input) }];
+                          const input = { dteMin: g.baseRules.DTE_MIN, dteMax: g.baseRules.DTE_MAX, stockPrice: g.price, costBasis: g.capacity.costBasis };
+                          return [{ symbol: r.symbol, floor: ccStrikeFloor(g.price, g.capacity.costBasis).floor, calls: listCcViewHidden(g.pool, ccView, input) }];
                         })}
                       />
                     )}

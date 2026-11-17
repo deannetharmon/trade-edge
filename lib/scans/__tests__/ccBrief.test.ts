@@ -12,16 +12,15 @@ describe('ccBriefReason', () => {
     expect(ccBriefReason({ ...base, floor: 90, price: 100 })).toBe('No call in Δ0.20–0.35');
   });
   it('explains a basis floor above the price with the numbers (TQQQ: $78.75 floor, $57.35 price)', () => {
-    expect(ccFloorExplanation({ floor: 78.75, price: 57.35, allowBelowBasis: false })).toBe(
-      'Your floor is your cost basis, $78.75, 37% above the price, $57.35. Calls below it are hidden unless you allow them for this stock.',
+    expect(ccFloorExplanation({ floor: 78.75, price: 57.35 })).toBe(
+      'Your floor is your cost basis, $78.75, 37% above the price, $57.35. No call is offered below it.',
     );
   });
-  it('stays silent when the floor is not what blocks: opted in, floor at the price, or unknown numbers', () => {
-    expect(ccFloorExplanation({ floor: 78.75, price: 57.35, allowBelowBasis: true })).toBeNull();
-    expect(ccFloorExplanation({ floor: 57.35, price: 57.35, allowBelowBasis: false })).toBeNull();
-    expect(ccFloorExplanation({ floor: null, price: 57.35, allowBelowBasis: false })).toBeNull();
-    expect(ccFloorExplanation({ floor: 78.75, price: null, allowBelowBasis: false })).toBeNull();
-    expect(ccFloorExplanation({ floor: 78.75, price: 0, allowBelowBasis: false })).toBeNull();
+  it('stays silent when the floor is not what blocks: floor at the price, or unknown numbers', () => {
+    expect(ccFloorExplanation({ floor: 57.35, price: 57.35 })).toBeNull();
+    expect(ccFloorExplanation({ floor: null, price: 57.35 })).toBeNull();
+    expect(ccFloorExplanation({ floor: 78.75, price: null })).toBeNull();
+    expect(ccFloorExplanation({ floor: 78.75, price: 0 })).toBeNull();
   });
   it('says the plain thing for capacity and unknown basis', () => {
     expect(ccBriefReason({ ...base, capacityBlocked: true })).toBe('Shares already covered');
