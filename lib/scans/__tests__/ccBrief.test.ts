@@ -7,6 +7,10 @@ describe('ccBriefReason', () => {
   it('names the delta range and the nearest valid call', () => {
     expect(ccBriefReason({ ...base, nearest: { strike: 29, delta: 0.17 } })).toBe('No call with POP 65–80% · nearest POP 83% at $29');
   });
+  it('names the price gap when calls sit in the POP range but none can be filled', () => {
+    expect(ccBriefReason({ ...base, widePopInRange: 4 })).toBe('4 calls have POP 65–80%, but the price gap is too big on every one');
+    expect(ccBriefReason({ ...base, widePopInRange: 1 })).toBe('1 call has POP 65–80%, but the price gap is too big on it');
+  });
   it('does not repeat the floor (the cost line says it)', () => {
     expect(ccBriefReason({ ...base, nearest: { strike: 29, delta: 0.17 }, floor: 55, price: 30 })).toBe('No call with POP 65–80% · nearest POP 83% at $29');
     expect(ccBriefReason({ ...base, floor: 90, price: 100 })).toBe('No call with POP 65–80%');

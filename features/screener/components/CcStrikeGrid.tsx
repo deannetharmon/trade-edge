@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CcGrid, CcGridCell } from '@/lib/scans/ccGridTypes';
 import { CC_GOALS, DEFAULT_CC_GOAL, ccCellNumbers, ccStockMovePct, cellInGoal, filterCcGrid, pickCellForSellPrice, pickDefaultAnchor, pickQuickCell, CC_QUICK_PICKS, CC_MIN_PAY_CHOICES, selectCcGridWindow, type CcGoal } from '@/lib/scans/ccGridView';
-import { buildCcCardView, ccCellVerdict, ccEffectiveMinPay, ccExpirationLabel, ccFillLabel, ccPopPct, ccPopTone, ccStrikeLabel, pickSmallAndSafe, CC_SMALL_SAFE_MIN_POP } from '@/lib/scans/ccGuidance';
+import { ccMidPerShare, buildCcCardView, ccCellVerdict, ccEffectiveMinPay, ccExpirationLabel, ccFillLabel, ccPopPct, ccPopTone, ccStrikeLabel, pickSmallAndSafe, CC_SMALL_SAFE_MIN_POP } from '@/lib/scans/ccGuidance';
 import { useCcMinPay } from '@/features/screener/useCcMinPay';
 import { CcBasisLine, type CcBasisInfo } from './CcBasisLine';
 
@@ -207,7 +207,7 @@ export function CcStrikeGrid({ grid: rawGrid, th, symbol, initial, onAnchorChang
                       <td key={e.expiration} className="p-0.5">
                         <button type="button" onClick={() => setSelected({ expiration: cell.expiration, strike: cell.strike })}
                           aria-label={`${cell.strike} call ${cell.expiration}`} aria-pressed={isSel} data-verdict={verdict}
-                          title={`Bid $${cell.bid.toFixed(2)} / ask $${cell.ask.toFixed(2)}. POP ${pop}% is the market's estimate of the chance you keep your shares.`}
+                          title={`Bid $${cell.bid.toFixed(2)} · mid $${ccMidPerShare(cell.bid, cell.ask).toFixed(2)} · ask $${cell.ask.toFixed(2)}. POP ${pop}% is the market's estimate of the chance you keep your shares.`}
                           className={`w-full rounded border p-1.5 text-left ${muted ? 'bg-white/5 opacity-60' : ''} ${isSel ? 'border-white' : verdict === 'wide' ? 'border-neutral-700' : cellInGoal(cell, goal) ? 'border-emerald-500/60' : 'border-neutral-800'}`}>
                           <span className={`block text-sm font-bold ${muted ? 'text-neutral-300' : 'text-emerald-400'}`}>{dollars(n.premiumTotal)} <span className="text-[13px] font-normal opacity-80">{n.usedBid ? 'at the bid' : 'now'}</span></span>
                           {verdict === 'wide' ? (
@@ -263,7 +263,7 @@ export function CcStrikeGrid({ grid: rawGrid, th, symbol, initial, onAnchorChang
                         <td className="p-1">{ccStrikeLabel(cell.strike)}</td>
                         <td className="p-1">{up !== null ? `${up.toFixed(1)}%` : '—'}</td>
                         <td className="p-1">{ccPopPct(cell.delta)}%</td>
-                        <td className="p-1">{dollars(n.premiumTotal)} <span className="opacity-70">(bid ${cell.bid.toFixed(2)} / ask ${cell.ask.toFixed(2)})</span></td>
+                        <td className="p-1">{dollars(n.premiumTotal)} <span className="opacity-70">(bid ${cell.bid.toFixed(2)} · mid ${ccMidPerShare(cell.bid, cell.ask).toFixed(2)} · ask ${cell.ask.toFixed(2)})</span></td>
                         <td className="p-1">{f.gapPct !== null ? `${f.gapPct.toFixed(1)}%` : '—'}</td>
                         <td className="p-1">{why}</td>
                       </tr>

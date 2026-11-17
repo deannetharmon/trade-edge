@@ -69,7 +69,7 @@ describe('XYZ qualified card', () => {
     const v = buildCcCardView({ grid: g, cell: c56, minPay: 25, symbol: 'XYZ' });
     expect(v.verdict).toBe('pick');
     expect(v.headline).toBe('Sell 2 $56C · Exp Dec 11');
-    expect(v.collect.big).toBe('$210'); expect(v.collect.sub).toBe('bid $1.04 · ask $1.06');
+    expect(v.collect.big).toBe('$210'); expect(v.collect.sub).toBe('bid $1.04 · mid $1.05 · ask $1.06');
     expect(v.keep.big).toBe('POP 71%'); expect(v.keep.sub).toBe('called only if XYZ rises 6.9%, to $56');
     expect(v.fill.big).toBe('Good'); expect(v.fill.sub).toBe('price gap 1.9% · expect $208 to $210');
     expect(v.why[0]).toBe('If called: shares sold at $56, a gain of $1,790 on your $48.10 cost, including the $210 you collect.');
@@ -140,7 +140,7 @@ describe('Small & safe (ABC: price 40, basis 36.50, 1 contract, minimum $25)', (
     expect(v.tag).toBe('SMALL & SAFE');
     expect(v.headline).toBe('Sell 1 $43C · Exp Nov 23');
     expect(v.note).toBe('Nothing pays $25. Best call with POP 90%+ above your cost.');
-    expect(v.collect.big).toBe('$14'); expect(v.collect.sub).toBe('bid $0.14 · ask $0.15');
+    expect(v.collect.big).toBe('$14'); expect(v.collect.sub).toBe('bid $0.14 · mid $0.14 · ask $0.15');
     expect(v.keep.big).toBe('POP 93%'); expect(v.keep.sub).toBe('called only if ABC rises 7.5%, to $43');
     expect(v.fill.big).toBe('OK'); expect(v.fill.sub).toBe('price gap 6.9% · expect about $14');
     expect(v.why[0]).toBe('If called: shares sold at $43, a gain of $664 on your $36.50 cost, including the $14 you collect.');
@@ -225,5 +225,15 @@ describe('calls outside your view', () => {
     expect(rows.map(r => r.cell.strike)).toEqual([27, 28, 30]);
     expect(rows[0].why).toBe('Strike too far above the price: POP 89%, your view wants 65 to 80%');
     expect(rows[2].why).toBe('Price gap too big (limit 10%)');
+  });
+});
+
+describe('METU $27C Dec 4 (matches TastyTrade: bid 0.15, mid 0.40, ask 0.65)', () => {
+  it('shows bid, mid and ask on the card; price gap 125%', () => {
+    const c = cell({ strike: 27, delta: 0.15, bid: 0.15, ask: 0.65, expiration: '2026-12-04', dte: 18 });
+    const g = abc([c]);
+    const v = buildCcCardView({ grid: g, cell: c, minPay: 25, symbol: 'METU' });
+    expect(v.collect.sub).toBe('the bid price · bid $0.15 · mid $0.40 · ask $0.65');
+    expect(ccPriceGapPct(0.15, 0.65)).toBe(125);
   });
 });

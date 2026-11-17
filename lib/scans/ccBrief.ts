@@ -10,6 +10,8 @@ export interface CcBriefInput {
   deltaMin: number;
   deltaMax: number;
   nearest: { strike: number; delta: number } | null;
+  /** Calls whose POP is inside the range but whose price gap is too big (counted from the strike grid). */
+  widePopInRange?: number;
   floor: number | null;
   price: number | null;
 }
@@ -39,7 +41,10 @@ export function ccBriefReason(i: CcBriefInput): string {
   if (i.floorMissing) return 'Cost basis unknown';
   // CC-PMCC-GUIDANCE-0001: POP, not delta. POP = (1 - delta) x 100.
   const pop = (d: number) => Math.round((1 - d) * 100);
-  const parts = [`No call with POP ${pop(i.deltaMax)}–${pop(i.deltaMin)}%`];
+  const range = `${pop(i.deltaMax)}–${pop(i.deltaMin)}%`;
+  // The real blocker: calls exist in the range, but none can be filled near the middle price.
+  if ((i.widePopInRange ?? 0) > 0) return `${i.widePopInRange} call${i.widePopInRange === 1 ? ' has' : 's have'} POP ${range}, but the price gap is too big on ${i.widePopInRange === 1 ? 'it' : 'every one'}`;
+  const parts = [`No call with POP ${range}`];
   if (i.nearest) parts.push(`nearest POP ${pop(i.nearest.delta)}% at ${usd(i.nearest.strike)}`);
   // The floor is not repeated here: the cost line and the timing line under the row already say it.
   return parts.join(' · ');
