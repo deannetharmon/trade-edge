@@ -10,7 +10,7 @@ import type { SpreadCandidate } from '@/lib/scans/types';
 const th = { card: '', border: '', text: '', textFaint: '' };
 const cand = (short: number, long: number, credit: number, pop: number, roc: number): SpreadCandidate =>
   ({ strategy: 'BPS', expiration: '2026-12-18', dte: 31, shortStrike: short, longStrike: long, spreadWidth: Math.abs(short - long), credit, pop, roc, creditRatio: credit / Math.abs(short - long), shortDelta: 0.27, shortOI: 1240, longOI: 900, midCredit: 1.52, naturalCredit: 1.38 } as unknown as SpreadCandidate);
-const base = { th, widthDollars: 5, noQuotes: false, loadedShort: 45, loadedLong: 40, canUndo: true, stock: 46.76, ivRankPct: 46, greeks: { delta: 9.8, gamma: 1.1, theta: 3.4, vega: -1.2 }, onLoad: () => {}, onUndo: () => {}, onClose: () => {} };
+const base = { th, widthDollars: 5, noQuotes: false, loadedShort: 45, loadedLong: 40, canUndo: true, popMin: 65, stock: 46.76, ivRankPct: 46, greeks: { delta: 9.8, gamma: 1.1, theta: 3.4, vega: -1.2 }, onLoad: () => {}, onUndo: () => {}, onClose: () => {} };
 
 describe('OptimizePanel', () => {
   it('shows the pick, tags the first row Best opportunity, and loads a clicked alternative', () => {
@@ -41,6 +41,21 @@ describe('OptimizePanel', () => {
     const c = { ...cand(50, 55, 1.5, 70, 40), strategy: 'BCS' } as SpreadCandidate;
     render(<OptimizePanel {...base} loadedShort={50} loadedLong={55} pick={c} atEachWidth={[c]} />);
     expect(screen.getByTestId('optimize-detail').textContent).toContain('$51.50');
+  });
+  it('lists credit, delta, POP and ROC in labelled columns with credit in green', () => {
+    const rows = [cand(45, 40, 1.45, 71, 41)];
+    render(<OptimizePanel {...base} pick={rows[0]} atEachWidth={rows} />);
+    for (const h of ['WIDTH', 'STRIKES', 'CREDIT', 'DELTA', 'POP', 'ROC']) expect(screen.getAllByText(h).length).toBeGreaterThan(0);
+    const credit = screen.getAllByText('$1.45').find(el => el.className.includes('text-emerald-400'));
+    expect(credit).toBeTruthy();
+  });
+  it('says plainly when the pick is below the saved POP minimum, and stays quiet otherwise', () => {
+    const low = cand(45, 40, 1.45, 60, 41);
+    const { rerender } = render(<OptimizePanel {...base} pick={low} atEachWidth={[low]} />);
+    expect(screen.getByText(/POP 60% is below your saved minimum of 65%/)).toBeTruthy();
+    const ok = cand(45, 40, 1.45, 71, 41);
+    rerender(<OptimizePanel {...base} pick={ok} atEachWidth={[ok]} />);
+    expect(screen.queryByText(/is below your saved minimum/)).toBeNull();
   });
   it('says nothing passes when there is no pick, and does not offer a weaker one as the pick', () => {
     render(<OptimizePanel {...base} pick={null} atEachWidth={[]} canUndo={false} />);

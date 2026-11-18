@@ -97,7 +97,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   const [sendOpen, setSendOpen] = useState(false);
   // The grid cell the trader clicked (stock price and date); null shows today at the current price.
   // Optimize (S5): the screener's own pick for this symbol; `prev` is what the map held before it was loaded.
-  const [opt, setOpt] = useState<{ result: OptimizeResult; widthDollars: number | null; prev: { anchor: number; widthSteps: number } | null } | null>(null);
+  const [opt, setOpt] = useState<{ result: OptimizeResult; widthDollars: number | null; prev: { anchor: number; widthSteps: number } | null; popMin: number | null } | null>(null);
   // Daily and weekly RSI(14) for the header; null until fetched, dashes when unavailable.
   const [headerRsi, setHeaderRsi] = useState<HeaderRsi | null>(null);
   const [optBusy, setOptBusy] = useState(false);
@@ -293,7 +293,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
       const widthDollars = Math.abs(specs[0].strike - specs[1].strike);
       const result = runOptimize({ strategy: strategy as 'bps' | 'bcs', exp, quotes: q, price: spot, expirationIv: expiryIv, rules, widthDollars });
       const prev = anchor != null ? { anchor, widthSteps } : null;
-      setOpt({ result, widthDollars, prev });
+      setOpt({ result, widthDollars, prev, popMin: rules.POP_MIN });
       if (result.pick) {
         const m = candidateToMap(result.pick, exp);
         if (m) { setAnchor(m.anchor); setWidthSteps(m.widthSteps); }
@@ -457,6 +457,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                 stock={spot}
                 ivRankPct={metrics?.ivRankPct ?? null}
                 greeks={todayGreeks}
+                popMin={opt.popMin}
                 canUndo={opt.prev != null && (opt.prev.anchor !== anchor || opt.prev.widthSteps !== widthSteps)}
                 onLoad={c => { loadCandidate(c, null); }}
                 onUndo={() => { if (opt.prev) { setAnchor(opt.prev.anchor); setWidthSteps(opt.prev.widthSteps); } }}
