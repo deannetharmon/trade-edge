@@ -22,6 +22,8 @@ import { cellDetail } from '@/lib/trademap/cellDetail';
 import { positionGreeksAt } from '@/lib/trademap/greeks';
 import { fetchHeaderRsi, formatRsi, type HeaderRsi } from '@/lib/trademap/headerRsi';
 import { buildTradingViewChartUrl } from '@/lib/tradingview';
+import { isMarketOpen } from '@/lib/wheel/marketHours';
+import { formatQuoteTime, isClosedMarketStale, shouldPollOnTimer } from '@/lib/trademap/pollPolicy';
 import CellDetailPanel from './CellDetailPanel';
 import OptimizePanel from './OptimizePanel';
 import { candidateToMap, runOptimize, type OptimizeResult } from '@/lib/trademap/optimize';
@@ -165,6 +167,17 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll quotes every 5s for the stock and the strategy's legs.
+  // Polling runs on a timer only while the market is open and this tab is visible (see lib/trademap/pollPolicy.ts).
+  const [tabVisible, setTabVisible] = useState(true);
+  useEffect(() => {
+    const sync = () => setTabVisible(typeof document === 'undefined' || document.visibilityState !== 'hidden');
+    sync();
+    document.addEventListener('visibilitychange', sync);
+    return () => document.removeEventListener('visibilitychange', sync);
+  }, []);
+  const marketOpen = isMarketOpen(new Date(nowMs));
+  const pollOnTimer = shouldPollOnTimer({ marketOpen, tabVisible });
+
   useEffect(() => {
     if (!symbol || !specs) return;
     let cancelled = false;
@@ -184,9 +197,9 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     };
     // A short delay, so dragging a marker across many strikes sends one quote request when it stops, not one per strike.
     const first = setTimeout(poll, 250);
-    const id = setInterval(poll, POLL_MS);
-    return () => { cancelled = true; clearTimeout(first); clearInterval(id); };
-  }, [symbol, symbolsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    const id = pollOnTimer ? setInterval(poll, POLL_MS) : null;
+    return () => { cancelled = true; clearTimeout(first); if (id != null) clearInterval(id); };
+  }, [symbol, symbolsKey, pollOnTimer]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
@@ -221,9 +234,9 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
       try { const q = await fetchOptionQuotes(fetcher, stripSymbols); if (!cancelled) setStripQuotes(q); } catch { /* the strip is optional: the 5 s poll still drives the gate */ }
     };
     run();
-    const id = setInterval(run, 30000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [symbol, stripKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    const id = pollOnTimer ? setInterval(run, 30000) : null;
+    return () => { cancelled = true; if (id != null) clearInterval(id); };
+  }, [symbol, stripKey, pollOnTimer]); // eslint-disable-line react-hooks/exhaustive-deps
   const stripOi = useMemo(() => {
     const out: Record<number, number | null> = {};
     for (const k of stripStrikes) { const sym = symbolAt(k); out[k] = sym ? allQuotes[symbolKey(sym)]?.openInterest ?? null : null; }
@@ -379,8 +392,11 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   const spotRowPrice = grid && axisSpot != null ? grid.prices.reduce((best, x) => (Math.abs(x - axisSpot) < Math.abs(best - axisSpot) ? x : best), grid.prices[0]) : null;
   const priceLabel = (p: number) => (p % 1 === 0 ? p.toFixed(0) : p.toFixed(2));
 
-  const statusColor = gate.status === 'live' ? 'bg-emerald-500' : gate.status === 'warming' ? 'bg-amber-500' : 'bg-rose-500';
-  const statusLabel = gate.status === 'live' ? 'LIVE' : gate.status === 'warming' ? 'WARMING UP' : 'STALE';
+  const closedStale = isClosedMarketStale(gate.status, marketOpen);
+  const newestQuoteMs = Object.values(quotes).reduce<number | null>((m, q) => (q.updatedAtMs != null && (m == null || q.updatedAtMs > m) ? q.updatedAtMs : m), null);
+  const lastQuoteText = formatQuoteTime(newestQuoteMs);
+  const statusColor = closedStale ? 'bg-slate-500' : gate.status === 'live' ? 'bg-emerald-500' : gate.status === 'warming' ? 'bg-amber-500' : 'bg-rose-500';
+  const statusLabel = closedStale ? 'MARKET CLOSED' : gate.status === 'live' ? 'LIVE' : gate.status === 'warming' ? 'WARMING UP' : 'STALE';
   const ageSec = lastSuccessMs != null ? Math.max(0, Math.round((nowMs - lastSuccessMs) / 1000)) : null;
   const strikesList = exp?.strikes.map(s => s.strike) ?? [];
   const sel = `${th.input} ${th.inputBorder} ${th.text} border rounded px-2 py-1 text-xs`;
@@ -399,12 +415,12 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
           </span>
         )}
         {symbol && underlying && (
-          <a href={buildTradingViewChartUrl(symbol)} target="_blank" rel="noopener noreferrer" title="Open this symbol in TradingView (your saved layout)" className="text-xs text-[var(--accent,#3b82f6)] underline decoration-dotted">TradingView ↗</a>
+          <a href={buildTradingViewChartUrl(symbol)} target="_blank" rel="noopener noreferrer" title="Open this symbol in TradingView (your saved layout)" className="ml-auto text-xs text-[var(--accent,#3b82f6)] underline decoration-dotted">TradingView ↗</a>
         )}
         {symbol && (
-          <span className={`ml-auto flex items-center gap-2 text-xs ${th.textFaint}`} title={gate.reasons.join('; ')}>
+          <span className={`${underlying ? 'ml-4' : 'ml-auto'} flex items-center gap-2 text-xs ${th.textFaint}`} title={gate.reasons.join('; ')}>
             <span className={`inline-block w-2 h-2 rounded-full ${statusColor}`} />
-            {statusLabel}{ageSec != null ? ` · updated ${ageSec}s ago` : ''}
+            {statusLabel}{closedStale ? (lastQuoteText ? ` · last quotes ${lastQuoteText}` : '') : (ageSec != null ? ` · updated ${ageSec}s ago` : '')}
           </span>
         )}
       </div>
@@ -475,12 +491,16 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
             {specs && <div className={`text-xs ${th.textFaint}`}>{specs.map(s => `${s.side === 'long' ? '+' : '−'}${s.strike}${s.right}`).join('  ')}</div>}
           </div>
 
-          {gate.status !== 'live' && (
+          {gate.status !== 'live' && (closedStale ? (
+            <div className={`text-xs ${th.textFaint}`}>
+              The market is closed, so these are the last quotes{lastQuoteText ? ` (${lastQuoteText})` : ''}. Planning only; nothing here can place an order. Quotes refresh on their own when the market opens.
+            </div>
+          ) : (
             <div className="text-xs text-amber-400">
               {gate.status === 'warming' ? 'Waiting for fresh quotes. ' : 'Quotes are not live: '}
               {gate.reasons.slice(0, 2).join('; ')}. Planning only; nothing here can place an order.
             </div>
-          )}
+          ))}
           {pollError && <div className="text-xs text-rose-400">Quote refresh failed: {pollError}</div>}
           {built?.error && <div className="text-xs text-rose-400">{built.error}</div>}
 
