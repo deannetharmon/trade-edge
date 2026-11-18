@@ -19,6 +19,7 @@ import {
 } from '@/lib/trademap/chain';
 import { chanceOfProfit } from '@/lib/trademap/pop';
 import { cellDetail } from '@/lib/trademap/cellDetail';
+import { positionGreeksAt } from '@/lib/trademap/greeks';
 import CellDetailPanel from './CellDetailPanel';
 import OptimizePanel from './OptimizePanel';
 import { candidateToMap, runOptimize, type OptimizeResult } from '@/lib/trademap/optimize';
@@ -312,6 +313,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     if (selCell && selValid) return cellDetail(legs, selCell.price, selCell.date, today, params, expiryIv);
     return cellDetail(legs, spot, today, today, params, expiryIv);
   }, [legs, spot, selCell, selValid, today, params, expiryIv]);
+  const todayGreeks = useMemo(() => (legs && spot != null ? positionGreeksAt(legs, spot, today, params) : null), [legs, spot, today, params]);
   useEffect(() => {
     if (!selCell) return undefined;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelCell(null); };
@@ -417,6 +419,9 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                 noQuotes={opt.result.noQuotes}
                 loadedShort={specs && specs.length >= 2 ? specs[0].strike : null}
                 loadedLong={specs && specs.length >= 2 ? specs[1].strike : null}
+                stock={spot}
+                ivRankPct={metrics?.ivRankPct ?? null}
+                greeks={todayGreeks}
                 canUndo={opt.prev != null && (opt.prev.anchor !== anchor || opt.prev.widthSteps !== widthSteps)}
                 onLoad={c => { loadCandidate(c, null); }}
                 onUndo={() => { if (opt.prev) { setAnchor(opt.prev.anchor); setWidthSteps(opt.prev.widthSteps); } }}

@@ -6,6 +6,7 @@
 'use client';
 
 import type { SpreadCandidate } from '@/lib/scans/types';
+import type { Greeks } from '@/lib/trademap/greeks';
 
 export interface OptimizePanelProps {
   th: any;
@@ -18,12 +19,72 @@ export interface OptimizePanelProps {
   loadedShort: number | null;
   loadedLong: number | null;
   canUndo: boolean;
+  /** The stock's current price, its IV rank and the position's Greeks today, for the selected trade's detail. */
+  stock: number | null;
+  ivRankPct: number | null;
+  greeks: Greeks | null;
   onLoad: (c: SpreadCandidate) => void;
   onUndo: () => void;
   onClose: () => void;
 }
 
+const usd0 = (v: number) => `${v < 0 ? '-' : '+'}$${Math.round(Math.abs(v)).toLocaleString('en-US')}`;
+const sgn = (v: number, d: number) => `${v < 0 ? '-' : '+'}${Math.abs(v).toFixed(d)}`;
 const widthText = (w: number) => `$${Number.isInteger(w) ? w : w.toFixed(2)}`;
+
+
+function Stat({ th, label, value, sub }: { th: any; label: string; value: string; sub?: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className={`text-[10px] tracking-wider ${th.textFaint}`}>{label}</div>
+      <div className={`text-sm font-semibold ${th.text}`}>{value}</div>
+      <div className={`text-[10px] ${th.textFaint}`}>{sub ?? ''}</div>
+    </div>
+  );
+}
+
+/** The selected trade's numbers, all from the screener's candidate or the grid's own model. */
+function SelectedDetail({ p, c }: { p: OptimizePanelProps; c: SpreadCandidate }) {
+  const { th } = p;
+  const isPut = c.strategy === 'BPS';
+  const credit = c.credit;
+  const breakeven = isPut ? c.shortStrike - credit : c.shortStrike + credit;
+  const fromStock = p.stock ? ((breakeven / p.stock) - 1) * 100 : null;
+  const maxLoss = (c.spreadWidth - credit) * 100;
+  return (
+    <div data-testid="optimize-detail" className={`border ${th.border} rounded-lg p-3 flex flex-col gap-2`}>
+      <div className={`text-xs font-bold ${th.text}`}>
+        Selected: short {c.shortStrike} / long {c.longStrike} {isPut ? 'put' : 'call'}{' '}
+        <span className={`font-normal ${th.textFaint}`}>{widthText(c.spreadWidth)} wide · {c.dte} days</span>
+      </div>
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+        <Stat th={th} label="STOCK" value={p.stock == null ? '—' : `$${p.stock.toFixed(2)}`} sub="now" />
+        <Stat th={th} label="ENTRY CREDIT" value={`$${credit.toFixed(2)}`} sub={c.midCredit != null && c.naturalCredit != null ? `mid $${c.midCredit.toFixed(2)} · natural $${c.naturalCredit.toFixed(2)}` : undefined} />
+        <Stat th={th} label="BREAKEVEN" value={`$${breakeven.toFixed(2)}`} sub={fromStock == null ? undefined : `${fromStock >= 0 ? '+' : '-'}${Math.abs(fromStock).toFixed(1)}% from stock`} />
+        <Stat th={th} label="MAX PROFIT" value={`$${Math.round(credit * 100).toLocaleString('en-US')}`} sub={`${isPut ? 'at or above' : 'at or below'} ${c.shortStrike}`} />
+        <Stat th={th} label="MAX LOSS" value={`$${Math.round(maxLoss).toLocaleString('en-US')}`} sub={`${isPut ? 'at or below' : 'at or above'} ${c.longStrike}`} />
+        <Stat th={th} label="CREDIT RATIO" value={c.creditRatio.toFixed(2)} sub="of width" />
+        <Stat th={th} label="PROFIT TARGET" value={usd0(credit * 50)} sub="50% of credit" />
+        <Stat th={th} label="STOP" value={usd0(-credit * 100)} sub="2x credit" />
+        <Stat th={th} label="SHORT DELTA" value={c.shortDelta.toFixed(2)} sub={`OI ${c.shortOI.toLocaleString('en-US')} / ${c.longOI.toLocaleString('en-US')}`} />
+        <Stat th={th} label="POP" value={c.pop == null ? '—' : `${Math.round(c.pop)}%`} sub="screener model" />
+        <Stat th={th} label="ROC" value={`${Math.round(c.roc)}%`} sub="on max loss" />
+        <Stat th={th} label="IV RANK" value={p.ivRankPct == null ? '—' : String(Math.round(p.ivRankPct))} />
+      </div>
+      {p.greeks && (
+        <>
+          <div className={`text-[10px] tracking-wider ${th.textFaint}`}>POSITION GREEKS TODAY</div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Stat th={th} label="DELTA" value={sgn(p.greeks.delta, 1)} sub="shares equivalent" />
+            <Stat th={th} label="GAMMA" value={p.greeks.gamma.toFixed(2)} sub="delta change per $1" />
+            <Stat th={th} label="THETA" value={`${p.greeks.theta < 0 ? '-' : '+'}$${Math.abs(p.greeks.theta).toFixed(2)}`} sub="per day" />
+            <Stat th={th} label="VEGA" value={`${p.greeks.vega < 0 ? '-' : '+'}$${Math.abs(p.greeks.vega).toFixed(2)}`} sub="per IV point" />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function OptimizePanel(p: OptimizePanelProps) {
   const { th } = p;
@@ -46,6 +107,10 @@ export default function OptimizePanel(p: OptimizePanelProps) {
         <div className={`text-xs ${th.textFaint}`}>No short strike meets your saved delta, market, credit ratio, return on risk and POP rules at this width. Your strikes were not changed. {p.atEachWidth.length > 0 ? 'The screener does find these at other widths:' : 'Try another width or expiration.'}</div>
       )}
       {p.pick && <div className={`text-xs ${th.textFaint}`}>Loaded onto the map. Chosen with your saved scan criteria, using the same logic as the screener.</div>}
+      {(() => {
+        const sel = p.atEachWidth.find(c => c.shortStrike === p.loadedShort && c.longStrike === p.loadedLong) ?? (p.pick && p.pick.shortStrike === p.loadedShort && p.pick.longStrike === p.loadedLong ? p.pick : null);
+        return sel ? <SelectedDetail p={p} c={sel} /> : null;
+      })()}
       {p.atEachWidth.length > 0 && (
         <>
           <div className={`text-[11px] tracking-wider ${th.textFaint}`}>THE SCREENER&apos;S BEST AT EACH WIDTH (click one to load it)</div>
@@ -64,7 +129,7 @@ export default function OptimizePanel(p: OptimizePanelProps) {
                     {c.shortStrike} / {c.longStrike}
                     {i === 0 && <span className="ml-2 px-2 py-0.5 rounded-full border border-emerald-700 bg-emerald-500/10 text-emerald-400 text-[10px] font-semibold">Best opportunity</span>}
                   </span>
-                  <span className={th.textFaint}>credit ${c.credit.toFixed(2)} · POP {Math.round(c.pop ?? 0)}% · ROC {Math.round(c.roc)}%</span>
+                  <span className={th.textFaint}>credit ${c.credit.toFixed(2)} · delta {c.shortDelta.toFixed(2)} · POP {Math.round(c.pop ?? 0)}% · ROC {Math.round(c.roc)}%</span>
                 </button>
               );
             })}
