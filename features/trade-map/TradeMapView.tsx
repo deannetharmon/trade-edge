@@ -363,8 +363,8 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   }, [view, legs, exp, axisSpot, effRange, curveDate, params]);
 
   const pop = useMemo(
-    () => (legs && spot != null && expiryIv != null ? chanceOfProfit(legs, spot, today, expiryIv, params.riskFreeRate, params.dividendYield) : null),
-    [legs, spot, expiryIv, today, params],
+    () => (legs && spot != null && expiryIv != null ? chanceOfProfit(legs, spot, today, expiryIv * ivMult, params.riskFreeRate, params.dividendYield) : null),
+    [legs, spot, expiryIv, ivMult, today, params],
   );
 
   const selValid = !!(selCell && grid && grid.prices.indexOf(selCell.price) >= 0 && grid.dates.indexOf(selCell.date) >= 0);
