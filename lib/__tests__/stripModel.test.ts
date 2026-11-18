@@ -23,6 +23,10 @@ describe('OPTMAP-0001 S2i: strike strip model', () => {
     expect(w[w.length - 1]).toBeLessThanOrEqual(SPOT * 1.06);
     const widened = stripWindow(ks, SPOT, 0.06, [682]);
     expect(widened[0]).toBe(682);
+    // widened evenly: the stock stays centered, so the far side reaches the same distance
+    const half = SPOT - 682;
+    expect(widened[widened.length - 1]).toBeGreaterThan(SPOT + half - 1.01);
+    expect(widened[widened.length - 1]).toBeLessThanOrEqual(SPOT + half + 1e-9);
   });
   it('labels thin out as the chain gets denser', () => {
     expect(labelEvery(20)).toBe(1);

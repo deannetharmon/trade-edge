@@ -22,11 +22,12 @@ export interface StripMarker {
   role: MarkerRole;
 }
 
-/** Strikes inside the chart range around the stock, widened so every marker is visible. */
+/** Strikes inside the chart range around the stock, widened evenly on both sides so every marker is visible and the stock stays centered. */
 export function stripWindow(strikes: number[], spot: number, rangePct: number, include: number[]): number[] {
-  let lo = spot * (1 - rangePct);
-  let hi = spot * (1 + rangePct);
-  for (const k of include) { lo = Math.min(lo, k); hi = Math.max(hi, k); }
+  let half = spot * rangePct;
+  for (const k of include) half = Math.max(half, Math.abs(k - spot));
+  const lo = spot - half;
+  const hi = spot + half;
   return strikes.filter(k => k >= lo - 1e-9 && k <= hi + 1e-9);
 }
 

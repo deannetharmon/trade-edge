@@ -6,7 +6,7 @@
 
 'use client';
 
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { labelEvery, strikeAtX, THIN_OI, nearestMover, widthLabel, type StripMarker } from '@/lib/trademap/stripModel';
 
 export interface StripLegInfo { label: string; text: string; tone: 'good' | 'thin' | 'plain' }
@@ -27,10 +27,23 @@ export default function StrikeStrip({ th, strikes, spot, markers, oi, legInfo, o
   const lastRef = useRef<number | null>(null);
   // Set while the whole spread is being slid: the strike grabbed and the short strike when the grab began.
   const slideRef = useRef<{ grab: number; anchor: number } | null>(null);
+  // The strip fills the card, so changing the zoom really changes how wide each strike (and a $5 spread) looks.
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const [boxW, setBoxW] = useState(1000);
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return undefined;
+    const read = () => { if (el.clientWidth > 0) setBoxW(el.clientWidth); };
+    read();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const count = strikes.length;
   if (count < 2) return null;
 
-  const px = Math.max(12, Math.min(44, Math.floor(1000 / count)));
+  const px = Math.max(3, Math.min(44, (boxW - 2) / count));
   const width = count * px;
   const every = labelEvery(count);
   const idxOf = (k: number) => strikes.indexOf(k);
@@ -90,7 +103,7 @@ export default function StrikeStrip({ th, strikes, spot, markers, oi, legInfo, o
   return (
     <div className="flex flex-col gap-2">
       <div className={`text-xs ${th.textFaint}`}>Drag a circle to change one leg. Drag the shaded band (or Shift-drag a circle) to slide the whole spread. Click a strike to move the nearest leg.</div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" ref={boxRef}>
         <div
           ref={trackRef}
           className="relative mx-auto select-none"
