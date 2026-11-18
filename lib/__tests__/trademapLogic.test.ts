@@ -224,7 +224,7 @@ describe('OPTMAP-0001 S2: strategy builders', () => {
   });
   it('turns quotes into trade legs: mid entry, own IV, padded symbols matched', () => {
     const quotes: Record<string, OptionQuote> = {
-      P47: { symbol: 'P47', bid: 9.6, ask: 9.65, mid: 9.625, iv: 1.79, delta: -0.46, updatedAtMs: 1, halted: false },
+      P47: { symbol: 'P47', bid: 9.6, ask: 9.65, mid: 9.625, iv: 1.79, delta: -0.46, openInterest: 100, updatedAtMs: 1, halted: false },
     };
     const r = buildTradeLegs(legSpecs('long-put', chain, 47, spot, 1)!, '2026-12-18', quotes);
     expect(r.error).toBeNull();
@@ -233,7 +233,7 @@ describe('OPTMAP-0001 S2: strategy builders', () => {
   it('fails closed on a missing, one-sided or IV-less leg', () => {
     const specs = legSpecs('long-put', chain, 47, spot, 1)!;
     const quote = (over: Partial<OptionQuote>): Record<string, OptionQuote> => ({
-      P47: { symbol: 'P47', bid: 9.6, ask: 9.65, mid: 9.625, iv: 1.79, delta: -0.46, updatedAtMs: 1, halted: false, ...over },
+      P47: { symbol: 'P47', bid: 9.6, ask: 9.65, mid: 9.625, iv: 1.79, delta: -0.46, openInterest: 100, updatedAtMs: 1, halted: false, ...over },
     });
     expect(buildTradeLegs(specs, '2026-12-18', {}).error).toContain('No quote');
     expect(buildTradeLegs(specs, '2026-12-18', quote({ mid: null })).error).toContain('one-sided');

@@ -72,6 +72,7 @@ export interface OptionQuote {
   /** Implied volatility as a fraction (1.84 = 184%). */
   iv: number | null;
   delta: number | null;
+  openInterest: number | null;
   updatedAtMs: number | null;
   halted: boolean | null;
 }
@@ -88,6 +89,7 @@ export function parseOptionQuote(item: any): OptionQuote | null {
     mid,
     iv: ivToFraction(item.volatility),
     delta: num(item.delta),
+    openInterest: num(item['open-interest']),
     updatedAtMs: timeMs(item['updated-at']),
     halted: typeof item['is-trading-halted'] === 'boolean' ? item['is-trading-halted'] : null,
   };
@@ -114,6 +116,8 @@ export interface UnderlyingMetrics {
   /** Per-expiration implied volatility as a fraction, keyed by YYYY-MM-DD. */
   ivByExpiration: Record<string, number>;
   earningsDate: string | null;
+  /** IV rank in percent (0 to 100); null when absent. */
+  ivRankPct: number | null;
   /** Continuous dividend yield as a fraction; null when absent. Approximate: see Alan's note. */
   dividendYield: number | null;
 }
@@ -126,8 +130,10 @@ export function parseMetrics(item: any): UnderlyingMetrics {
   }
   const earnings = item?.earnings?.['expected-report-date'];
   const yieldRaw = num(item?.['dividend-yield']);
+  const ivr = num(item?.['implied-volatility-index-rank']);
   return {
     ivByExpiration,
+    ivRankPct: ivr != null && ivr >= 0 && ivr <= 1 ? ivr * 100 : null,
     earningsDate: typeof earnings === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(earnings) ? earnings : null,
     dividendYield: yieldRaw != null && yieldRaw > 0 && yieldRaw < 1 ? yieldRaw : null,
   };
