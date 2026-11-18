@@ -168,7 +168,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   const legs = built?.legs ?? null;
   const em = legs ? expiryMetrics(legs) : null;
   const params = useMemo(() => ({ ...DEFAULT_PRICING_PARAMS, dividendYield: metrics?.dividendYield ?? 0, ivMultiplier: ivMult }), [metrics, ivMult]);
-  const effRange = rangePct ?? (expectedMove != null ? Math.min(0.9, Math.max(0.05, expectedMove)) : 0.2);
+  const effRange = rangePct ?? (expectedMove != null ? Math.min(0.5, Math.max(0.05, expectedMove)) : 0.2);
 
   const grid = useMemo(() => {
     if (!legs || !exp || axisSpot == null) return null;
@@ -261,10 +261,10 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                   </select>
                 </label>
               )}
-              <label className={th.textFaint}>Range ±{Math.round(effRange * 100)}%{' '}
+              <label className={th.textFaint} title="How far above and below today's stock price the table and graph reach.">Range ±{Math.round(effRange * 100)}%{' '}
                 <input type="range" min={5} max={90} value={Math.round(effRange * 100)} onChange={e => { setRangePct(Number(e.target.value) / 100); }} />
               </label>
-              <label className={th.textFaint}>IV ×{ivMult.toFixed(2)}{' '}
+              <label className={th.textFaint} title="What-if on implied volatility: 1.00 = today's IV, 1.50 = IV rises 50%, 0.70 = IV falls 30%. Changes the dates before expiration only.">IV ×{ivMult.toFixed(2)}{' '}
                 <input type="range" min={50} max={300} step={5} value={Math.round(ivMult * 100)} onChange={e => setIvMult(Number(e.target.value) / 100)} />
               </label>
             </div>
