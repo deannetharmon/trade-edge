@@ -287,6 +287,7 @@ import { publishRecommendations, clearRecommendations, failRecommendationsEvalua
 import { RsiLine } from '@/components/RsiLine';
 import { ChartLinkButton } from '@/components/ChartLinkButton';
 import TradeMapLink from '@/features/trade-map/TradeMapLink';
+import { buildOrderLegs } from '@/lib/orders/entryLegs';
 
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
 // as module-level side effects (`if (typeof document !== 'undefined') {...}`).
@@ -3369,31 +3370,6 @@ function CspTradeModal({ result, th, onClose, qualification, onPlaced }: {
   );
 }
 
-function buildOrderLegs(result: ScreenResult, c: SpreadCandidate): any[] {
-  const instrType = result.underlyingType === 'index' ? 'Index Option' : 'Equity Option';
-  const legs: any[] = [];
-  if (c.strategy === 'PMCC') {
-    legs.push({ 'instrument-type': instrType, symbol: c.shortOccSymbolPMCC || c.shortOccSymbol!, quantity: 1, action: 'Sell to Open' });
-    legs.push({ 'instrument-type': instrType, symbol: c.longOccSymbolPMCC || c.longOccSymbol!, quantity: 1, action: 'Buy to Open' });
-  } else if (c.strategy === 'BPS') {
-    legs.push({ 'instrument-type': instrType, symbol: c.shortOccSymbol!, quantity: 1, action: 'Sell to Open' });
-    legs.push({ 'instrument-type': instrType, symbol: c.longOccSymbol!, quantity: 1, action: 'Buy to Open' });
-  } else if (c.strategy === 'BCS') {
-    legs.push({ 'instrument-type': instrType, symbol: c.shortOccSymbol!, quantity: 1, action: 'Sell to Open' });
-    legs.push({ 'instrument-type': instrType, symbol: c.longOccSymbol!, quantity: 1, action: 'Buy to Open' });
-  } else if (c.strategy === 'IC') {
-    legs.push({ 'instrument-type': instrType, symbol: c.shortOccSymbol!, quantity: 1, action: 'Sell to Open' });
-    legs.push({ 'instrument-type': instrType, symbol: c.longOccSymbol!, quantity: 1, action: 'Buy to Open' });
-    legs.push({ 'instrument-type': instrType, symbol: c.shortCallOccSymbol!, quantity: 1, action: 'Sell to Open' });
-    legs.push({ 'instrument-type': instrType, symbol: c.longCallOccSymbol!, quantity: 1, action: 'Buy to Open' });
-  } else if (c.strategy === 'CSP') {
-    // CSP-ORDERS-0001 -- a cash-secured put is a single leg, deliberately
-    // never more. buildCreditEntryOtoco (lib/screener/entryBracket.ts) is
-    // already leg-count-agnostic, so no change was needed there.
-    legs.push({ 'instrument-type': instrType, symbol: c.shortOccSymbol!, quantity: 1, action: 'Sell to Open' });
-  }
-  return legs;
-}
 // LEAPS-0001: a genuinely new, purpose-built modal, not an adaptation of
 // TradeModal -- checked buildOrderLegs/buildOrderPayload first, and both
 // are hard-coded per multi-leg strategy (PMCC/BPS/BCS/IC), with no case
