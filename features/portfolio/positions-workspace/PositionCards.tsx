@@ -121,6 +121,10 @@ function CardItem({ pmccOpportunity, onFindPmccShortCall, rsi, cutoff, card, th,
         <div className="sm:max-w-[30rem] sm:justify-self-end sm:text-right">
           <b data-testid="card-pnl" className={`block text-xl ${pnlTone}`}>{usd(card.pnl)}</b>
           <span className={`block text-[11px] ${card.unverifiedQuote ? 'text-amber-300' : th.textFaint}`}>{card.pnlNote}</span>
+          {/* PREMIUM-TILE-0001: what you keep if the option expires worthless = the credit collected. Credit positions only. */}
+          {p.entryPriceEffect === 'Credit' && p.entryEconomicsComplete !== false && (p.entryCredit ?? p.creditReceived) != null && (
+            <span data-testid="card-potential-premium" className="mt-1 block text-[11px] text-white/70">Potential Premium <b className={SEMANTIC_TONE_CLASS.positive}>{usd(p.entryCredit ?? p.creditReceived)}</b></span>
+          )}
           {isLeapCall(p) && <LeapRsiChips position={p} rsi={rsi} cutoff={cutoff} textFaint={th.textFaint} />}
           {sideChips.length > 0 && (() => {
             const last = Math.max(...sideChips.map(c => c.row));
