@@ -13,6 +13,8 @@ export interface TradeMapPrefill {
   strategy?: StrategyId;
   expiry?: string;
   strike?: number;
+  /** Long strike of a spread; the width in strike steps is derived from the live chain. */
+  longStrike?: number;
   /** Spread width in strike steps. */
   width?: number;
 }
@@ -28,6 +30,8 @@ export function parseTradeMapParams(search: string): TradeMapPrefill {
   if (expiry && /^\d{4}-\d{2}-\d{2}$/.test(expiry)) out.expiry = expiry;
   const strike = parseFloat(q.get('strike') ?? '');
   if (Number.isFinite(strike) && strike > 0) out.strike = strike;
+  const long = parseFloat(q.get('long') ?? '');
+  if (Number.isFinite(long) && long > 0) out.longStrike = long;
   const width = Number(q.get('width') ?? 'x');
   if (Number.isInteger(width) && width >= 1 && width <= 10) out.width = width;
   return out;
@@ -39,6 +43,7 @@ export function buildTradeMapUrl(p: TradeMapPrefill): string {
   if (p.strategy) q.set('strategy', p.strategy);
   if (p.expiry) q.set('expiry', p.expiry);
   if (p.strike != null) q.set('strike', String(p.strike));
+  if (p.longStrike != null) q.set('long', String(p.longStrike));
   if (p.width != null) q.set('width', String(p.width));
   const s = q.toString();
   return s ? `/trade-map?${s}` : '/trade-map';

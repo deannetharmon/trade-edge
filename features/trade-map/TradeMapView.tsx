@@ -121,7 +121,10 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     const pend = pendingRef.current;
     pendingRef.current = null;
     setAnchor(pend?.strike != null && strikes.indexOf(pend.strike) >= 0 ? pend.strike : defaultAnchorStrike(strategy, strikes, spotRef.current, move));
-    setWidthSteps(pend?.width != null ? pend.width : defaultWidthSteps(strikes, spotRef.current));
+    const idxShort = pend?.strike != null ? strikes.indexOf(pend.strike) : -1;
+    const idxLong = pend?.longStrike != null ? strikes.indexOf(pend.longStrike) : -1;
+    const derived = idxShort >= 0 && idxLong >= 0 && idxShort !== idxLong ? Math.abs(idxShort - idxLong) : null;
+    setWidthSteps(derived != null && derived <= 10 ? derived : pend?.width != null ? pend.width : defaultWidthSteps(strikes, spotRef.current));
     setAxisSpot(spotRef.current);
     setDateIdx(null);
     setRangePct(null);

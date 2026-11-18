@@ -286,6 +286,7 @@ import { ScanModalShell, ScanModeRadioGroup, type ScanMode } from '@/features/sc
 import { publishRecommendations, clearRecommendations, failRecommendationsEvaluation, evaluateScreenResultsInBatches } from '@/lib/recommendations';
 import { RsiLine } from '@/components/RsiLine';
 import { ChartLinkButton } from '@/components/ChartLinkButton';
+import TradeMapLink from '@/features/trade-map/TradeMapLink';
 
 // NOTE: accent-style and DM-Sans-font <head> injection used to live here
 // as module-level side effects (`if (typeof document !== 'undefined') {...}`).
@@ -6711,8 +6712,8 @@ const strategyScores = useMemo(() => {
       {cleanCsp && c ? (
         <CleanCspLine result={result} c={c} th={th} rsi14={rsi14} oiBelowFloor={c.cspOiPassing === false} alloc={cleanAlloc}
           score={cspScore} band={cspBand} scoreOpen={showCspScore} onScore={() => setShowCspScore(v => !v)} expanded={expanded}
-          chartLink={<ScreenerChartLink symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
-            sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />}
+          chartLink={<><ScreenerChartLink symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
+            sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} /><TradeMapLink symbol={result.symbol} candidate={c} className="mt-0.5 block text-[10px] font-semibold tracking-wide text-[var(--accent,#3b82f6)] hover:underline" /></>}
           positionNote={matchingPositions.length > 0 ? (
             <span data-testid="clean-open-position" className="inline-flex flex-wrap items-center gap-x-2 rounded border border-amber-500/60 bg-amber-500/10 px-2 py-0.5 text-[10px]" onClick={e => e.stopPropagation()}>
               <span className="font-bold uppercase tracking-widest text-amber-400">▸ Open position</span>
@@ -6735,6 +6736,7 @@ const strategyScores = useMemo(() => {
           <div className="mt-0.5">
             <ScreenerChartLink symbol={result.symbol} th={th} showChart={showChart} setShowChart={setShowChart}
               sparkData={sparkData} setSparkData={setSparkData} sparkLoading={sparkLoading} setSparkLoading={setSparkLoading} />
+            <TradeMapLink symbol={result.symbol} candidate={c} className="mt-0.5 block text-[10px] font-semibold tracking-wide text-[var(--accent,#3b82f6)] hover:underline" />
           </div>
         </div>
         {/* Col 2: Badges — fixed width */}

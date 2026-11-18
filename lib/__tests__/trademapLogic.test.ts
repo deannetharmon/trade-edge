@@ -306,3 +306,25 @@ describe('OPTMAP-0001 S2d: deep link parameters', () => {
     expect(parseTradeMapParams('strike=abc&width=1.5')).toEqual({});
   });
 });
+
+import { candidateToPrefill, candidateTradeMapUrl } from '../trademap/candidateLink';
+
+describe('OPTMAP-0001 S2e: screener candidate links', () => {
+  it('BPS carries both strikes; CSP only the short strike', () => {
+    expect(candidateToPrefill('SOXL', { strategy: 'BPS', expiration: '2026-12-18', shortStrike: 45, longStrike: 40 }))
+      .toEqual({ symbol: 'SOXL', strategy: 'bps', expiry: '2026-12-18', strike: 45, longStrike: 40 });
+    expect(candidateToPrefill('NVDL', { strategy: 'CSP', expiration: '2026-12-18', shortStrike: 11, longStrike: 0 }))
+      .toEqual({ symbol: 'NVDL', strategy: 'csp', expiry: '2026-12-18', strike: 11 });
+  });
+  it('an iron condor opens on symbol and expiry only (its call side is not stated)', () => {
+    expect(candidateToPrefill('SPY', { strategy: 'IC', expiration: '2026-12-18', shortStrike: 600, longStrike: 595 }))
+      .toEqual({ symbol: 'SPY', strategy: 'ic', expiry: '2026-12-18' });
+  });
+  it('drops unknown strategies and bad dates; builds a url with the long strike', () => {
+    expect(candidateToPrefill('X', { strategy: 'PMCC', expiration: 'soon' })).toEqual({ symbol: 'X' });
+    expect(candidateToPrefill('X', null)).toEqual({ symbol: 'X' });
+    expect(candidateTradeMapUrl('SOXL', { strategy: 'BCS', expiration: '2026-12-18', shortStrike: 55, longStrike: 57.5 }))
+      .toBe('/trade-map?symbol=SOXL&strategy=bcs&expiry=2026-12-18&strike=55&long=57.5');
+    expect(parseTradeMapParams('symbol=SOXL&strike=55&long=57.5').longStrike).toBe(57.5);
+  });
+});

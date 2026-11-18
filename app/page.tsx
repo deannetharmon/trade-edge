@@ -404,6 +404,7 @@ export default function HomePage() {
             <NavCard href="/portfolio"    label="PORTFOLIO"         icon="📊" desc="Live positions, Greeks, action buttons"          th={th} />
             <NavCard href="/screener"     label="SCREENER"          icon="🔍" desc="Scan tickers for BPS, BCS, IC setups"            th={th} />
             {showTab('research') && <NavCard href="/research"     label="RESEARCH"          icon="🔎" desc="Look up any stock: price, chart and key stats"   th={th} /> }
+            {showTab('trade-map') && <NavCard href="/trade-map"   label="TRADE MAP"         icon="🗺️" desc="Build a trade on live quotes and see its P/L map" th={th} /> }
             {showTab('engine') && <NavCard href="/engine"       label="INCOME ENGINE"     icon="⚡" desc="SPX spread suggestions and capital allocation"   th={th} /> }
             {showTab('rinse-repeat') && <NavCard href="/rinse-repeat" label="REPEAT" icon="🔄" desc="Re-screen past winners and track cycles"         th={th} /> }
             <NavCard href="/trade-log"    label="TRADE LOG"         icon="📋" desc="Closed trade history and P&L analysis"           th={th} />
