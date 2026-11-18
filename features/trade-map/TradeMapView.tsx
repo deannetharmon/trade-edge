@@ -14,7 +14,7 @@ import { ttFetch } from '@/lib/tastytrade/client';
 import type { Theme } from '@/lib/theme';
 import { THEMES } from '@/lib/theme';
 import {
-  fetchMetrics, fetchNestedChain, fetchOptionQuotes, fetchUnderlyingQuote, symbolKey,
+  fetchMetrics, fetchNestedChain, fetchOptionQuotes, fetchOptionQuotesBestEffort, fetchUnderlyingQuote, symbolKey,
   type ChainExpiration, type OptionQuote, type UnderlyingMetrics, type UnderlyingQuote,
 } from '@/lib/trademap/chain';
 import { chanceOfProfit } from '@/lib/trademap/pop';
@@ -264,15 +264,24 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   }, [exp, strategy, axisSpot, spot]);
   const stripSymbols = useMemo(() => stripStrikes.map(symbolAt).filter((x): x is string => !!x), [stripStrikes, symbolAt]);
   const stripKey = stripSymbols.join('|');
+  // Open-interest bars: keep every quote already loaded, fetch only the strikes not loaded yet (after a short pause while the
+  // Zoom slider moves), and refresh everything on the 30 s timer. One failed batch no longer wipes the strip.
+  const stripHave = useRef<Set<string>>(new Set());
+  useEffect(() => { stripHave.current = new Set(); }, [symbol, expiry]);
   useEffect(() => {
     if (!symbol || stripSymbols.length === 0) return;
     let cancelled = false;
-    const run = async () => {
-      try { const q = await fetchOptionQuotes(fetcher, stripSymbols); if (!cancelled) setStripQuotes(q); } catch { /* the strip is optional: the 5 s poll still drives the gate */ }
+    const run = async (all: boolean) => {
+      const need = all ? stripSymbols : stripSymbols.filter(s => !stripHave.current.has(symbolKey(s)));
+      if (need.length === 0) return;
+      const q = await fetchOptionQuotesBestEffort(fetcher, need);
+      if (cancelled) return;
+      for (const k of Object.keys(q)) stripHave.current.add(k);
+      setStripQuotes(prev => ({ ...prev, ...q }));
     };
-    run();
-    const id = pollOnTimer ? setInterval(run, 30000) : null;
-    return () => { cancelled = true; if (id != null) clearInterval(id); };
+    const t = setTimeout(() => { void run(false); }, 250);
+    const id = pollOnTimer ? setInterval(() => { void run(true); }, 30000) : null;
+    return () => { cancelled = true; clearTimeout(t); if (id != null) clearInterval(id); };
   }, [symbol, stripKey, pollOnTimer]); // eslint-disable-line react-hooks/exhaustive-deps
   const stripOi = useMemo(() => {
     const out: Record<number, number | null> = {};

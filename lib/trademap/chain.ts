@@ -159,6 +159,15 @@ export async function fetchOptionQuotes(fetch: ChainFetcher, symbols: string[]):
   return out;
 }
 
+/** Like fetchOptionQuotes, but one failed chunk only loses that chunk (the strike strip's open-interest bars are optional). */
+export async function fetchOptionQuotesBestEffort(fetch: ChainFetcher, symbols: string[]): Promise<Record<string, OptionQuote>> {
+  const out: Record<string, OptionQuote> = {};
+  for (let i = 0; i < symbols.length; i += QUOTE_CHUNK) {
+    try { Object.assign(out, await fetchOptionQuotes(fetch, symbols.slice(i, i + QUOTE_CHUNK))); } catch { /* keep what the other chunks returned */ }
+  }
+  return out;
+}
+
 export async function fetchUnderlyingQuote(fetch: ChainFetcher, symbol: string): Promise<UnderlyingQuote | null> {
   const data = await fetch(`/market-data/by-type?equity=${encodeURIComponent(symbol)}`);
   return parseUnderlyingQuote(data?.data?.items?.[0]);
