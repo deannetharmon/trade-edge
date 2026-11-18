@@ -7,7 +7,28 @@
 
 # TradeEdge Roadmap (maintained by Paul — update after every major decision)
 
-Last updated: 2026-11-05 (reconciliation)
+Last updated: 2026-11-17 (OPTMAP-0001 / Trade Map status board added by Paul and Frank)
+
+## OPTMAP-0001 Trade Map and ORDER-SEND-0001: status board (2026-11-17, main @ fac6f5f)
+
+Scope rule: the screener finds and ranks trades; Trade Map shows what a chosen trade does (OptionStrat-style, any symbol) on real-time TastyTrade quotes. It never recommends, ranks or sizes a trade. Decisions: docs in the TradeEdge project, `OPTMAP-0001-decision-record.md` plus `OPTMAP-0001-decision-record-addendum-2026-11-17.md` (the addendum wins).
+
+### Done (on main, CI green)
+- S0 spike (real-time data confirmed over REST; no DXLink). S1 pricing engine (lib/trademap, Black-Scholes, golden fixtures).
+- S2 read-only Trade Map tab at /trade-map: chain-fed builder for long call, long put, CSP, BPS, BCS, IC; live gate v2 (Live / Warming up / Stale); chance of profit; max profit and loss; breakevens; earnings line; price x date grid (5 dates; P/L $ and P/L % of premium); 1-sigma default range capped at 50%; IV what-if slider.
+- S2b graph view (selected date and expiry curves, date slider). S2d URL prefill (/trade-map?symbol=&strategy=&expiry=&strike=&long=&width=). S2e "Trade Map" link on screener result cards and a home card.
+- ORDER-SEND-0001 Step 0: buildOrderLegs moved from app/screener/page.tsx to lib/orders/entryLegs.ts (verbatim) with golden fixtures.
+
+### In progress
+- ORDER-SEND-0001 (Send to order from Trade Map). Spec signed by Ian: credit trades only, entry plus 50% profit target and 2x-credit stop on every order, entry at mid with re-price and abort beyond $0.05, dry-run on by default, gate must be LIVE, failed Prosper checks need acknowledgement, 1 contract to start, no price walk. Quinn narrowed v1 to BPS, BCS and IC until CSP's post-submit tracking is verified. Next: pure modules with fixtures (order-leg mapping, bracket prices, re-price check, Prosper checks from the screener's threshold constants), then the Send dialog (Diane mock: board 3 of the Trade Map canvas), then Dean's live dry-run.
+
+### Waiting on Dean (only he can do these)
+1. Open /trade-map with the market open and report anything wrong (not yet seen live).
+2. After Step 0: on a screener candidate, open the order ticket and run the dry-run; confirm it still validates.
+3. Look at the Send confirm mock (board 3) before the Send screen is built.
+
+### Not started / later
+- Portfolio position links to Trade Map. S4: covered call, LEAPS, PMCC (two expirations, model-based summary), net greeks ("More" menu), target and stop overlays. Later: saved strategies, IV history. Send for debit trades, CC, PMCC and CSP (after Quinn's check).
 
 ## Reconciliation 2026-11-05 (Paul; verified by Dane against main @ 93a539f)
 
