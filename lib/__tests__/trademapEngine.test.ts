@@ -237,7 +237,7 @@ describe('OPTMAP-0001 S1: axes', () => {
 import { buildDisplayPriceAxis, buildPriceAxis as buildPriceAxisRaw } from '../trademap/gridModel';
 
 describe('OPTMAP-0001 S2h: display price axis', () => {
-  it('rows 1.5 dollars or more apart sit on whole dollars, descending and unique', () => {
+  it('rows $1 or more apart sit on whole dollars, descending and unique', () => {
     const axis = buildDisplayPriceAxis(46.76, 0.52, 11)!;
     expect(axis.every(p => Number.isInteger(p))).toBe(true);
     for (let i = 1; i < axis.length; i += 1) expect(axis[i]).toBeLessThan(axis[i - 1]);
@@ -247,6 +247,15 @@ describe('OPTMAP-0001 S2h: display price axis', () => {
   it('tight rows keep cents, so labels never collide', () => {
     const raw = buildPriceAxisRaw(16.01, 0.2, 11)!;
     expect(buildDisplayPriceAxis(16.01, 0.2, 11)).toEqual(raw);
+  });
+  it('rows about $1.20 apart now round too (Dean 2026-11-17), still unique and descending', () => {
+    const axis = buildDisplayPriceAxis(51.62, 0.12, 11)!;
+    expect(axis.every(p => Number.isInteger(p))).toBe(true);
+    for (let i = 1; i < axis.length; i += 1) expect(axis[i]).toBeLessThan(axis[i - 1]);
+  });
+  it('rows under $1 apart keep cents', () => {
+    const raw = buildPriceAxisRaw(51.62, 0.09, 11)!;
+    expect(buildDisplayPriceAxis(51.62, 0.09, 11)).toEqual(raw);
   });
   it('fails closed like the raw axis', () => {
     expect(buildDisplayPriceAxis(0, 0.2, 11)).toBeNull();
