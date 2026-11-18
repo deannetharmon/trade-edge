@@ -516,16 +516,18 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                   </select>
                 </label>
               )}
-                </div>
-              </details>
-              <label className={th.textFaint} title="How far above and below today's stock price the table and graph reach. Zoom only; no effect on the trade.">Range ±{Math.round(effRange * 100)}%{' '}
-                <input type="range" min={5} max={90} value={Math.round(effRange * 100)} onChange={e => { setRangePct(Number(e.target.value) / 100); }} />
-                {rangePct != null && <button type="button" className="ml-1 text-blue-400 underline" onClick={() => setRangePct(null)}>Auto</button>}
-              </label>
-              <label className={th.textFaint} title="What-if: scales implied volatility before expiration. 1.00 = today's IV, 0.60 = IV drops 40%, 1.50 = IV rises 50%. Changes the numbers, so keep it at 1.00 to see the real trade.">IV ×{ivMult.toFixed(2)}{ivMult !== 1 ? ' what-if' : ''}{' '}
+              <label className={th.textFaint} title="What-if: scales implied volatility before expiration. 1.00 = today's IV, 0.60 = IV drops 40%, 1.50 = IV rises 50%. Changes the numbers, so keep it at 1.00 to see the real trade.">What if IV changes ×{ivMult.toFixed(2)}{' '}
                 <input type="range" min={50} max={300} step={5} value={Math.round(ivMult * 100)} onChange={e => setIvMult(Number(e.target.value) / 100)} />
                 {ivMult !== 1 && <button type="button" className="ml-1 text-blue-400 underline" onClick={() => setIvMult(1)}>Reset to 1.00</button>}
               </label>
+                </div>
+              </details>
+              <label className={th.textFaint} title="How far above and below today's stock price the table and graph reach. Zoom only; no effect on the trade.">Zoom ±{Math.round(effRange * 100)}%{' '}
+                <input type="range" min={5} max={90} value={Math.round(effRange * 100)} onChange={e => { setRangePct(Number(e.target.value) / 100); }} />
+                {rangePct != null && <button type="button" className="ml-1 text-blue-400 underline" onClick={() => setRangePct(null)}>Auto</button>}
+              </label>
+              {ivMult !== 1 && <span className="text-xs text-rose-400">IV what-if ×{ivMult.toFixed(2)} <button type="button" className="ml-1 text-blue-400 underline" onClick={() => setIvMult(1)}>Reset</button></span>}
+
             </div>
             {strategy === 'cc' && (
               <div className="flex flex-wrap items-center gap-3">
