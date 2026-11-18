@@ -87,7 +87,7 @@ export interface DragInput {
 }
 export interface DragResult { anchor: number; widthSteps: number }
 
-/** The anchor and width after moving a marker to the listed strike nearest the target; null when that is not allowed. */
+/** The anchor and width after moving a marker (on spreads the other leg stays put) to the listed strike nearest the target; null when that is not allowed. */
 export function dragLeg(i: DragInput): DragResult | null {
   const strikes = i.chain.strikes.map(s => s.strike);
   if (strikes.length === 0 || !Number.isFinite(i.targetStrike)) return null;
@@ -96,6 +96,19 @@ export function dragLeg(i: DragInput): DragResult | null {
   let widthSteps = i.widthSteps;
   if (i.role === 'anchor') {
     anchor = snapped;
+    // On a spread, each marker moves on its own: moving the short leg leaves the long leg where it is, so the spread
+    // widens or narrows (a single leg has no width to keep). The short leg stops one strike short of the long leg.
+    if (i.strategy === 'bps' || i.strategy === 'bcs' || i.strategy === 'ic') {
+      const a = strikes.indexOf(i.anchor);
+      const t = strikes.indexOf(snapped);
+      if (a < 0 || t < 0) return null;
+      const longIdx = i.strategy === 'bcs' ? a + i.widthSteps : a - i.widthSteps;
+      const steps = i.strategy === 'bcs' ? longIdx - t : t - longIdx;
+      widthSteps = Math.min(MAX_WIDTH_STEPS, Math.max(1, steps));
+      const keepIdx = i.strategy === 'bcs' ? longIdx - widthSteps : longIdx + widthSteps;
+      if (keepIdx < 0 || keepIdx >= strikes.length) return null;
+      anchor = strikes[keepIdx];
+    }
   } else {
     const a = strikes.indexOf(i.anchor);
     const t = strikes.indexOf(snapped);

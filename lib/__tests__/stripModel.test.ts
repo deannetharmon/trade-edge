@@ -45,9 +45,23 @@ describe('OPTMAP-0001 S2i: strike strip model', () => {
     expect(ic.map(m => m.role)).toEqual(['anchor', 'width', 'mirror', 'mirror']);
     expect(markersFor('csp', legSpecs('csp', c, 716, SPOT, 1)!)[0].role).toBe('anchor');
   });
-  it('dragging the short put snaps to a listed strike and keeps the width', () => {
-    const r = dragLeg({ strategy: 'bps', chain: c, spot: SPOT, anchor: 716, widthSteps: 10, role: 'anchor', targetStrike: 721.4 })!;
-    expect(r).toEqual({ anchor: 721, widthSteps: 10 });
+  it('dragging the short put leaves the long put in place, so the spread widens or narrows', () => {
+    const up = dragLeg({ strategy: 'bps', chain: c, spot: SPOT, anchor: 716, widthSteps: 10, role: 'anchor', targetStrike: 721.4 })!;
+    expect(up).toEqual({ anchor: 721, widthSteps: 15 }); // long stays 706
+    const down = dragLeg({ strategy: 'bps', chain: c, spot: SPOT, anchor: 716, widthSteps: 10, role: 'anchor', targetStrike: 710 })!;
+    expect(down).toEqual({ anchor: 710, widthSteps: 4 });
+  });
+  it('the short leg stops one strike from the long leg', () => {
+    const r = dragLeg({ strategy: 'bps', chain: c, spot: SPOT, anchor: 716, widthSteps: 10, role: 'anchor', targetStrike: 690 })!;
+    expect(r).toEqual({ anchor: 707, widthSteps: 1 });
+  });
+  it('bear call spread: dragging the short call leaves the long call in place', () => {
+    const r = dragLeg({ strategy: 'bcs', chain: c, spot: SPOT, anchor: 750, widthSteps: 5, role: 'anchor', targetStrike: 747 })!;
+    expect(r).toEqual({ anchor: 747, widthSteps: 8 }); // long stays 755
+  });
+  it('a cash-secured put has no width: the short leg just moves', () => {
+    const r = dragLeg({ strategy: 'csp', chain: c, spot: SPOT, anchor: 716, widthSteps: 1, role: 'anchor', targetStrike: 710 })!;
+    expect(r.anchor).toBe(710);
   });
   it('dragging the long put sets the width from the distance to the short put', () => {
     const r = dragLeg({ strategy: 'bps', chain: c, spot: SPOT, anchor: 716, widthSteps: 10, role: 'width', targetStrike: 701 })!;
@@ -66,14 +80,12 @@ describe('OPTMAP-0001 S2i: strike strip model', () => {
     const r = dragLeg({ strategy: 'bps', chain: wide, spot: SPOT, anchor: 716, widthSteps: 5, role: 'width', targetStrike: 310 })!;
     expect(r.widthSteps).toBe(MAX_WIDTH_STEPS);
   });
-  it('a move that no listed strike supports is refused', () => {
-    // long leg would fall off the bottom of the chain
-    expect(dragLeg({ strategy: 'bps', chain: c, spot: SPOT, anchor: 716, widthSteps: 10, role: 'anchor', targetStrike: 681 })).toBeNull();
+  it('a target that is not a number is refused', () => {
     expect(dragLeg({ strategy: 'bps', chain: c, spot: SPOT, anchor: 716, widthSteps: 10, role: 'anchor', targetStrike: NaN })).toBeNull();
   });
   it('iron condor: moving the put anchor keeps the call side mirrored and valid', () => {
-    const r = dragLeg({ strategy: 'ic', chain: c, spot: SPOT, anchor: 716, widthSteps: 5, role: 'anchor', targetStrike: 710 })!;
-    expect(r.anchor).toBe(710);
+    const r = dragLeg({ strategy: 'ic', chain: c, spot: SPOT, anchor: 716, widthSteps: 5, role: 'anchor', targetStrike: 714 })!;
+    expect(r).toEqual({ anchor: 714, widthSteps: 3 });
     expect(legSpecs('ic', c, r.anchor, SPOT, r.widthSteps)).not.toBeNull();
   });
   it('a click moves the nearest movable marker (the anchor on a tie); mirrored markers never move', () => {
