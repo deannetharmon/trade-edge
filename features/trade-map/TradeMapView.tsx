@@ -20,6 +20,8 @@ import {
 import { chanceOfProfit } from '@/lib/trademap/pop';
 import { cellDetail } from '@/lib/trademap/cellDetail';
 import { positionGreeksAt } from '@/lib/trademap/greeks';
+import { fetchHeaderRsi, formatRsi, type HeaderRsi } from '@/lib/trademap/headerRsi';
+import { buildTradingViewChartUrl } from '@/lib/tradingview';
 import CellDetailPanel from './CellDetailPanel';
 import OptimizePanel from './OptimizePanel';
 import { candidateToMap, runOptimize, type OptimizeResult } from '@/lib/trademap/optimize';
@@ -94,6 +96,8 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   // The grid cell the trader clicked (stock price and date); null shows today at the current price.
   // Optimize (S5): the screener's own pick for this symbol; `prev` is what the map held before it was loaded.
   const [opt, setOpt] = useState<{ result: OptimizeResult; widthDollars: number | null; prev: { anchor: number; widthSteps: number } | null } | null>(null);
+  // Daily and weekly RSI(14) for the header; null until fetched, dashes when unavailable.
+  const [headerRsi, setHeaderRsi] = useState<HeaderRsi | null>(null);
   const [optBusy, setOptBusy] = useState(false);
   const [optError, setOptError] = useState<string | null>(null);
   const [selCell, setSelCell] = useState<{ price: number; date: string } | null>(null);
@@ -247,6 +251,13 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     if (from == null) return;
     moveLeg(role, stepStrike(allStrikes, from, dir));
   }, [anchor, markers, allStrikes, moveLeg]);
+  useEffect(() => {
+    setHeaderRsi(null);
+    if (!symbol) return undefined;
+    let cancelled = false;
+    fetchHeaderRsi(symbol).then(r => { if (!cancelled) setHeaderRsi(r); }).catch(() => { if (!cancelled) setHeaderRsi({ daily: null, weekly: null }); });
+    return () => { cancelled = true; };
+  }, [symbol]);
   const optimizeSupported = strategy === 'bps' || strategy === 'bcs';
   useEffect(() => { setOpt(null); setOptError(null); }, [symbol, expiry, strategy]);
   const loadCandidate = useCallback((c: SpreadCandidate, keepPrev: { anchor: number; widthSteps: number } | null) => {
@@ -382,6 +393,14 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
         <input value={symbolInput} onChange={e => setSymbolInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') load(); }} className={`${sel} w-24 uppercase`} aria-label="Symbol" />
         <button onClick={() => load()} disabled={loading} className={chip(true)}>{loading ? 'Loading…' : 'Load'}</button>
         {symbol && underlying && <span className={`text-sm font-semibold ${th.text}`}>{symbol} ${underlying.price.toFixed(2)}</span>}
+        {symbol && underlying && headerRsi && (
+          <span className={`text-xs ${th.textFaint}`} title="RSI(14) on completed bars. D = daily, W = weekly. Same numbers as the screener cards.">
+            RSI {formatRsi(headerRsi.daily)} D · {formatRsi(headerRsi.weekly)} W
+          </span>
+        )}
+        {symbol && underlying && (
+          <a href={buildTradingViewChartUrl(symbol)} target="_blank" rel="noopener noreferrer" title="Open this symbol in TradingView (your saved layout)" className="text-xs text-[var(--accent,#3b82f6)] underline decoration-dotted">TradingView ↗</a>
+        )}
         {symbol && (
           <span className={`ml-auto flex items-center gap-2 text-xs ${th.textFaint}`} title={gate.reasons.join('; ')}>
             <span className={`inline-block w-2 h-2 rounded-full ${statusColor}`} />
