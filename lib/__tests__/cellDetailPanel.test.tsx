@@ -24,7 +24,8 @@ describe('CellDetailPanel', () => {
     for (const label of ['P/L', 'CHANCE OF PROFIT', 'DELTA', 'GAMMA', 'THETA', 'VEGA']) expect(screen.getByText(label)).toBeTruthy();
     expect(screen.getByText(/Short 45 put · delta/)).toBeTruthy();
     expect(screen.getByText(/-3\.8% from now/)).toBeTruthy();
-    expect(screen.getByText(/7 days before expiration/)).toBeTruthy();
+    expect(screen.getByText(/24 days from now · 7 days left to expiration/)).toBeTruthy();
+    expect(screen.getByText(/Your legs if the stock is \$45:/)).toBeTruthy();
   });
   it('Clear calls onClear; with nothing selected there is no Clear and the title says today', () => {
     const d = cellDetail(legs, 46.76, '2026-11-17', '2026-11-17', DEFAULT_PRICING_PARAMS, 1.2)!;

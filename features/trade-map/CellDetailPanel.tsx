@@ -39,7 +39,9 @@ export default function CellDetailPanel({ th, detail, selected, movePct, onClear
   const title = selected
     ? `If the stock is $${priceText(detail.price)} on ${shortDate(detail.date)}`
     : `Today at $${priceText(detail.price)}`;
-  const when = detail.daysToExpiry === 0 ? 'at expiration' : `${detail.daysToExpiry} day${detail.daysToExpiry === 1 ? '' : 's'} before expiration`;
+  const plural = (n: number) => `${n} day${n === 1 ? '' : 's'}`;
+  const left = detail.daysToExpiry === 0 ? 'at expiration' : `${plural(detail.daysToExpiry)} left to expiration`;
+  const when = selected && detail.daysOut > 0 ? `${plural(detail.daysOut)} from now · ${left}` : left;
   const move = selected && movePct != null ? `${movePct >= 0 ? '+' : '-'}${Math.abs(movePct).toFixed(1)}% from now · ` : '';
   return (
     <div data-testid="cell-detail" className={`border-t ${th.border} p-3 flex flex-col gap-2 text-left`}>
@@ -57,6 +59,7 @@ export default function CellDetailPanel({ th, detail, selected, movePct, onClear
         <Stat th={th} label="VEGA" value={money2(g.vega)} sub="per IV point" />
       </div>
       <div className={`text-xs ${th.textFaint}`}>
+        <span>{selected ? `Your legs if the stock is $${priceText(detail.price)}: ` : 'Your legs today: '}</span>
         {detail.legs.map((l, i) => (
           <span key={i}>{i > 0 ? ' | ' : ''}{l.side === 'short' ? 'Short' : 'Long'} {l.strike} {l.right === 'P' ? 'put' : 'call'} · delta {signed(l.delta, 2)}</span>
         ))}
