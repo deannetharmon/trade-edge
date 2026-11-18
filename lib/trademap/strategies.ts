@@ -3,15 +3,14 @@
 // OPTMAP-0001 S2 (Ian: v1 strategies): turns a strategy choice plus an anchor
 // strike into the option legs to quote, and turns live quotes into the
 // TradeLeg model (entry price = mid, IV = that leg's own IV). Pure functions.
-// Covered call is not here: it needs a share leg and a cost basis, which the
-// leg model does not carry yet (S4). Fail closed: a leg with no two-sided
+// Covered call: only the short call is quoted here; the share leg (cost basis) is added by shareLeg(). Fail closed: a leg with no two-sided
 // quote or no IV makes the whole strategy unusable, never a guess.
 
 import { symbolKey, type ChainExpiration, type OptionQuote } from './chain';
 import type { OptionRight } from './pricing';
 import type { LegSide, TradeLeg } from './strategyLegs';
 
-export type StrategyId = 'long-call' | 'long-put' | 'csp' | 'bps' | 'bcs' | 'ic';
+export type StrategyId = 'long-call' | 'long-put' | 'csp' | 'bps' | 'bcs' | 'ic' | 'cc';
 
 export interface StrategyOption {
   id: StrategyId;
@@ -27,6 +26,7 @@ export const STRATEGIES: StrategyOption[] = [
   { id: 'bps', label: 'Bull put spread', hasWidth: true },
   { id: 'bcs', label: 'Bear call spread', hasWidth: true },
   { id: 'ic', label: 'Iron condor', hasWidth: true },
+  { id: 'cc', label: 'Covered call', hasWidth: false },
 ];
 
 export interface LegSpec {
@@ -65,7 +65,7 @@ export function defaultAnchorStrike(id: StrategyId, strikes: number[], spot: num
   const away = expectedMove != null && expectedMove > 0 ? expectedMove / 2 : 0.08;
   let target = spot;
   if (id === 'csp' || id === 'bps' || id === 'ic') target = spot * (1 - away);
-  if (id === 'bcs') target = spot * (1 + away);
+  if (id === 'bcs' || id === 'cc') target = spot * (1 + away);
   return strikes[nearestIndex(strikes, target)];
 }
 
@@ -91,6 +91,7 @@ export function legSpecs(
     case 'long-call': specs.push(legAt(chain, i, 'C', 'long')); break;
     case 'long-put': specs.push(legAt(chain, i, 'P', 'long')); break;
     case 'csp': specs.push(legAt(chain, i, 'P', 'short')); break;
+    case 'cc': specs.push(legAt(chain, i, 'C', 'short')); break;
     case 'bps':
       specs.push(legAt(chain, i, 'P', 'short'), legAt(chain, i - widthSteps, 'P', 'long'));
       break;

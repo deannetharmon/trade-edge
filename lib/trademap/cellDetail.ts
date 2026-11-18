@@ -10,7 +10,7 @@ import { chanceOfProfit } from './pop';
 import { daysBetween, DAYS_PER_YEAR } from './pricing';
 import { expirationsOf, netDebit as netDebitOf, type TradeLeg } from './strategyLegs';
 
-export interface LegDelta { side: 'long' | 'short'; right: 'C' | 'P'; strike: number; delta: number }
+export interface LegDelta { side: 'long' | 'short'; right: 'C' | 'P' | 'S'; strike: number; delta: number }
 
 export interface CellDetail {
   price: number;
@@ -48,7 +48,7 @@ export function cellDetail(
   for (const leg of legs) {
     const d = daysBetween(dateIso, leg.expiration);
     if (d == null) return null;
-    const g = bsGreeks(leg.right, price, leg.strike, d / DAYS_PER_YEAR, params.riskFreeRate, params.dividendYield, leg.iv * params.ivMultiplier);
+    const g = leg.right === 'S' ? { delta: 1, gamma: 0, theta: 0, vega: 0 } : bsGreeks(leg.right, price, leg.strike, d / DAYS_PER_YEAR, params.riskFreeRate, params.dividendYield, leg.iv * params.ivMultiplier);
     if (!g) return null;
     legDeltas.push({ side: leg.side, right: leg.right, strike: leg.strike, delta: g.delta });
   }

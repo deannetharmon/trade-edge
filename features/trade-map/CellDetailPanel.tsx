@@ -61,7 +61,7 @@ export default function CellDetailPanel({ th, detail, selected, movePct, onClear
       <div className={`text-xs ${th.textFaint}`}>
         <span>{selected ? `Your legs if the stock is $${priceText(detail.price)}: ` : 'Your legs today: '}</span>
         {detail.legs.map((l, i) => (
-          <span key={i}>{i > 0 ? ' | ' : ''}{l.side === 'short' ? 'Short' : 'Long'} {l.strike} {l.right === 'P' ? 'put' : 'call'} · delta {signed(l.delta, 2)}</span>
+          <span key={i}>{i > 0 ? ' | ' : ''}{l.right === 'S' ? 'Own 100 shares' : `${l.side === 'short' ? 'Short' : 'Long'} ${l.strike} ${l.right === 'P' ? 'put' : 'call'}`} · delta {signed(l.delta, 2)}</span>
         ))}
       </div>
       <div className={`text-[11px] ${th.textFaint}`}>Model estimates (Black-Scholes, same inputs as the grid; early exercise ignored). Click a grid cell to change the scenario.</div>

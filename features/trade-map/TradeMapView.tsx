@@ -42,7 +42,7 @@ import { netCreditAtMid, sendBlockers, sendSupported } from '@/lib/orders/tradeM
 import type { LegQuote, Wing } from '@/lib/trademap/ruleChecks';
 import { parseTradeMapParams, type TradeMapPrefill } from '@/lib/trademap/deepLink';
 import { buildCurve } from '@/lib/trademap/graphModel';
-import { expiryMetrics } from '@/lib/trademap/strategyLegs';
+import { expiryMetrics, shareLeg } from '@/lib/trademap/strategyLegs';
 import {
   STRATEGIES, buildTradeLegs, defaultAnchorStrike, defaultWidthSteps, legSpecs, type StrategyId,
 } from '@/lib/trademap/strategies';
@@ -208,7 +208,17 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
 
   const allQuotes = useMemo(() => ({ ...stripQuotes, ...quotes }), [stripQuotes, quotes]);
   const built = useMemo(() => (specs && exp ? buildTradeLegs(specs, exp.date, allQuotes) : null), [specs, exp, allQuotes]);
-  const legs = built?.legs ?? null;
+  const [costBasisText, setCostBasisText] = useState('');
+  const costBasis = useMemo(() => {
+    const typed = parseFloat(costBasisText);
+    if (Number.isFinite(typed) && typed > 0) return typed;
+    return spot != null ? Math.round(spot * 100) / 100 : null;
+  }, [costBasisText, spot]);
+  const legs = useMemo(() => {
+    const opt = built?.legs ?? null;
+    if (!opt || strategy !== 'cc') return opt;
+    return costBasis != null && exp ? [shareLeg(costBasis, exp.date), ...opt] : null;
+  }, [built, strategy, costBasis, exp]);
   const em = legs ? expiryMetrics(legs) : null;
   const params = useMemo(() => ({ ...DEFAULT_PRICING_PARAMS, dividendYield: metrics?.dividendYield ?? 0, ivMultiplier: ivMult }), [metrics, ivMult]);
   const effRange = rangePct ?? (expectedMove != null ? Math.min(0.5, Math.max(0.05, expectedMove)) : 0.2);
@@ -489,7 +499,15 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                 <input type="range" min={50} max={300} step={5} value={Math.round(ivMult * 100)} onChange={e => setIvMult(Number(e.target.value) / 100)} />
               </label>
             </div>
-            {specs && <div className={`text-xs ${th.textFaint}`}>{specs.map(s => `${s.side === 'long' ? '+' : '−'}${s.strike}${s.right}`).join('  ')}</div>}
+            {strategy === 'cc' && (
+              <div className="flex flex-wrap items-center gap-3">
+                <label className={th.textFaint}>Own 100 shares at ${' '}
+                  <input className={sel} style={{ width: 90 }} inputMode="decimal" placeholder={costBasis != null ? costBasis.toFixed(2) : ''} value={costBasisText} onChange={e => setCostBasisText(e.target.value)} aria-label="Cost basis per share" />
+                </label>
+                {(metrics?.dividendYield ?? 0) > 0 && <span className={`text-xs ${th.textFaint}`}>Pays a dividend: a call in the money near the ex-dividend date can be assigned early.</span>}
+              </div>
+            )}
+            {specs && <div className={`text-xs ${th.textFaint}`}>{strategy === 'cc' ? 'own 100 sh  ' : ''}{specs.map(s => `${s.side === 'long' ? '+' : '−'}${s.strike}${s.right}`).join('  ')}</div>}
           </div>
 
           {gate.status !== 'live' && (closedStale ? (
@@ -509,7 +527,9 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
             <>
               <div className={`${th.card} ${th.border} border rounded-lg p-3 grid grid-cols-2 md:grid-cols-5 gap-3 text-center`}>
                 {[
-                  { k: grid.netDebit > 0 ? 'NET DEBIT' : 'NET CREDIT', v: money(Math.abs(grid.netDebit)) },
+                  strategy === 'cc' && costBasis != null
+                    ? { k: 'CALL CREDIT', v: money(costBasis * 100 - grid.netDebit) }
+                    : { k: grid.netDebit > 0 ? 'NET DEBIT' : 'NET CREDIT', v: money(Math.abs(grid.netDebit)) },
                   { k: 'MAX LOSS', v: money2(em.maxLoss, em.maxLossUnbounded) },
                   { k: 'MAX PROFIT', v: money2(em.maxProfit, em.maxProfitUnbounded) },
                   { k: 'CHANCE OF PROFIT', v: pop == null ? '—' : `${Math.round(pop * 100)}%` },

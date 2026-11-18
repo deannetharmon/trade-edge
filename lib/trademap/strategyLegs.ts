@@ -15,8 +15,11 @@ const EPS = 1e-9;
 
 export type LegSide = 'long' | 'short';
 
+/** 'C' call, 'P' put, 'S' shares (covered call): quantity is lots of 100 shares, entryPrice the cost basis, no IV or strike meaning. */
+export type LegRight = OptionRight | 'S';
+
 export interface TradeLeg {
-  right: OptionRight;
+  right: LegRight;
   side: LegSide;
   strike: number;
   /** YYYY-MM-DD */
@@ -37,7 +40,7 @@ export function legSign(leg: Pick<TradeLeg, 'side'>): 1 | -1 {
 export function validateLegs(legs: TradeLeg[]): string | null {
   if (!Array.isArray(legs) || legs.length === 0) return 'no legs';
   for (const leg of legs) {
-    if (leg.right !== 'C' && leg.right !== 'P') return 'bad option type';
+    if (leg.right !== 'C' && leg.right !== 'P' && leg.right !== 'S') return 'bad option type';
     if (leg.side !== 'long' && leg.side !== 'short') return 'bad side';
     if (!Number.isFinite(leg.strike) || leg.strike <= 0) return 'bad strike';
     if (!Number.isInteger(leg.quantity) || leg.quantity <= 0) return 'bad quantity';
@@ -67,7 +70,7 @@ export function netDebit(legs: TradeLeg[]): number | null {
 export function expiryPayoff(legs: TradeLeg[], spot: number): number {
   let total = 0;
   for (const leg of legs) {
-    total += legSign(leg) * leg.quantity * (intrinsicValue(leg.right, spot, leg.strike) - leg.entryPrice) * CONTRACT_MULTIPLIER;
+    total += legSign(leg) * leg.quantity * ((leg.right === 'S' ? spot : intrinsicValue(leg.right, spot, leg.strike)) - leg.entryPrice) * CONTRACT_MULTIPLIER;
   }
   return total;
 }
@@ -104,7 +107,7 @@ export function expiryMetrics(legs: TradeLeg[]): ExpiryMetrics | null {
 
   // Above the highest strike only calls still move with the stock.
   let slope = 0;
-  for (const leg of legs) if (leg.right === 'C') slope += legSign(leg) * leg.quantity * CONTRACT_MULTIPLIER;
+  for (const leg of legs) if (leg.right === 'C' || leg.right === 'S') slope += legSign(leg) * leg.quantity * CONTRACT_MULTIPLIER;
 
   const best = Math.max.apply(null, vs);
   const worst = Math.min.apply(null, vs);
@@ -141,4 +144,9 @@ export function expiryMetrics(legs: TradeLeg[]): ExpiryMetrics | null {
     maxLossUnbounded,
     breakevens: roots,
   };
+}
+
+/** The covered-call share leg: 100 shares per lot at the cost basis, tied to the call's expiration so the leg set stays on one date. */
+export function shareLeg(costBasis: number, expiration: string, lots = 1): TradeLeg {
+  return { right: 'S', side: 'long', strike: costBasis, expiration, quantity: lots, entryPrice: costBasis, iv: 0 };
 }

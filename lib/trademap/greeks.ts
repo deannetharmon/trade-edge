@@ -57,7 +57,7 @@ export function positionGreeksAt(legs: TradeLeg[], spot: number, dateIso: string
   for (const leg of legs) {
     const days = daysBetween(dateIso, leg.expiration);
     if (days == null || days < 0) return null;
-    const g = bsGreeks(leg.right, spot, leg.strike, days / DAYS_PER_YEAR, params.riskFreeRate, params.dividendYield, leg.iv * params.ivMultiplier);
+    const g = leg.right === 'S' ? { delta: 1, gamma: 0, theta: 0, vega: 0 } : bsGreeks(leg.right, spot, leg.strike, days / DAYS_PER_YEAR, params.riskFreeRate, params.dividendYield, leg.iv * params.ivMultiplier);
     if (g == null) return null;
     const k = legSign(leg) * leg.quantity * CONTRACT_MULTIPLIER;
     net.delta += k * g.delta;

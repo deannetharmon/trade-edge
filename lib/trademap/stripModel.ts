@@ -40,7 +40,7 @@ export function labelEvery(count: number): number {
 
 /** Which side of the chain's quotes the strip needs for this strategy. */
 export function rightsFor(strategy: StrategyId): OptionRight[] {
-  if (strategy === 'long-call' || strategy === 'bcs') return ['C'];
+  if (strategy === 'long-call' || strategy === 'bcs' || strategy === 'cc') return ['C'];
   if (strategy === 'ic') return ['P', 'C'];
   return ['P'];
 }

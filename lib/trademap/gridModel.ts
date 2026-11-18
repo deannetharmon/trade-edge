@@ -63,7 +63,7 @@ export function positionAt(legs: TradeLeg[], spot: number, dateIso: string, para
   for (const leg of legs) {
     const days = daysBetween(dateIso, leg.expiration);
     if (days == null || days < 0) return null;
-    const price = bsPrice(leg.right, spot, leg.strike, days / DAYS_PER_YEAR, params.riskFreeRate, params.dividendYield, leg.iv * params.ivMultiplier);
+    const price = leg.right === 'S' ? spot : bsPrice(leg.right, spot, leg.strike, days / DAYS_PER_YEAR, params.riskFreeRate, params.dividendYield, leg.iv * params.ivMultiplier);
     if (price == null) return null;
     value += legSign(leg) * leg.quantity * price * CONTRACT_MULTIPLIER;
     cost += legSign(leg) * leg.quantity * leg.entryPrice * CONTRACT_MULTIPLIER;
