@@ -82,7 +82,7 @@ export interface DragInput {
   spot: number;
   anchor: number;
   widthSteps: number;
-  role: 'anchor' | 'width';
+  role: 'anchor' | 'width' | 'slide';
   targetStrike: number;
 }
 export interface DragResult { anchor: number; widthSteps: number }
@@ -109,6 +109,9 @@ export function dragLeg(i: DragInput): DragResult | null {
       if (keepIdx < 0 || keepIdx >= strikes.length) return null;
       anchor = strikes[keepIdx];
     }
+  } else if (i.role === 'slide') {
+    // The whole spread moves; the width is kept. targetStrike is where the short leg should land.
+    anchor = snapped;
   } else {
     const a = strikes.indexOf(i.anchor);
     const t = strikes.indexOf(snapped);
@@ -132,4 +135,10 @@ export function strikeAtX(strikes: number[], x: number, pxPerStrike: number): nu
   if (strikes.length === 0 || !(pxPerStrike > 0)) return null;
   const i = Math.min(strikes.length - 1, Math.max(0, Math.floor(x / pxPerStrike)));
   return strikes[i];
+}
+
+/** Width of a spread side in dollars, as a short label ("$10 wide"). */
+export function widthLabel(a: number, b: number): string {
+  const w = Math.round(Math.abs(a - b) * 100) / 100;
+  return `$${Number.isInteger(w) ? w : w.toFixed(2).replace(/0$/, '')} wide`;
 }

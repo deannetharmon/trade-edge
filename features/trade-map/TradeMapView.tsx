@@ -220,7 +220,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
       tone: oi == null ? 'plain' : oi >= THIN_OI ? 'good' : 'thin',
     };
   });
-  const moveLeg = useCallback((role: 'anchor' | 'width', strike: number) => {
+  const moveLeg = useCallback((role: 'anchor' | 'width' | 'slide', strike: number) => {
     if (!exp || spot == null || anchor == null) return;
     const r = dragLeg({ strategy, chain: exp, spot, anchor, widthSteps, role, targetStrike: strike });
     if (!r) return;

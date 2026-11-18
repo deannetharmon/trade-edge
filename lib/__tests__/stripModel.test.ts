@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { ChainExpiration } from '../trademap/chain';
 import { legSpecs } from '../trademap/strategies';
 import {
-  barRight, dragLeg, labelEvery, markersFor, MAX_WIDTH_STEPS, nearestMover, rightsFor, stepStrike, strikeAtX, stripWindow,
+  barRight, dragLeg, labelEvery, widthLabel, markersFor, MAX_WIDTH_STEPS, nearestMover, rightsFor, stepStrike, strikeAtX, stripWindow,
 } from '../trademap/stripModel';
 
 function chain(lo: number, hi: number, step = 1): ChainExpiration {
@@ -50,6 +50,20 @@ describe('OPTMAP-0001 S2i: strike strip model', () => {
     expect(up).toEqual({ anchor: 721, widthSteps: 15 }); // long stays 706
     const down = dragLeg({ strategy: 'bps', chain: c, spot: SPOT, anchor: 716, widthSteps: 10, role: 'anchor', targetStrike: 710 })!;
     expect(down).toEqual({ anchor: 710, widthSteps: 4 });
+  });
+  it('sliding moves the whole spread and keeps the width', () => {
+    const r = dragLeg({ strategy: 'bps', chain: c, spot: SPOT, anchor: 716, widthSteps: 10, role: 'slide', targetStrike: 700 })!;
+    expect(r).toEqual({ anchor: 700, widthSteps: 10 });
+    const bcs = dragLeg({ strategy: 'bcs', chain: c, spot: SPOT, anchor: 750, widthSteps: 5, role: 'slide', targetStrike: 760 })!;
+    expect(bcs).toEqual({ anchor: 760, widthSteps: 5 });
+  });
+  it('sliding is refused when the long leg would fall off the listed strikes', () => {
+    expect(dragLeg({ strategy: 'bps', chain: c, spot: SPOT, anchor: 716, widthSteps: 10, role: 'slide', targetStrike: 681 })).toBeNull();
+  });
+  it('width label is in dollars', () => {
+    expect(widthLabel(716, 706)).toBe('$10 wide');
+    expect(widthLabel(750, 752.5)).toBe('$2.5 wide');
+    expect(widthLabel(100, 100.25)).toBe('$0.25 wide');
   });
   it('the short leg stops one strike from the long leg', () => {
     const r = dragLeg({ strategy: 'bps', chain: c, spot: SPOT, anchor: 716, widthSteps: 10, role: 'anchor', targetStrike: 690 })!;

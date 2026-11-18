@@ -7,7 +7,7 @@
 'use client';
 
 import { useRef } from 'react';
-import { labelEvery, strikeAtX, THIN_OI, nearestMover, type StripMarker } from '@/lib/trademap/stripModel';
+import { labelEvery, strikeAtX, THIN_OI, nearestMover, widthLabel, type StripMarker } from '@/lib/trademap/stripModel';
 
 export interface StripLegInfo { label: string; text: string; tone: 'good' | 'thin' | 'plain' }
 
@@ -18,13 +18,15 @@ export interface StrikeStripProps {
   markers: StripMarker[];
   oi: Record<number, number | null>;
   legInfo: StripLegInfo[];
-  onMove: (role: 'anchor' | 'width', strike: number) => void;
+  onMove: (role: 'anchor' | 'width' | 'slide', strike: number) => void;
   onStep: (role: 'anchor' | 'width', dir: -1 | 1) => void;
 }
 
 export default function StrikeStrip({ th, strikes, spot, markers, oi, legInfo, onMove, onStep }: StrikeStripProps) {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const lastRef = useRef<number | null>(null);
+  // Set while the whole spread is being slid: the strike grabbed and the short strike when the grab began.
+  const slideRef = useRef<{ grab: number; anchor: number } | null>(null);
   const count = strikes.length;
   if (count < 2) return null;
 
@@ -46,12 +48,12 @@ export default function StrikeStrip({ th, strikes, spot, markers, oi, legInfo, o
   }
 
   // Shade the span of each side's legs.
-  const spans: Array<{ left: number; width: number }> = [];
+  const spans: Array<{ left: number; width: number; label: string }> = [];
   for (const right of ['P', 'C'] as const) {
     const ks = markers.filter(m => m.right === right).map(m => m.strike).filter(k => idxOf(k) >= 0);
     if (ks.length >= 2) {
       const lo = Math.min(...ks); const hi = Math.max(...ks);
-      spans.push({ left: centerOf(lo), width: centerOf(hi) - centerOf(lo) });
+      spans.push({ left: centerOf(lo), width: centerOf(hi) - centerOf(lo), label: widthLabel(lo, hi) });
     }
   }
 
@@ -63,9 +65,31 @@ export default function StrikeStrip({ th, strikes, spot, markers, oi, legInfo, o
     onMove(role, k);
   };
 
+  const anchorStrike = markers.find(m => m.role === 'anchor')?.strike ?? null;
+  const beginSlide = (e: React.PointerEvent<HTMLElement>) => {
+    const grab = strikeAtX(strikes, trackX(e.clientX), px);
+    if (grab == null || anchorStrike == null) return false;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    slideRef.current = { grab, anchor: anchorStrike };
+    lastRef.current = anchorStrike;
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  };
+  const slideTo = (clientX: number) => {
+    const sl = slideRef.current;
+    const at = strikeAtX(strikes, trackX(clientX), px);
+    if (!sl || at == null) return;
+    const idx = strikes.indexOf(sl.anchor) + (strikes.indexOf(at) - strikes.indexOf(sl.grab));
+    const k = strikes[Math.min(strikes.length - 1, Math.max(0, idx))];
+    if (k === lastRef.current) return;
+    lastRef.current = k;
+    onMove('slide', k);
+  };
+
   return (
     <div className="flex flex-col gap-2">
-      <div className={`text-xs ${th.textFaint}`}>Drag a marker, or click a strike to move the nearest leg. Bars show open interest.</div>
+      <div className={`text-xs ${th.textFaint}`}>Drag a circle to change one leg. Drag the shaded band (or Shift-drag a circle) to slide the whole spread. Click a strike to move the nearest leg.</div>
       <div className="overflow-x-auto">
         <div
           ref={trackRef}
@@ -78,8 +102,19 @@ export default function StrikeStrip({ th, strikes, spot, markers, oi, legInfo, o
             if (k != null && m && (m.role === 'anchor' || m.role === 'width')) { lastRef.current = null; onMove(m.role, k); }
           }}
         >
-          {spans.map((s, i) => (
-            <div key={i} className="absolute" style={{ left: s.left, width: s.width, top: 28, bottom: 34, background: 'rgba(106,160,255,0.10)', borderLeft: '1px solid #6aa0ff', borderRight: '1px solid #6aa0ff', pointerEvents: 'none' }} />
+          {spans.map((sp, i) => (
+            <div
+              key={i}
+              data-testid="spread-band"
+              className="absolute"
+              style={{ left: sp.left, width: sp.width, top: 28, bottom: 34, background: 'rgba(106,160,255,0.10)', borderLeft: '1px solid #6aa0ff', borderRight: '1px solid #6aa0ff', cursor: 'grab', touchAction: 'none' }}
+              onPointerDown={e => { beginSlide(e); }}
+              onPointerMove={e => { if ((e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) slideTo(e.clientX); }}
+              onPointerUp={() => { slideRef.current = null; }}
+              onPointerCancel={() => { slideRef.current = null; }}
+            >
+              <div className="absolute text-[11px] font-semibold whitespace-nowrap" style={{ left: '50%', top: 4, transform: 'translateX(-50%)', color: '#9fc0ff', pointerEvents: 'none' }}>{sp.label}</div>
+            </div>
           ))}
           {strikes.map((k, i) => {
             const v = oi[k];
@@ -118,14 +153,18 @@ export default function StrikeStrip({ th, strikes, spot, markers, oi, legInfo, o
                 }}
                 onPointerDown={e => {
                   if (!movable) return;
+                  if (e.shiftKey && m.role === 'anchor' && beginSlide(e)) return;
                   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                  slideRef.current = null;
                   lastRef.current = m.strike;
                   e.preventDefault();
                 }}
                 onPointerMove={e => {
                   if (!movable || !(e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) return;
+                  if (slideRef.current) { slideTo(e.clientX); return; }
                   moveTo(m.role as 'anchor' | 'width', e.clientX);
                 }}
+                onPointerUp={() => { slideRef.current = null; }}
                 onKeyDown={e => {
                   if (!movable) return;
                   if (e.key === 'ArrowLeft') { e.preventDefault(); onStep(m.role as 'anchor' | 'width', -1); }
