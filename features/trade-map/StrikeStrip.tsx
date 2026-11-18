@@ -100,13 +100,13 @@ export default function StrikeStrip({ th, strikes, spot, markers, oi, legInfo, o
               <div className="absolute text-[11px]" style={{ left: spotX, top: 4, transform: 'translateX(-50%)', color: '#cfd6e6', pointerEvents: 'none' }}>${spot.toFixed(2)}</div>
             </>
           )}
-          {markers.map((m, i) => {
+          {markers.map(m => {
             if (idxOf(m.strike) < 0) return null;
             const movable = m.role === 'anchor' || m.role === 'width';
             const filled = m.side === 'short';
             return (
               <button
-                key={`${m.right}${m.strike}${i}`}
+                key={`${m.right}-${m.side}-${m.role}`}
                 type="button"
                 disabled={!movable}
                 aria-label={`${m.side === 'short' ? 'Short' : 'Long'} ${m.strike} ${m.right === 'P' ? 'put' : 'call'}${movable ? ', drag or use arrow keys to move' : ', follows the other side'}`}
