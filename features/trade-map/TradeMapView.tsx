@@ -18,6 +18,8 @@ import {
   type ChainExpiration, type OptionQuote, type UnderlyingMetrics, type UnderlyingQuote,
 } from '@/lib/trademap/chain';
 import { chanceOfProfit } from '@/lib/trademap/pop';
+import { cellDetail } from '@/lib/trademap/cellDetail';
+import CellDetailPanel from './CellDetailPanel';
 import { evaluateGate, type GateQuote } from '@/lib/trademap/realtimeGate';
 import { DEFAULT_PRICING_PARAMS, buildDateAxis, buildDisplayPriceAxis, computeGrid } from '@/lib/trademap/gridModel';
 import { DISPLAY_MODES, PRIMARY_MODES, formatModeValue, modeValue, type DisplayMode } from '@/lib/trademap/displayModes';
@@ -82,6 +84,8 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [axisSpot, setAxisSpot] = useState<number | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
+  // The grid cell the trader clicked (stock price and date); null shows today at the current price.
+  const [selCell, setSelCell] = useState<{ price: number; date: string } | null>(null);
   // Slow-refresh quotes for the strikes on the strip (open interest, and quotes for a leg just moved to). The 5 s poll below
   // stays the only source for the live gate and for Send.
   const [stripQuotes, setStripQuotes] = useState<Record<string, OptionQuote>>({});
@@ -261,6 +265,19 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     [legs, spot, expiryIv, today, params],
   );
 
+  const selValid = !!(selCell && grid && grid.prices.indexOf(selCell.price) >= 0 && grid.dates.indexOf(selCell.date) >= 0);
+  const detail = useMemo(() => {
+    if (!legs || spot == null) return null;
+    if (selCell && selValid) return cellDetail(legs, selCell.price, selCell.date, today, params, expiryIv);
+    return cellDetail(legs, spot, today, today, params, expiryIv);
+  }, [legs, spot, selCell, selValid, today, params, expiryIv]);
+  useEffect(() => {
+    if (!selCell) return undefined;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelCell(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selCell]);
+
   const gate = useMemo(() => {
     const toGate = (q: OptionQuote | undefined, sym: string): GateQuote => ({ symbol: sym, updatedAtMs: q?.updatedAtMs ?? null, halted: q?.halted ?? null, bid: q?.bid ?? null, ask: q?.ask ?? null });
     return evaluateGate({
@@ -437,7 +454,15 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                       <tr key={p} style={p === spotRowPrice ? { borderBottom: '1px dashed rgba(255,255,255,0.7)' } : undefined}>
                         <td className={`p-1.5 text-left ${axisSpot != null && Math.abs(p - axisSpot) === Math.min.apply(null, grid.prices.map(x => Math.abs(x - axisSpot))) ? 'font-bold text-[var(--accent,#3b82f6)]' : th.textMuted}`}>${priceLabel(p)} <span className={th.textFaint}>{axisSpot ? `${(((p / axisSpot) - 1) * 100).toFixed(0)}%` : ''}</span></td>
                         {grid.cells[i].map((c, j) => (
-                          <td key={j} className={`p-1.5 ${th.text}`} style={cellStyle(c ? c.pl : null)}>
+                          <td
+                            key={j}
+                            className={`p-1.5 ${th.text}`}
+                            style={{ ...cellStyle(c ? c.pl : null), ...(c ? { cursor: 'pointer' } : {}), ...(selValid && selCell && selCell.price === p && selCell.date === grid.dates[j] ? { boxShadow: 'inset 0 0 0 2px #e8ecf4', fontWeight: 700 } : {}) }}
+                            tabIndex={c ? 0 : undefined}
+                            aria-label={c ? `If the stock is $${priceLabel(p)} on ${shortDate(grid.dates[j])}: show profit and loss, chance of profit and Greeks` : undefined}
+                            onClick={c ? () => setSelCell({ price: p, date: grid.dates[j] }) : undefined}
+                            onKeyDown={c ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelCell({ price: p, date: grid.dates[j] }); } }) : undefined}
+                          >
                             {formatModeValue(mode, modeValue(mode, c, basis))}
                           </td>
                         ))}
@@ -445,6 +470,15 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                     ))}
                   </tbody>
                 </table>
+                {detail && (
+                  <CellDetailPanel
+                    th={th}
+                    detail={detail}
+                    selected={selValid}
+                    movePct={selValid && axisSpot ? ((detail.price / axisSpot) - 1) * 100 : null}
+                    onClear={() => setSelCell(null)}
+                  />
+                )}
               </div>
               )}
             </>
