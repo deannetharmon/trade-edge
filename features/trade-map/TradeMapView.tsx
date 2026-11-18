@@ -518,11 +518,13 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
               )}
                 </div>
               </details>
-              <label className={th.textFaint} title="How far above and below today's stock price the table and graph reach.">Range ±{Math.round(effRange * 100)}%{' '}
+              <label className={th.textFaint} title="How far above and below today's stock price the table and graph reach. Zoom only; no effect on the trade.">Range ±{Math.round(effRange * 100)}%{' '}
                 <input type="range" min={5} max={90} value={Math.round(effRange * 100)} onChange={e => { setRangePct(Number(e.target.value) / 100); }} />
+                {rangePct != null && <button type="button" className="ml-1 text-blue-400 underline" onClick={() => setRangePct(null)}>Auto</button>}
               </label>
-              <label className={th.textFaint} title="What-if on implied volatility: 1.00 = today's IV, 1.50 = IV rises 50%, 0.70 = IV falls 30%. Changes the dates before expiration only.">IV ×{ivMult.toFixed(2)}{' '}
+              <label className={th.textFaint} title="What-if: scales implied volatility before expiration. 1.00 = today's IV, 0.60 = IV drops 40%, 1.50 = IV rises 50%. Changes the numbers, so keep it at 1.00 to see the real trade.">IV ×{ivMult.toFixed(2)}{ivMult !== 1 ? ' what-if' : ''}{' '}
                 <input type="range" min={50} max={300} step={5} value={Math.round(ivMult * 100)} onChange={e => setIvMult(Number(e.target.value) / 100)} />
+                {ivMult !== 1 && <button type="button" className="ml-1 text-blue-400 underline" onClick={() => setIvMult(1)}>Reset to 1.00</button>}
               </label>
             </div>
             {strategy === 'cc' && (
