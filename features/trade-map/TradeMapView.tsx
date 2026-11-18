@@ -42,6 +42,9 @@ import { netCreditAtMid, sendBlockers, sendSupported } from '@/lib/orders/tradeM
 import type { LegQuote, Wing } from '@/lib/trademap/ruleChecks';
 import { parseTradeMapParams, type TradeMapPrefill } from '@/lib/trademap/deepLink';
 import { buildCurve } from '@/lib/trademap/graphModel';
+import { fetchCcBasisSettings } from '@/features/screener/useCcBasisSettings';
+import { resolveCcBasis, type CcBasisSource } from '@/lib/ccBasis/ccBasisSettings';
+import { getCoveredCallCapacityReport } from '@/lib/scans/tastytrade-client';
 import { expiryMetrics, shareLeg } from '@/lib/trademap/strategyLegs';
 import {
   STRATEGIES, buildTradeLegs, defaultAnchorStrike, defaultWidthSteps, legSpecs, type StrategyId,
@@ -209,11 +212,34 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   const allQuotes = useMemo(() => ({ ...stripQuotes, ...quotes }), [stripQuotes, quotes]);
   const built = useMemo(() => (specs && exp ? buildTradeLegs(specs, exp.date, allQuotes) : null), [specs, exp, allQuotes]);
   const [costBasisText, setCostBasisText] = useState('');
+  // Covered call: the cost basis you already have (typed on the screener, else the broker's), read once per symbol.
+  const [held, setHeld] = useState<{ shares: number; basis: number | null; source: CcBasisSource | null } | null>(null);
+  useEffect(() => {
+    setHeld(null);
+    if (strategy !== 'cc' || !symbol) return;
+    let live = true;
+    (async () => {
+      try {
+        const report = await getCoveredCallCapacityReport(await getAccessToken());
+        const cap = report.status === 'ok' ? report.bySymbol[symbol] ?? null : null;
+        const settings = await fetchCcBasisSettings();
+        const r = resolveCcBasis(settings, symbol, cap);
+        if (live) setHeld({ shares: cap?.sharesOwned ?? 0, basis: r.basis, source: r.source });
+      } catch {
+        if (live) setHeld({ shares: 0, basis: null, source: null });
+      }
+    })();
+    return () => { live = false; };
+  }, [strategy, symbol]);
+  const typedBasis = parseFloat(costBasisText);
   const costBasis = useMemo(() => {
-    const typed = parseFloat(costBasisText);
-    if (Number.isFinite(typed) && typed > 0) return typed;
+    if (Number.isFinite(typedBasis) && typedBasis > 0) return typedBasis;
+    if (held?.basis != null) return held.basis;
     return spot != null ? Math.round(spot * 100) / 100 : null;
-  }, [costBasisText, spot]);
+  }, [typedBasis, held, spot]);
+  const basisNote = Number.isFinite(typedBasis) && typedBasis > 0 ? 'your entry'
+    : held?.basis != null ? (held.source === 'broker' ? 'from your broker' : 'your saved basis')
+    : held == null ? 'loading your holding…' : 'not held, using today\'s price';
   const legs = useMemo(() => {
     const opt = built?.legs ?? null;
     if (!opt || strategy !== 'cc') return opt;
@@ -504,6 +530,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                 <label className={th.textFaint}>Own 100 shares at ${' '}
                   <input className={sel} style={{ width: 90 }} inputMode="decimal" placeholder={costBasis != null ? costBasis.toFixed(2) : ''} value={costBasisText} onChange={e => setCostBasisText(e.target.value)} aria-label="Cost basis per share" />
                 </label>
+                <span className={`text-xs ${th.textFaint}`}>{basisNote}{held && held.shares > 0 ? ` · you own ${held.shares.toLocaleString()} shares` : ''}</span>
                 {(metrics?.dividendYield ?? 0) > 0 && <span className={`text-xs ${th.textFaint}`}>Pays a dividend: a call in the money near the ex-dividend date can be assigned early.</span>}
               </div>
             )}
