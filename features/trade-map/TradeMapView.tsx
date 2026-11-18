@@ -508,6 +508,9 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                 </div>
               ) : (
               <div className={`${th.card} ${th.border} border rounded-lg overflow-x-auto`}>
+                <div className={`px-3 pt-2 text-[11px] ${th.textFaint}`}>
+                  Rows are the stock price; columns are dates from today to your {shortDate(exp.date)} expiration (the last column). Each cell is the trade's value if the stock is that price on that date.
+                </div>
                 <table className="w-full text-xs text-center">
                   <thead>
                     <tr className={th.textFaint}>
