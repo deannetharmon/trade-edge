@@ -202,17 +202,16 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   }, [nowMs, specs, quotes, underlying, lastSuccessMs, successfulPolls]);
 
   const basis = { netDebit: grid?.netDebit ?? 0, maxLoss: em?.maxLoss ?? null };
-  const band = (em?.maxLoss ?? (grid ? Math.abs(grid.netDebit) : 0)) * 0.05;
   // Opaque blend from a neutral dark base toward green (profit) or red (loss), so cells never pick up the card's tint.
   const mix = (to: [number, number, number], t: number): string => {
     const base = [26, 26, 26];
     return `rgb(${base.map((b, i) => Math.round(b + (to[i] - b) * t)).join(',')})`;
   };
+  // Two colors only: green for profit, red for loss. Strength follows the size of the amount, so cells near breakeven fade to the neutral base.
   const cellStyle = (pl: number | null): React.CSSProperties => {
     if (pl == null) return {};
-    if (Math.abs(pl) <= band) return { background: mix([245, 158, 11], 0.45) };
     const scale = Math.max(1, em?.maxLoss ?? Math.abs(grid?.netDebit ?? 1));
-    const t = Math.min(0.8, 0.12 + (Math.abs(pl) / scale) * 0.7);
+    const t = Math.min(0.8, (Math.abs(pl) / scale) * 0.9);
     return { background: pl > 0 ? mix([16, 160, 105], t) : mix([220, 50, 80], t) };
   };
 

@@ -2,7 +2,7 @@
 //
 // OPTMAP-0001 S2b: profit/loss curve for the Trade Map. Solid line = the
 // selected date, dashed line = expiration day. Green above zero, red below.
-// Vertical markers: current stock price and breakevens (at expiry).
+// Vertical markers: current stock price (dotted) and breakevens at expiry (solid gray).
 // Display only; all numbers come from lib/trademap.
 
 'use client';
@@ -62,8 +62,8 @@ export default function TradeGraph({ selected, expiry, mode, basis, spot, breake
       {spot >= xMin && spot <= xMax && <line x1={sx(spot)} x2={sx(spot)} y1={PAD.t} y2={H - PAD.b} stroke={mutedColor} strokeDasharray="2 3" />}
       {breakevens.filter(b => b >= xMin && b <= xMax).map(b => (
         <g key={b}>
-          <line x1={sx(b)} x2={sx(b)} y1={PAD.t} y2={H - PAD.b} stroke="#f59e0b" strokeOpacity={0.8} />
-          <text x={sx(b) + 3} y={PAD.t + 10} fontSize={10} fill="#f59e0b">BE ${b.toFixed(2)}</text>
+          <line x1={sx(b)} x2={sx(b)} y1={PAD.t} y2={H - PAD.b} stroke={mutedColor} strokeOpacity={0.8} />
+          <text x={sx(b) + 3} y={PAD.t + 10} fontSize={10} fill={mutedColor}>BE ${b.toFixed(2)}</text>
         </g>
       ))}
       {[exp, sel].map((pts, k) => (
