@@ -13,12 +13,14 @@ import { tickTableFromNestedChain } from '@/lib/portfolio/tickSize';
 import { occRoot } from '@/lib/portfolio/tickSize';
 import { ttFetch } from '@/lib/tastytrade/client';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
-import { getExecutableOptionQuotes } from '@/lib/scans/tastytrade-client';
+import { classifyUnderlying, getExecutableOptionQuotes } from '@/lib/scans/tastytrade-client';
+import { getSavedEtfRules, getSavedRules, hasCustomRules } from '@/lib/scans/savedRules';
 import { isMarketOpen } from '@/lib/wheel/marketHours';
 import { DEFAULT_GTC_PCT, DEFAULT_STOP_MULTIPLE, VALIDATION_MAX_AGE_MS } from '@/lib/orders/tradeMapEntry';
 import { placeSend, validateSend, type SendDeps, type Validated } from '@/lib/orders/tradeMapSend';
 import { evaluateRuleChecks, isIndexSymbol, needsAcknowledgement, type RuleCheck } from '@/lib/trademap/ruleChecks';
 import type { LegSpec, StrategyId } from '@/lib/trademap/strategies';
+import type { Wing } from '@/lib/trademap/ruleChecks';
 
 const BROKER = 'https://api.tastytrade.com';
 
@@ -51,8 +53,11 @@ export interface SendDialogProps {
   width: number;
   ivRankPct: number | null;
   earningsDate: string | null;
-  shortDeltas: Array<number | null>;
-  shortOis: Array<number | null>;
+  /** Stock price and the expiration's implied volatility (a fraction), for the screener's rule checks. */
+  price: number | null;
+  expirationIv: number | null;
+  /** The credit spreads in the trade with their live quotes (one for BPS and BCS, put then call for IC). */
+  wings: Wing[];
   onClose: () => void;
 }
 
@@ -72,21 +77,41 @@ export default function SendDialog(p: SendDialogProps) {
   // After a live order was sent and failed or went unanswered, only Close is offered: a second try could double-place.
   const [mayBeSent, setMayBeSent] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // The screener picks the ETF/index rules or the stock rules from the symbol's type; so does this dialog. Until the type
+  // is known no checks are shown and Validate stays off (fail closed).
+  const [kind, setKind] = useState<'index' | 'etf' | 'stock' | 'unsupported' | null>(null);
+  const [kindError, setKindError] = useState(false);
 
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 500);
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    setKind(null); setKindError(false);
+    (async () => {
+      try {
+        const k = await classifyUnderlying(p.symbol, await getAccessToken());
+        if (!cancelled) setKind(k);
+      } catch { if (!cancelled) setKindError(true); }
+    })();
+    return () => { cancelled = true; };
+  }, [p.symbol]);
+
+  const etfOrIndex = kind === 'index' || kind === 'etf';
+  const rules = useMemo(() => (kind == null ? null : etfOrIndex ? getSavedEtfRules() : getSavedRules()), [kind, etfOrIndex]);
+  const customRules = rules != null && hasCustomRules(rules, etfOrIndex);
+
   const checks = useMemo(
-    () => evaluateRuleChecks({
-      strategy: p.strategy as 'bps' | 'bcs' | 'ic', symbol: p.symbol, dte: p.dte, ivRankPct: p.ivRankPct,
-      shortDeltas: p.shortDeltas, shortOis: p.shortOis, earningsDate: p.earningsDate, expiration: p.expiration,
-      credit: p.displayedCredit, width: p.width,
+    () => rules == null ? [] : evaluateRuleChecks({
+      strategy: p.strategy as 'bps' | 'bcs' | 'ic', rules, etfOrIndex, price: p.price, dte: p.dte, ivRankPct: p.ivRankPct,
+      expirationIv: p.expirationIv, earningsDate: p.earningsDate, expiration: p.expiration, wings: p.wings,
     }),
-    [p.strategy, p.symbol, p.dte, p.ivRankPct, p.shortDeltas, p.shortOis, p.earningsDate, p.expiration, p.displayedCredit, p.width],
+    [p.strategy, rules, etfOrIndex, p.price, p.dte, p.ivRankPct, p.expirationIv, p.earningsDate, p.expiration, p.wings],
   );
   const mustAck = needsAcknowledgement(checks);
+  const typeKnown = kind != null;
 
   const credit = p.displayedCredit;
   const maxLoss = (p.width - credit) * 100 * quantity;
@@ -165,7 +190,11 @@ export default function SendDialog(p: SendDialogProps) {
           {checks.map(c => (
             <div key={c.key} className={`text-xs ${statusColor(c)}`}>{statusMark(c)} {c.value} <span className={th.textFaint}>({c.rule})</span></div>
           ))}
-          <div className={`text-[10px] ${th.textFaint}`}>Checked against the default scan rules; custom scan settings are not applied here.</div>
+          <div className={`text-[10px] ${th.textFaint}`}>
+            {kindError ? `Could not tell whether ${p.symbol} is an ETF or a stock, so the rules cannot be checked. Close and open Send again.`
+              : !typeKnown ? 'Checking the symbol type…'
+              : `Checked against ${customRules ? 'your saved scan criteria' : 'the default scan rules (you have not changed them)'} for ${etfOrIndex ? 'ETFs and indexes' : 'stocks'}.`}
+          </div>
         </div>
 
         {mustAck && phase === 'review' && (
@@ -186,7 +215,7 @@ export default function SendDialog(p: SendDialogProps) {
         <div className="flex gap-2 justify-end">
           <button onClick={p.onClose} disabled={phase === 'placing'} className={`${btn} ${th.textFaint}`}>{phase === 'done' ? 'Close' : 'Cancel'}</button>
           {(phase === 'review' || phase === 'validating' || (phase === 'error' && !mayBeSent)) && (
-            <button onClick={validate} disabled={busy || (mustAck && !ack)} className={primary}>{phase === 'validating' ? 'Validating…' : phase === 'error' ? 'Validate again' : 'Validate with broker'}</button>
+            <button onClick={validate} disabled={busy || !typeKnown || (mustAck && !ack)} className={primary}>{phase === 'validating' ? 'Validating…' : phase === 'error' ? 'Validate again' : 'Validate with broker'}</button>
           )}
           {(phase === 'validated' || phase === 'placing') && (
             <button onClick={place} disabled={phase === 'placing' || secondsLeft === 0} className={primary}>{phase === 'placing' ? 'Placing…' : 'Place order'}</button>

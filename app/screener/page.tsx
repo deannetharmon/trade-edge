@@ -179,6 +179,7 @@ import { tickTableFromNestedChain, snapEntryCredit, stepByTick, type TickTable }
 import { effectiveTickTable, learnedBrokerTick, optionRootOf } from '@/lib/portfolio/brokerTick';
 import { postWithTickHeal, describeHeal, describeLearnedTick } from '@/lib/entry-walk/tickHeal';
 import { invalidateAccessToken, isTokenRejection, sendWithTokenRetry } from '@/lib/auth/tokenRetry';
+import { LS_RULES, LS_RULES_ETF, getSavedRules, getSavedEtfRules } from '@/lib/scans/savedRules';
 import BuyingPowerLine from '@/features/screener/components/BuyingPowerLine';
 import MarketLinksMenu from '@/features/screener/components/MarketLinksMenu';
 import { buildCspOrderLeg, computeCspMaxLoss } from '@/lib/scans/cspOrderMath';
@@ -1000,32 +1001,11 @@ const RULE_LABELS: Record<string, string> = {
   POP_MIN: 'Min POP % (Probability of Profit)',
 };
 
-const LS_RULES = 'hunter-rules';
-const LS_RULES_ETF = 'hunter-rules-etf';
+// Saved scan criteria (LS_RULES, LS_RULES_ETF, getSavedRules, getSavedEtfRules) live in lib/scans/savedRules.ts so Trade Map reads the same values.
 const LS_RULES_PRESET = 'hunter-rules-preset';
 const LS_ACTIVE_PRESET = 'hunter-active-preset';
 const LS_ACTIVE_PRESET_ETF = 'hunter-active-preset-etf';
-const LS_RULES_VERSION = 'hunter-rules-v3'; // bump this when defaults change
 
-
-function getSavedRules(): RulesType {
-  try {
-    if (!localStorage.getItem(LS_RULES_VERSION)) {
-      localStorage.removeItem(LS_RULES);
-      localStorage.removeItem(LS_RULES_ETF);
-      localStorage.setItem(LS_RULES_VERSION, '1');
-    }
-    const saved = localStorage.getItem(LS_RULES);
-    return saved ? { ...DEFAULT_RULES, ...JSON.parse(saved) } : { ...DEFAULT_RULES };
-  } catch { return { ...DEFAULT_RULES }; }
-}
-
-function getSavedEtfRules(): RulesType {
-  try {
-    const saved = localStorage.getItem(LS_RULES_ETF);
-    return saved ? { ...DEFAULT_ETF_RULES, ...JSON.parse(saved) } : { ...DEFAULT_ETF_RULES };
-  } catch { return { ...DEFAULT_ETF_RULES }; }
-}
 
 function saveRulesToStorage(rules: RulesType) {
   try { localStorage.setItem(LS_RULES, JSON.stringify(rules)); } catch {}

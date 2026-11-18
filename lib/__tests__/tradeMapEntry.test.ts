@@ -2,7 +2,7 @@
 //
 // ORDER-SEND-0001 S3a: the Trade Map order path must produce the same body as the screener path.
 
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   buildTradeMapEntryOrder, checkReprice, legsToOrderLegs, liveSubmitAllowed, netCreditAtMid, sendBlockers, sendSupported,
 } from '../orders/tradeMapEntry';
@@ -114,75 +114,37 @@ describe('ORDER-SEND-0001 S3a: Send blockers and the dry-run rule', () => {
   });
 });
 
-import { evaluateRuleChecks, failedChecks, isIndexSymbol, needsAcknowledgement, rulesFor } from '../trademap/ruleChecks';
-import { parseMetrics, parseOptionQuote } from '../trademap/chain';
 import { DEFAULT_ETF_RULES, DEFAULT_RULES } from '../scans/constants';
+import { getSavedEtfRules, getSavedRules, hasCustomRules, LS_RULES, LS_RULES_ETF, LS_RULES_VERSION } from '../scans/savedRules';
 
-describe('ORDER-SEND-0001 S3b: Prosper rule checks use the screener constants', () => {
-  const base = {
-    strategy: 'bps' as const, symbol: 'SOXL', dte: 31, ivRankPct: 45, shortDeltas: [-0.25], shortOis: [900],
-    earningsDate: null as string | null, expiration: '2026-12-18', credit: 1.45, width: 5,
+describe('saved scan criteria loader (moved from the screener page)', () => {
+  const store: Record<string, string> = {};
+  const ls = {
+    getItem: (k: string) => (k in store ? store[k] : null), setItem: (k: string, v: string) => { store[k] = String(v); },
+    removeItem: (k: string) => { delete store[k]; },
   };
-  const by = (cs: ReturnType<typeof evaluateRuleChecks>, k: string) => cs.find(c => c.key === k)!;
-
-  it('a qualifying BPS passes everything and needs no acknowledgement', () => {
-    const cs = evaluateRuleChecks(base);
-    expect(cs.map(c => c.status)).toEqual(['pass', 'pass', 'pass', 'pass', 'pass', 'pass']);
-    expect(needsAcknowledgement(cs)).toBe(false);
+  beforeEach(() => { for (const k of Object.keys(store)) delete store[k]; (globalThis as any).localStorage = ls; });
+  it('returns the defaults when nothing is saved', () => {
+    expect(getSavedRules()).toEqual(DEFAULT_RULES);
+    expect(getSavedEtfRules()).toEqual(DEFAULT_ETF_RULES);
   });
-  it('IV rank below the screener minimum fails, using the screener value (30)', () => {
-    expect(DEFAULT_RULES.IVR_MIN).toBe(30);
-    const cs = evaluateRuleChecks({ ...base, ivRankPct: 22 });
-    expect(by(cs, 'ivr').status).toBe('fail');
-    expect(by(cs, 'ivr').rule).toBe('rule: at least 30');
-    expect(needsAcknowledgement(cs)).toBe(true);
-    expect(evaluateRuleChecks({ ...base, ivRankPct: 30 }).find(c => c.key === 'ivr')!.status).toBe('pass');
+  it('merges saved values over the defaults and reports custom rules', () => {
+    store[LS_RULES_VERSION] = '1';
+    store[LS_RULES] = JSON.stringify({ IVR_MIN: 20 });
+    store[LS_RULES_ETF] = JSON.stringify({ SPREAD_DELTA_MAX: 0.4 });
+    expect(getSavedRules().IVR_MIN).toBe(20);
+    expect(getSavedRules().DTE_MIN).toBe(DEFAULT_RULES.DTE_MIN);
+    expect(getSavedEtfRules().SPREAD_DELTA_MAX).toBe(0.4);
+    expect(hasCustomRules(getSavedRules(), false)).toBe(true);
+    expect(hasCustomRules({ ...DEFAULT_RULES }, false)).toBe(false);
   });
-  it('missing IV rank, missing delta and missing OI fail closed (OI is a warning)', () => {
-    const cs = evaluateRuleChecks({ ...base, ivRankPct: null, shortDeltas: [null], shortOis: [null] });
-    expect(by(cs, 'ivr').status).toBe('fail');
-    expect(by(cs, 'delta').status).toBe('fail');
-    expect(by(cs, 'oi').status).toBe('warn');
+  it('an old rules version clears saved values, as the screener does', () => {
+    store[LS_RULES] = JSON.stringify({ IVR_MIN: 20 });
+    expect(getSavedRules()).toEqual(DEFAULT_RULES);
+    expect(store[LS_RULES]).toBeUndefined();
   });
-  it('DTE outside 30 to 45 fails; delta band is 0.20 to 0.30 for spreads and 0.16 to 0.20 for condors', () => {
-    expect(by(evaluateRuleChecks({ ...base, dte: 21 }), 'dte').status).toBe('fail');
-    expect(by(evaluateRuleChecks({ ...base, dte: 45 }), 'dte').status).toBe('pass');
-    expect(by(evaluateRuleChecks({ ...base, shortDeltas: [-0.35] }), 'delta').status).toBe('fail');
-    const ic = { ...base, strategy: 'ic' as const, shortDeltas: [-0.18, 0.18], shortOis: [900, 900], credit: 2.2, width: 5, ivRankPct: 50 };
-    expect(by(evaluateRuleChecks(ic), 'delta').status).toBe('pass');
-    expect(by(evaluateRuleChecks({ ...ic, shortDeltas: [-0.25, 0.18] }), 'delta').status).toBe('fail');
-  });
-  it('iron condors also cap IV rank at 70', () => {
-    const ic = { ...base, strategy: 'ic' as const, shortDeltas: [-0.18, 0.18], shortOis: [900, 900], credit: 2.2, width: 5 };
-    expect(by(evaluateRuleChecks({ ...ic, ivRankPct: 85 }), 'ivr').status).toBe('fail');
-    expect(by(evaluateRuleChecks({ ...ic, ivRankPct: 60 }), 'ivr').status).toBe('pass');
-  });
-  it('return on risk: credit 1.45 on width 5 is 41% and passes; 0.8 is 19% and fails the 20% minimum', () => {
-    expect(by(evaluateRuleChecks(base), 'roc').value).toBe('return 41%');
-    expect(by(evaluateRuleChecks({ ...base, credit: 0.8 }), 'roc').status).toBe('fail');
-  });
-  it('earnings inside the window fail (the screener buffer); a date well after expiry passes; none listed passes', () => {
-    expect(by(evaluateRuleChecks({ ...base, earningsDate: '2026-12-10' }), 'earnings').status).toBe('fail');
-    expect(by(evaluateRuleChecks({ ...base, earningsDate: '2027-02-20' }), 'earnings').status).toBe('pass');
-    expect(by(evaluateRuleChecks(base), 'earnings').status).toBe('pass');
-  });
-  it('low open interest is a warning that needs no acknowledgement', () => {
-    const cs = evaluateRuleChecks({ ...base, shortOis: [120] });
-    expect(by(cs, 'oi').status).toBe('warn');
-    expect(failedChecks(cs)).toEqual([]);
-    expect(needsAcknowledgement(cs)).toBe(false);
-  });
-  it('index symbols use the ETF/index rules', () => {
-    expect(isIndexSymbol('spx')).toBe(true);
-    expect(rulesFor('SPX')).toBe(DEFAULT_ETF_RULES);
-    expect(rulesFor('SOXL')).toBe(DEFAULT_RULES);
-    expect(by(evaluateRuleChecks({ ...base, symbol: 'SPX', ivRankPct: 18, shortOis: [150], shortDeltas: [-0.3] }), 'ivr').status).toBe('pass');
-  });
-  it('chain parsing now carries open interest and IV rank (percent)', () => {
-    expect(parseOptionQuote({ symbol: 'X', bid: '1', ask: '1.1', 'open-interest': 55 })!.openInterest).toBe(55);
-    expect(parseOptionQuote({ symbol: 'X', bid: '1', ask: '1.1' })!.openInterest).toBeNull();
-    expect(parseMetrics({ 'implied-volatility-index-rank': '0.3817' }).ivRankPct).toBeCloseTo(38.17, 9);
-    expect(parseMetrics({ 'implied-volatility-index-rank': '38' }).ivRankPct).toBeNull();
-    expect(parseMetrics({}).ivRankPct).toBeNull();
+  it('broken saved JSON falls back to the defaults', () => {
+    store[LS_RULES_VERSION] = '1'; store[LS_RULES] = '{nope';
+    expect(getSavedRules()).toEqual(DEFAULT_RULES);
   });
 });

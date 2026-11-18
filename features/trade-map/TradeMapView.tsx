@@ -26,6 +26,7 @@ import SendDialog from './SendDialog';
 import StrikeStrip, { type StripLegInfo } from './StrikeStrip';
 import { barRight, dragLeg, markersFor, stepStrike, stripWindow, THIN_OI } from '@/lib/trademap/stripModel';
 import { netCreditAtMid, sendBlockers, sendSupported } from '@/lib/orders/tradeMapEntry';
+import type { LegQuote, Wing } from '@/lib/trademap/ruleChecks';
 import { parseTradeMapParams, type TradeMapPrefill } from '@/lib/trademap/deepLink';
 import { buildCurve } from '@/lib/trademap/graphModel';
 import { expiryMetrics } from '@/lib/trademap/strategyLegs';
@@ -278,11 +279,15 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     const credit = netCreditAtMid(specs, mids);
     const shorts = specs.filter(sp => sp.side === 'short');
     const width = Math.max(0, ...specs.filter(sp => sp.side === 'long').map(l => Math.min(...shorts.filter(sh => sh.right === l.right).map(sh => Math.abs(sh.strike - l.strike)))));
-    return {
-      credit, width,
-      shortDeltas: shorts.map(sp => quotes[symbolKey(sp.symbol)]?.delta ?? null),
-      shortOis: shorts.map(sp => quotes[symbolKey(sp.symbol)]?.openInterest ?? null),
-    };
+    const legQuote = (sym: string): LegQuote => { const q = quotes[symbolKey(sym)]; return { bid: q?.bid ?? null, ask: q?.ask ?? null, mid: q?.mid ?? null, oi: q?.openInterest ?? null }; };
+    // Each short leg with the long leg bought against it on the same side (a credit spread), for the rule checks.
+    const wings: Wing[] = [];
+    for (const sh of shorts) {
+      const long = specs.find(sp => sp.side === 'long' && sp.right === sh.right);
+      if (!long) continue;
+      wings.push({ right: sh.right, shortStrike: sh.strike, longStrike: long.strike, shortDelta: quotes[symbolKey(sh.symbol)]?.delta ?? null, short: legQuote(sh.symbol), long: legQuote(long.symbol) });
+    }
+    return { credit, width, wings };
   }, [specs, exp, quotes]);
   const blockers = sendBlockers({ gateStatus: gate.status, strategy, hasLegs: sendInfo?.credit != null, quantity: 1 });
 
@@ -451,7 +456,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
           th={th} symbol={symbol ?? ''} strategy={strategy} strategyLabel={STRATEGIES.find(s => s.id === strategy)?.label ?? strategy}
           specs={specs} expiration={exp.date} dte={exp.dte} displayedCredit={sendInfo.credit} width={sendInfo.width}
           ivRankPct={metrics?.ivRankPct ?? null} earningsDate={metrics?.earningsDate ?? null}
-          shortDeltas={sendInfo.shortDeltas} shortOis={sendInfo.shortOis} onClose={() => setSendOpen(false)}
+          price={spot} expirationIv={expiryIv} wings={sendInfo.wings} onClose={() => setSendOpen(false)}
         />
       )}
     </div>
