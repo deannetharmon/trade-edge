@@ -556,7 +556,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                     <tr className={th.textFaint}>
                       <th className="p-1.5 text-left">Price</th>
                       {grid.dates.map(d => (
-                        <th key={d} className="p-1.5 font-normal">{shortDate(d)}<div className="text-[10px]">{d === grid.earliestExpiration ? 'Exp' : `${Math.round((Date.parse(d) - Date.parse(today)) / 86400000)}D`}</div></th>
+                        <th key={d} className="p-1.5 font-normal">{shortDate(d)}<div className="text-[10px]">{`${Math.max(0, Math.round((Date.parse(grid.earliestExpiration) - Date.parse(d)) / 86400000))} DTE`}{d === grid.earliestExpiration ? ' · Exp' : ''}</div></th>
                       ))}
                     </tr>
                   </thead>
