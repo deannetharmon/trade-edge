@@ -23,6 +23,8 @@ import { DEFAULT_PRICING_PARAMS, buildDateAxis, buildDisplayPriceAxis, computeGr
 import { DISPLAY_MODES, PRIMARY_MODES, formatModeValue, modeValue, type DisplayMode } from '@/lib/trademap/displayModes';
 import TradeGraph from './TradeGraph';
 import SendDialog from './SendDialog';
+import StrikeStrip, { type StripLegInfo } from './StrikeStrip';
+import { barRight, dragLeg, markersFor, stepStrike, stripWindow, THIN_OI } from '@/lib/trademap/stripModel';
 import { netCreditAtMid, sendBlockers, sendSupported } from '@/lib/orders/tradeMapEntry';
 import { parseTradeMapParams, type TradeMapPrefill } from '@/lib/trademap/deepLink';
 import { buildCurve } from '@/lib/trademap/graphModel';
@@ -79,6 +81,9 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [axisSpot, setAxisSpot] = useState<number | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
+  // Slow-refresh quotes for the strikes on the strip (open interest, and quotes for a leg just moved to). The 5 s poll below
+  // stays the only source for the live gate and for Send.
+  const [stripQuotes, setStripQuotes] = useState<Record<string, OptionQuote>>({});
 
   const today = localIso(new Date(nowMs));
   const exp = useMemo(() => chain.find(c => c.date === expiry) ?? null, [chain, expiry]);
@@ -108,7 +113,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
       pendingRef.current = prefill ?? null;
       if (prefill?.strategy) setStrategy(prefill.strategy);
       setExpiry((wanted ?? nearest30).date); setRangePct(null); setIvMult(1);
-      setQuotes({}); setLastSuccessMs(null); setSuccessfulPolls(0);
+      setQuotes({}); setStripQuotes({}); setLastSuccessMs(null); setSuccessfulPolls(0);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Load failed');
     } finally { setLoading(false); }
@@ -157,9 +162,10 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
         if (!cancelled) setPollError(e instanceof Error ? e.message : 'Poll failed');
       }
     };
-    poll();
+    // A short delay, so dragging a marker across many strikes sends one quote request when it stops, not one per strike.
+    const first = setTimeout(poll, 250);
     const id = setInterval(poll, POLL_MS);
-    return () => { cancelled = true; clearInterval(id); };
+    return () => { cancelled = true; clearTimeout(first); clearInterval(id); };
   }, [symbol, symbolsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -167,11 +173,71 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     return () => clearInterval(id);
   }, []);
 
-  const built = useMemo(() => (specs && exp ? buildTradeLegs(specs, exp.date, quotes) : null), [specs, exp, quotes]);
+  const allQuotes = useMemo(() => ({ ...stripQuotes, ...quotes }), [stripQuotes, quotes]);
+  const built = useMemo(() => (specs && exp ? buildTradeLegs(specs, exp.date, allQuotes) : null), [specs, exp, allQuotes]);
   const legs = built?.legs ?? null;
   const em = legs ? expiryMetrics(legs) : null;
   const params = useMemo(() => ({ ...DEFAULT_PRICING_PARAMS, dividendYield: metrics?.dividendYield ?? 0, ivMultiplier: ivMult }), [metrics, ivMult]);
   const effRange = rangePct ?? (expectedMove != null ? Math.min(0.5, Math.max(0.05, expectedMove)) : 0.2);
+
+  // ── Strike strip (S2i) ──
+  const allStrikes = useMemo(() => exp?.strikes.map(k => k.strike) ?? [], [exp]);
+  const markers = useMemo(() => (specs ? markersFor(strategy, specs) : []), [specs, strategy]);
+  const stripStrikes = useMemo(
+    () => (exp && (axisSpot ?? spot) != null ? stripWindow(allStrikes, (axisSpot ?? spot) as number, effRange, markers.map(m => m.strike)) : []),
+    [exp, allStrikes, axisSpot, spot, effRange, markers],
+  );
+  const symbolAt = useCallback((k: number): string | null => {
+    const row = exp?.strikes.find(r => r.strike === k);
+    if (!row) return null;
+    return barRight(strategy, k, (axisSpot ?? spot ?? k)) === 'P' ? row.put : row.call;
+  }, [exp, strategy, axisSpot, spot]);
+  const stripSymbols = useMemo(() => stripStrikes.map(symbolAt).filter((x): x is string => !!x), [stripStrikes, symbolAt]);
+  const stripKey = stripSymbols.join('|');
+  useEffect(() => {
+    if (!symbol || stripSymbols.length === 0) return;
+    let cancelled = false;
+    const run = async () => {
+      try { const q = await fetchOptionQuotes(fetcher, stripSymbols); if (!cancelled) setStripQuotes(q); } catch { /* the strip is optional: the 5 s poll still drives the gate */ }
+    };
+    run();
+    const id = setInterval(run, 30000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [symbol, stripKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const stripOi = useMemo(() => {
+    const out: Record<number, number | null> = {};
+    for (const k of stripStrikes) { const sym = symbolAt(k); out[k] = sym ? allQuotes[symbolKey(sym)]?.openInterest ?? null : null; }
+    return out;
+  }, [stripStrikes, symbolAt, allQuotes]);
+  const legInfo: StripLegInfo[] = (specs ?? []).map(sp => {
+    const q = allQuotes[symbolKey(sp.symbol)];
+    const oi = q?.openInterest ?? null;
+    const fmt = (n: number | null | undefined, d = 2) => (n == null ? '—' : n.toFixed(d));
+    return {
+      label: `${sp.side === 'long' ? 'Long' : 'Short'} ${sp.strike} ${sp.right === 'P' ? 'put' : 'call'}`,
+      text: `bid ${fmt(q?.bid)} / ask ${fmt(q?.ask)} · delta ${fmt(q?.delta)} · OI ${oi == null ? '—' : oi.toLocaleString()}`,
+      tone: oi == null ? 'plain' : oi >= THIN_OI ? 'good' : 'thin',
+    };
+  });
+  const moveLeg = useCallback((role: 'anchor' | 'width', strike: number) => {
+    if (!exp || spot == null || anchor == null) return;
+    const r = dragLeg({ strategy, chain: exp, spot, anchor, widthSteps, role, targetStrike: strike });
+    if (!r) return;
+    if (r.anchor !== anchor) setAnchor(r.anchor);
+    if (r.widthSteps !== widthSteps) setWidthSteps(r.widthSteps);
+  }, [exp, spot, anchor, widthSteps, strategy]);
+  const stepLeg = useCallback((role: 'anchor' | 'width', dir: -1 | 1) => {
+    const from = role === 'anchor' ? anchor : markers.find(m => m.role === 'width')?.strike;
+    if (from == null) return;
+    moveLeg(role, stepStrike(allStrikes, from, dir));
+  }, [anchor, markers, allStrikes, moveLeg]);
+  const strikeLabel = (k: number): string => {
+    const sym = symbolAt(k);
+    const q = sym ? allQuotes[symbolKey(sym)] : undefined;
+    if (!q) return String(k);
+    return `${k}${q.delta != null ? ` · Δ${Math.abs(q.delta).toFixed(2)}` : ''}${q.openInterest != null ? ` · OI ${q.openInterest.toLocaleString()}` : ''}`;
+  };
+  const widthOptions = Array.from(new Set([1, 2, 3, 4, 5, 6, 8, 10, widthSteps])).sort((a, b) => a - b);
 
   const grid = useMemo(() => {
     if (!legs || !exp || axisSpot == null) return null;
@@ -269,19 +335,27 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
             <div className="flex flex-wrap gap-2">
               {chain.slice(0, 24).map(c => <button key={c.date} onClick={() => setExpiry(c.date)} className={chip(c.date === expiry)}>{shortDate(c.date)} · {c.dte}d</button>)}
             </div>
+            {spot != null && stripStrikes.length >= 2 && markers.length > 0 && (
+              <StrikeStrip th={th} strikes={stripStrikes} spot={spot} markers={markers} oi={stripOi} legInfo={legInfo} onMove={moveLeg} onStep={stepLeg} />
+            )}
             <div className="flex flex-wrap items-center gap-3 text-xs">
+              <details className="text-xs">
+                <summary className={`cursor-pointer ${th.textFaint}`}>Edit as numbers</summary>
+                <div className="flex flex-wrap items-center gap-3 mt-2">
               <label className={th.textFaint}>Strike{' '}
                 <select className={sel} value={anchor ?? ''} onChange={e => setAnchor(Number(e.target.value))}>
-                  {strikesList.map(k => <option key={k} value={k}>{k}</option>)}
+                  {strikesList.map(k => <option key={k} value={k}>{strikeLabel(k)}</option>)}
                 </select>
               </label>
               {STRATEGIES.find(s => s.id === strategy)?.hasWidth && (
                 <label className={th.textFaint}>Width (strikes){' '}
                   <select className={sel} value={widthSteps} onChange={e => setWidthSteps(Number(e.target.value))}>
-                    {[1, 2, 3, 4, 5, 6, 8, 10].map(n => <option key={n} value={n}>{n}</option>)}
+                    {widthOptions.map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </label>
               )}
+                </div>
+              </details>
               <label className={th.textFaint} title="How far above and below today's stock price the table and graph reach.">Range ±{Math.round(effRange * 100)}%{' '}
                 <input type="range" min={5} max={90} value={Math.round(effRange * 100)} onChange={e => { setRangePct(Number(e.target.value) / 100); }} />
               </label>
@@ -315,7 +389,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                 ))}
               </div>
               <div className={`text-[11px] ${th.textFaint}`}>
-                {em.maxProfit != null && em.maxLoss != null && em.maxLoss > 0 ? `Max profit ÷ max loss ${(em.maxProfit / em.maxLoss).toFixed(2)}× · ` : ''}
+                {em.maxProfit != null && em.maxLoss != null && em.maxLoss > 0 ? `Profit to loss ${(em.maxProfit / em.maxLoss).toFixed(2)}× · ` : ''}
                 Earnings: {metrics?.earningsDate && metrics.earningsDate <= exp.date ? `${shortDate(metrics.earningsDate)} (before expiry)` : metrics?.earningsDate ? `${shortDate(metrics.earningsDate)} (after expiry)` : 'none listed'}
                 {' · '}Based on Black-Scholes{expiryIv != null ? ` · IV ${Math.round(expiryIv * 100 * ivMult)}%` : ''} (early exercise ignored; dividends approximate). Not an order price.
               </div>
