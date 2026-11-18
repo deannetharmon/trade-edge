@@ -20,6 +20,12 @@ import {
 import { chanceOfProfit } from '@/lib/trademap/pop';
 import { cellDetail } from '@/lib/trademap/cellDetail';
 import CellDetailPanel from './CellDetailPanel';
+import OptimizePanel from './OptimizePanel';
+import { candidateToMap, runOptimize, type OptimizeResult } from '@/lib/trademap/optimize';
+import { classifyUnderlying } from '@/lib/scans/tastytrade-client';
+import { getSavedEtfRules, getSavedRules } from '@/lib/scans/savedRules';
+import { getAccessToken } from '@/lib/auth/tastytradeToken';
+import type { SpreadCandidate } from '@/lib/scans/types';
 import { evaluateGate, type GateQuote } from '@/lib/trademap/realtimeGate';
 import { DEFAULT_PRICING_PARAMS, buildDateAxis, buildDisplayPriceAxis, computeGrid } from '@/lib/trademap/gridModel';
 import { DISPLAY_MODES, PRIMARY_MODES, formatModeValue, modeValue, type DisplayMode } from '@/lib/trademap/displayModes';
@@ -85,6 +91,10 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   const [axisSpot, setAxisSpot] = useState<number | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
   // The grid cell the trader clicked (stock price and date); null shows today at the current price.
+  // Optimize (S5): the screener's own pick for this symbol; `prev` is what the map held before it was loaded.
+  const [opt, setOpt] = useState<{ result: OptimizeResult; widthDollars: number | null; prev: { anchor: number; widthSteps: number } | null } | null>(null);
+  const [optBusy, setOptBusy] = useState(false);
+  const [optError, setOptError] = useState<string | null>(null);
   const [selCell, setSelCell] = useState<{ price: number; date: string } | null>(null);
   // Slow-refresh quotes for the strikes on the strip (open interest, and quotes for a leg just moved to). The 5 s poll below
   // stays the only source for the live gate and for Send.
@@ -236,6 +246,37 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     if (from == null) return;
     moveLeg(role, stepStrike(allStrikes, from, dir));
   }, [anchor, markers, allStrikes, moveLeg]);
+  const optimizeSupported = strategy === 'bps' || strategy === 'bcs';
+  useEffect(() => { setOpt(null); setOptError(null); }, [symbol, expiry, strategy]);
+  const loadCandidate = useCallback((c: SpreadCandidate, keepPrev: { anchor: number; widthSteps: number } | null) => {
+    if (!exp) return false;
+    const m = candidateToMap(c, exp);
+    if (!m) return false;
+    setAnchor(m.anchor); setWidthSteps(m.widthSteps);
+    setOpt(o => (o ? { ...o, prev: keepPrev ?? o.prev } : o));
+    return true;
+  }, [exp]);
+  const runOptimizeNow = useCallback(async () => {
+    if (!exp || spot == null || !symbol || !specs || specs.length < 2 || !optimizeSupported) return;
+    setOptBusy(true); setOptError(null);
+    try {
+      const kind = await classifyUnderlying(symbol, await getAccessToken());
+      const rules = kind === 'index' || kind === 'etf' ? getSavedEtfRules() : getSavedRules();
+      const side = strategy === 'bps' ? 'put' : 'call';
+      const symbols = exp.strikes.map(r => r[side]).filter((x): x is string => !!x);
+      const q = await fetchOptionQuotes(fetcher, symbols);
+      const widthDollars = Math.abs(specs[0].strike - specs[1].strike);
+      const result = runOptimize({ strategy: strategy as 'bps' | 'bcs', exp, quotes: q, price: spot, expirationIv: expiryIv, rules, widthDollars });
+      const prev = anchor != null ? { anchor, widthSteps } : null;
+      setOpt({ result, widthDollars, prev });
+      if (result.pick) {
+        const m = candidateToMap(result.pick, exp);
+        if (m) { setAnchor(m.anchor); setWidthSteps(m.widthSteps); }
+      }
+    } catch (e) {
+      setOptError(e instanceof Error ? e.message : 'Optimize failed');
+    } finally { setOptBusy(false); }
+  }, [exp, spot, symbol, specs, strategy, optimizeSupported, expiryIv, anchor, widthSteps]);
   const strikeLabel = (k: number): string => {
     const sym = symbolAt(k);
     const q = sym ? allQuotes[symbolKey(sym)] : undefined;
@@ -359,6 +400,28 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
             </div>
             {spot != null && stripStrikes.length >= 2 && markers.length > 0 && (
               <StrikeStrip th={th} strikes={stripStrikes} spot={spot} markers={markers} oi={stripOi} legInfo={legInfo} onMove={moveLeg} onStep={stepLeg} />
+            )}
+            {optimizeSupported && specs && specs.length >= 2 && (
+              <div className="flex flex-wrap items-center gap-3">
+                <button type="button" onClick={runOptimizeNow} disabled={optBusy} className={`${chip(false)} font-semibold`}>{optBusy ? 'Optimizing…' : 'Optimize'}</button>
+                <span className={`text-xs ${th.textFaint}`}>Loads the screener&apos;s own pick at your width, using your saved scan criteria.</span>
+                {optError && <span className="text-xs text-rose-400">{optError}</span>}
+              </div>
+            )}
+            {opt && (
+              <OptimizePanel
+                th={th}
+                widthDollars={opt.widthDollars}
+                pick={opt.result.pick}
+                atEachWidth={opt.result.atEachWidth}
+                noQuotes={opt.result.noQuotes}
+                loadedShort={specs && specs.length >= 2 ? specs[0].strike : null}
+                loadedLong={specs && specs.length >= 2 ? specs[1].strike : null}
+                canUndo={opt.prev != null && (opt.prev.anchor !== anchor || opt.prev.widthSteps !== widthSteps)}
+                onLoad={c => { loadCandidate(c, null); }}
+                onUndo={() => { if (opt.prev) { setAnchor(opt.prev.anchor); setWidthSteps(opt.prev.widthSteps); } }}
+                onClose={() => setOpt(null)}
+              />
             )}
             <div className="flex flex-wrap items-center gap-3 text-xs">
               <details className="text-xs">
