@@ -291,3 +291,18 @@ describe('OPTMAP-0001 S2b: graph curve', () => {
     expect(buildCurve(legs, 100, 0.2, '2026-12-18', DEFAULT_PRICING_PARAMS, 1)).toBeNull();
   });
 });
+
+import { buildTradeMapUrl, parseTradeMapParams } from '../trademap/deepLink';
+
+describe('OPTMAP-0001 S2d: deep link parameters', () => {
+  it('parses a full link and round-trips', () => {
+    const p = parseTradeMapParams('?symbol=soxl&strategy=bps&expiry=2026-12-18&strike=45&width=2');
+    expect(p).toEqual({ symbol: 'SOXL', strategy: 'bps', expiry: '2026-12-18', strike: 45, width: 2 });
+    expect(parseTradeMapParams(buildTradeMapUrl(p).split('?')[1])).toEqual(p);
+    expect(buildTradeMapUrl({})).toBe('/trade-map');
+  });
+  it('drops anything malformed instead of guessing', () => {
+    expect(parseTradeMapParams('?symbol=<script>&strategy=condor&expiry=12/18&strike=-3&width=99')).toEqual({});
+    expect(parseTradeMapParams('strike=abc&width=1.5')).toEqual({});
+  });
+});

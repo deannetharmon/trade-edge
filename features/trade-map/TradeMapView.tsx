@@ -22,6 +22,7 @@ import { evaluateGate, type GateQuote } from '@/lib/trademap/realtimeGate';
 import { DEFAULT_PRICING_PARAMS, buildDateAxis, buildPriceAxis, computeGrid } from '@/lib/trademap/gridModel';
 import { DISPLAY_MODES, PRIMARY_MODES, formatModeValue, modeValue, type DisplayMode } from '@/lib/trademap/displayModes';
 import TradeGraph from './TradeGraph';
+import { parseTradeMapParams, type TradeMapPrefill } from '@/lib/trademap/deepLink';
 import { buildCurve } from '@/lib/trademap/graphModel';
 import { expiryMetrics } from '@/lib/trademap/strategyLegs';
 import {
@@ -88,8 +89,9 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   );
   const symbolsKey = specs ? specs.map(s => s.symbol).join('|') : '';
 
-  const load = useCallback(async () => {
-    const sym = symbolInput.trim().toUpperCase();
+  const pendingRef = useRef<TradeMapPrefill | null>(null);
+  const load = useCallback(async (prefill?: TradeMapPrefill) => {
+    const sym = (prefill?.symbol ?? symbolInput).trim().toUpperCase();
     if (!sym) return;
     setLoading(true); setLoadError(null);
     try {
@@ -99,7 +101,10 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
       if (!u) throw new Error('No stock quote available for that symbol');
       const nearest30 = c.reduce((best, e) => (Math.abs(e.dte - 30) < Math.abs(best.dte - 30) ? e : best), c[0]);
       setSymbol(sym); setChain(c); setMetrics(m); setUnderlying(u);
-      setExpiry(nearest30.date); setRangePct(null); setIvMult(1);
+      const wanted = prefill?.expiry ? c.find(e => e.date === prefill.expiry) : null;
+      pendingRef.current = prefill ?? null;
+      if (prefill?.strategy) setStrategy(prefill.strategy);
+      setExpiry((wanted ?? nearest30).date); setRangePct(null); setIvMult(1);
       setQuotes({}); setLastSuccessMs(null); setSuccessfulPolls(0);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Load failed');
@@ -113,12 +118,20 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     if (!exp || spotRef.current == null) return;
     const strikes = exp.strikes.map(s => s.strike);
     const move = metrics && metrics.ivByExpiration[exp.date] != null ? metrics.ivByExpiration[exp.date] * Math.sqrt(exp.dte / 365) : null;
-    setAnchor(defaultAnchorStrike(strategy, strikes, spotRef.current, move));
-    setWidthSteps(defaultWidthSteps(strikes, spotRef.current));
+    const pend = pendingRef.current;
+    pendingRef.current = null;
+    setAnchor(pend?.strike != null && strikes.indexOf(pend.strike) >= 0 ? pend.strike : defaultAnchorStrike(strategy, strikes, spotRef.current, move));
+    setWidthSteps(pend?.width != null ? pend.width : defaultWidthSteps(strikes, spotRef.current));
     setAxisSpot(spotRef.current);
     setDateIdx(null);
     setRangePct(null);
   }, [exp, strategy, metrics]);
+
+  // Open prefilled from a link (/trade-map?symbol=...).
+  useEffect(() => {
+    const pre = parseTradeMapParams(window.location.search);
+    if (pre.symbol) { setSymbolInput(pre.symbol); load(pre); }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll quotes every 5s for the stock and the strategy's legs.
   useEffect(() => {
@@ -187,12 +200,17 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
 
   const basis = { netDebit: grid?.netDebit ?? 0, maxLoss: em?.maxLoss ?? null };
   const band = (em?.maxLoss ?? (grid ? Math.abs(grid.netDebit) : 0)) * 0.05;
+  // Opaque blend from a neutral dark base toward green (profit) or red (loss), so cells never pick up the card's tint.
+  const mix = (to: [number, number, number], t: number): string => {
+    const base = [26, 26, 26];
+    return `rgb(${base.map((b, i) => Math.round(b + (to[i] - b) * t)).join(',')})`;
+  };
   const cellStyle = (pl: number | null): React.CSSProperties => {
     if (pl == null) return {};
+    if (Math.abs(pl) <= band) return { background: mix([245, 158, 11], 0.45) };
     const scale = Math.max(1, em?.maxLoss ?? Math.abs(grid?.netDebit ?? 1));
-    const a = Math.min(0.55, 0.08 + (Math.abs(pl) / scale) * 0.5);
-    if (Math.abs(pl) <= band) return { background: 'rgba(245,158,11,0.30)' };
-    return { background: pl > 0 ? `rgba(16,185,129,${a})` : `rgba(244,63,94,${a})` };
+    const t = Math.min(0.8, 0.12 + (Math.abs(pl) / scale) * 0.7);
+    return { background: pl > 0 ? mix([16, 160, 105], t) : mix([220, 50, 80], t) };
   };
 
   const statusColor = gate.status === 'live' ? 'bg-emerald-500' : gate.status === 'warming' ? 'bg-amber-500' : 'bg-rose-500';
@@ -207,7 +225,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     <div className="flex flex-col gap-4">
       <div className={`${th.card} ${th.border} border rounded-lg p-3 flex flex-wrap items-center gap-3`}>
         <input value={symbolInput} onChange={e => setSymbolInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') load(); }} className={`${sel} w-24 uppercase`} aria-label="Symbol" />
-        <button onClick={load} disabled={loading} className={chip(true)}>{loading ? 'Loading…' : 'Load'}</button>
+        <button onClick={() => load()} disabled={loading} className={chip(true)}>{loading ? 'Loading…' : 'Load'}</button>
         {symbol && underlying && <span className={`text-sm font-semibold ${th.text}`}>{symbol} ${underlying.price.toFixed(2)}</span>}
         {symbol && (
           <span className={`ml-auto flex items-center gap-2 text-xs ${th.textFaint}`} title={gate.reasons.join('; ')}>
@@ -269,7 +287,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                   { k: 'CHANCE OF PROFIT', v: pop == null ? '—' : `${Math.round(pop * 100)}%` },
                   { k: 'BREAKEVEN', v: em.breakevens.length ? em.breakevens.map(b => `$${b.toFixed(2)}`).join(' / ') : '—' },
                 ].map(m => (
-                  <div key={m.k}><div className={`text-[10px] tracking-wider ${th.textFaint}`}>{m.k}</div><div className={`text-sm font-semibold ${th.text}`}>{m.v}</div></div>
+                  <div key={m.k} title={m.k === 'CHANCE OF PROFIT' ? 'Model estimate of finishing beyond breakeven at expiry. Differs from the screener POP, which is measured at the strike.' : undefined}><div className={`text-[10px] tracking-wider ${th.textFaint}`}>{m.k}</div><div className={`text-sm font-semibold ${th.text}`}>{m.v}</div></div>
                 ))}
               </div>
               <div className={`text-[11px] ${th.textFaint}`}>
