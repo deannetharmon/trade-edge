@@ -606,6 +606,15 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                 {' · '}Based on Black-Scholes{expiryIv != null ? ` · IV ${Math.round(expiryIv * 100 * ivMult)}%` : ''} (early exercise ignored; dividends approximate). Not an order price.
               </div>
 
+              {detail && (
+                <CellDetailPanel
+                  th={th}
+                  detail={detail}
+                  selected={selValid}
+                  movePct={selValid && axisSpot ? ((detail.price / axisSpot) - 1) * 100 : null}
+                  onClear={() => setSelCell(null)}
+                />
+              )}
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => setView('table')} className={chip(view === 'table')}>Table</button>
                 <button onClick={() => setView('graph')} className={chip(view === 'graph')}>Graph</button>
@@ -663,15 +672,6 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                     ))}
                   </tbody>
                 </table>
-                {detail && (
-                  <CellDetailPanel
-                    th={th}
-                    detail={detail}
-                    selected={selValid}
-                    movePct={selValid && axisSpot ? ((detail.price / axisSpot) - 1) * 100 : null}
-                    onClear={() => setSelCell(null)}
-                  />
-                )}
               </div>
               )}
             </>
