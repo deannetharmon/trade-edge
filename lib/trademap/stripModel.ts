@@ -143,3 +143,18 @@ export function widthLabel(a: number, b: number): string {
   const w = Math.round(Math.abs(a - b) * 100) / 100;
   return `$${Number.isInteger(w) ? w : w.toFixed(2).replace(/0$/, '')} wide`;
 }
+
+/** The strike (above the stock) whose |delta| is closest to the middle of the band; null when no strike has a delta. */
+export function strikeForDeltaBand(strikes: number[], deltaOf: (strike: number) => number | null, spot: number, min: number, max: number): number | null {
+  const mid = (min + max) / 2;
+  let best: number | null = null;
+  let bestGap = Infinity;
+  for (const k of strikes) {
+    if (k <= spot) continue;
+    const d = deltaOf(k);
+    if (d == null) continue;
+    const gap = Math.abs(d - mid);
+    if (gap < bestGap) { bestGap = gap; best = k; }
+  }
+  return best;
+}

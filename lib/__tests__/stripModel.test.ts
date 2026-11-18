@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { ChainExpiration } from '../trademap/chain';
 import { legSpecs } from '../trademap/strategies';
 import {
-  barRight, dragLeg, labelEvery, widthLabel, markersFor, MAX_WIDTH_STEPS, nearestMover, rightsFor, stepStrike, strikeAtX, stripWindow,
+  barRight, dragLeg, labelEvery, widthLabel, markersFor, MAX_WIDTH_STEPS, nearestMover, rightsFor, stepStrike, strikeAtX, strikeForDeltaBand, stripWindow,
 } from '../trademap/stripModel';
 
 function chain(lo: number, hi: number, step = 1): ChainExpiration {
@@ -23,10 +23,11 @@ describe('OPTMAP-0001 S2i: strike strip model', () => {
     expect(w[w.length - 1]).toBeLessThanOrEqual(SPOT * 1.06);
     const widened = stripWindow(ks, SPOT, 0.06, [682]);
     expect(widened[0]).toBe(682);
-    // widened evenly: the stock stays centered, so the far side reaches the same distance
-    const half = SPOT - 682;
-    expect(widened[widened.length - 1]).toBeGreaterThan(SPOT + half - 1.01);
-    expect(widened[widened.length - 1]).toBeLessThanOrEqual(SPOT + half + 1e-9);
+    // widened evenly: the stock stays centered, so the far side reaches the same distance (here the chain ends at 780)
+    expect(widened[widened.length - 1]).toBe(780);
+    const wide2 = stripWindow(ks, SPOT, 0.01, [713]);
+    expect(wide2[0]).toBe(713);
+    expect(wide2[wide2.length - 1]).toBeGreaterThanOrEqual(SPOT + (SPOT - 713) - 1);
   });
   it('labels thin out as the chain gets denser', () => {
     expect(labelEvery(20)).toBe(1);
@@ -128,5 +129,14 @@ describe('OPTMAP-0001 S2i: strike strip model', () => {
     expect(strikeAtX(ks, 999, 10)).toBe(703);
     expect(strikeAtX(ks, -5, 10)).toBe(700);
     expect(strikeAtX([], 5, 10)).toBeNull();
+  });
+  it('delta band picks the call strike nearest the middle of the band, above the stock only', () => {
+    const deltas: Record<number, number> = { 730: 0.55, 740: 0.35, 750: 0.25, 760: 0.15, 770: 0.07 };
+    const f = (k: number) => deltas[k] ?? null;
+    const ks = [730, 740, 750, 760, 770];
+    expect(strikeForDeltaBand(ks, f, 732, 0.10, 0.20)).toBe(760);
+    expect(strikeForDeltaBand(ks, f, 732, 0.20, 0.35)).toBe(750);
+    expect(strikeForDeltaBand(ks, f, 732, 0.30, 0.40)).toBe(740);
+    expect(strikeForDeltaBand(ks, () => null, 732, 0.1, 0.2)).toBeNull();
   });
 });

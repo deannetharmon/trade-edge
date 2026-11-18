@@ -37,11 +37,12 @@ import { DISPLAY_MODES, PRIMARY_MODES, formatModeValue, modeValue, type DisplayM
 import TradeGraph from './TradeGraph';
 import SendDialog from './SendDialog';
 import StrikeStrip, { type StripLegInfo } from './StrikeStrip';
-import { barRight, dragLeg, markersFor, stepStrike, stripWindow, THIN_OI } from '@/lib/trademap/stripModel';
+import { barRight, dragLeg, markersFor, stepStrike, strikeForDeltaBand, stripWindow, THIN_OI } from '@/lib/trademap/stripModel';
 import { netCreditAtMid, sendBlockers, sendSupported } from '@/lib/orders/tradeMapEntry';
 import type { LegQuote, Wing } from '@/lib/trademap/ruleChecks';
 import { parseTradeMapParams, type TradeMapPrefill } from '@/lib/trademap/deepLink';
 import { buildCurve } from '@/lib/trademap/graphModel';
+import { CC_GOALS, type CcGoal } from '@/lib/scans/ccGridView';
 import { fetchCcBasisSettings } from '@/features/screener/useCcBasisSettings';
 import { resolveCcBasis, type CcBasisSource } from '@/lib/ccBasis/ccBasisSettings';
 import { getCoveredCallCapacityReport } from '@/lib/scans/tastytrade-client';
@@ -436,6 +437,22 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   const ageSec = lastSuccessMs != null ? Math.max(0, Math.round((nowMs - lastSuccessMs) / 1000)) : null;
   const strikesList = exp?.strikes.map(s => s.strike) ?? [];
   const sel = `${th.input} ${th.inputBorder} ${th.text} border rounded px-2 py-1 text-xs`;
+  // Covered call goals (same delta bands as the screener): picks the call strike whose delta sits closest to the middle of the band.
+  const callDeltaAt = (k: number): number | null => {
+    const sym = symbolAt(k);
+    const d = sym ? allQuotes[symbolKey(sym)]?.delta : null;
+    return d == null ? null : Math.abs(d);
+  };
+  const activeGoal: CcGoal | null = (() => {
+    const d = anchor != null ? callDeltaAt(anchor) : null;
+    if (d == null) return null;
+    return (Object.keys(CC_GOALS) as CcGoal[]).find(g => d >= CC_GOALS[g].min && d <= CC_GOALS[g].max) ?? null;
+  })();
+  const pickGoal = (g: CcGoal) => {
+    if (spot == null) return;
+    const best = strikeForDeltaBand(strikesList, callDeltaAt, spot, CC_GOALS[g].min, CC_GOALS[g].max);
+    if (best != null) setAnchor(best);
+  };
   const chip = (on: boolean) => `px-2.5 py-1 text-xs rounded border ${on ? 'border-[var(--accent,#3b82f6)] text-[var(--accent,#3b82f6)]' : `${th.border} ${th.textFaint}`}`;
   const money2 = (v: number | null | undefined, unbounded: boolean | undefined) => (unbounded ? 'Unlimited' : money(v ?? null));
 
@@ -468,6 +485,11 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
             <div className="flex flex-wrap gap-2">
               {STRATEGIES.map(s => <button key={s.id} onClick={() => setStrategy(s.id)} className={chip(strategy === s.id)}>{s.label}</button>)}
             </div>
+            {strategy === 'cc' && (
+              <div className="flex flex-wrap items-center gap-2">
+                {(Object.keys(CC_GOALS) as CcGoal[]).map(g => <button key={g} onClick={() => pickGoal(g)} className={chip(activeGoal === g)} title={`Call delta ${CC_GOALS[g].min.toFixed(2)} to ${CC_GOALS[g].max.toFixed(2)}, ${CC_GOALS[g].pop}`}>{CC_GOALS[g].label}</button>)}
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               {chain.slice(0, 24).map(c => <button key={c.date} onClick={() => setExpiry(c.date)} className={chip(c.date === expiry)}>{shortDate(c.date)} · {c.dte}d</button>)}
             </div>
