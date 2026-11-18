@@ -3,10 +3,9 @@
 // OPTMAP-0001 S6: the header RSI is the existing pipelines' numbers, and never a guess.
 
 import { describe, it, expect } from 'vitest';
-import { headerRsiFromBars, formatRsi } from '@/lib/trademap/headerRsi';
+import { headerRsiFromBars, formatRsi, completedWeeklyCloses } from '@/lib/trademap/headerRsi';
 import { stockRsiFromBars } from '@/lib/portfolio/stockRsi';
-import { periodCloses, wilderRsiSeries } from '@/lib/discovery/normalized/technicals';
-import { epochDay } from '@/lib/discovery/normalized/dates';
+import { rsiSeries } from '@/lib/indicators/rsi';
 
 // Weekday bars from Mon 2025-01-06, one per weekday, 16:00 UTC (11:00 ET), with a wavy price path.
 const START = Date.UTC(2025, 0, 6, 16, 0, 0) / 1000;
@@ -33,24 +32,33 @@ describe('headerRsiFromBars', () => {
     const r = headerRsiFromBars(bars, bars.map(b => ({ t: b.t, c: b.c })), now);
     expect(r.daily).toBe(stockRsiFromBars(bars, now)!.rsi);
   });
-  it('weekly equals Wilder RSI on completed weekly closes', () => {
+  it('weekly equals Wilder RSI on the closes of completed Monday-based weeks', () => {
     const long = bars.map(b => ({ t: b.t, c: b.c }));
     const r = headerRsiFromBars(bars, long, now);
-    const series = wilderRsiSeries(periodCloses(long, 'WEEK', epochDay(Math.floor(now.getTime() / 1000))))!;
-    expect(r.weekly).toBe(series[series.length - 1]);
+    // Independent reference: the Friday close of each full week (the series starts on a Monday and has no holidays).
+    const fridays = long.filter(b => new Date(b.t * 1000).getUTCDay() === 5).map(b => b.c);
+    const series = rsiSeries(fridays)!;
+    expect(r.weekly).toBeCloseTo(series[series.length - 1], 10);
     expect(r.weekly).toBeGreaterThan(0);
     expect(r.weekly).toBeLessThan(100);
   });
-  it('a half-finished week is not used: mid-week now ignores the current week', () => {
+  it('a half-finished week is not used', () => {
     const long = bars.map(b => ({ t: b.t, c: b.c }));
-    const lastBarMidWeek = new Date((long[long.length - 1].t + 3600) * 1000); // same day as the last bar
-    const dow = lastBarMidWeek.getUTCDay();
-    const r = headerRsiFromBars(bars, long, lastBarMidWeek);
-    const completed = periodCloses(long, 'WEEK', epochDay(Math.floor(lastBarMidWeek.getTime() / 1000)));
-    const next = periodCloses(long, 'WEEK', epochDay(Math.floor(now.getTime() / 1000)));
-    expect(dow).not.toBe(0);
-    expect(completed.length).toBe(next.length - 1);
-    expect(r.weekly).toBe(wilderRsiSeries(completed)![completed.length - 15]);
+    const last = long[long.length - 1];
+    const lastDow = new Date(last.t * 1000).getUTCDay();
+    const sameDay = last.t + 3600;
+    const monday = last.t + 3 * 86400;
+    const midWeek = completedWeeklyCloses(long, sameDay)!;
+    const nextWeek = completedWeeklyCloses(long, monday)!;
+    expect(lastDow).toBe(5); // the series ends on a Friday
+    expect(midWeek.length).toBe(nextWeek.length - 1);
+    expect(nextWeek[nextWeek.length - 1]).toBe(last.c); // the Friday close counts once the next week has begun
+  });
+  it('malformed, unsorted or duplicate bars give no weekly series', () => {
+    expect(completedWeeklyCloses([{ t: 2, c: 1 }, { t: 1, c: 1 }], 10_000_000)).toBeNull();
+    expect(completedWeeklyCloses([{ t: 1, c: 1 }, { t: 1, c: 1 }], 10_000_000)).toBeNull();
+    expect(completedWeeklyCloses([{ t: 1, c: 0 }], 10_000_000)).toBeNull();
+    expect(completedWeeklyCloses(null, 1)).toBeNull();
   });
   it('too little history gives dashes, not guesses', () => {
     const few = weekdayBars(30);
