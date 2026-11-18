@@ -19,7 +19,7 @@ import {
 } from '@/lib/trademap/chain';
 import { chanceOfProfit } from '@/lib/trademap/pop';
 import { evaluateGate, type GateQuote } from '@/lib/trademap/realtimeGate';
-import { DEFAULT_PRICING_PARAMS, buildDateAxis, buildPriceAxis, computeGrid } from '@/lib/trademap/gridModel';
+import { DEFAULT_PRICING_PARAMS, buildDateAxis, buildDisplayPriceAxis, computeGrid } from '@/lib/trademap/gridModel';
 import { DISPLAY_MODES, PRIMARY_MODES, formatModeValue, modeValue, type DisplayMode } from '@/lib/trademap/displayModes';
 import TradeGraph from './TradeGraph';
 import { parseTradeMapParams, type TradeMapPrefill } from '@/lib/trademap/deepLink';
@@ -172,7 +172,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
 
   const grid = useMemo(() => {
     if (!legs || !exp || axisSpot == null) return null;
-    const prices = buildPriceAxis(axisSpot, effRange, ROWS);
+    const prices = buildDisplayPriceAxis(axisSpot, effRange, ROWS);
     const dates = buildDateAxis(today, exp.date, COLS);
     return prices && dates ? computeGrid(legs, prices, dates, params) : null;
   }, [legs, exp, axisSpot, effRange, params, today]);
@@ -202,18 +202,21 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   }, [nowMs, specs, quotes, underlying, lastSuccessMs, successfulPolls]);
 
   const basis = { netDebit: grid?.netDebit ?? 0, maxLoss: em?.maxLoss ?? null };
-  // Opaque blend from a neutral dark base toward green (profit) or red (loss), so cells never pick up the card's tint.
+  // Two colors only. Strength follows the size of the amount; near breakeven the cell fades to the dark base.
   const mix = (to: [number, number, number], t: number): string => {
-    const base = [26, 26, 26];
+    const base = [12, 17, 30];
     return `rgb(${base.map((b, i) => Math.round(b + (to[i] - b) * t)).join(',')})`;
   };
-  // Two colors only: green for profit, red for loss. Strength follows the size of the amount, so cells near breakeven fade to the neutral base.
+  const gainScale = Math.max(1, em?.maxProfit ?? em?.maxLoss ?? Math.abs(grid?.netDebit ?? 1));
+  const lossScale = Math.max(1, em?.maxLoss ?? Math.abs(grid?.netDebit ?? 1));
   const cellStyle = (pl: number | null): React.CSSProperties => {
     if (pl == null) return {};
-    const scale = Math.max(1, em?.maxLoss ?? Math.abs(grid?.netDebit ?? 1));
-    const t = Math.min(0.8, (Math.abs(pl) / scale) * 0.9);
-    return { background: pl > 0 ? mix([16, 160, 105], t) : mix([220, 50, 80], t) };
+    return pl > 0
+      ? { background: mix([0, 168, 70], Math.min(1, pl / gainScale)) }
+      : { background: mix([176, 0, 45], Math.min(1, -pl / lossScale)) };
   };
+  const spotRowPrice = grid && axisSpot != null ? grid.prices.reduce((best, x) => (Math.abs(x - axisSpot) < Math.abs(best - axisSpot) ? x : best), grid.prices[0]) : null;
+  const priceLabel = (p: number) => (p % 1 === 0 ? p.toFixed(0) : p.toFixed(2));
 
   const statusColor = gate.status === 'live' ? 'bg-emerald-500' : gate.status === 'warming' ? 'bg-amber-500' : 'bg-rose-500';
   const statusLabel = gate.status === 'live' ? 'LIVE' : gate.status === 'warming' ? 'WARMING UP' : 'STALE';
@@ -330,8 +333,8 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                   </thead>
                   <tbody>
                     {grid.prices.map((p, i) => (
-                      <tr key={p}>
-                        <td className={`p-1.5 text-left ${axisSpot != null && Math.abs(p - axisSpot) === Math.min.apply(null, grid.prices.map(x => Math.abs(x - axisSpot))) ? 'font-bold text-[var(--accent,#3b82f6)]' : th.textMuted}`}>${p.toFixed(2)} <span className={th.textFaint}>{axisSpot ? `${(((p / axisSpot) - 1) * 100).toFixed(0)}%` : ''}</span></td>
+                      <tr key={p} style={p === spotRowPrice ? { borderBottom: '1px dashed rgba(255,255,255,0.7)' } : undefined}>
+                        <td className={`p-1.5 text-left ${axisSpot != null && Math.abs(p - axisSpot) === Math.min.apply(null, grid.prices.map(x => Math.abs(x - axisSpot))) ? 'font-bold text-[var(--accent,#3b82f6)]' : th.textMuted}`}>${priceLabel(p)} <span className={th.textFaint}>{axisSpot ? `${(((p / axisSpot) - 1) * 100).toFixed(0)}%` : ''}</span></td>
                         {grid.cells[i].map((c, j) => (
                           <td key={j} className={`p-1.5 ${th.text}`} style={cellStyle(c ? c.pl : null)}>
                             {formatModeValue(mode, modeValue(mode, c, basis))}

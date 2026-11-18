@@ -233,3 +233,23 @@ describe('OPTMAP-0001 S1: axes', () => {
     expect(buildDateAxis('2026-11-17', '2026-12-18', 1)).toBeNull();
   });
 });
+
+import { buildDisplayPriceAxis, buildPriceAxis as buildPriceAxisRaw } from '../trademap/gridModel';
+
+describe('OPTMAP-0001 S2h: display price axis', () => {
+  it('rows 1.5 dollars or more apart sit on whole dollars, descending and unique', () => {
+    const axis = buildDisplayPriceAxis(46.76, 0.52, 11)!;
+    expect(axis.every(p => Number.isInteger(p))).toBe(true);
+    for (let i = 1; i < axis.length; i += 1) expect(axis[i]).toBeLessThan(axis[i - 1]);
+    expect(axis[0]).toBe(71);
+    expect(axis[axis.length - 1]).toBe(22);
+  });
+  it('tight rows keep cents, so labels never collide', () => {
+    const raw = buildPriceAxisRaw(16.01, 0.2, 11)!;
+    expect(buildDisplayPriceAxis(16.01, 0.2, 11)).toEqual(raw);
+  });
+  it('fails closed like the raw axis', () => {
+    expect(buildDisplayPriceAxis(0, 0.2, 11)).toBeNull();
+    expect(buildDisplayPriceAxis(100, 1.5, 11)).toBeNull();
+  });
+});

@@ -130,3 +130,20 @@ export function buildDateAxis(asOf: string, endDate: string, maxCols: number): s
   }
   return thinned;
 }
+
+/**
+ * Price rows for display: when the rows are at least $1.50 apart they sit on whole dollars, and the grid is
+ * priced at those whole-dollar prices, so a label never differs from the price its numbers were computed at.
+ * Closer rows keep cents. The stock's own price is never rounded anywhere else.
+ */
+export function buildDisplayPriceAxis(spot: number, rangePct: number, rows: number): number[] | null {
+  const raw = buildPriceAxis(spot, rangePct, rows);
+  if (raw == null || raw.length < 2) return raw;
+  const step = (raw[0] - raw[raw.length - 1]) / (raw.length - 1);
+  if (step < 1.5) return raw;
+  const rounded = raw.map(p => Math.round(p));
+  for (let i = 0; i < rounded.length; i += 1) {
+    if (rounded[i] <= 0 || (i > 0 && rounded[i] >= rounded[i - 1])) return raw;
+  }
+  return rounded;
+}
