@@ -7,9 +7,9 @@
 
 # TradeEdge Roadmap (maintained by Paul — update after every major decision)
 
-Last updated: 2026-11-17 (OPTMAP-0001 / Trade Map status board added by Paul and Frank)
+Last updated: 2026-11-17 (OPTMAP-0001 / Send shipped; status board by Paul and Frank)
 
-## OPTMAP-0001 Trade Map and ORDER-SEND-0001: status board (2026-11-17, main @ fac6f5f)
+## OPTMAP-0001 Trade Map and ORDER-SEND-0001: status board (2026-11-17, main @ abd17d8)
 
 Scope rule: the screener finds and ranks trades; Trade Map shows what a chosen trade does (OptionStrat-style, any symbol) on real-time TastyTrade quotes. It never recommends, ranks or sizes a trade. Decisions: docs in the TradeEdge project, `OPTMAP-0001-decision-record.md` plus `OPTMAP-0001-decision-record-addendum-2026-11-17.md` (the addendum wins).
 
@@ -19,13 +19,18 @@ Scope rule: the screener finds and ranks trades; Trade Map shows what a chosen t
 - S2b graph view (selected date and expiry curves, date slider). S2d URL prefill (/trade-map?symbol=&strategy=&expiry=&strike=&long=&width=). S2e "Trade Map" link on screener result cards and a home card.
 - ORDER-SEND-0001 Step 0: buildOrderLegs moved from app/screener/page.tsx to lib/orders/entryLegs.ts (verbatim) with golden fixtures.
 
+### Done since (on main, CI green, Vercel preview Ready)
+- S2f/S2g/S2h: grid colours are green and red only, fading through the dark base (no yellow, no amber band); whole-dollar price rows when rows are $1 or more apart; chance-of-profit note in a hover.
+- ORDER-SEND-0001 S3a pure order module (lib/orders/tradeMapEntry.ts; order body equals the screener's), S3b Prosper rule checks (lib/trademap/ruleChecks.ts) from the screener's own constants (IV rank at least 30; 30 to 45 DTE; short delta bands; return on risk; earnings; open interest warning), S3c Send dialog (features/trade-map/SendDialog.tsx) with I/O steps in lib/orders/tradeMapSend.ts: market-open check, fresh quote re-read, re-price within $0.05, broker dry run (tick-healed and token-retried once), place only from a validation of the identical payload at most 15 seconds old, never resent.
+- Send v1 is BPS, BCS and IC, 50% target and 2x-credit stop on every order, default scan rules only (custom scan settings are not applied). Entry-context snapshots are not written for Trade Map orders (the bracket lives at the broker); the order lifecycle event is recorded.
+
 ### In progress
-- ORDER-SEND-0001 (Send to order from Trade Map). Spec signed by Ian: credit trades only, entry plus 50% profit target and 2x-credit stop on every order, entry at mid with re-price and abort beyond $0.05, dry-run on by default, gate must be LIVE, failed Prosper checks need acknowledgement, 1 contract to start, no price walk. Quinn narrowed v1 to BPS, BCS and IC until CSP's post-submit tracking is verified. Next: pure modules with fixtures (order-leg mapping, bracket prices, re-price check, Prosper checks from the screener's threshold constants), then the Send dialog (Diane mock: board 3 of the Trade Map canvas), then Dean's live dry-run.
+- Dean's live check of Send (below). Nothing else open on ORDER-SEND-0001.
 
 ### Waiting on Dean (only he can do these)
 1. Open /trade-map with the market open and report anything wrong (not yet seen live).
 2. After Step 0: on a screener candidate, open the order ticket and run the dry-run; confirm it still validates.
-3. Look at the Send confirm mock (board 3) before the Send screen is built.
+3. With the market open: on /trade-map pick a BPS, press Send, Validate with broker (this places nothing), read the Prosper lines and the target and stop prices, then Cancel. Place a real 1-contract order only when you choose to.
 
 ### Not started / later
 - Portfolio position links to Trade Map. S4: covered call, LEAPS, PMCC (two expirations, model-based summary), net greeks ("More" menu), target and stop overlays. Later: saved strategies, IV history. Send for debit trades, CC, PMCC and CSP (after Quinn's check).
