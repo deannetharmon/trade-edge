@@ -179,7 +179,7 @@ import { tickTableFromNestedChain, snapEntryCredit, stepByTick, type TickTable }
 import { effectiveTickTable, learnedBrokerTick, optionRootOf } from '@/lib/portfolio/brokerTick';
 import { postWithTickHeal, describeHeal, describeLearnedTick } from '@/lib/entry-walk/tickHeal';
 import { invalidateAccessToken, isTokenRejection, sendWithTokenRetry } from '@/lib/auth/tokenRetry';
-import { LS_RULES, LS_RULES_ETF, getSavedRules, getSavedEtfRules } from '@/lib/scans/savedRules';
+import { LS_RULES, LS_RULES_ETF, LS_RANK_CONFIG, DEFAULT_RANK_CONFIG, getSavedRules, getSavedEtfRules, getSavedRankConfig } from '@/lib/scans/savedRules';
 import BuyingPowerLine from '@/features/screener/components/BuyingPowerLine';
 import MarketLinksMenu from '@/features/screener/components/MarketLinksMenu';
 import { buildCspOrderLeg, computeCspMaxLoss } from '@/lib/scans/cspOrderMath';
@@ -1107,7 +1107,6 @@ const LS_GLOBAL_SESSIONS = 'hunter-global-sessions';
 const LS_SCREEN_MODE = 'hunter-screen-mode';
 const LS_CSP_VIEW_PRESET = 'hunter-csp-view-preset';
 const LS_CSP_GROUP_EXP = 'hunter-csp-group-by-expiration';
-const LS_RANK_CONFIG = 'hunter-rank-config';
 const LS_RESULTS_CACHE = 'hunter-results-cache';
 const LS_RAW_SCAN_CACHE = 'hunter-raw-scan-cache'; // legacy localStorage key — no longer written to; rawScanCache now lives in IndexedDB (see idbGet/idbSet below) because full options-chain data can exceed localStorage's quota
 const LS_RESULTS_CACHE_AT = 'hunter-results-cache-at';
@@ -1188,17 +1187,6 @@ async function idbDel(key: string): Promise<void> {
   }
 }
 
-const DEFAULT_RANK_CONFIG: RankConfig = {
-  weightMomentum: 25, weightIvr: 15, weightEmClearance: 15, weightRange: 15, weightTechnical: 10, weightLiquidity: 10, weightBuffer: 10,
-  dteSweetSpot: 38, dteRange: 7,
-  thresholdGreen: 75, thresholdYellow: 55, thresholdOrange: 35,
-  weightCredit: 25, weightRoc: 20, weightPop: 15, weightDte: 15,
-};
-
-function getSavedRankConfig(): RankConfig {
-  try { const s = localStorage.getItem(LS_RANK_CONFIG); return s ? { ...DEFAULT_RANK_CONFIG, ...JSON.parse(s) } : { ...DEFAULT_RANK_CONFIG }; }
-  catch { return { ...DEFAULT_RANK_CONFIG }; }
-}
 
 
 

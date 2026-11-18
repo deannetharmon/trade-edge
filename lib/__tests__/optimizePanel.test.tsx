@@ -10,14 +10,14 @@ import type { SpreadCandidate } from '@/lib/scans/types';
 const th = { card: '', border: '', text: '', textFaint: '' };
 const cand = (short: number, long: number, credit: number, pop: number, roc: number): SpreadCandidate =>
   ({ strategy: 'BPS', expiration: '2026-12-18', dte: 31, shortStrike: short, longStrike: long, spreadWidth: Math.abs(short - long), credit, pop, roc, creditRatio: credit / Math.abs(short - long), shortDelta: 0.27, shortOI: 1240, longOI: 900, midCredit: 1.52, naturalCredit: 1.38 } as unknown as SpreadCandidate);
-const base = { th, widthDollars: 5, noQuotes: false, loadedShort: 45, loadedLong: 40, canUndo: true, popMin: 65, stock: 46.76, ivRankPct: 46, greeks: { delta: 9.8, gamma: 1.1, theta: 3.4, vega: -1.2 }, onLoad: () => {}, onUndo: () => {}, onClose: () => {} };
+const base = { th, widthDollars: 5, noQuotes: false, loadedShort: 45, loadedLong: 40, loadedExp: '2026-12-18', canUndo: true, popMin: 65, stock: 46.76, ivRankPct: 46, greeks: { delta: 9.8, gamma: 1.1, theta: 3.4, vega: -1.2 }, onLoad: () => {}, onUndo: () => {}, onClose: () => {} };
 
 describe('OptimizePanel', () => {
   it('shows the pick, tags the first row Best opportunity, and loads a clicked alternative', () => {
     const onLoad = vi.fn();
     const rows = [cand(45, 40, 1.45, 71, 41), cand(47, 37, 2.6, 68, 35)];
     render(<OptimizePanel {...base} pick={rows[0]} atEachWidth={rows} onLoad={onLoad} />);
-    expect(screen.getByText('Screener pick at your $5 width')).toBeTruthy();
+    expect(screen.getByText("Screener's best opportunity")).toBeTruthy();
     expect(screen.getAllByText('Best opportunity')).toHaveLength(1);
     fireEvent.click(screen.getByText('47 / 37'));
     expect(onLoad).toHaveBeenCalledWith(rows[1]);
@@ -45,7 +45,7 @@ describe('OptimizePanel', () => {
   it('lists credit, delta, POP and ROC in labelled columns with credit in green', () => {
     const rows = [cand(45, 40, 1.45, 71, 41)];
     render(<OptimizePanel {...base} pick={rows[0]} atEachWidth={rows} />);
-    for (const h of ['WIDTH', 'STRIKES', 'CREDIT', 'DELTA', 'POP', 'ROC']) expect(screen.getAllByText(h).length).toBeGreaterThan(0);
+    for (const h of ['EXPIRES', 'WIDTH', 'STRIKES', 'CREDIT', 'DELTA', 'POP', 'ROC']) expect(screen.getAllByText(h).length).toBeGreaterThan(0);
     const credit = screen.getAllByText('$1.45').find(el => el.className.includes('text-emerald-400'));
     expect(credit).toBeTruthy();
   });
@@ -59,7 +59,7 @@ describe('OptimizePanel', () => {
   });
   it('says nothing passes when there is no pick, and does not offer a weaker one as the pick', () => {
     render(<OptimizePanel {...base} pick={null} atEachWidth={[]} canUndo={false} />);
-    expect(screen.getByText('Nothing passes your scan criteria at $5 wide')).toBeTruthy();
+    expect(screen.getByText("Nothing qualifies in the screener's ranked scan")).toBeTruthy();
     expect(screen.getByText(/Your strikes were not changed/)).toBeTruthy();
     expect(screen.queryByText('Undo')).toBeNull();
   });

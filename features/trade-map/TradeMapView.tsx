@@ -26,7 +26,8 @@ import { isMarketOpen } from '@/lib/wheel/marketHours';
 import { formatQuoteTime, isClosedMarketStale, shouldPollOnTimer } from '@/lib/trademap/pollPolicy';
 import CellDetailPanel from './CellDetailPanel';
 import OptimizePanel from './OptimizePanel';
-import { candidateToMap, runOptimize, type OptimizeResult } from '@/lib/trademap/optimize';
+import { candidateToMap, type OptimizeResult } from '@/lib/trademap/optimize';
+import { runRankedOptimize } from '@/lib/trademap/optimizeRank';
 import { classifyUnderlying } from '@/lib/scans/tastytrade-client';
 import { getSavedEtfRules, getSavedRules } from '@/lib/scans/savedRules';
 import { getAccessToken } from '@/lib/auth/tastytradeToken';
@@ -101,7 +102,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   const [sendOpen, setSendOpen] = useState(false);
   // The grid cell the trader clicked (stock price and date); null shows today at the current price.
   // Optimize (S5): the screener's own pick for this symbol; `prev` is what the map held before it was loaded.
-  const [opt, setOpt] = useState<{ result: OptimizeResult; widthDollars: number | null; prev: { anchor: number; widthSteps: number } | null; popMin: number | null } | null>(null);
+  const [opt, setOpt] = useState<{ result: OptimizeResult; widthDollars: number | null; prev: { anchor: number; widthSteps: number; expiry?: string } | null; popMin: number | null } | null>(null);
   // Daily and weekly RSI(14) for the header; null until fetched, dashes when unavailable.
   const [headerRsi, setHeaderRsi] = useState<HeaderRsi | null>(null);
   const [optBusy, setOptBusy] = useState(false);
@@ -318,7 +319,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     return () => { cancelled = true; };
   }, [symbol]);
   const optimizeSupported = strategy === 'bps' || strategy === 'bcs';
-  useEffect(() => { setOpt(null); setOptError(null); }, [symbol, expiry, strategy]);
+  useEffect(() => { setOpt(null); setOptError(null); }, [symbol, strategy]);
   const loadCandidate = useCallback((c: SpreadCandidate, keepPrev: { anchor: number; widthSteps: number } | null) => {
     if (!exp) return false;
     const m = candidateToMap(c, exp);
@@ -327,27 +328,28 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     setOpt(o => (o ? { ...o, prev: keepPrev ?? o.prev } : o));
     return true;
   }, [exp]);
+  const loadRanked = useCallback((c: SpreadCandidate) => {
+    if (exp && c.expiration === exp.date) { loadCandidate(c, null); return; }
+    const target = chain.find(e => e.date === c.expiration);
+    if (!target) return;
+    pendingRef.current = { strike: c.shortStrike, longStrike: c.longStrike };
+    setExpiry(c.expiration);
+  }, [exp, chain, loadCandidate]);
   const runOptimizeNow = useCallback(async () => {
     if (!exp || spot == null || !symbol || !specs || specs.length < 2 || !optimizeSupported) return;
     setOptBusy(true); setOptError(null);
     try {
-      const kind = await classifyUnderlying(symbol, await getAccessToken());
-      const rules = kind === 'index' || kind === 'etf' ? getSavedEtfRules() : getSavedRules();
-      const side = strategy === 'bps' ? 'put' : 'call';
-      const symbols = exp.strikes.map(r => r[side]).filter((x): x is string => !!x);
-      const q = await fetchOptionQuotes(fetcher, symbols);
-      const widthDollars = Math.abs(specs[0].strike - specs[1].strike);
-      const result = runOptimize({ strategy: strategy as 'bps' | 'bcs', exp, quotes: q, price: spot, expirationIv: expiryIv, rules, widthDollars });
-      const prev = anchor != null ? { anchor, widthSteps } : null;
-      setOpt({ result, widthDollars, prev, popMin: rules.POP_MIN });
-      if (result.pick) {
-        const m = candidateToMap(result.pick, exp);
-        if (m) { setAnchor(m.anchor); setWidthSteps(m.widthSteps); }
-      }
+      // The screener's own ranked scan for this symbol (all strikes, widths and 30-45 DTE expirations), top result first.
+      const { ranked, popMin } = await runRankedOptimize({ symbol, strategy: strategy as 'bps' | 'bcs' });
+      const list = ranked.map(r => r.candidate);
+      const prev = anchor != null ? { anchor, widthSteps, expiry: exp.date } : null;
+      const result = { pick: list[0] ?? null, atEachWidth: list, noQuotes: false };
+      setOpt({ result, widthDollars: null, prev, popMin });
+      if (result.pick) loadRanked(result.pick);
     } catch (e) {
       setOptError(e instanceof Error ? e.message : 'Optimize failed');
     } finally { setOptBusy(false); }
-  }, [exp, spot, symbol, specs, strategy, optimizeSupported, expiryIv, anchor, widthSteps]);
+  }, [exp, spot, symbol, specs, strategy, optimizeSupported, anchor, widthSteps]); // eslint-disable-line react-hooks/exhaustive-deps
   const strikeLabel = (k: number): string => {
     const sym = symbolAt(k);
     const q = sym ? allQuotes[symbolKey(sym)] : undefined;
@@ -521,13 +523,18 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                 noQuotes={opt.result.noQuotes}
                 loadedShort={specs && specs.length >= 2 ? specs[0].strike : null}
                 loadedLong={specs && specs.length >= 2 ? specs[1].strike : null}
+                loadedExp={exp?.date ?? null}
                 stock={spot}
                 ivRankPct={metrics?.ivRankPct ?? null}
                 greeks={todayGreeks}
                 popMin={opt.popMin}
-                canUndo={opt.prev != null && (opt.prev.anchor !== anchor || opt.prev.widthSteps !== widthSteps)}
-                onLoad={c => { loadCandidate(c, null); }}
-                onUndo={() => { if (opt.prev) { setAnchor(opt.prev.anchor); setWidthSteps(opt.prev.widthSteps); } }}
+                canUndo={opt.prev != null && (opt.prev.anchor !== anchor || opt.prev.widthSteps !== widthSteps || opt.prev.expiry !== exp?.date)}
+                onLoad={loadRanked}
+                onUndo={() => {
+                  if (!opt.prev) return;
+                  if (opt.prev.expiry && opt.prev.expiry !== exp?.date) { pendingRef.current = { strike: opt.prev.anchor, width: opt.prev.widthSteps }; setExpiry(opt.prev.expiry); return; }
+                  setAnchor(opt.prev.anchor); setWidthSteps(opt.prev.widthSteps);
+                }}
                 onClose={() => setOpt(null)}
               />
             )}

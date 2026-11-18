@@ -5,6 +5,7 @@
 // with storage unavailable it returns the defaults.
 
 import { DEFAULT_ETF_RULES, DEFAULT_RULES, type RulesType } from './constants';
+import type { RankConfig } from './types';
 
 export const LS_RULES = 'hunter-rules';
 export const LS_RULES_ETF = 'hunter-rules-etf';
@@ -33,4 +34,19 @@ export function getSavedEtfRules(): RulesType {
 export function hasCustomRules(rules: RulesType, etfOrIndex: boolean): boolean {
   const base = etfOrIndex ? DEFAULT_ETF_RULES : DEFAULT_RULES;
   return (Object.keys(base) as Array<keyof RulesType>).some(k => rules[k] !== base[k]);
+}
+
+export const LS_RANK_CONFIG = 'hunter-rank-config';
+
+export const DEFAULT_RANK_CONFIG: RankConfig = {
+  weightMomentum: 25, weightIvr: 15, weightEmClearance: 15, weightRange: 15, weightTechnical: 10, weightLiquidity: 10, weightBuffer: 10,
+  dteSweetSpot: 38, dteRange: 7,
+  thresholdGreen: 75, thresholdYellow: 55, thresholdOrange: 35,
+  weightCredit: 25, weightRoc: 20, weightPop: 15, weightDte: 15,
+};
+
+/** The ranking weights a trader saved in the screener (localStorage); defaults fill anything not saved. */
+export function getSavedRankConfig(): RankConfig {
+  try { const s = localStorage.getItem(LS_RANK_CONFIG); return s ? { ...DEFAULT_RANK_CONFIG, ...JSON.parse(s) } : { ...DEFAULT_RANK_CONFIG }; }
+  catch { return { ...DEFAULT_RANK_CONFIG }; }
 }

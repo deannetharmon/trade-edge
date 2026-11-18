@@ -1,5 +1,8 @@
 // lib/trademap/optimize.ts
 //
+// SUPERSEDED for the Optimize button by lib/trademap/optimizeRank.ts (S5b, 2026-11-18): the button runs the screener's RANKED scan,
+// which is what produces the screener's Best opportunity. This per-width finder wrapper is kept for candidateToMap and its tests.
+//
 // OPTMAP-0001 S5 (Dean, Ian, Alan, Quinn, 2026-11-17): "Optimize" shows the SCREENER'S OWN pick for the symbol, never a
 // second ranking. It maps the Trade Map's quotes into the screener's leg format and calls the screener's finders
 // (trySpreadAtWidth, findBestSpread) with the trader's saved scan criteria. No scoring or qualification lives here.

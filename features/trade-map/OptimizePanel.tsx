@@ -18,6 +18,7 @@ export interface OptimizePanelProps {
   /** Short strike currently on the map, to mark the loaded row. */
   loadedShort: number | null;
   loadedLong: number | null;
+  loadedExp: string | null;
   canUndo: boolean;
   /** The saved POP minimum (percent) for this symbol type, to say plainly when a pick is below it. */
   popMin: number | null;
@@ -96,8 +97,8 @@ export default function OptimizePanel(p: OptimizePanelProps) {
   const head = p.noQuotes
     ? 'No usable quotes for these strikes yet'
     : p.pick
-      ? `Screener pick at ${p.widthDollars != null ? `your ${widthText(p.widthDollars)} width` : 'its best width'}`
-      : `Nothing passes your scan criteria at ${p.widthDollars != null ? `${widthText(p.widthDollars)} wide` : 'any width'}`;
+      ? "Screener's best opportunity"
+      : "Nothing qualifies in the screener's ranked scan";
   return (
     <div data-testid="optimize-panel" className={`${th.card} ${th.border} border rounded-lg p-3 flex flex-col gap-2`}>
       <div className="flex flex-wrap items-center gap-3">
@@ -113,26 +114,28 @@ export default function OptimizePanel(p: OptimizePanelProps) {
       )}
       {p.pick && <div className={`text-xs ${th.textFaint}`}>Loaded onto the map. Chosen with your saved scan criteria, using the same logic as the screener.</div>}
       {(() => {
-        const sel = p.atEachWidth.find(c => c.shortStrike === p.loadedShort && c.longStrike === p.loadedLong) ?? (p.pick && p.pick.shortStrike === p.loadedShort && p.pick.longStrike === p.loadedLong ? p.pick : null);
+        const same = (c: SpreadCandidate) => c.shortStrike === p.loadedShort && c.longStrike === p.loadedLong && c.expiration === p.loadedExp;
+        const sel = p.atEachWidth.find(same) ?? (p.pick && same(p.pick) ? p.pick : null);
         return sel ? <SelectedDetail p={p} c={sel} /> : null;
       })()}
       {p.atEachWidth.length > 0 && (
         <>
-          <div className={`text-[11px] tracking-wider ${th.textFaint}`}>THE SCREENER&apos;S BEST AT EACH WIDTH (click one to load it)</div>
+          <div className={`text-[11px] tracking-wider ${th.textFaint}`}>THE SCREENER&apos;S TOP RESULTS, BEST FIRST (click one to load it)</div>
           <div className="overflow-x-auto">
-            <div className="min-w-[520px] flex flex-col gap-0.5 tabular-nums">
-              <div className={`grid grid-cols-[72px_96px_76px_64px_64px_64px_1fr] gap-2 px-2 text-[10px] tracking-wider ${th.textFaint}`}>
-                <span>WIDTH</span><span>STRIKES</span><span className="text-right">CREDIT</span><span className="text-right">DELTA</span><span className="text-right">POP</span><span className="text-right">ROC</span><span />
+            <div className="min-w-[600px] flex flex-col gap-0.5 tabular-nums">
+              <div className={`grid grid-cols-[84px_64px_96px_76px_64px_64px_64px_1fr] gap-2 px-2 text-[10px] tracking-wider ${th.textFaint}`}>
+                <span>EXPIRES</span><span>WIDTH</span><span>STRIKES</span><span className="text-right">CREDIT</span><span className="text-right">DELTA</span><span className="text-right">POP</span><span className="text-right">ROC</span><span />
               </div>
               {p.atEachWidth.map((c, i) => {
-                const loaded = c.shortStrike === p.loadedShort && c.longStrike === p.loadedLong;
+                const loaded = c.shortStrike === p.loadedShort && c.longStrike === p.loadedLong && c.expiration === p.loadedExp;
                 return (
                   <button
-                    key={`${c.shortStrike}-${c.longStrike}`}
+                    key={`${c.expiration}-${c.shortStrike}-${c.longStrike}`}
                     type="button"
                     onClick={() => p.onLoad(c)}
-                    className={`grid grid-cols-[72px_96px_76px_64px_64px_64px_1fr] gap-2 items-center text-left text-sm rounded px-2 py-1.5 ${loaded ? 'bg-[#16233a] ring-1 ring-[#2f4a78]' : 'hover:bg-white/5'} ${th.text}`}
+                    className={`grid grid-cols-[84px_64px_96px_76px_64px_64px_64px_1fr] gap-2 items-center text-left text-sm rounded px-2 py-1.5 ${loaded ? 'bg-[#16233a] ring-1 ring-[#2f4a78]' : 'hover:bg-white/5'} ${th.text}`}
                   >
+                    <span className={th.textFaint}>{c.expiration.slice(5)} · {c.dte}d</span>
                     <span className={th.textFaint}>{widthText(c.spreadWidth)}</span>
                     <span className="font-semibold">{c.shortStrike} / {c.longStrike}</span>
                     <span className="text-right font-semibold text-emerald-400">${c.credit.toFixed(2)}</span>
@@ -147,7 +150,7 @@ export default function OptimizePanel(p: OptimizePanelProps) {
           </div>
         </>
       )}
-      <div className={`text-[11px] ${th.textFaint}`}>Same finders and saved criteria as the screener; Trade Map adds no scoring. Bull put and bear call spreads for now.</div>
+      <div className={`text-[11px] ${th.textFaint}`}>Same ranked scan and saved criteria as the screener; Trade Map adds no scoring. Bull put and bear call spreads for now.</div>
     </div>
   );
 }
