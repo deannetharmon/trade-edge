@@ -21,6 +21,8 @@ import { chanceOfProfit } from '@/lib/trademap/pop';
 import { evaluateGate, type GateQuote } from '@/lib/trademap/realtimeGate';
 import { DEFAULT_PRICING_PARAMS, buildDateAxis, buildPriceAxis, computeGrid } from '@/lib/trademap/gridModel';
 import { DISPLAY_MODES, PRIMARY_MODES, formatModeValue, modeValue, type DisplayMode } from '@/lib/trademap/displayModes';
+import TradeGraph from './TradeGraph';
+import { buildCurve } from '@/lib/trademap/graphModel';
 import { expiryMetrics } from '@/lib/trademap/strategyLegs';
 import {
   STRATEGIES, buildTradeLegs, defaultAnchorStrike, defaultWidthSteps, legSpecs, type StrategyId,
@@ -64,6 +66,8 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   const [rangePct, setRangePct] = useState<number | null>(null);
   const [ivMult, setIvMult] = useState(1);
   const [mode, setMode] = useState<DisplayMode>('pl-dollar');
+  const [view, setView] = useState<'table' | 'graph'>('table');
+  const [dateIdx, setDateIdx] = useState<number | null>(null);
 
   const [quotes, setQuotes] = useState<Record<string, OptionQuote>>({});
   const [lastSuccessMs, setLastSuccessMs] = useState<number | null>(null);
@@ -112,6 +116,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     setAnchor(defaultAnchorStrike(strategy, strikes, spotRef.current, move));
     setWidthSteps(defaultWidthSteps(strikes, spotRef.current));
     setAxisSpot(spotRef.current);
+    setDateIdx(null);
     setRangePct(null);
   }, [exp, strategy, metrics]);
 
@@ -155,6 +160,15 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     const dates = buildDateAxis(today, exp.date, COLS);
     return prices && dates ? computeGrid(legs, prices, dates, params) : null;
   }, [legs, exp, axisSpot, effRange, params, today]);
+
+  const sliderDates = useMemo(() => (exp ? buildDateAxis(today, exp.date, 60) : null), [exp, today]);
+  const curveDate = sliderDates ? sliderDates[Math.min(dateIdx ?? sliderDates.length - 1, sliderDates.length - 1)] : null;
+  const curves = useMemo(() => {
+    if (view !== 'graph' || !legs || !exp || axisSpot == null || !curveDate) return null;
+    const selected = buildCurve(legs, axisSpot, effRange, curveDate, params);
+    const expiryCurve = buildCurve(legs, axisSpot, effRange, exp.date, params);
+    return selected && expiryCurve ? { selected, expiry: expiryCurve } : null;
+  }, [view, legs, exp, axisSpot, effRange, curveDate, params]);
 
   const pop = useMemo(
     () => (legs && spot != null && expiryIv != null ? chanceOfProfit(legs, spot, today, expiryIv, params.riskFreeRate, params.dividendYield) : null),
@@ -265,8 +279,25 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
               </div>
 
               <div className="flex flex-wrap gap-2">
+                <button onClick={() => setView('table')} className={chip(view === 'table')}>Table</button>
+                <button onClick={() => setView('graph')} className={chip(view === 'graph')}>Graph</button>
+                <span className="w-3" />
                 {DISPLAY_MODES.filter(m => PRIMARY_MODES.indexOf(m.id) >= 0).map(m => <button key={m.id} onClick={() => setMode(m.id)} className={chip(mode === m.id)}>{m.label}</button>)}
               </div>
+              {view === 'graph' ? (
+                <div className={`${th.card} ${th.border} border rounded-lg p-3 flex flex-col gap-2`}>
+                  {curves && axisSpot != null ? (
+                    <TradeGraph selected={curves.selected} expiry={curves.expiry} mode={mode} basis={basis} spot={axisSpot} breakevens={em.breakevens} mutedColor="#808080" />
+                  ) : <div className="text-xs text-rose-400">Graph unavailable: a leg could not be priced.</div>}
+                  {sliderDates && curveDate && (
+                    <label className={`text-xs ${th.textFaint} flex items-center gap-3`}>
+                      Date: {shortDate(curveDate)} {curveDate === exp.date ? '(at expiration)' : `(${Math.round((Date.parse(curveDate) - Date.parse(today)) / 86400000)}d from today)`}
+                      <input type="range" className="flex-1" min={0} max={sliderDates.length - 1} value={Math.min(dateIdx ?? sliderDates.length - 1, sliderDates.length - 1)} onChange={e => setDateIdx(Number(e.target.value))} />
+                    </label>
+                  )}
+                  <div className={`text-[11px] ${th.textFaint}`}>Solid line: selected date. Dashed line: expiration. Dotted line: current price.</div>
+                </div>
+              ) : (
               <div className={`${th.card} ${th.border} border rounded-lg overflow-x-auto`}>
                 <table className="w-full text-xs text-center">
                   <thead>
@@ -291,6 +322,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                   </tbody>
                 </table>
               </div>
+              )}
             </>
           )}
         </>

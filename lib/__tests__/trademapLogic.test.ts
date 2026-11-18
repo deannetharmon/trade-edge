@@ -268,3 +268,26 @@ describe('OPTMAP-0001 S2: display modes', () => {
     expect(formatModeValue('pl-pct', null)).toBe('—');
   });
 });
+
+import { buildCurve } from '../trademap/graphModel';
+import { DEFAULT_PRICING_PARAMS } from '../trademap/gridModel';
+import { expiryPayoff } from '../trademap/strategyLegs';
+
+describe('OPTMAP-0001 S2b: graph curve', () => {
+  const legs = [leg({ entryPrice: 3 })];
+  it('expiry-day curve equals the expiration payoff and spans spot +/- range', () => {
+    const c = buildCurve(legs, 100, 0.2, '2026-12-18', DEFAULT_PRICING_PARAMS, 41)!;
+    expect(c.length).toBe(41);
+    expect(c[0].price).toBeCloseTo(80, 9);
+    expect(c[40].price).toBeCloseTo(120, 9);
+    for (const p of c) expect(p.cell.pl).toBeCloseTo(expiryPayoff(legs, p.price), 6);
+  });
+  it('an earlier date differs from expiry (time value) and fails closed on bad input or later dates', () => {
+    const early = buildCurve(legs, 100, 0.2, '2026-12-01', DEFAULT_PRICING_PARAMS, 41)!;
+    expect(early[20].cell.pl).toBeGreaterThan(-300 - 1e-9);
+    expect(buildCurve(legs, 100, 0.2, '2026-12-19', DEFAULT_PRICING_PARAMS)).toBeNull();
+    expect(buildCurve(legs, 0, 0.2, '2026-12-18', DEFAULT_PRICING_PARAMS)).toBeNull();
+    expect(buildCurve(legs, 100, 1.2, '2026-12-18', DEFAULT_PRICING_PARAMS)).toBeNull();
+    expect(buildCurve(legs, 100, 0.2, '2026-12-18', DEFAULT_PRICING_PARAMS, 1)).toBeNull();
+  });
+});
