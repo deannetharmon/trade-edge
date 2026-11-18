@@ -22,6 +22,8 @@ import { evaluateGate, type GateQuote } from '@/lib/trademap/realtimeGate';
 import { DEFAULT_PRICING_PARAMS, buildDateAxis, buildDisplayPriceAxis, computeGrid } from '@/lib/trademap/gridModel';
 import { DISPLAY_MODES, PRIMARY_MODES, formatModeValue, modeValue, type DisplayMode } from '@/lib/trademap/displayModes';
 import TradeGraph from './TradeGraph';
+import SendDialog from './SendDialog';
+import { netCreditAtMid, sendBlockers, sendSupported } from '@/lib/orders/tradeMapEntry';
 import { parseTradeMapParams, type TradeMapPrefill } from '@/lib/trademap/deepLink';
 import { buildCurve } from '@/lib/trademap/graphModel';
 import { expiryMetrics } from '@/lib/trademap/strategyLegs';
@@ -76,6 +78,7 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
   const [pollError, setPollError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [axisSpot, setAxisSpot] = useState<number | null>(null);
+  const [sendOpen, setSendOpen] = useState(false);
 
   const today = localIso(new Date(nowMs));
   const exp = useMemo(() => chain.find(c => c.date === expiry) ?? null, [chain, expiry]);
@@ -201,6 +204,22 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
     });
   }, [nowMs, specs, quotes, underlying, lastSuccessMs, successfulPolls]);
 
+  // ORDER-SEND-0001: what the Send step needs, from the same live quotes the grid uses.
+  const sendInfo = useMemo(() => {
+    if (!specs || !exp) return null;
+    const mids: Record<string, number | null> = {};
+    for (const sp of specs) mids[symbolKey(sp.symbol)] = quotes[symbolKey(sp.symbol)]?.mid ?? null;
+    const credit = netCreditAtMid(specs, mids);
+    const shorts = specs.filter(sp => sp.side === 'short');
+    const width = Math.max(0, ...specs.filter(sp => sp.side === 'long').map(l => Math.min(...shorts.filter(sh => sh.right === l.right).map(sh => Math.abs(sh.strike - l.strike)))));
+    return {
+      credit, width,
+      shortDeltas: shorts.map(sp => quotes[symbolKey(sp.symbol)]?.delta ?? null),
+      shortOis: shorts.map(sp => quotes[symbolKey(sp.symbol)]?.openInterest ?? null),
+    };
+  }, [specs, exp, quotes]);
+  const blockers = sendBlockers({ gateStatus: gate.status, strategy, hasLegs: sendInfo?.credit != null, quantity: 1 });
+
   const basis = { netDebit: grid?.netDebit ?? 0, maxLoss: em?.maxLoss ?? null };
   // Two colors only. Strength follows the size of the amount; near breakeven the cell fades to the dark base.
   const mix = (to: [number, number, number], t: number): string => {
@@ -306,6 +325,9 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
                 <button onClick={() => setView('graph')} className={chip(view === 'graph')}>Graph</button>
                 <span className="w-3" />
                 {DISPLAY_MODES.filter(m => PRIMARY_MODES.indexOf(m.id) >= 0).map(m => <button key={m.id} onClick={() => setMode(m.id)} className={chip(mode === m.id)}>{m.label}</button>)}
+                {sendSupported(strategy) && (
+                  <button onClick={() => setSendOpen(true)} disabled={blockers.length > 0} title={blockers.join(' ') || 'Review, validate with the broker, then place'} className={`${chip(true)} ml-auto disabled:opacity-40`}>Send…</button>
+                )}
               </div>
               {view === 'graph' ? (
                 <div className={`${th.card} ${th.border} border rounded-lg p-3 flex flex-col gap-2`}>
@@ -349,6 +371,14 @@ export default function TradeMapView({ theme }: { theme: Theme }) {
             </>
           )}
         </>
+      )}
+      {sendOpen && specs && exp && sendInfo && sendInfo.credit != null && sendSupported(strategy) && (
+        <SendDialog
+          th={th} symbol={symbol ?? ''} strategy={strategy} strategyLabel={STRATEGIES.find(s => s.id === strategy)?.label ?? strategy}
+          specs={specs} expiration={exp.date} dte={exp.dte} displayedCredit={sendInfo.credit} width={sendInfo.width}
+          ivRankPct={metrics?.ivRankPct ?? null} earningsDate={metrics?.earningsDate ?? null}
+          shortDeltas={sendInfo.shortDeltas} shortOis={sendInfo.shortOis} onClose={() => setSendOpen(false)}
+        />
       )}
     </div>
   );
