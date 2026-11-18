@@ -9,7 +9,7 @@
 
 Last updated: 2026-11-17 (OPTMAP-0001 / Send shipped; status board by Paul and Frank)
 
-## OPTMAP-0001 Trade Map and ORDER-SEND-0001: status board (2026-11-17, main @ abd17d8)
+## OPTMAP-0001 Trade Map and ORDER-SEND-0001: status board (2026-11-17, main @ 08c51ab)
 
 Scope rule: the screener finds and ranks trades; Trade Map shows what a chosen trade does (OptionStrat-style, any symbol) on real-time TastyTrade quotes. It never recommends, ranks or sizes a trade. Decisions: docs in the TradeEdge project, `OPTMAP-0001-decision-record.md` plus `OPTMAP-0001-decision-record-addendum-2026-11-17.md` (the addendum wins).
 
@@ -23,6 +23,8 @@ Scope rule: the screener finds and ranks trades; Trade Map shows what a chosen t
 - S2f/S2g/S2h: grid colours are green and red only, fading through the dark base (no yellow, no amber band); whole-dollar price rows when rows are $1 or more apart; chance-of-profit note in a hover.
 - ORDER-SEND-0001 S3a pure order module (lib/orders/tradeMapEntry.ts; order body equals the screener's), S3b Prosper rule checks (lib/trademap/ruleChecks.ts) from the screener's own constants (IV rank at least 30; 30 to 45 DTE; short delta bands; return on risk; earnings; open interest warning), S3c Send dialog (features/trade-map/SendDialog.tsx) with I/O steps in lib/orders/tradeMapSend.ts: market-open check, fresh quote re-read, re-price within $0.05, broker dry run (tick-healed and token-retried once), place only from a validation of the identical payload at most 15 seconds old, never resent.
 - Send v1 is BPS, BCS and IC, 50% target and 2x-credit stop on every order, default scan rules only (custom scan settings are not applied). Entry-context snapshots are not written for Trade Map orders (the bracket lives at the broker); the order lifecycle event is recorded.
+
+- S2i strike strip (08c51ab): the legs are draggable markers on a row of the listed strikes (drag, click a strike, or arrow keys; open interest bars; thin strikes dimmed). The strike and width dropdowns stay under "Edit as numbers" and now show delta and open interest. Dragging only changes strikes; Send rules are unchanged. Quote polling waits 250 ms after a leg change.
 
 ### In progress
 - Dean's live check of Send (below). Nothing else open on ORDER-SEND-0001.
