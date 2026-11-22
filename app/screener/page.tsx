@@ -11529,7 +11529,8 @@ export default function Home() {
             const adjusted = ccTransactions && brokerCapacity.costBasisComplete
               ? computeAdjustedBasis({ transactions: ccTransactions, symbol, sharesOwned: brokerCapacity.sharesOwned, brokerBasis: brokerCapacity.costBasis, hasLongCallOnSymbol: hasOpenLongCall(ccTransactions, symbol) })
               : null;
-            const adjustedBasisValue = adjusted && adjusted.ok ? adjusted.basis : null;
+            // Floor on the HIGHEST lot basis after put premium: a call can be assigned against any lot, so the weighted average can sit below a lot's cost.
+            const adjustedBasisValue = adjusted && adjusted.ok ? adjusted.floorBasis : null;
             const resolvedBasis = resolveCcBasis(ccBasisSettings, symbol, brokerCapacity, adjustedBasisValue);
             const capacity = applyTypedBasis(ccBasisSettings, symbol, brokerCapacity, adjustedBasisValue);
             // CC-SIMPLIFY-0001 Phase 2: the scan only fetches (tickers + DTE). It grades wide open and keeps the pool of

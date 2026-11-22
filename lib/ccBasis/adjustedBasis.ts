@@ -17,6 +17,8 @@ export interface AdjustedBasisLot {
   strike: number;
   /** Net premium kept per share across the put and any rolls, after fees. */
   premiumPerShare: number;
+  /** This lot's own cost per share after put premium: strike - premiumPerShare. */
+  basis: number;
   assignedOn: string;
   putSymbol: string;
 }
@@ -33,7 +35,18 @@ export type AdjustedBasisFailure =
   | 'MULTIPLE_ACCOUNTS';
 
 export type AdjustedBasisResult =
-  | { ok: true; basis: number; strikeAverage: number; shares: number; lots: AdjustedBasisLot[] }
+  | {
+      ok: true;
+      /** Share-weighted average basis after put premium. Use for display and total-profit math. */
+      basis: number;
+      /**
+       * The HIGHEST single-lot basis after put premium. Use as the covered-call strike floor: a call can be assigned
+       * against any lot, so a strike between the average and the highest lot locks a loss on that lot.
+       * Equals `basis` when every lot has the same basis.
+       */
+      floorBasis: number;
+      strikeAverage: number; shares: number; lots: AdjustedBasisLot[];
+    }
   | { ok: false; reason: AdjustedBasisFailure };
 
 export interface AdjustedBasisInput {
@@ -166,16 +179,25 @@ export function computeAdjustedBasis(input: AdjustedBasisInput): AdjustedBasisRe
         chain.push(predecessor);
       }
     }
+    // Unlinked roll guard. A roll legged in as two separate orders shares no order id, so the chain above cannot join the
+    // old put to the new one. Leaving the old put out is only safe if the roll was a net credit; a roll for a net DEBIT
+    // would leave premium overstated and the basis too low. So if a put on this stock was bought to close on the same
+    // New York day that any chain put was sold, and that buyback is not in the chain, the roll cannot be proven: fail closed.
+    const inChain = new Set(chain);
+    const chainSaleDays = new Set(sells.filter(s => inChain.has(s.symbol)).map(s => dayOf(s.tx)));
+    if (buys.some(b => !inChain.has(b.symbol) && chainSaleDays.has(dayOf(b.tx)))) return fail('ROLL_UNPROVABLE');
     // Each predecessor's buyback is counted once above, in its own chain entry; the successor's sale is counted in its own.
     cash += -fees(a.tx);
-    result.push({ shares: lot.remaining, strike: a.o.strike, premiumPerShare: round4(cash / lot.remaining), assignedOn: a.day, putSymbol: String(a.tx.symbol) });
+    const premiumPerShare = round4(cash / lot.remaining);
+    result.push({ shares: lot.remaining, strike: a.o.strike, premiumPerShare, basis: round4(a.o.strike - premiumPerShare), assignedOn: a.day, putSymbol: String(a.tx.symbol) });
   }
 
   const shares = result.reduce((s, l) => s + l.shares, 0);
   const strikeAverage = round4(result.reduce((s, l) => s + l.shares * l.strike, 0) / shares);
   if (brokerBasis === null || !(brokerBasis > 0) || Math.abs(brokerBasis - strikeAverage) > 0.01) return fail('BROKER_BASIS_DIFFERS');
   const basis = round4(result.reduce((s, l) => s + l.shares * (l.strike - l.premiumPerShare), 0) / shares);
-  return { ok: true, basis, strikeAverage, shares, lots: result };
+  const floorBasis = Math.max(...result.map(l => l.basis));
+  return { ok: true, basis, floorBasis, strikeAverage, shares, lots: result };
 }
 
 /** One plain sentence for the card, e.g. "after put premium from your 2 assignments". */
