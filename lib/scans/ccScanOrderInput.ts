@@ -29,7 +29,7 @@ export function ccOrderInputFromScanResult(result: ScreenResult): CcOrderInput |
     initialQuantity: contracts,
     stockPrice: typeof result.price === 'number' && result.price > 0 ? result.price : null,
     ...ccQuoteForOrder(result, c.shortOccSymbol),
-    typedBasis: c.ccBasisSource === 'typed' && typeof c.ccCostBasis === 'number' && c.ccCostBasis > 0 ? c.ccCostBasis : null,
+    typedBasis: (c.ccBasisSource === 'typed' || c.ccBasisSource === 'adjusted') && typeof c.ccCostBasis === 'number' && c.ccCostBasis > 0 ? c.ccCostBasis : null,
   };
 }
 

@@ -23,7 +23,7 @@ export function useCcAdjustedBasis(symbol: string, sharesOwned: number | null, b
     void loadHistory().then(tx => {
       if (!live || !tx) return;
       const r = computeAdjustedBasis({ transactions: tx, symbol, sharesOwned, brokerBasis, hasLongCallOnSymbol: hasOpenLongCall(tx, symbol) });
-      setBasis(r.ok ? r.basis : null);
+      setBasis(r.ok ? r.floorBasis : null); // same number the scan floors on: the highest lot basis after put premium
     });
     return () => { live = false; };
   }, [symbol, sharesOwned, brokerBasis]);

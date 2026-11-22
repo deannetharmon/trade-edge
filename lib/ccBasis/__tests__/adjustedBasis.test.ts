@@ -83,12 +83,31 @@ describe('computeAdjustedBasis', () => {
     expect(computeAdjustedBasis({ ...base, transactions: tx })).toEqual({ ok: false, reason: 'PUT_HISTORY_INCOMPLETE' });
   });
 
-  it('a roll with no shared order id is not linked, so the earlier put\'s premium is left out (never overstated)', () => {
+  it('a same-day roll with no shared order id cannot be proven, so it fails closed (a debit roll would overstate premium)', () => {
     const tx = deanHistory().map(t => (t.symbol === P82_B && t['transaction-sub-type'] === 'Sell to Open' ? { ...t, 'order-id': 'OTHER' } : t));
-    // The first put's 4.10 sale and 1.90 buyback are no longer linked, so only the assigned put's own 2.20 counts.
-    const r = computeAdjustedBasis({ ...base, transactions: tx });
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.lots.find(l => l.strike === 82)?.premiumPerShare).toBe(2.2);
+    expect(computeAdjustedBasis({ ...base, transactions: tx })).toEqual({ ok: false, reason: 'ROLL_UNPROVABLE' });
+  });
+
+  it('a losing unlinked roll (sold 2.00, bought back 3.50, re-sold 4.00) never yields a basis below the strike less true net premium', () => {
+    const A = 'TQQQ  261016P00082000', B = 'TQQQ  261106P00082000';
+    const tx = [
+      opt(A, 'Sell to Open', 1, 2.0, '2026-09-10T14:00:00.000+0000'),
+      opt(A, 'Buy to Close', 1, 3.5, '2026-10-12T15:00:00.000+0000', { 'order-id': 'X1' }),
+      opt(B, 'Sell to Open', 1, 4.0, '2026-10-12T15:01:00.000+0000', { 'order-id': 'X2' }),
+      assign(B, 1, '2026-11-06T21:00:00.000+0000'), shares(100, 82, '2026-11-06T21:00:00.000+0000'),
+    ];
+    // True net premium 2.00 - 3.50 + 4.00 = 2.50, basis 79.50. The old code returned 78.00 (premium 4.00 only).
+    expect(computeAdjustedBasis({ symbol: 'TQQQ', sharesOwned: 100, brokerBasis: 82, transactions: tx })).toEqual({ ok: false, reason: 'ROLL_UNPROVABLE' });
+  });
+
+  it('a put closed for profit on another day does not block the proof', () => {
+    const tx = [...deanHistory(), opt('TQQQ  261120P00070000', 'Sell to Open', 1, 1.0, '2026-10-01T14:00:00.000+0000'), opt('TQQQ  261120P00070000', 'Buy to Close', 1, 0.5, '2026-10-03T14:00:00.000+0000')];
+    expect(computeAdjustedBasis({ ...base, transactions: tx }).ok).toBe(true);
+  });
+
+  it('floorBasis is the highest single-lot basis, not the average (a call can be assigned against any lot)', () => {
+    const r = computeAdjustedBasis({ ...base, transactions: deanHistory() });
+    expect(r).toMatchObject({ ok: true, basis: 74.95, floorBasis: 77.6 });
   });
 
   it('fails closed when two sales share one order with two buybacks', () => {
