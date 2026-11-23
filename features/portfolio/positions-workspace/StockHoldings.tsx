@@ -227,6 +227,8 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
         <div className="text-right">
           <b className={`block text-xl ${pnlTone}`}>{row.pnl != null ? signedMoney(Math.round(row.pnl * 100) / 100) : 'Unavailable'}</b>
           <span className={`block text-[11px] ${row.pnl == null ? 'text-amber-300' : th.textFaint}`}>{row.pnl != null ? (row.pnlPct != null ? `${row.pnlPct >= 0 ? '+' : ''}${row.pnlPct.toFixed(1)}% vs cost` : 'unrealized') : !row.basisComplete ? 'needs a complete cost basis' : 'price unavailable'}</span>
+          {/* TRADE-EVOLUTION-CARDS-0001: what was paid for the shares (broker cost basis), under the P/L. */}
+          {row.basisComplete && row.costBasis != null && row.costBasis > 0 && <span data-testid={`stock-invested-${row.key}`} className="mt-1 block text-[11px] text-white/70">{money(row.costBasis)} invested</span>}
         </div>
       </div>
       <ul aria-label="Signals" className="mt-3 flex flex-wrap items-center gap-1.5">

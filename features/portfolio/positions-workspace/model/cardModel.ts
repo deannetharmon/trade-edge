@@ -44,6 +44,8 @@ export interface PositionCard {
   pnlNote: string;
   /** Whole-position capital at risk, used only for sorting. Never displayed as a risk score. */
   dollarsAtRisk: number | null;
+  /** TRADE-EVOLUTION-CARDS-0001: what is tied up in the position, in dollars: capital at risk on a credit position, what was paid on a bought option. Same figure as dollarsAtRiskOf. */
+  invested: number | null;
   chips: CardChip[];
   assignment: { shares: number; netPrice: number | null; underwaterNow: number | null } | null;
   itmShortPut: boolean;
@@ -189,7 +191,7 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
   const debit = p.entryPriceEffect === 'Debit';
   const stats: PositionCard['stats'] = [
     debit ? { label: 'Paid', value: dollars(risk) } : { label: 'Credit', value: dollars(p.entryCredit ?? p.creditReceived) },
-    debit ? { label: 'Close now', value: dollars(p.closeValue) } : { label: 'Max risk', value: dollars(risk) },
+    debit ? { label: 'Close now', value: dollars(p.closeValue) } : { label: 'Invested', value: dollars(risk) },
     { label: 'Break-even', value: breakeven.values.length ? breakeven.values.map(v => `$${v.toFixed(2)}`).join(' / ') : 'Unavailable' },
     { label: 'Opened', value: p.entryDate ? shortDate(p.entryDate) + (p.entryDate.slice(0, 4) !== String(new Date().getFullYear()) ? `, ${p.entryDate.slice(0, 4)}` : '') : 'Unavailable' },
   ];
@@ -218,6 +220,7 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
     pnl,
     pnlNote,
     dollarsAtRisk: dollarsAtRiskOf(p),
+    invested: risk,
     chips: [...chips].sort((a, b) => a.row - b.row || CHIP_ORDER.indexOf(a.id) - CHIP_ORDER.indexOf(b.id)),
     assignment,
     itmShortPut: itmShortPutOf(p),

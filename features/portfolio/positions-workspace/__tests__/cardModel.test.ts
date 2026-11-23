@@ -8,7 +8,7 @@ import { decodePositionsViewStored, DEFAULT_POSITIONS_VIEW_STORED, isCardsDisabl
 const leg = (direction: 'Long' | 'Short', optionType: 'C' | 'P', strikePrice = 50) => ({ symbol: 'x', optionType, strikePrice, direction, quantity: 1, avgOpenPrice: 1, currentPrice: 1 }) as unknown as PositionLeg;
 const rec = (kind: string, intent: string | undefined, label = 'Label') => ({ kind, label, primaryReason: 'because', managementIntent: intent ? { intent, reasons: [] } : undefined }) as unknown as Position['recommendation'];
 const pos = (o: Partial<Position>) => ({ key: 'k', symbol: 'AAA', strategy: 'PUT', legs: [leg('Short', 'P')], intent: 'income', quantity: 1, dte: 30, stockPrice: 60, entryPriceEffect: 'Credit', ...o }) as unknown as Position;
-const card = (bucket: PositionCard['bucket'], dollarsAtRisk: number | null, dte: number, symbol = 'AAA'): PositionCard => ({ key: symbol + dte, position: { symbol, dte } as unknown as Position, bucket, verdictLabel: '', reason: null, pnl: null, pnlNote: '', dollarsAtRisk, chips: [], assignment: null, itmShortPut: false, unverifiedQuote: false, pctOfAccount: null, overSizing: false, stats: [] });
+const card = (bucket: PositionCard['bucket'], dollarsAtRisk: number | null, dte: number, symbol = 'AAA'): PositionCard => ({ key: symbol + dte, position: { symbol, dte } as unknown as Position, bucket, verdictLabel: '', reason: null, pnl: null, pnlNote: '', dollarsAtRisk, invested: dollarsAtRisk, chips: [], assignment: null, itmShortPut: false, unverifiedQuote: false, pctOfAccount: null, overSizing: false, stats: [] });
 
 describe('verdict bucket', () => {
   it('no recommendation is Unjudged, never Hold', () => {
