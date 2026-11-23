@@ -19,6 +19,7 @@ import PnlCalendarTab from '@/features/portfolio/pnl-calendar/PnlCalendarTab';
 import {
   classifyPositionLifecycle,
 } from '@/lib/portfolio/positionLifecycle';
+import { computeLegCostBasis } from '@/lib/portfolio/legCostBasis';
 import { evaluatePmccLifecycle } from '@/lib/scans/pmccLifecycle';
 import { formatStrategyMix } from '@/lib/portfolioReview/strategyMix';
 import { daysUntilNy, earningsOnOrBeforeExpiration } from '@/lib/scans/earningsPrecheck';
@@ -9549,6 +9550,27 @@ function PositionCard({ pos, pmccShortPosition, th, checked, onToggle, onProfitT
               </p>
             ))}
           </div>
+
+          {(() => {
+            const basis = computeLegCostBasis(pos.legs);
+            const fmt = (n: number) => `$${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            return (
+              <>
+                <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-1`}>Cost Basis</p>
+                {basis == null ? (
+                  <p className="text-[10px] text-amber-400 mb-3">Unavailable (a leg has no average open price)</p>
+                ) : (
+                  <div className="flex items-center gap-4 flex-wrap mb-3">
+                    <span className={`text-[10px] ${th.textFaint}`}>Long paid: <span className={th.text}>{fmt(basis.longPaid)}</span></span>
+                    <span className={`text-[10px] ${th.textFaint}`}>Short collected: <span className={th.text}>{fmt(basis.shortCollected)}</span></span>
+                    <span className={`text-[10px] font-bold ${basis.net > 0 ? 'text-orange-300' : 'text-emerald-400'}`}>
+                      Net {basis.net > 0 ? 'invested (debit)' : 'credit'}: {fmt(basis.net)}
+                    </span>
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
           <p className={`text-[9px] ${th.textFaint} uppercase tracking-widest mb-2`}>Legs</p>
           <div className="space-y-1.5">
