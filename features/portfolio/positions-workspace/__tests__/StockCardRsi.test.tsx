@@ -56,7 +56,7 @@ describe('stock card RSI', () => {
     expect(rsi).toHaveTextContent('RSI 54');
     expect(screen.getByLabelText('rising')).toBeInTheDocument();
     expect(screen.getByText('Calls: Ready')).toBeInTheDocument();
-    expect(screen.getByTestId('stock-price-move-equity:MRVL:long')).toHaveTextContent('+24.2% since you bought');
+    expect(screen.getByTestId('stock-paid-equity:MRVL:long')).toHaveTextContent('Paid $12,000 → worth $14,900 now');
   });
 
   it('labels the RSI with the completed bar it comes from', () => {
