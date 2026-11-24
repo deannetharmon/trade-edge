@@ -514,6 +514,28 @@ export function reconstructTrades(transactions: RawTransaction[]): Reconstructio
 }
 
 // ── Public: network fetch + reconstruction ────────────────────────────────
+/**
+ * Raw broker transactions going back `years` years (no trade reconstruction). Used to find when shares were bought and which
+ * put an assignment came from, which can be older than the 12 months the trade log loads.
+ */
+export async function fetchTransactionHistory(years: number): Promise<RawTransaction[]> {
+  const token = await getAccessToken();
+  const accountNumber = await requireActiveBrokerAccount(token, ttFetch);
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - years);
+  const startDate = d.toISOString().split('T')[0];
+  let allTx: RawTransaction[] = [];
+  let page = 1;
+  while (true) {
+    const data = await ttFetch(`/accounts/${accountNumber}/transactions?start-date=${startDate}&per-page=250&page-offset=${page - 1}`, token);
+    const items: RawTransaction[] = data?.data?.items ?? [];
+    allTx = [...allTx, ...items];
+    if (!data?.pagination || items.length < 250 || allTx.length >= data.pagination['total-items']) break;
+    page++;
+  }
+  return allTx;
+}
+
 export async function fetchAndReconstructTrades(range: TimeRange): Promise<ReconstructionResult & { transactions: RawTransaction[] }> {
   const token = await getAccessToken();
   const accountNumber = await requireActiveBrokerAccount(token, ttFetch);

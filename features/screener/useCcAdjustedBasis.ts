@@ -6,12 +6,15 @@
 // fetched once per page visit and shared. Null when it cannot be proven (the typed or broker basis then stands).
 
 import { useEffect, useState } from 'react';
-import { fetchAndReconstructTrades } from '@/lib/tradeLog/reconstructTrades';
+import { fetchTransactionHistory } from '@/lib/tradeLog/reconstructTrades';
 import { computeAdjustedBasis, hasOpenLongCall } from '@/lib/ccBasis/adjustedBasis';
+
+// Three years, so a purchase or put assignment older than a year is still found (entry date, cost after put premium).
+const HISTORY_YEARS = 3;
 
 let history: Promise<Array<Record<string, any>> | null> | null = null;
 export function loadHistory() {
-  if (!history) history = fetchAndReconstructTrades('12m').then(r => r.transactions as Array<Record<string, any>>).catch(() => null);
+  if (!history) history = fetchTransactionHistory(HISTORY_YEARS).then(tx => tx as Array<Record<string, any>>).catch(() => null);
   return history;
 }
 
