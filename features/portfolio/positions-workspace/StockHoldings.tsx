@@ -24,6 +24,7 @@ import { CommittedCallsLine } from '@/features/screener/components/CommittedCall
 import { marketMetricsPath, parseMarketMetricsEarnings, type StockEarnings } from './model/stockEarnings';
 import { nextEarningsLine } from './model/nextEarnings';
 import { underlyingStockFor } from '@/lib/leveragedEtfs';
+import { daysUntilNy } from '@/lib/scans/earningsPrecheck';
 import type { PositionIntent } from '@/lib/portfolio-data/types';
 import type { StockAiAnalysis, StockAnalysisContext } from '@/lib/portfolio/stockAnalysis';
 import { rsiAsOfLabel, rsiAtEntry, type StockRsi } from '@/lib/portfolio/stockRsi';
@@ -377,7 +378,15 @@ export function StockHoldings({ cards = false, earningsEnabled = false, intentEn
     const under = underlyingStockFor(row.symbol)?.toUpperCase() ?? null;
     const e = own ?? (under ? earningsBySymbol[under] : undefined);
     const line = e ? nextEarningsLine(e.date, e.estimated, null, undefined, own ? null : under) : null;
-    return line ? <span className={th.textFaint} data-testid="stock-next-earnings">{line.text}</span> : null;
+    if (line) return <span className={th.textFaint} data-testid="stock-next-earnings">{line.text}</span>;
+    // The broker may still hold the LAST report date (the next one is not posted yet): say so instead of showing nothing.
+    const daysAway = e ? daysUntilNy(e.date) : null;
+    if (e && daysAway != null && daysAway < 0) {
+      const [, month, day] = e.date.split('-').map(Number);
+      const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      if (month >= 1 && month <= 12 && day) return <span className={th.textFaint} data-testid="stock-next-earnings">{own ? '' : `${under} `}reported {names[month - 1]} {day} · next date not announced</span>;
+    }
+    return null;
   };
   const aligned = alignedStockColumns(columnWidths);
   const gridStyle = aligned ? { gridTemplateColumns: aligned.template } : undefined;
