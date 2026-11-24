@@ -64,7 +64,7 @@ function rsiView(row: StockHoldingRow, rsi: StockRsi | null | undefined, cutoff:
   return { chip, atEntry, asOf: rsi ? rsiAsOfLabel(rsi.points) : null };
 }
 
-function StockEntryDateEditor({ id, symbol, savedDate, onSave }: { id: string; symbol: string; savedDate: string | null; onSave: (entryDate: string | null) => Promise<void> }) {
+function StockEntryDateEditor({ id, symbol, savedDate, detectedDate, onSave }: { id: string; symbol: string; savedDate: string | null; detectedDate: string | null; onSave: (entryDate: string | null) => Promise<void> }) {
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
   const today = new Date().toISOString().slice(0, 10);
@@ -75,10 +75,10 @@ function StockEntryDateEditor({ id, symbol, savedDate, onSave }: { id: string; s
   return (
     <div>
       <label className={`block text-[10px] ${'text-white/60'}`} htmlFor={`stock-entry-date-${id}`}>Entry date (when you bought {symbol})</label>
-      <input id={`stock-entry-date-${id}`} type="date" max={today} min="1990-01-01" value={savedDate ?? ''}
+      <input id={`stock-entry-date-${id}`} type="date" max={today} min="1990-01-01" value={savedDate ?? detectedDate ?? ''}
         onChange={event => { void run(event.target.value === '' ? null : event.target.value); }}
         className="mt-1 rounded border border-white/20 bg-transparent px-2 py-1 text-xs text-white focus:outline-none focus:ring-2 focus:ring-teal-400" />
-      <span className="mt-1 block text-[9px] text-white/40">{state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : state === 'error' ? error : savedDate ? 'Clear the field to remove it' : 'Optional. Shows RSI at entry vs now.'}</span>
+      <span className="mt-1 block text-[9px] text-white/40">{state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : state === 'error' ? error : savedDate ? 'Clear the field to remove it' : detectedDate ? 'Filled in from your broker history. Pick a date to override.' : 'Optional. Shows RSI at entry vs now.'}</span>
     </div>
   );
 }
@@ -273,7 +273,7 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
               </dl>
               {effectiveEntryDate && !atEntry && rsi && <p className="text-[10px] text-amber-300">Entry date is outside the last ~5 months of chart history, so RSI at entry is not shown.</p>}
               {rsiChip && <p className={`text-[11px] ${th.textFaint}`}>{rsiChip.reason}</p>}
-              <StockEntryDateEditor id={row.key} symbol={row.symbol} savedDate={entryDate} onSave={next => onSaveEntryDate(row.accountNumber, row.key, next)} />
+              <StockEntryDateEditor id={row.key} symbol={row.symbol} savedDate={entryDate} detectedDate={derivedEntry?.latest.day ?? null} onSave={next => onSaveEntryDate(row.accountNumber, row.key, next)} />
             </div>
           </div>
           <dl className="grid grid-cols-2 gap-2 sm:grid-cols-5">{stats.map(([label, value]) => <div key={label} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"><dt className={`text-[10px] uppercase tracking-wider ${th.textFaint}`}>{label}</dt><dd className="text-sm font-bold text-white">{value}</dd></div>)}</dl>
