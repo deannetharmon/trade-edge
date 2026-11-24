@@ -24,7 +24,7 @@ export function CcOutsideView({ result, textFaint }: { result: ScreenResult; tex
     <div data-testid="cc-outside-view" className="space-y-1 px-3 pb-2 text-[13px]">
       {/* The row already carries the Calls chip; the floor sentence is left out when a timing line says the same thing. */}
       <CcBasisLine basis={result.ccBasis} floor={note.lines.length > 0 ? undefined : result.ccFloorInfo?.floor} price={note.lines.length > 0 ? undefined : result.ccFloorInfo?.price} />
-      {note.lines.map(l => <p key={l} className="text-amber-300">{l}</p>)}
+      {note.lines.map(l => <p key={l} className={/below cost/.test(l) ? 'font-bold text-red-400' : 'text-amber-300'}>{l}</p>)}
       {outside.length > 0 && (
         <div>
           <p className={textFaint}>{outside.length} call{outside.length === 1 ? ' is' : 's are'} outside your view (chance of keeping your shares {lo} to {hi}%, or price gap)</p>

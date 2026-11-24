@@ -26,7 +26,7 @@ export function CcStockTiming({ symbol, rsi, price, brokerBasis, shares, cutoff 
   return (
     <li data-testid={`cc-stock-timing-${symbol}`} className="min-w-[16rem] flex-1 text-[11px] leading-snug text-white/70">
       {note.title && !rsiShown && <><b className="font-bold tracking-wide text-amber-300">{note.title}</b>{' · '}</>}
-      {note.lines.map(l => <span key={l}>{(rsiShown ? l.replace(/ \(now \d+\)/, '') : l).replace(/\.$/, '')}{' · '}</span>)}
+      {note.lines.map(l => <span key={l} className={/below cost/.test(l) ? 'font-bold text-red-400' : undefined} data-testid={/below cost/.test(l) ? `cc-stock-below-cost-${symbol}` : undefined}>{(rsiShown ? l.replace(/ \(now \d+\)/, '') : l).replace(/\.$/, '')}{' · '}</span>)}
       <span>{ccBasisText(resolved)}</span>
     </li>
   );
