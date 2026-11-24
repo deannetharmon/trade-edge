@@ -227,17 +227,15 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
         <div className="text-right">
           <b className={`block text-xl ${pnlTone}`}>{row.pnl != null ? signedMoney(Math.round(row.pnl * 100) / 100) : 'Unavailable'}</b>
           <span className={`block text-[11px] ${row.pnl == null ? 'text-amber-300' : th.textFaint}`}>{row.pnl != null ? (row.pnlPct != null ? `${row.pnlPct >= 0 ? '+' : ''}${row.pnlPct.toFixed(1)}% vs cost` : 'unrealized') : !row.basisComplete ? 'needs a complete cost basis' : 'price unavailable'}</span>
-          {/* TRADE-EVOLUTION-CARDS-0001: what was paid for the shares (broker cost basis), under the P/L. */}
-          {row.basisComplete && row.costBasis != null && row.costBasis > 0 && <span data-testid={`stock-invested-${row.key}`} className="mt-1 block text-[11px] text-white/70">{money(row.costBasis)} invested</span>}
         </div>
       </div>
       <ul aria-label="Signals" className="mt-3 flex flex-wrap items-center gap-1.5">
         <li className={`rounded-full border px-2.5 py-0.5 text-[11px] ${PILL[row.covered.tone]}`}>{row.covered.headline}</li>
-        {rsi !== undefined && <li data-testid={`stock-rsi-${row.key}`} className="text-[11px] text-white">
+        {rsi !== undefined && <li data-testid={`stock-rsi-${row.key}`} className="text-base font-bold text-white">
           RSI <b>{rsi ? Math.round(rsi.rsi) : '—'}</b>
-          {rsiArrow && <span className={`ml-1 text-[10px] ${th.textFaint}`} aria-label={rsiArrow.label}>{rsiArrow.glyph}</span>}
-          {atEntry && rsi && <span className={th.textFaint}> · {Math.round(atEntry.rsi)} at entry</span>}
-          {rsiAsOf && <span className={th.textFaint} title="Daily RSI(14) on the last completed bar. Today's session is not included."> · {rsiAsOf.short}</span>}
+          {rsiArrow && <span className="ml-1 text-white" aria-label={rsiArrow.label}>{rsiArrow.glyph}</span>}
+          {atEntry && rsi && <span className={`text-[11px] font-normal ${th.textFaint}`}> · {Math.round(atEntry.rsi)} at entry</span>}
+          {rsiAsOf && <span className={`text-[11px] font-normal ${th.textFaint}`} title="Daily RSI(14) on the last completed bar. Today's session is not included."> · {rsiAsOf.short}</span>}
         </li>}
         {rsiChip && <li title={rsiChip.reason} className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${RSI_CHIP_TONE[rsiChip.state]}`}>Calls: {rsiChip.label}</li>}
         {row.stale && <li className="rounded-full border border-amber-400/50 bg-amber-400/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">Stale price</li>}

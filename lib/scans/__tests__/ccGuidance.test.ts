@@ -196,23 +196,23 @@ describe('stock card and scan row timing (METU: price 21.97, basis 26.94, RSI 42
   it('Wait: RSI under the cutoff, then price below cost', () => {
     const n = ccTimingNote({ symbol: 'METU', rsi: 42, price: 21.97, basis: 26.94, cutoff: 50 });
     expect(n.chip).toBe('Wait');
-    expect(n.title).toBe('NO CALL TO SELL YET');
+    expect(n.title).toBe('NO CALL YET');
     expect(n.lines).toEqual([
-      'METU RSI is 42, below your 50 cutoff. Wait for RSI to reach 50.',
-      'Even then, no call above your $26.94 cost fits yet: METU is at $21.97, 18.4% below it.',
+      'Wait for RSI 50 (now 42).',
+      'Price is 18.4% below cost.',
     ]);
   });
   it('Recovery: RSI fine but price below cost', () => {
     const n = ccTimingNote({ symbol: 'METU', rsi: 55, price: 21.97, basis: 26.94, cutoff: 50 });
     expect(n.chip).toBe('Recovery');
-    expect(n.lines).toEqual(['No call above your $26.94 cost fits yet: METU is at $21.97, 18.4% below it.']);
+    expect(n.lines).toEqual(['Price is 18.4% below cost.']);
   });
   it('Ready: nothing to warn about', () => {
     const n = ccTimingNote({ symbol: 'XYZ', rsi: 60, price: 52.4, basis: 48.1, cutoff: 50 });
     expect(n.chip).toBe('Ready'); expect(n.title).toBeNull(); expect(n.lines).toEqual([]);
   });
   it('unknown RSI fails closed to Wait with its own sentence', () => {
-    expect(ccTimingNote({ symbol: 'X', rsi: null, price: 10, basis: 8, cutoff: 50 }).lines[0]).toBe('Daily RSI is unavailable, so timing cannot be confirmed.');
+    expect(ccTimingNote({ symbol: 'X', rsi: null, price: 10, basis: 8, cutoff: 50 }).lines[0]).toBe('RSI unavailable, timing unconfirmed.');
   });
 });
 

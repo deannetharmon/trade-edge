@@ -273,7 +273,7 @@ export interface CcTimingNote {
   state: CcRsiChipState;
   /** "Ready", "Wait" or "Recovery": the chip text after "Calls:". */
   chip: 'Ready' | 'Wait' | 'Recovery';
-  /** Null when calls are fine to look at (Ready); otherwise "NO CALL TO SELL YET". */
+  /** Null when calls are fine to look at (Ready); otherwise "NO CALL YET". */
   title: string | null;
   lines: string[];
 }
@@ -284,13 +284,13 @@ export function ccTimingNote(i: { symbol: string; rsi: number | null | undefined
   const lines: string[] = [];
   const below = typeof i.basis === 'number' && i.basis > 0 && typeof i.price === 'number' && i.price > 0 && i.price < i.basis;
   if (chip.state === 'wait') {
-    lines.push(typeof i.rsi === 'number' ? `${i.symbol} RSI is ${Math.round(i.rsi)}, below your ${i.cutoff} cutoff. Wait for RSI to reach ${i.cutoff}.` : 'Daily RSI is unavailable, so timing cannot be confirmed.');
+    lines.push(typeof i.rsi === 'number' ? `Wait for RSI ${i.cutoff} (now ${Math.round(i.rsi)}).` : 'RSI unavailable, timing unconfirmed.');
   }
   if (below) {
     const pct = (((i.basis as number) - (i.price as number)) / (i.basis as number)) * 100;
-    lines.push(`${chip.state === 'wait' ? 'Even then, no' : 'No'} call above your $${(i.basis as number).toFixed(2)} cost fits yet: ${i.symbol} is at $${(i.price as number).toFixed(2)}, ${pct.toFixed(1)}% below it.`);
+    lines.push(`Price is ${pct.toFixed(1)}% below cost.`);
   }
-  return { state: chip.state, chip: chip.label, title: lines.length > 0 ? 'NO CALL TO SELL YET' : null, lines };
+  return { state: chip.state, chip: chip.label, title: lines.length > 0 ? 'NO CALL YET' : null, lines };
 }
 
 /** The POP range a goal asks for, e.g. "65 to 80%". */
