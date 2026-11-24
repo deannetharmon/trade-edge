@@ -19,11 +19,13 @@ export function CcStockTiming({ symbol, rsi, price, brokerBasis, shares, cutoff 
   const resolved = resolveCcBasis(settings, sym, brokerBasis === null ? null : ({ costBasis: brokerBasis, costBasisComplete: true } as Parameters<typeof resolveCcBasis>[2]), adjusted);
   const note = ccTimingNote({ symbol, rsi, price, basis: resolved.basis, cutoff });
   if (!note.title && resolved.basis === null) return null;
-  // One compact line (no box): the verdict, the reasons, then the cost basis and where it came from.
+  // One compact line. The Calls chip and the RSI number sit right above, so the title and "(now N)" are left out while
+  // they show; with no RSI at all the title stays, because nothing else says calls are on hold.
+  const rsiShown = typeof rsi === 'number';
   return (
-    <p data-testid={`cc-stock-timing-${symbol}`} className="mt-2 text-[11px] leading-snug text-white/70">
-      {note.title && <><b className="font-bold tracking-wide text-amber-300">{note.title}</b>{' · '}</>}
-      {note.lines.map(l => <span key={l}>{l.replace(/\.$/, '')}{' · '}</span>)}
+    <p data-testid={`cc-stock-timing-${symbol}`} className="mt-1.5 text-[11px] leading-snug text-white/70">
+      {note.title && !rsiShown && <><b className="font-bold tracking-wide text-amber-300">{note.title}</b>{' · '}</>}
+      {note.lines.map(l => <span key={l}>{(rsiShown ? l.replace(/ \(now \d+\)/, '') : l).replace(/\.$/, '')}{' · '}</span>)}
       <span>{ccBasisText(resolved)}</span>
     </p>
   );
