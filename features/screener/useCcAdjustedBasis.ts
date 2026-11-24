@@ -10,7 +10,7 @@ import { fetchAndReconstructTrades } from '@/lib/tradeLog/reconstructTrades';
 import { computeAdjustedBasis, hasOpenLongCall } from '@/lib/ccBasis/adjustedBasis';
 
 let history: Promise<Array<Record<string, any>> | null> | null = null;
-function loadHistory() {
+export function loadHistory() {
   if (!history) history = fetchAndReconstructTrades('12m').then(r => r.transactions as Array<Record<string, any>>).catch(() => null);
   return history;
 }
