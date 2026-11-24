@@ -18,6 +18,8 @@ import { alignedStockColumns } from './model/stockColumnAlignment';
 import { IntentSelectControl } from './IntentSelect';
 import { CcBasisEditor } from './CcBasisEditor';
 import { CcStockTiming } from './CcStockTiming';
+import { useStockEntryFromHistory } from './useStockEntryFromHistory';
+import { describeStockEntry } from '@/lib/portfolio/entryFromTransactions';
 import { CommittedCallsLine } from '@/features/screener/components/CommittedCallsLine';
 import { marketMetricsPath, parseMarketMetricsEarnings, type StockEarnings } from './model/stockEarnings';
 import { nextEarningsLine } from './model/nextEarnings';
@@ -206,7 +208,10 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
   const [detailOpen, setDetailOpen] = useState(false);
   const pnlTone = row.pnl == null ? 'text-white/40' : row.pnl >= 0 ? 'text-emerald-400' : 'text-red-400';
   const canSellCovered = row.covered.kind === 'available';
-  const { chip: rsiChip, atEntry, asOf: rsiAsOf } = rsiView(row, rsi, cutoff, entryDate);
+  // STOCK-ENTRY-0001: with no date typed by the user, use the broker's own assignment or buy date.
+  const derivedEntry = useStockEntryFromHistory(row.symbol, row.direction === 'Long' ? Math.abs(row.shares) : null);
+  const effectiveEntryDate = entryDate ?? derivedEntry?.latest.day ?? null;
+  const { chip: rsiChip, atEntry, asOf: rsiAsOf } = rsiView(row, rsi, cutoff, effectiveEntryDate);
   const rsiArrow = rsi ? RSI_ARROW[rsi.direction] : null;
   const priceMove = row.basisComplete && row.avgCost != null && row.price != null && row.avgCost > 0
     ? ((row.price - row.avgCost) / row.avgCost) * 100 : null;
@@ -222,11 +227,14 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
       <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
         <div className="min-w-0">
           <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-white">{row.symbol}<span className="rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">STOCK</span>{chart}</h3>
-          <p className={`mt-0.5 text-xs ${th.textFaint}`}>{Math.abs(row.shares)} sh · {row.direction.toLowerCase()}{row.price != null ? ` · ${money(row.price)}` : ''}{row.sharesNote ? ` · ${row.sharesNote}` : ''}</p>
+          <p className={`mt-0.5 text-xs ${th.textFaint}`}>{Math.abs(row.shares)} sh · {row.direction.toLowerCase()}{row.price != null ? ` · ${money(row.price)}` : ''}{row.sharesNote ? ` · ${row.sharesNote}` : ''}{derivedEntry ? ` · ${describeStockEntry(derivedEntry)}` : ''}</p>
         </div>
         <div className="text-right">
           <b className={`block text-xl ${pnlTone}`}>{row.pnl != null ? signedMoney(Math.round(row.pnl * 100) / 100) : 'Unavailable'}</b>
           <span className={`block text-[11px] ${row.pnl == null ? 'text-amber-300' : th.textFaint}`}>{row.pnl != null ? (row.pnlPct != null ? `${row.pnlPct >= 0 ? '+' : ''}${row.pnlPct.toFixed(1)}% vs cost` : 'unrealized') : !row.basisComplete ? 'needs a complete cost basis' : 'price unavailable'}</span>
+          {row.costBasis != null && row.value != null && (
+            <span data-testid={`stock-paid-${row.key}`} className="mt-1 block text-[11px] text-white/70">Paid <b className="text-white">{money(row.costBasis)}</b> → worth <b className="text-white">{money(row.value)}</b> now</span>
+          )}
         </div>
       </div>
       <ul aria-label="Signals" className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -244,11 +252,9 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
       {row.direction === 'Long' && rsi !== undefined && <CcStockTiming symbol={row.symbol} rsi={rsi?.rsi} price={row.price} brokerBasis={row.basisComplete ? row.avgCost : null} shares={Math.abs(row.shares)} cutoff={cutoff} />}
       {row.covered.detail && <p className={`mt-1 text-[11px] ${th.textFaint}`}>{row.covered.detail}</p>}
       {row.committedCalls.length > 0 && <CommittedCallsLine symbol={row.symbol} sharesOwned={Math.abs(row.shares)} gross={Math.floor(Math.abs(row.shares) / 100)} available={Math.max(0, Math.floor(Math.abs(row.shares) / 100) - row.committedCalls.reduce((n, c) => n + c.quantity, 0))} calls={row.committedCalls} showCount={false} className={`mt-1 ${th.textFaint}`} />}
-      {priceMove != null && row.price != null && row.avgCost != null && (
+      {priceMove != null && row.price != null && row.avgCost != null && !(row.costBasis != null && row.value != null) && (
         <p data-testid={`stock-price-move-${row.key}`} className={`mt-1 text-[11px] ${th.textFaint}`}>
-          {row.costBasis != null && row.value != null
-            ? <>Paid <b className="text-white">{money(row.costBasis)}</b><span className="mx-1" aria-label="to">→</span>worth <b className="text-white">{money(row.value)}</b> now</>
-            : <><span>{money(row.avgCost)}</span><span className="mx-1" aria-label="to">→</span><b className="text-white">{money(row.price)}</b></>}
+          <span>{money(row.avgCost)}</span><span className="mx-1" aria-label="to">→</span><b className="text-white">{money(row.price)}</b>
           {' · '}{Math.abs(priceMove) < 0.05 ? '0.0%' : `${priceMove > 0 ? '+' : '−'}${Math.abs(priceMove).toFixed(1)}%`} since you bought
         </p>
       )}
@@ -256,7 +262,7 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
         <div data-testid="stock-card-detail" className="mt-3 space-y-3">
           <div data-testid="stock-rsi-detail" className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-3 sm:grid-cols-[auto_1fr]">
             <div className={th.textFaint}>
-              {rsi?.points && rsi.points.length >= 2 ? <RsiSparkline points={rsi.points} cutoff={cutoff} entryDate={entryDate} symbol={row.symbol} /> : <span className="text-[11px]">RSI history unavailable</span>}
+              {rsi?.points && rsi.points.length >= 2 ? <RsiSparkline points={rsi.points} cutoff={cutoff} entryDate={effectiveEntryDate} symbol={row.symbol} /> : <span className="text-[11px]">RSI history unavailable</span>}
               <span className="block text-[9px]">Daily RSI(14), last 30 sessions · dashed line = {cutoff} cutoff</span>
             </div>
             <div className="space-y-2">
@@ -265,7 +271,7 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
                 <div><dt className={`text-[10px] ${th.textFaint}`}>Yesterday</dt><dd className="font-bold">{rsi ? Math.round(rsi.previous) : '—'}</dd></div>
                 <div><dt className={`text-[10px] ${th.textFaint}`}>At entry</dt><dd className="font-bold">{atEntry ? Math.round(atEntry.rsi) : '—'}</dd></div>
               </dl>
-              {entryDate && !atEntry && rsi && <p className="text-[10px] text-amber-300">Entry date is outside the last ~5 months of chart history, so RSI at entry is not shown.</p>}
+              {effectiveEntryDate && !atEntry && rsi && <p className="text-[10px] text-amber-300">Entry date is outside the last ~5 months of chart history, so RSI at entry is not shown.</p>}
               {rsiChip && <p className={`text-[11px] ${th.textFaint}`}>{rsiChip.reason}</p>}
               <StockEntryDateEditor id={row.key} symbol={row.symbol} savedDate={entryDate} onSave={next => onSaveEntryDate(row.accountNumber, row.key, next)} />
             </div>
