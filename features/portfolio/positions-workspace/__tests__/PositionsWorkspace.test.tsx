@@ -386,7 +386,7 @@ describe('PositionsWorkspace', () => {
 
   const arrowClassFor = (label: string) => {
     const row = screen.getByText(new RegExp(`^${label}\\s*$`)).parentElement!;
-    return Array.from(row.querySelectorAll('span')).find(el => /[▲▼]/.test(el.textContent ?? ''))?.className ?? '';
+    return Array.from(row.querySelectorAll('span')).find(el => /[↗↘]/.test(el.textContent ?? ''))?.className ?? '';
   };
 
   it('a bought call shows extrinsic now and at entry in the Strike / BE cell, and Int and Ext rows in Metric Movement colored green when they rose', async () => {

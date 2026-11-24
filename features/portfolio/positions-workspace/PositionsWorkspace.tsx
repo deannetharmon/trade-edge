@@ -665,7 +665,10 @@ function SemanticComparison({ label, prior, current, tone, digits = 1, suffix = 
   // just that it's colored). No arrow at all when the value didn't move
   // or is missing -- matches the neutral tone in that case.
   const moved = prior != null && current != null && Number.isFinite(prior) && Number.isFinite(current) && current !== prior;
-  const arrowGlyph = moved ? (current! > prior! ? '▲' : '▼') : '—';
+  // Up and to the right when it rose, down and to the right when it fell, a straight arrow when it did not move,
+  // and a dash only when there is nothing to compare.
+  const comparable = prior != null && current != null && Number.isFinite(prior) && Number.isFinite(current);
+  const arrowGlyph = moved ? (current! > prior! ? '↗' : '↘') : comparable ? '→' : '—';
   return <span className="block"><span className="text-white/70">{label} </span><span className="text-white/40">{number(prior, digits)}{prior == null ? '' : suffix}</span><span className={`px-1 text-sm leading-none ${material ? SEMANTIC_TONE_CLASS[tone] : 'text-white/30'}`} aria-hidden="true">{arrowGlyph}</span><span className={`${SEMANTIC_TONE_CLASS[tone]} ${material ? 'font-semibold' : ''}`}>{number(current, digits)}{current == null ? '' : suffix}</span></span>;
 }
 
