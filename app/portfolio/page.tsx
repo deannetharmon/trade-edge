@@ -107,6 +107,7 @@ import { staleEnvelopeVerdict } from '@/lib/portfolio/complexEnvelope';
 import { bracketCloseTimeInForce, buildExactOcoBody, cancelExistingGtcForReplacement, DAY_PROMOTED_NOTE, criticalGtcRestorationWarning, liveStopRefusal, PAIRED_LEG_REFUSAL_PREFIX, keptStopPolicy, resolvePairedLeg, restoreOriginalGtcIfNeeded, stopCoverageRefusal, submitAfterBrokerDryRun, type ReconstructablePairedLeg } from '@/lib/portfolio/existingGtcReplacement';
 import { orderErrorForDisplay } from '@/lib/portfolio/orderErrorDisplay';
 import { resolveOcoStopOrderId } from '@/lib/portfolio-data/acquisition';
+import { fmtEntryNowPct, fmtEntryNowDelta, fmtEntryNowTheta, fmtEntryNowDte, fmtEntryNowGamma, fmtEntryNowVega, fmtEntryNowNetEdge, fmtEntryNowMaybePct, fmtEntryNowIvr, entryChangeColor, bufferColor, netEdgeAtEntry } from '@/lib/portfolio/tradeEvolution';
 // PM-0001: pure entry-vs-now favorability judgment for Trade Evolution's
 // per-metric coloring -- see computeEntryChangeTone's doc comment.
 import {
@@ -2516,57 +2517,17 @@ function fmtSignedNum(value: number | null | undefined, digits = 3): string {
 }
 
 
-function fmtEntryNowPct(entry: number | null | undefined, current: number | null | undefined, digits = 0): string {
-  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
-  return `${entry.toFixed(digits)}→${current.toFixed(digits)}%`;
-}
-
-function fmtEntryNowDelta(entry: number | null | undefined, current: number | null | undefined): string {
-  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
-  return `${(entry * 100).toFixed(0)}→${(current * 100).toFixed(0)} sh-eq`;
-}
-
-function fmtEntryNowTheta(entry: number | null | undefined, current: number | null | undefined): string {
-  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
-  return `${(entry * 100).toFixed(0)}→${(current * 100).toFixed(0)}/d`;
-}
-
-function fmtEntryNowDte(entry: number | null | undefined, current: number | null | undefined): string {
-  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
-  return `${entry.toFixed(0)}→${current.toFixed(0)}d`;
-}
-
-function fmtEntryNowGamma(entry: number | null | undefined, current: number | null | undefined): string {
-  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
-  return `${Math.abs(entry).toFixed(3)}→${Math.abs(current).toFixed(3)}`;
-}
-
-function fmtEntryNowVega(entry: number | null | undefined, current: number | null | undefined): string {
-  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
-  const sign = (v: number) => (v >= 0 ? '+' : '-');
-  return `${sign(entry)}${Math.abs(entry).toFixed(2)}→${sign(current)}${Math.abs(current).toFixed(2)}`;
-}
-
-function fmtEntryNowNetEdge(entry: number | null | undefined, current: number | null | undefined): string {
-  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
-  const sign = (v: number) => (v >= 0 ? '+' : '-');
-  return `${sign(entry)}$${Math.abs(entry).toFixed(0)}→${sign(current)}$${Math.abs(current).toFixed(0)}/d`;
-}
 
 
 
 
-function fmtEntryNowMaybePct(entry: number | null | undefined, current: number | null | undefined, digits = 0): string {
-  const e = normalizePercentValue(entry);
-  const c = normalizePercentValue(current);
-  if (e == null || c == null) return '—';
-  return `${e.toFixed(digits)}→${c.toFixed(digits)}%`;
-}
 
-function fmtEntryNowIvr(entry: number | null | undefined, current: number | null | undefined): string {
-  if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
-  return `${entry.toFixed(0)}→${current.toFixed(0)}`;
-}
+
+
+
+
+
+
 
 function fmtPointChange(entry: number | null | undefined, current: number | null | undefined, digits = 0, suffix = ' pts'): string {
   if (entry == null || current == null || !Number.isFinite(entry) || !Number.isFinite(current)) return '—';
@@ -2575,14 +2536,6 @@ function fmtPointChange(entry: number | null | undefined, current: number | null
   return `${sign}${Math.abs(diff).toFixed(digits)}${suffix}`;
 }
 
-// PM-0001: the favorable/unfavorable direction judgment itself now lives in
-// lib/portfolio/positionMetrics.ts's computeEntryChangeTone (pure,
-// unit-tested); this wrapper only maps that tone to a CSS class.
-function entryChangeColor(entry: number | null | undefined, current: number | null | undefined, goodWhenDown = true, fallback = 'text-slate-500'): string {
-  const tone = computeEntryChangeTone(entry, current, goodWhenDown);
-  if (tone === 'neutral') return fallback;
-  return tone === 'good' ? 'text-emerald-400' : 'text-red-400';
-}
 
 function getShortLegs(pos: Position): PositionLeg[] {
   return pos.legs.filter(l => l.direction === 'Short');
@@ -8127,12 +8080,6 @@ function premiumEdgeValue(iv: number | null, hv30: number | null): number | null
 
 
 
-// Requires all four at-entry values (theta/gamma/iv/stockPrice) — older
-// snapshots captured before this fix won't have gamma/stockPrice at entry,
-// so this correctly returns null rather than a partial/misleading figure.
-function netEdgeAtEntry(pos: Position): number | null {
-  return netEdgeFrom(pos.thetaAtEntry ?? null, pos.gammaAtEntry ?? null, pos.ivAtEntry ?? null, pos.stockPriceAtEntry ?? null);
-}
 
 
 
@@ -8481,40 +8428,7 @@ function entryBaselineCaveat(pos: Position): string {
   return `\nCAVEAT — entry/now baseline: this trade is ~${tradeAgeDays ?? '?'}d old but its Trade Evolution baseline was only captured ${days === 0 ? 'today' : `${days}d ago`} (this app has no historical data before that point). Any "entry → now" field above that looks unchanged reflects insufficient elapsed time to show drift, NOT confirmed stability — do not cite it as evidence nothing has moved.`;
 }
 
-// ── Buffer Color Helpers ──────────────────────────────────────────────────
-function bufferColor(buffer: number | null, dte: number): string {
-  if (buffer == null) return 'text-[#808080]';
-
-  // Breached or effectively at the short strike is the only true red condition.
-  if (buffer <= 0) return 'text-red-400';
-
-  // DTE-aware coloring: the same buffer is less dangerous with fewer days remaining.
-  // Short-dated positions should warn, not panic, unless the strike is breached.
-  if (dte <= 7) {
-    if (buffer < 1) return 'text-orange-400';
-    if (buffer < 2) return 'text-yellow-400';
-    return 'text-emerald-400';
-  }
-  if (dte <= 21) {
-    if (buffer < 1) return 'text-orange-400';
-    if (buffer < 2) return 'text-yellow-400';
-    if (buffer < 3) return 'text-yellow-400';
-    return 'text-emerald-400';
-  }
-  if (dte <= 30) {
-    if (buffer < 1) return 'text-red-400';
-    if (buffer < 2) return 'text-orange-400';
-    if (buffer < 3) return 'text-yellow-400';
-    if (buffer < 5) return 'text-yellow-400';
-    return 'text-emerald-400';
-  }
-
-  // Longer-dated positions need a wider cushion because there is more time to move.
-  if (buffer < 1) return 'text-red-400';
-  if (buffer < 2) return 'text-orange-400';
-  if (buffer < 5) return 'text-yellow-400';
-  return 'text-emerald-400';
-}
+// Buffer colour helper (bufferColor) now lives in lib/portfolio/tradeEvolution.ts.
 
 // Highlights the active row in the tooltip table
 function isBufferRow(buffer: number, label: string): boolean {

@@ -8,10 +8,11 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useHoldingRsi } from '@/components/portfolio-data/useHoldingRsi';
 import { useCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
-import type { StockRsi } from '@/lib/portfolio/stockRsi';
+import { rsiAtEntry, type StockRsi } from '@/lib/portfolio/stockRsi';
 import { LeapRsiChips, LeapRsiDetail, isLeapCall } from './LeapRsi';
 import { LongOptionPathPanel } from './LongOptionPathPanel';
 import { buildLongOptionPath } from './model/longOptionPath';
+import { buildTradeEvolution, openDateOf, type EvoTone, type TradeEvolution } from './model/tradeEvolutionModel';
 import { IntentSelect } from './IntentSelect';
 import { SalvageEntry } from './salvage/SalvagePanel';
 import { buildPositionCard, shortDate, stopNotExpected, type CardBucket, type CardChipTone, type PositionCard } from './model/cardModel';
@@ -76,17 +77,19 @@ export interface PositionCardsProps {
 
 export function PositionCards({ incomeOpportunities, onFindPmccShortCall, positions, order, pctOfTarget, netLiquidity, getManagementActions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart, renderNote, th, emptyText }: PositionCardsProps) {
   const cards = useMemo(() => order(positions.map(p => buildPositionCard(p, { pctOfTarget: pctOfTarget(p), netLiquidity }))), [positions, order, pctOfTarget, netLiquidity]);
-  // STOCK-RSI-0002: daily RSI of the underlying, for held LEAP calls only (one fetch per symbol, shared with the scans).
+  // STOCK-RSI-0002 / TRADE-EVOLUTION-CARDS-0001: daily RSI of the underlying for every option card (one fetch per symbol, shared with the scans).
+  // The LEAP chips still show on held LEAP calls only; every other card uses it for the RSI tile in Show detail.
   const [ccRsiCutoff] = useCcRsiCutoff();
-  const rsiBySymbol = useHoldingRsi(positions.filter(isLeapCall).map(p => p.symbol));
+  const rsiBySymbol = useHoldingRsi(positions.map(p => p.symbol));
   if (cards.length === 0) return <p role="status" className={`rounded-xl border ${th.border} p-6 text-center text-sm ${th.textFaint}`}>{emptyText}</p>;
-  return <div data-testid="position-cards" className="grid gap-3 lg:grid-cols-2">{cards.map(card => <CardItem key={card.key} pmccOpportunity={isLeapCall(card.position) ? incomeOpportunities?.find(o => o.kind === 'pmcc-short-call' && o.positionKey === card.position.key && !o.pairedShort && !!o.accountNumber && !!o.exactContract) : undefined} onFindPmccShortCall={onFindPmccShortCall} card={card} th={th} rsi={isLeapCall(card.position) ? rsiBySymbol[card.position.symbol.trim().toUpperCase()] : undefined} cutoff={ccRsiCutoff} actions={getManagementActions?.(card.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} onIntentChange={onIntentChange} onRefresh={onRefresh} renderChart={renderChart} renderNote={renderNote} />)}</div>;
+  return <div data-testid="position-cards" className="grid gap-3 lg:grid-cols-2">{cards.map(card => <CardItem key={card.key} pmccOpportunity={isLeapCall(card.position) ? incomeOpportunities?.find(o => o.kind === 'pmcc-short-call' && o.positionKey === card.position.key && !o.pairedShort && !!o.accountNumber && !!o.exactContract) : undefined} onFindPmccShortCall={onFindPmccShortCall} card={card} th={th} rsi={rsiBySymbol[card.position.symbol.trim().toUpperCase()]} cutoff={ccRsiCutoff} actions={getManagementActions?.(card.position) ?? []} onExecute={onExecute} renderStopControl={renderStopControl} onAnalyze={onAnalyze} onIntentChange={onIntentChange} onRefresh={onRefresh} renderChart={renderChart} renderNote={renderNote} />)}</div>;
 }
 
 function CardItem({ pmccOpportunity, onFindPmccShortCall, rsi, cutoff, card, th, actions, onExecute, renderStopControl, onAnalyze, onIntentChange, onRefresh, renderChart, renderNote }: { pmccOpportunity?: ExistingIncomeOpportunity; onFindPmccShortCall?: (opportunity: ExistingIncomeOpportunity) => void; rsi?: StockRsi | null; cutoff: number; card: PositionCard; th: PositionCardsProps['th']; actions: ActionType[]; onExecute?: PositionCardsProps['onExecute']; renderStopControl?: PositionCardsProps['renderStopControl']; onAnalyze?: PositionCardsProps['onAnalyze']; onIntentChange?: PositionCardsProps['onIntentChange']; onRefresh?: () => void; renderChart?: (position: Position) => ReactNode; renderNote?: (position: Position) => ReactNode }) {
   const p = card.position;
   const [detailOpen, setDetailOpen] = useState(false);
   const horizon = standaloneLongOptionLabel(p);
+  const evolution = useMemo(() => buildTradeEvolution(p, { now: rsi?.rsi ?? null, atOpen: rsi ? rsiAtEntry(rsi.points, openDateOf(p))?.rsi ?? null : null }), [p, rsi]);
   const suggested = p.recommendation ? canonicalRecommendationToAction(p.recommendation.kind) : null;
   const moneyness = card.chips.find(c => c.id === 'moneyness');
   const breakeven = card.chips.find(c => c.id === 'breakeven');
@@ -125,6 +128,7 @@ function CardItem({ pmccOpportunity, onFindPmccShortCall, rsi, cutoff, card, th,
           {p.entryPriceEffect === 'Credit' && p.entryEconomicsComplete !== false && (p.entryCredit ?? p.creditReceived) != null && (
             <span data-testid="card-potential-premium" className="mt-1 block text-[11px] text-white/70">Potential Premium <b className={SEMANTIC_TONE_CLASS.positive}>{usd(p.entryCredit ?? p.creditReceived)}</b></span>
           )}
+          {card.invested != null && <span data-testid="card-invested" className="mt-1 block text-[11px] text-white/70">{usd(card.invested)} invested</span>}
           {isLeapCall(p) && <LeapRsiChips position={p} rsi={rsi} cutoff={cutoff} textFaint={th.textFaint} />}
           {sideChips.length > 0 && (() => {
             const last = Math.max(...sideChips.map(c => c.row));
@@ -134,6 +138,7 @@ function CardItem({ pmccOpportunity, onFindPmccShortCall, rsi, cutoff, card, th,
       </div>
       {detailOpen && (() => { const path = buildLongOptionPath(p); return path ? <LongOptionPathPanel path={path} textFaint={th.textFaint} /> : null; })()}
       {detailOpen && isLeapCall(p) && rsi !== undefined && <LeapRsiDetail position={p} rsi={rsi} cutoff={cutoff} textFaint={th.textFaint} />}
+      {detailOpen && <TradeEvolutionPanel evolution={evolution} textFaint={th.textFaint} />}
       {detailOpen && <dl data-testid="card-detail" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">{card.stats.map(stat => {
         const warn = stat.label === '% of account' && card.overSizing;
         return <div key={stat.label} className={`rounded-lg border px-3 py-2 ${warn ? 'border-amber-400/60 bg-amber-400/10' : 'border-white/10 bg-white/[0.03]'}`}><dt className={`text-[10px] uppercase tracking-wider ${th.textFaint}`}>{stat.label}</dt><dd className={`text-sm font-bold ${warn ? 'text-amber-200' : 'text-white'}`}>{stat.value}</dd></div>;
@@ -157,5 +162,40 @@ function CardItem({ pmccOpportunity, onFindPmccShortCall, rsi, cutoff, card, th,
         <span><IntentSelect position={p} onIntentChange={onIntentChange} /></span>
       </div>
     </article>
+  );
+}
+
+const EVO_TONE_CLASS: Record<EvoTone, string> = { good: 'text-emerald-400', bad: 'text-red-400', warn: 'text-amber-400', neutral: 'text-white/70' };
+
+/** TRADE-EVOLUTION-CARDS-0001: entry -> now for the metrics a premium seller manages by. Green = moved your way, gray = no entry value or no judgment. */
+function TradeEvolutionPanel({ evolution, textFaint }: { evolution: TradeEvolution; textFaint: string }) {
+  const { tiles, strip, since, hope } = evolution;
+  return (
+    <section data-testid="card-trade-evolution" aria-label="Trade evolution" className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+      <h4 className={`text-[10px] uppercase tracking-wider ${textFaint}`}>Trade evolution{since ? ` (first tracked ${shortDate(since)})` : ''} <span className="normal-case">· entry → now</span></h4>
+      <dl className={`mt-2 grid grid-cols-3 gap-2 ${tiles.length > 9 ? 'sm:grid-cols-5' : 'sm:grid-cols-3'}`}>
+        {tiles.map(tile => (
+          <div key={tile.id} data-testid={`evo-${tile.id}`} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+            <dt className={`text-[10px] uppercase tracking-wider ${textFaint}`}>{tile.label}</dt>
+            <dd className={`text-sm font-bold ${EVO_TONE_CLASS[tile.tone]}`}>{tile.value}</dd>
+          </div>
+        ))}
+      </dl>
+      {hope && (
+        <p data-testid="evo-hope" className={`mt-2 text-[11px] ${textFaint}`} title="Percent the stock still has to move to reach the expiration breakeven, now and measured from the stock price when you opened. The chance is a model estimate from current implied volatility, not a forecast.">
+          {hope.pastBreakeven ? <b className="text-emerald-400">Past breakeven</b> : <>Needs <b className="text-white">{hope.neededNow >= 0 ? '+' : '−'}{Math.abs(hope.neededNow).toFixed(1)}%</b> to break even</>}
+          {hope.neededAtOpen != null && <span> (was {hope.neededAtOpen >= 0 ? '+' : '−'}{Math.abs(hope.neededAtOpen).toFixed(1)}% at open)</span>}
+          {hope.chance != null && <span> · {Math.round(hope.chance * 100)}% model chance</span>}
+        </p>
+      )}
+      {strip && (
+        <p data-testid="evo-strip" className={`mt-2 text-[11px] ${textFaint}`} title="Theta dollars per day minus modeled gamma cost under a one-standard-deviation IV move. A directional estimate, not realized P/L.">
+          Theta−Gamma <b className="text-white">{strip.value}</b>
+          {strip.change && <span className={`ml-1 font-semibold ${strip.change.up ? 'text-emerald-400' : 'text-amber-400'}`}>{strip.change.up ? '↑' : '↓'} {strip.change.pct.toFixed(0)}% vs yesterday</span>}
+          {strip.peak != null && <span> · peak ${strip.peak.toFixed(0)} · {strip.daysTracked} {strip.daysTracked === 1 ? 'day' : 'days'} tracked</span>}
+          {strip.rolledOver && <span className="ml-1 font-semibold text-red-400">▼ off peak</span>}
+        </p>
+      )}
+    </section>
   );
 }
