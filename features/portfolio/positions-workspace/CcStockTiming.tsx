@@ -19,14 +19,19 @@ export function CcStockTiming({ symbol, rsi, price, brokerBasis, shares, cutoff 
   const resolved = resolveCcBasis(settings, sym, brokerBasis === null ? null : ({ costBasis: brokerBasis, costBasisComplete: true } as Parameters<typeof resolveCcBasis>[2]), adjusted);
   const note = ccTimingNote({ symbol, rsi, price, basis: resolved.basis, cutoff });
   if (!note.title && resolved.basis === null) return null;
-  // One compact <li> that sits in the card's Signals row beside the chips (wraps to its own line when the card is narrow).
-  // One compact line. The Calls chip and the RSI number sit right above, so the title and "(now N)" are left out while
-  // they show; with no RSI at all the title stays, because nothing else says calls are on hold.
   const rsiShown = typeof rsi === 'number';
+  const below = note.lines.find(l => /below cost/.test(l));
+  // With an RSI showing, the Calls chip already says wait and the cost tiles and "Calls use" line carry the basis, so the card
+  // keeps only the stopper: price below cost, in red. With no RSI the full line stays, because nothing else says calls are on hold.
+  if (rsiShown) {
+    if (resolved.basis === null) return <li data-testid={`cc-stock-timing-${symbol}`} className="text-[11px] font-bold text-red-400">{ccBasisText(resolved)}</li>;
+    if (!below) return null;
+    return <li data-testid={`cc-stock-timing-${symbol}`} className="text-[11px] font-bold text-red-400"><span data-testid={`cc-stock-below-cost-${symbol}`}>{below.replace(/^Price is /, '').replace(/\.$/, '')}</span></li>;
+  }
   return (
     <li data-testid={`cc-stock-timing-${symbol}`} className="min-w-[16rem] flex-1 text-[11px] leading-snug text-white/70">
-      {note.title && !rsiShown && <><b className="font-bold tracking-wide text-amber-300">{note.title}</b>{' · '}</>}
-      {note.lines.map(l => <span key={l} className={/below cost/.test(l) ? 'font-bold text-red-400' : undefined} data-testid={/below cost/.test(l) ? `cc-stock-below-cost-${symbol}` : undefined}>{(rsiShown ? l.replace(/ \(now \d+\)/, '') : l).replace(/\.$/, '')}{' · '}</span>)}
+      {note.title && <><b className="font-bold tracking-wide text-amber-300">{note.title}</b>{' · '}</>}
+      {note.lines.map(l => <span key={l} className={/below cost/.test(l) ? 'font-bold text-red-400' : undefined}>{l.replace(/\.$/, '')}{' · '}</span>)}
       <span>{ccBasisText(resolved)}</span>
     </li>
   );
