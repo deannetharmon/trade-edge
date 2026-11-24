@@ -248,8 +248,8 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
         {rsiChip && <li title={rsiChip.reason} className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${RSI_CHIP_TONE[rsiChip.state]}`}>Calls: {rsiChip.label}</li>}
         {row.stale && <li className="rounded-full border border-amber-400/50 bg-amber-400/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">Stale price</li>}
         {earnings && <li className="text-[11px]">{earnings}</li>}
+        {row.direction === 'Long' && rsi !== undefined && <CcStockTiming symbol={row.symbol} rsi={rsi?.rsi} price={row.price} brokerBasis={row.basisComplete ? row.avgCost : null} shares={Math.abs(row.shares)} cutoff={cutoff} />}
       </ul>
-      {row.direction === 'Long' && rsi !== undefined && <CcStockTiming symbol={row.symbol} rsi={rsi?.rsi} price={row.price} brokerBasis={row.basisComplete ? row.avgCost : null} shares={Math.abs(row.shares)} cutoff={cutoff} />}
       {row.covered.detail && <p className={`mt-1 text-[11px] ${th.textFaint}`}>{row.covered.detail}</p>}
       {row.committedCalls.length > 0 && <CommittedCallsLine symbol={row.symbol} sharesOwned={Math.abs(row.shares)} gross={Math.floor(Math.abs(row.shares) / 100)} available={Math.max(0, Math.floor(Math.abs(row.shares) / 100) - row.committedCalls.reduce((n, c) => n + c.quantity, 0))} calls={row.committedCalls} showCount={false} className={`mt-1 ${th.textFaint}`} />}
       {priceMove != null && row.price != null && row.avgCost != null && !(row.costBasis != null && row.value != null) && (
