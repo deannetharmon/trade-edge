@@ -23,6 +23,7 @@ import { describeStockEntry } from '@/lib/portfolio/entryFromTransactions';
 import { CommittedCallsLine } from '@/features/screener/components/CommittedCallsLine';
 import { marketMetricsPath, parseMarketMetricsEarnings, type StockEarnings } from './model/stockEarnings';
 import { nextEarningsLine } from './model/nextEarnings';
+import { underlyingStockFor } from '@/lib/leveragedEtfs';
 import type { PositionIntent } from '@/lib/portfolio-data/types';
 import type { StockAiAnalysis, StockAnalysisContext } from '@/lib/portfolio/stockAnalysis';
 import { rsiAsOfLabel, rsiAtEntry, type StockRsi } from '@/lib/portfolio/stockRsi';
@@ -224,6 +225,7 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
   ];
   return (
     <article aria-label={`${row.symbol} stock holding`} data-testid={`stock-card-${row.key}`} className={`rounded-xl border border-l-4 border-l-white/20 ${th.border} bg-white/[0.02] p-4`}>
+      {earnings && <div className="mb-2 text-center text-xs font-semibold text-white/80" data-testid="stock-earnings-top">{earnings}</div>}
       <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
         <div className="min-w-0">
           <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-white">{row.symbol}<span className="rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">STOCK</span>{chart}</h3>
@@ -247,7 +249,6 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
         </li>}
         {rsiChip && <li title={rsiChip.reason} className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${RSI_CHIP_TONE[rsiChip.state]}`}>Calls: {rsiChip.label}</li>}
         {row.stale && <li className="rounded-full border border-amber-400/50 bg-amber-400/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">Stale price</li>}
-        {earnings && <li className="text-[11px]">{earnings}</li>}
         {row.direction === 'Long' && rsi !== undefined && <CcStockTiming symbol={row.symbol} rsi={rsi?.rsi} price={row.price} brokerBasis={row.basisComplete ? row.avgCost : null} shares={Math.abs(row.shares)} cutoff={cutoff} />}
       </ul>
       {row.covered.detail && <p className={`mt-1 text-[11px] ${th.textFaint}`}>{row.covered.detail}</p>}
@@ -354,7 +355,7 @@ export function StockHoldings({ cards = false, earningsEnabled = false, intentEn
     return () => { active = false; };
   }, [intentEnabled]);
   const [earningsBySymbol, setEarningsBySymbol] = useState<Record<string, StockEarnings>>({});
-  const symbolsKey = Array.from(new Set(rows.map(r => r.symbol.toUpperCase()))).sort().join(',');
+  const symbolsKey = Array.from(new Set(rows.flatMap(r => [r.symbol.toUpperCase(), underlyingStockFor(r.symbol)?.toUpperCase() ?? '']).filter(Boolean))).sort().join(',');
   useEffect(() => {
     if (!earningsEnabled || !symbolsKey || typeof fetch !== 'function') return;
     let active = true;
@@ -368,6 +369,15 @@ export function StockHoldings({ cards = false, earningsEnabled = false, intentEn
     setIntents(current => ({ ...current, [id]: intent }));
     if (typeof fetch !== 'function') return;
     fetch('/api/position-intent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ positionKey: id, intent }) }).catch(() => {});
+  };
+  // A leveraged single-stock fund (NVDL, GGLL, METU...) has no earnings of its own, so its card shows the underlying stock's date.
+  const earningsNode = (row: StockHoldingRow) => {
+    if (!earningsEnabled) return null;
+    const own = earningsBySymbol[row.symbol.toUpperCase()];
+    const under = underlyingStockFor(row.symbol)?.toUpperCase() ?? null;
+    const e = own ?? (under ? earningsBySymbol[under] : undefined);
+    const line = e ? nextEarningsLine(e.date, e.estimated, null, undefined, own ? null : under) : null;
+    return line ? <span className={th.textFaint} data-testid="stock-next-earnings">{line.text}</span> : null;
   };
   const aligned = alignedStockColumns(columnWidths);
   const gridStyle = aligned ? { gridTemplateColumns: aligned.template } : undefined;
@@ -418,7 +428,7 @@ export function StockHoldings({ cards = false, earningsEnabled = false, intentEn
           <div data-testid="stock-cards" className="grid gap-3 lg:grid-cols-2">
             {rows.map(row => (
             <StockCard key={row.key} row={row} th={th}
-              earnings={(() => { const e = earningsEnabled ? earningsBySymbol[row.symbol.toUpperCase()] : undefined; const line = e ? nextEarningsLine(e.date, e.estimated, null) : null; return line ? <span className={th.textFaint} data-testid="stock-next-earnings">{line.text}</span> : null; })()}
+              earnings={earningsNode(row)}
               intentControl={intentEnabled ? <IntentSelectControl family="STOCK" stored={intents[`${row.accountNumber}::${row.key}`]} ariaLabel={`Intent for ${row.symbol} shares`} onChange={intent => saveIntent(`${row.accountNumber}::${row.key}`, intent)} /> : null}
               chart={<ChartLinkButton symbol={row.symbol} chartSymbol={INDEX_CHART_SYMBOLS[row.symbol.toUpperCase()] ?? row.symbol} instanceKey={`stock-${row.key}`} th={th}
                 showChart={openChartKey === row.key} setShowChart={open => setOpenChartKey(open ? row.key : null)}
@@ -440,7 +450,7 @@ export function StockHoldings({ cards = false, earningsEnabled = false, intentEn
           </div>
           {rows.map(row => (
             <Row key={row.key} row={row} th={th} gridStyle={gridStyle}
-              earnings={(() => { const e = earningsEnabled ? earningsBySymbol[row.symbol.toUpperCase()] : undefined; const line = e ? nextEarningsLine(e.date, e.estimated, null) : null; return line ? <span className={th.textFaint} data-testid="stock-next-earnings">{line.text}</span> : null; })()}
+              earnings={earningsNode(row)}
               intentControl={intentEnabled ? <IntentSelectControl family="STOCK" stored={intents[`${row.accountNumber}::${row.key}`]} ariaLabel={`Intent for ${row.symbol} shares`} onChange={intent => saveIntent(`${row.accountNumber}::${row.key}`, intent)} /> : null}
               chart={<ChartLinkButton symbol={row.symbol} chartSymbol={INDEX_CHART_SYMBOLS[row.symbol.toUpperCase()] ?? row.symbol} instanceKey={`stock-${row.key}`} th={th}
                 showChart={openChartKey === row.key} setShowChart={open => setOpenChartKey(open ? row.key : null)}
