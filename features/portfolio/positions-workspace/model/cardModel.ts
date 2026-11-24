@@ -46,6 +46,8 @@ export interface PositionCard {
   dollarsAtRisk: number | null;
   /** TRADE-EVOLUTION-CARDS-0001: what is tied up in the position, in dollars: capital at risk on a credit position, what was paid on a bought option. Same figure as dollarsAtRiskOf. */
   invested: number | null;
+  /** Bought options with a verified debit: what closing returns now (the marketable value), so the card can say "Paid $X → worth $Y now". Null otherwise. */
+  worthNow: number | null;
   chips: CardChip[];
   assignment: { shares: number; netPrice: number | null; underwaterNow: number | null } | null;
   itmShortPut: boolean;
@@ -132,7 +134,7 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
   // A wide bid/ask is a real market condition, not a missing quote: say so plainly. Only a verify-pricing verdict means the quote itself is in doubt.
   const pnlNote = verifyPricing ? 'unverified quote'
     : wide != null ? `${basis} · wide market`
-    : recovery ? `${recovery.remainingPct.toFixed(0)}% of ${money0(recovery.paid)} ${recovery.atOrAbovePaid ? 'of paid' : 'left'}`
+    : recovery ? basis
     : opts.pctOfTarget != null ? `${basis} · ${opts.pctOfTarget.toFixed(0)}% of target`
     : basis;
 
@@ -221,6 +223,7 @@ export function buildPositionCard(p: Position, opts: { pctOfTarget: number | nul
     pnlNote,
     dollarsAtRisk: dollarsAtRiskOf(p),
     invested: risk,
+    worthNow: recovery?.closeNow ?? null,
     chips: [...chips].sort((a, b) => a.row - b.row || CHIP_ORDER.indexOf(a.id) - CHIP_ORDER.indexOf(b.id)),
     assignment,
     itmShortPut: itmShortPutOf(p),

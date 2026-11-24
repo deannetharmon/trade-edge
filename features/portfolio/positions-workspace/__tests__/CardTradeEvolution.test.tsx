@@ -33,3 +33,17 @@ describe('Cards: invested and trade evolution', () => {
     expect(screen.getByTestId('evo-otm')).toHaveTextContent('8.0→6.1%');
   });
 });
+
+describe('Cards: bought option says what it is worth now', () => {
+  const longCall = { key: 'k2', symbol: 'AAA', strategy: 'Long Call', legs: [leg('Long', 'C', { strikePrice: 120 })], entryPriceEffect: 'Debit', entryEconomicsComplete: true, entryCredit: 1000, closeValue: 590, identity: { quantity: 1 }, dte: 400, entryDte: 400, quantity: 1, stockPrice: 100 } as unknown as Position;
+  it('reads "Paid $1,000 → worth $590 now" and drops the "% left" note', () => {
+    renderCards(longCall);
+    expect(screen.getByTestId('card-invested')).toHaveTextContent('Paid $1,000 → worth $590 now');
+    expect(screen.queryByText(/% of \$1,000/)).not.toBeInTheDocument();
+    expect(screen.getByText('if closed now')).toBeInTheDocument();
+  });
+  it('a credit card keeps "invested"', () => {
+    renderCards(spread);
+    expect(screen.getByTestId('card-invested')).toHaveTextContent('$400 invested');
+  });
+});
