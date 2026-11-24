@@ -128,7 +128,9 @@ function CardItem({ pmccOpportunity, onFindPmccShortCall, rsi, cutoff, card, th,
           {p.entryPriceEffect === 'Credit' && p.entryEconomicsComplete !== false && (p.entryCredit ?? p.creditReceived) != null && (
             <span data-testid="card-potential-premium" className="mt-1 block text-[11px] text-white/70">Potential Premium <b className={SEMANTIC_TONE_CLASS.positive}>{usd(p.entryCredit ?? p.creditReceived)}</b></span>
           )}
-          {card.invested != null && <span data-testid="card-invested" className="mt-1 block text-[11px] text-white/70">{usd(card.invested)} invested</span>}
+          {card.invested != null && (card.worthNow != null
+            ? <span data-testid="card-invested" className="mt-1 block text-[11px] text-white/70">Paid <b className="text-white">{usd(card.invested)}</b> → worth <b className="text-white">{usd(card.worthNow)}</b> now</span>
+            : <span data-testid="card-invested" className="mt-1 block text-[11px] text-white/70">{usd(card.invested)} invested</span>)}
           {isLeapCall(p) && <LeapRsiChips position={p} rsi={rsi} cutoff={cutoff} textFaint={th.textFaint} />}
           {sideChips.length > 0 && (() => {
             const last = Math.max(...sideChips.map(c => c.row));
