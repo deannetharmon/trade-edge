@@ -227,6 +227,9 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
         <div className="text-right">
           <b className={`block text-xl ${pnlTone}`}>{row.pnl != null ? signedMoney(Math.round(row.pnl * 100) / 100) : 'Unavailable'}</b>
           <span className={`block text-[11px] ${row.pnl == null ? 'text-amber-300' : th.textFaint}`}>{row.pnl != null ? (row.pnlPct != null ? `${row.pnlPct >= 0 ? '+' : ''}${row.pnlPct.toFixed(1)}% vs cost` : 'unrealized') : !row.basisComplete ? 'needs a complete cost basis' : 'price unavailable'}</span>
+          {row.costBasis != null && row.value != null && (
+            <span data-testid={`stock-paid-${row.key}`} className="mt-1 block text-[11px] text-white/70">Paid <b className="text-white">{money(row.costBasis)}</b> → worth <b className="text-white">{money(row.value)}</b> now</span>
+          )}
         </div>
       </div>
       <ul aria-label="Signals" className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -244,11 +247,9 @@ function StockCard({ row, th, chart, intentControl, earnings, savedNote, onSaveN
       {row.direction === 'Long' && rsi !== undefined && <CcStockTiming symbol={row.symbol} rsi={rsi?.rsi} price={row.price} brokerBasis={row.basisComplete ? row.avgCost : null} shares={Math.abs(row.shares)} cutoff={cutoff} />}
       {row.covered.detail && <p className={`mt-1 text-[11px] ${th.textFaint}`}>{row.covered.detail}</p>}
       {row.committedCalls.length > 0 && <CommittedCallsLine symbol={row.symbol} sharesOwned={Math.abs(row.shares)} gross={Math.floor(Math.abs(row.shares) / 100)} available={Math.max(0, Math.floor(Math.abs(row.shares) / 100) - row.committedCalls.reduce((n, c) => n + c.quantity, 0))} calls={row.committedCalls} showCount={false} className={`mt-1 ${th.textFaint}`} />}
-      {priceMove != null && row.price != null && row.avgCost != null && (
+      {priceMove != null && row.price != null && row.avgCost != null && !(row.costBasis != null && row.value != null) && (
         <p data-testid={`stock-price-move-${row.key}`} className={`mt-1 text-[11px] ${th.textFaint}`}>
-          {row.costBasis != null && row.value != null
-            ? <>Paid <b className="text-white">{money(row.costBasis)}</b><span className="mx-1" aria-label="to">→</span>worth <b className="text-white">{money(row.value)}</b> now</>
-            : <><span>{money(row.avgCost)}</span><span className="mx-1" aria-label="to">→</span><b className="text-white">{money(row.price)}</b></>}
+          <span>{money(row.avgCost)}</span><span className="mx-1" aria-label="to">→</span><b className="text-white">{money(row.price)}</b>
           {' · '}{Math.abs(priceMove) < 0.05 ? '0.0%' : `${priceMove > 0 ? '+' : '−'}${Math.abs(priceMove).toFixed(1)}%`} since you bought
         </p>
       )}
