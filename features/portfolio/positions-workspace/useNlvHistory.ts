@@ -62,7 +62,7 @@ export function useNlvHistory(): { history: BalanceDayPoint[]; note: string | nu
         }
         const token = await getAccessToken();
         const accountNumber = await requireActiveBrokerAccount(token, ttFetch);
-        const failure = await syncBalanceSnapshots({ ttFetch, token, accountNumber });
+        const failure = await syncBalanceSnapshots({ ttFetch, token, accountNumber, lookbackDays: 45 });
         if (cancelled) return;
         if (failure !== null) { setNote(failure); return; }
         setNote(null);
