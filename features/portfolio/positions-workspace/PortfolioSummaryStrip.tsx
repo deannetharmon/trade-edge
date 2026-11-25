@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useMemo, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { buildNlvSpark } from '@/lib/portfolio-data/nlvSparkline';
 import { todayNewYork } from '@/lib/portfolio-data/balancePerformance';
 import { NlvSparkline } from './NlvSparkline';
@@ -36,17 +36,35 @@ function Figure({ figure, prefix }: { figure: SummedFigure; prefix: string }) {
   );
 }
 
+const WIDE_TILE_PX = 420;
+
 function TileBody({ tile, weekSince, store }: { tile: SummaryTile; weekSince: string | null; store: SnapStore | null }) {
+  // Wide tiles: the chart takes the right ~45% at the tile's full height (Dean, 2026-11-24). Narrow tiles keep the small inline line.
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(entries => setWide((entries[0]?.contentRect.width ?? 0) >= WIDE_TILE_PX));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const tileSpark = useMemo(() => buildTileSpark(store ?? {}, tile.members, todayNewYork(Date.now()), tile.pnl.value != null && tile.pnl.included === tile.pnl.of ? tile.pnl.value : null), [store, tile]);
   const returnText = tile.returnPct != null && tile.basis ? ` · ${tile.returnPct >= 0 ? '+' : ''}${tile.returnPct}% of ${tile.basis}` : '';
   return (
-    <>
+    <span ref={rootRef} className="relative block">
+      {wide && (
+        <span className="absolute bottom-0 right-0 top-0 flex w-[44%] flex-col" data-testid="tile-side-chart">
+          <NlvSparkline spark={toNlvSpark(tileSpark)} note="Collecting history" label={`${tile.label} P/L`} />
+        </span>
+      )}
+      <span className={wide ? 'block pr-[47%]' : 'block'}>
       <span className="block text-[10px] uppercase tracking-widest text-white/50">{tile.label}</span>
       <span className="mt-1 flex items-stretch">
         <span className={`shrink-0 text-xl font-bold ${tone(tile.pnl.value)}`}>
           {tile.pnl.value == null ? 'Unavailable' : signedMoney(tile.pnl.value)}
         </span>
-        <TileSparkline spark={tileSpark} />
+        {!wide && <TileSparkline spark={tileSpark} />}
       </span>
       <span className="mt-1 block text-[11px] text-white/70">
         {tile.count} {tile.count === 1 ? 'position' : 'positions'}{returnText}
@@ -64,7 +82,8 @@ function TileBody({ tile, weekSince, store }: { tile: SummaryTile; weekSince: st
         <Figure figure={tile.weekChange} prefix="1W" />
       </span>
       {tile.needsAttention > 0 && <span className="mt-1 block text-[11px] font-semibold text-amber-400">{tile.needsAttention} need attention</span>}
-    </>
+      </span>
+    </span>
   );
 }
 
@@ -117,7 +136,7 @@ function HeadlineStrip({ headline, store }: { headline: PortfolioHeadline; store
           {headline.reserve && (
             <span className={`mt-2 block border-t border-white/10 pt-2 text-[11px] ${reserveTone(headline.reserve.tone)}`} data-testid="headline-reserve"
               title="Option Buying Power as a share of Portfolio Value, against your reserve rule (never below 10%, 20-30% preferred).">
-              Reserve {Math.round(headline.reserve.pct)}% · {headline.reserve.label}
+              Reserve {Math.round(headline.reserve.pct)}%
             </span>
           )}
           {headline.cashFreePct != null && (

@@ -47,3 +47,13 @@ describe('tile sparklines', () => {
     expect(screen.getByTestId('tile-placeholder').getAttribute('class')).toContain('absolute');
   });
 });
+
+describe('wide tile layout', () => {
+  it('a wide tile puts the chart on the right at full tile height instead of the inline line', async () => {
+    class RO { cb: (e: unknown[]) => void; constructor(cb: (e: unknown[]) => void) { this.cb = cb; } observe() { this.cb([{ contentRect: { width: 600, height: 100 } }]); } disconnect() {} }
+    vi.stubGlobal('ResizeObserver', RO);
+    renderStrip({});
+    await waitFor(() => expect(screen.getAllByTestId('tile-side-chart').length).toBeGreaterThan(0));
+    expect(screen.queryAllByTestId('tile-spark').length).toBe(0);
+  });
+});

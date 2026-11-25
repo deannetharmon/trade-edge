@@ -5,6 +5,7 @@
 //  * a tile's line is the sum of its CURRENTLY OPEN positions' daily P/L ("same positions only"; closed positions are not replayed);
 //  * a position that opened mid-window adds nothing before its first record; a day where an already-open position has no record is skipped, never guessed;
 //  * the record is the first reading of the day (the page's first load), so it is "as of the day's first look", not a strict close;
+//  * if any position in the tile has no earlier record yet, the whole line waits (no partial line that ends in a cliff);
 //  * weekends are dropped; the prior value must be recent (MAX_CLOSE_AGE_DAYS) or there is no day-change and no colour.
 
 import { addDays, daysBetween, isWeekend, MAX_CLOSE_AGE_DAYS, SPARK_DAYS, type NlvSpark } from './nlvSparkline';
@@ -45,6 +46,10 @@ function finish(closed: SeriesPoint[], todayNy: string, live: number | null): Se
 export function buildTileSpark(store: SnapStore, members: ReadonlyArray<{ key: string; pnl: number | null }>, todayNy: string, livePnl: number | null): SeriesSpark {
   const per = members.map(m => dailyValues(store[m.key], r => r.pnl, todayNy));
   const first = per.map(m => (m.size ? Array.from(m.keys()).sort()[0] : null));
+  // A position with no earlier record (a stock holding before its first record, or a position opened today) has an unknown past.
+  // Drawing the others and then jumping to a live total that includes it would be a false cliff, so the line waits (dashed) until
+  // every position in the tile has at least one earlier record.
+  if (members.length === 0 || first.some(f => f == null)) return finish([], todayNy, null);
   const dates = new Set<string>();
   per.forEach(m => m.forEach((_v, d) => dates.add(d)));
   const closed: SeriesPoint[] = [];

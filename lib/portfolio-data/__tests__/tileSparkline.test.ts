@@ -31,9 +31,14 @@ describe('buildTileSpark', () => {
     expect(s.change).toBeNull();
     expect(s.priorValue).toBeNull();
   });
-  it('no history: one live point only, no line', () => {
+  it('a tile with one position that has no earlier record waits: no partial line ending in a cliff', () => {
+    const s = buildTileSpark({ A: [r('2026-11-20', 1), r('2026-11-23', 2)] }, [{ key: 'A', pnl: 5 }, { key: 'EQUITY:SOXL', pnl: -19000 }], TODAY, -18995);
+    expect(s.points).toHaveLength(0);
+    expect(s.change).toBeNull();
+  });
+  it('no history at all: nothing to draw', () => {
     const s = buildTileSpark({}, [{ key: 'EQUITY:SOXL', pnl: 3 }], TODAY, 3);
-    expect(s.points).toHaveLength(1);
+    expect(s.points).toHaveLength(0);
     expect(s.change).toBeNull();
   });
   it('unpriced tile has no live point', () => {
