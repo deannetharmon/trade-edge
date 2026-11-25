@@ -43,7 +43,7 @@ export function daysBetween(fromIso: string, toIso: string): number {
 export function buildNlvSpark(history: readonly BalanceDayPoint[], todayNy: string, liveNlv: number | null, windowDays = SPARK_DAYS): NlvSpark {
   const byDate = new Map<string, BalanceDayPoint>();
   history.filter(usable).filter(d => d.date < todayNy).forEach(d => byDate.set(d.date, { date: d.date, netLiquidatingValue: d.netLiquidatingValue }));
-  const closed = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const closed = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
   const live = liveNlv != null && Number.isFinite(liveNlv) && liveNlv > 0 ? liveNlv : null;
   const series = live != null && !isWeekend(todayNy) ? withLivePoint(closed, todayNy, live) : closed;
   const from = addDays(todayNy, -(windowDays - 1));
