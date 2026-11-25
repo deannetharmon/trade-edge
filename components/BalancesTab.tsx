@@ -7,7 +7,8 @@ import { useEffect, useState, useMemo } from 'react';
 import { getAccessToken } from '@/lib/auth/tastytradeToken';
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import { balanceChangeRows, BALANCE_GAP_DAYS } from '@/lib/portfolio-data/balanceChange';
-import { closedDaysOnly, extractMoneyMovements, performanceSeries, todayNewYork, withLivePoint, type BalanceDayPoint, type MoneyMovement } from '@/lib/portfolio-data/balancePerformance';
+import { syncBalanceSnapshots } from '@/lib/portfolio-data/balanceSync';
+import { extractMoneyMovements, performanceSeries, todayNewYork, withLivePoint, type BalanceDayPoint, type MoneyMovement } from '@/lib/portfolio-data/balancePerformance';
 
 const BASE = 'https://api.tastytrade.com';
 const CLIENT_ID = '4d4c851b-bdaf-4ac9-b39b-811e604739f2';
@@ -77,35 +78,8 @@ async function loadCurrentAndSyncHistory(): Promise<{ current: CurrentBalances; 
   };
 
   // RECON-0003: the sync used to fail silently, so a stretch with no stored days had no visible cause. The reason is kept and shown.
-  let syncError: string | null = null;
-  try {
-    const snapData = await ttFetch(`/accounts/${accountNumber}/balance-snapshots`, token);
-    const items = snapData?.data?.items ?? [];
-    const days: BalanceDay[] = items
-      .map((item: any) => ({
-        date: item['snapshot-date'],
-        netLiquidatingValue: parseFloat(item['net-liquidating-value'] ?? '0'),
-        cashBalance: parseFloat(item['cash-balance'] ?? '0'),
-        netOptionsValue: parseFloat(item['long-derivative-value'] ?? '0') - parseFloat(item['short-derivative-value'] ?? '0'),
-      }))
-      .filter((d: BalanceDay) => d.date && d.netLiquidatingValue !== 0);
-    // BALANCE-CHART-0001: only completed days are stored; today's figure keeps changing and is drawn live instead.
-    const closed = closedDaysOnly(days, todayNewYork(Date.now()));
-
-    if (closed.length > 0) {
-      const saved = await fetch('/api/balance-history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ days: closed }),
-      });
-      if (!saved.ok) syncError = `Saving balance history failed (${saved.status}).`;
-    } else {
-      syncError = 'The broker returned no completed balance days.';
-    }
-  } catch (e) {
-    // History sync is best-effort -- current balances above already loaded fine.
-    syncError = e instanceof Error ? `Balance history sync failed: ${e.message.slice(0, 160)}` : 'Balance history sync failed.';
-  }
+  // SPARKLINES-0001A: the sync itself now lives in lib/portfolio-data/balanceSync.ts and also runs from the Portfolio page.
+  const syncError: string | null = await syncBalanceSnapshots({ ttFetch, token, accountNumber });
 
   // BALANCE-CHART-0001: deposits / withdrawals, so the performance line does not treat them as gains or losses.
   let movements: MoneyMovement[] = [];

@@ -7,7 +7,11 @@
 
 'use client';
 
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
+import { buildNlvSpark } from '@/lib/portfolio-data/nlvSparkline';
+import { todayNewYork } from '@/lib/portfolio-data/balancePerformance';
+import { NlvSparkline } from './NlvSparkline';
+import { useNlvHistory } from './useNlvHistory';
 import type { PortfolioHeadline, PortfolioSummary, SummaryGroupKey, SummaryTile, SummedFigure } from './model/portfolioSummary';
 
 const signedMoney = (v: number) => `${v >= 0 ? '+' : '-'}$${Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
@@ -65,13 +69,27 @@ function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
   const { bridge } = headline;
   const fundedPct = bridge && headline.deployed != null && bridge.funded > 0 ? Math.round((headline.deployed / bridge.funded) * 100) : null;
   const unavailable = <span className="text-white/50">Unavailable</span>;
+  // SPARKLINES-0001A: the line and the day-change arrow for Portfolio Value (never makes the tile taller).
+  const history = useNlvHistory();
+  const spark = useMemo(() => buildNlvSpark(history, todayNewYork(Date.now()), headline.portfolioValue), [history, headline.portfolioValue]);
+  const dayChange = spark.change;
+  const dayTone = dayChange == null || Math.round(dayChange) === 0 ? 'text-white/60' : dayChange > 0 ? 'text-emerald-400' : 'text-red-400';
+  const dayArrow = dayChange == null || Math.round(dayChange) === 0 ? '▬' : dayChange > 0 ? '▲' : '▼';
   return (
     <section aria-label="Portfolio headline" data-testid="portfolio-headline" className="mb-2">
       <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-        <div className={HEADLINE_TILE} title="Net liquidating value of the account: what everything is worth right now, as reported by the broker.">
+        <div className={`${HEADLINE_TILE} flex flex-col`} title="Net liquidating value of the account: what everything is worth right now, as reported by the broker.">
           <span className="block text-[10px] uppercase tracking-widest text-white/50">Portfolio Value</span>
           <span className="mt-1 block text-2xl font-bold text-white" data-testid="headline-portfolio-value">{headline.portfolioValue == null ? unavailable : money(headline.portfolioValue)}</span>
-          <span className="mt-1 block text-[11px] text-white/50">Net liquidating value</span>
+          <span className="mt-1 block text-[11px] text-white/50">
+            Net liquidating value
+            {dayChange != null && (
+              <span className={dayTone} data-testid="nlv-day-change" title={spark.changePct != null ? `${spark.changePct >= 0 ? '+' : ''}${spark.changePct.toFixed(2)}% since the prior close` : undefined}>
+                {' · '}{dayArrow} {Math.round(dayChange) === 0 ? '$0' : signedMoney(dayChange)} vs prior close
+              </span>
+            )}
+          </span>
+          <NlvSparkline spark={spark} />
         </div>
         <div className={HEADLINE_TILE} title="Cash balance minus the full strike amount of each short put, the full width of each credit spread and cash held by working opening orders. The premium you kept is already in your cash and counts toward that collateral. Margin buying power is not counted. Option Buying Power is the broker's margin-based figure and is shown for comparison only.">
           <span className="block text-[10px] uppercase tracking-widest text-white/50">Cash to deploy</span>
