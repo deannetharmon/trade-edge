@@ -29,13 +29,13 @@ describe('Portfolio Value tile sparkline', () => {
 
   it('stale history (last stored day weeks old): no arrow, no fake change, dashed placeholder', async () => {
     renderTile([day('2026-10-06', 44713)]);
-    await waitFor(() => expect(screen.getByTestId('nlv-placeholder')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByTestId('nlv-placeholder')[0]).toBeTruthy());
     expect(screen.queryByTestId('nlv-day-change')).toBeNull();
   });
 
   it('no history at all: no arrow, dashed placeholder', async () => {
     renderTile([]);
-    await waitFor(() => expect(screen.getByTestId('nlv-placeholder')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByTestId('nlv-placeholder')[0]).toBeTruthy());
     expect(screen.queryByTestId('nlv-day-change')).toBeNull();
   });
 });

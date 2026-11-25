@@ -123,6 +123,8 @@ export interface SummaryTile {
   dayMissing: Array<{ symbol: string; reason: string }>;
   weekChange: SummedFigure;
   needsAttention: number;
+  /** SPARKLINES-0001B: the positions behind this tile, so its history line can be summed from the same set. */
+  members: Array<{ key: string; kind: 'option' | 'equity'; pnl: number | null }>;
 }
 
 export interface CashToDeploy {
@@ -304,6 +306,7 @@ function tile(key: SummaryTile['key'], label: string, basis: SummaryTile['basis'
     dayMissing: members.filter(m => m.day == null).map(m => ({ symbol: m.symbol, reason: m.dayReason ?? 'unavailable' })),
     weekChange: sumOf(members.map(m => m.week)),
     needsAttention: members.filter(m => m.attention).length,
+    members: members.map(m => ({ key: m.key, kind: m.kind, pnl: m.pnl })),
   };
 }
 

@@ -11,6 +11,9 @@ import { useMemo, type ReactNode } from 'react';
 import { buildNlvSpark } from '@/lib/portfolio-data/nlvSparkline';
 import { todayNewYork } from '@/lib/portfolio-data/balancePerformance';
 import { NlvSparkline } from './NlvSparkline';
+import { TileSparkline } from './TileSparkline';
+import { useTileHistory } from './useTileHistory';
+import { buildTileSpark, buildDeployedSpark, toNlvSpark, type SnapStore } from '@/lib/portfolio-data/tileSparkline';
 import { useNlvHistory } from './useNlvHistory';
 import type { PortfolioHeadline, PortfolioSummary, SummaryGroupKey, SummaryTile, SummedFigure } from './model/portfolioSummary';
 
@@ -33,13 +36,17 @@ function Figure({ figure, prefix }: { figure: SummedFigure; prefix: string }) {
   );
 }
 
-function TileBody({ tile, weekSince }: { tile: SummaryTile; weekSince: string | null }) {
+function TileBody({ tile, weekSince, store }: { tile: SummaryTile; weekSince: string | null; store: SnapStore | null }) {
+  const tileSpark = useMemo(() => buildTileSpark(store ?? {}, tile.members, todayNewYork(Date.now()), tile.pnl.value != null && tile.pnl.included === tile.pnl.of ? tile.pnl.value : null), [store, tile]);
   const returnText = tile.returnPct != null && tile.basis ? ` · ${tile.returnPct >= 0 ? '+' : ''}${tile.returnPct}% of ${tile.basis}` : '';
   return (
     <>
       <span className="block text-[10px] uppercase tracking-widest text-white/50">{tile.label}</span>
-      <span className={`mt-1 block text-xl font-bold ${tone(tile.pnl.value)}`}>
-        {tile.pnl.value == null ? 'Unavailable' : signedMoney(tile.pnl.value)}
+      <span className="mt-1 flex items-stretch">
+        <span className={`shrink-0 text-xl font-bold ${tone(tile.pnl.value)}`}>
+          {tile.pnl.value == null ? 'Unavailable' : signedMoney(tile.pnl.value)}
+        </span>
+        <TileSparkline spark={tileSpark} />
       </span>
       <span className="mt-1 block text-[11px] text-white/70">
         {tile.count} {tile.count === 1 ? 'position' : 'positions'}{returnText}
@@ -65,13 +72,14 @@ const HEADLINE_TILE = 'rounded-lg border border-teal-400/60 bg-slate-950 p-3';
 const reserveTone = (t: 'good' | 'watch' | 'bad') => (t === 'bad' ? 'text-red-400' : t === 'watch' ? 'text-amber-400' : 'text-emerald-400');
 
 /** PORT-HEADLINE-0001: Portfolio Value, Cash to deploy and Deployed Capital, with a line showing how they tie together. */
-function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
+function HeadlineStrip({ headline, store }: { headline: PortfolioHeadline; store: SnapStore | null }) {
   const { bridge } = headline;
   const fundedPct = bridge && headline.deployed != null && bridge.funded > 0 ? Math.round((headline.deployed / bridge.funded) * 100) : null;
   const unavailable = <span className="text-white/50">Unavailable</span>;
   // SPARKLINES-0001A: the line and the day-change arrow for Portfolio Value (never makes the tile taller).
   const { history, note: historyNote } = useNlvHistory();
   const spark = useMemo(() => buildNlvSpark(history, todayNewYork(Date.now()), headline.portfolioValue), [history, headline.portfolioValue]);
+  const deployedSpark = useMemo(() => toNlvSpark(buildDeployedSpark(store ?? {}, todayNewYork(Date.now()), headline.deployedPartial ? null : headline.deployed)), [store, headline.deployed, headline.deployedPartial]);
   const dayChange = spark.change;
   const dayTone = dayChange == null || Math.round(dayChange) === 0 ? 'text-white/60' : dayChange > 0 ? 'text-emerald-400' : 'text-red-400';
   const dayArrow = dayChange == null || Math.round(dayChange) === 0 ? '▬' : dayChange > 0 ? '▲' : '▼';
@@ -96,19 +104,15 @@ function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
           <span className={`mt-1 block text-2xl font-bold ${headline.usingMargin ? 'text-amber-400' : 'text-white'}`} data-testid="headline-cash-to-deploy">
             {headline.cashToDeploy == null ? unavailable : headline.usingMargin ? `-${money(headline.cashToDeploy)}` : money(headline.cashToDeploy)}
           </span>
-          <span className="mt-1 block text-[11px] text-white/50">{headline.usingMargin ? 'Short-put collateral exceeds cash' : 'Cash balance minus full CSP collateral (no margin)'}</span>
-          <span className="mt-2 block border-t border-white/10 pt-2 text-[11px] text-white/50">
-            Cash balance {headline.cashBalance == null ? 'unavailable' : money(headline.cashBalance)} · Option Buying Power {headline.optionBuyingPower == null ? 'unavailable' : money(headline.optionBuyingPower)} (broker margin figure)
-          </span>
         </div>
-        <div className={HEADLINE_TILE} title="Capital you have put to work: short-put and spread max risk (collateral less the premium you kept), long options and shares at cost. Can exceed Portfolio Value when open positions are down.">
+        <div className={`${HEADLINE_TILE} flex flex-col`} title="Capital you have put to work: short-put and spread max risk (collateral less the premium you kept), long options and shares at cost. Can exceed Portfolio Value when open positions are down.">
           <span className="block text-[10px] uppercase tracking-widest text-white/50">Deployed Capital</span>
           <span className="mt-1 block text-2xl font-bold text-white" data-testid="headline-deployed">
             {headline.deployed == null ? unavailable : money(headline.deployed)}
             {headline.deployedPartial && <span className="text-[11px] font-normal text-white/50"> partial</span>}
           </span>
           <span className="mt-1 block text-[11px] text-white/50">
-            {fundedPct != null && bridge ? `${fundedPct}% of ${money(bridge.funded)} (cash + cost basis) · ` : ''}at cost, puts net of premium kept
+            {fundedPct != null ? `Deployed ${fundedPct}% of funded` : ''}
           </span>
           {headline.reserve && (
             <span className={`mt-2 block border-t border-white/10 pt-2 text-[11px] ${reserveTone(headline.reserve.tone)}`} data-testid="headline-reserve"
@@ -119,9 +123,10 @@ function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
           {headline.cashFreePct != null && (
             <span className="mt-1 block text-[11px] text-white/60" data-testid="headline-cash-free"
               title="Cash to deploy as a share of Portfolio Value. You run no margin, so this is the reserve you can actually use. The Reserve line above is the broker's margin-based buying power.">
-              Cash free {headline.cashFreePct < 10 ? headline.cashFreePct.toFixed(1) : Math.round(headline.cashFreePct)}% (no margin)
+              Cash free {headline.cashFreePct < 10 ? headline.cashFreePct.toFixed(1) : Math.round(headline.cashFreePct)}%
             </span>
           )}
+          <NlvSparkline spark={deployedSpark} note={store ? 'Collecting history' : null} label="Deployed capital" />
         </div>
       </div>
       {bridge && (
@@ -146,15 +151,16 @@ export function PortfolioSummaryStrip({ summary, selected, onSelect, onSelectSym
   const tileClass = (on: boolean) =>
     `min-h-11 rounded-lg border bg-slate-950 p-3 text-left focus:outline-none focus:ring-2 focus:ring-teal-400 ${on ? 'border-teal-400' : 'border-white/15 hover:border-white/30'}`;
   const { cashToDeploy, largest, leveragedCluster } = summary;
+  const store = useTileHistory(summary);
   const tierClass = (tier: 'normal' | 'amber' | 'red') => tier === 'red' ? 'font-semibold text-red-400' : tier === 'amber' ? 'font-semibold text-amber-400' : 'text-white/50';
   return (
     <>
-    <HeadlineStrip headline={summary.headline} />
+    <HeadlineStrip headline={summary.headline} store={store} />
     {afterHeadline}
     <section aria-label="P/L by position type" className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">
       <div className={tileClass(selected == null)}>
         <button type="button" aria-pressed={selected == null} onClick={() => onSelect(null)} className="block w-full text-left focus:outline-none">
-          <TileBody tile={summary.total} weekSince={summary.weekSince} />
+          <TileBody tile={summary.total} weekSince={summary.weekSince} store={store} />
         </button>
         <span className="mt-2 block border-t border-white/10 pt-2 text-[11px]" title="Cash balance minus the full strike amount of each short put, the full width of each credit spread and cash held by working opening orders. The premium you kept is already in your cash and counts toward that collateral. Margin buying power is not counted. A negative figure is an estimate that your cash-secured collateral exceeds cash, not a margin loan reported by the broker.">
           <span className="text-white/50">Cash to deploy (no margin) </span>
@@ -179,7 +185,7 @@ export function PortfolioSummaryStrip({ summary, selected, onSelect, onSelectSym
       </div>
       {summary.groups.map(tile => (
         <button key={tile.key} type="button" aria-pressed={selected === tile.key} onClick={() => onSelect(selected === tile.key ? null : tile.key as SummaryGroupKey)} className={tileClass(selected === tile.key)}>
-          <TileBody tile={tile} weekSince={summary.weekSince} />
+          <TileBody tile={tile} weekSince={summary.weekSince} store={store} />
         </button>
       ))}
     </section>

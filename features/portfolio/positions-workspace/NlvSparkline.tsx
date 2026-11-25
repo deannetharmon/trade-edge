@@ -15,7 +15,7 @@ const H = 44;
 const PAD = 3;
 const MIN_H = 40;
 
-export function NlvSparkline({ spark, note }: { spark: NlvSpark | null; note?: string | null }) {
+export function NlvSparkline({ spark, note, label = 'Portfolio value' }: { spark: NlvSpark | null; note?: string | null; label?: string }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [fits, setFits] = useState(true);
   useEffect(() => {
@@ -51,7 +51,7 @@ export function NlvSparkline({ spark, note }: { spark: NlvSpark | null; note?: s
           <span>{fmtCompact(mx)}</span>
           <span>{fmtCompact(mn)}</span>
         </div>
-        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className={`h-full w-full min-h-0 ${color}`} role="img" aria-label={`Portfolio value, ${fmtShortDate(first)} to ${fmtShortDate(last)}`}>
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className={`h-full w-full min-h-0 ${color}`} role="img" aria-label={`${label}, ${fmtShortDate(first)} to ${fmtShortDate(last)}`}>
           {spark.priorClose != null && (
             <line x1="0" x2={W} y1={y(spark.priorClose)} y2={y(spark.priorClose)} stroke="currentColor" strokeOpacity="0.45" strokeWidth="1" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" data-testid="nlv-prior-close" />
           )}

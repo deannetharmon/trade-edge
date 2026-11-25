@@ -96,9 +96,9 @@ describe('PortfolioSummaryStrip headline', () => {
     expect(screen.getByTestId('headline-bridge').textContent).toContain('funded');
   });
 
-  it('labels the broker figure as a margin figure and never shows stock buying power', () => {
+  it('shows no buying-power or cash-balance wording and never stock buying power', () => {
     strip();
-    expect(screen.getByTestId('portfolio-headline').textContent).toContain('Option Buying Power $5,000 (broker margin figure)');
+    expect(screen.getByTestId('portfolio-headline').textContent).not.toContain('Option Buying Power');
     expect(screen.getByTestId('portfolio-headline').textContent).not.toMatch(/stock buying power/i);
   });
 
