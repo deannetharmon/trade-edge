@@ -70,7 +70,7 @@ function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
   const fundedPct = bridge && headline.deployed != null && bridge.funded > 0 ? Math.round((headline.deployed / bridge.funded) * 100) : null;
   const unavailable = <span className="text-white/50">Unavailable</span>;
   // SPARKLINES-0001A: the line and the day-change arrow for Portfolio Value (never makes the tile taller).
-  const history = useNlvHistory();
+  const { history, note: historyNote } = useNlvHistory();
   const spark = useMemo(() => buildNlvSpark(history, todayNewYork(Date.now()), headline.portfolioValue), [history, headline.portfolioValue]);
   const dayChange = spark.change;
   const dayTone = dayChange == null || Math.round(dayChange) === 0 ? 'text-white/60' : dayChange > 0 ? 'text-emerald-400' : 'text-red-400';
@@ -89,7 +89,7 @@ function HeadlineStrip({ headline }: { headline: PortfolioHeadline }) {
               </span>
             )}
           </span>
-          <NlvSparkline spark={spark} />
+          <NlvSparkline spark={spark} note={historyNote} />
         </div>
         <div className={HEADLINE_TILE} title="Cash balance minus the full strike amount of each short put, the full width of each credit spread and cash held by working opening orders. The premium you kept is already in your cash and counts toward that collateral. Margin buying power is not counted. Option Buying Power is the broker's margin-based figure and is shown for comparison only.">
           <span className="block text-[10px] uppercase tracking-widest text-white/50">Cash to deploy</span>

@@ -11,6 +11,8 @@
 import { withLivePoint, type BalanceDayPoint } from './balancePerformance';
 
 export const SPARK_DAYS = 30;
+/** The prior close must be recent. A longer stretch (weekend plus a holiday is 4 days) means history has a gap, and a day-change against a weeks-old close would be a fake number. */
+export const MAX_CLOSE_AGE_DAYS = 5;
 
 export interface NlvSpark {
   /** Ascending, within the window. The last point is the latest figure. */
@@ -51,6 +53,11 @@ export function buildNlvSpark(history: readonly BalanceDayPoint[], todayNy: stri
   if (series.length < 2) return { points, priorClose: null, latest: series[0]?.netLiquidatingValue ?? null, change: null, changePct: null };
   const latest = series[series.length - 1].netLiquidatingValue;
   const priorClose = series[series.length - 2].netLiquidatingValue;
+  const latestDate = series[series.length - 1].date;
+  const priorDate = series[series.length - 2].date;
+  if (daysBetween(priorDate, latestDate) > MAX_CLOSE_AGE_DAYS || daysBetween(latestDate, todayNy) > MAX_CLOSE_AGE_DAYS) {
+    return { points, priorClose: null, latest, change: null, changePct: null };
+  }
   const change = latest - priorClose;
   return { points, priorClose, latest, change, changePct: priorClose > 0 ? (change / priorClose) * 100 : null };
 }

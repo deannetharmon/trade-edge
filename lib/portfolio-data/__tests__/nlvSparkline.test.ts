@@ -54,6 +54,18 @@ describe('buildNlvSpark', () => {
     expect(buildNlvSpark([], '2026-11-24', null).latest).toBeNull();
   });
 
+  it('stale history: a prior close weeks old is never used (no fake day change, no baseline)', () => {
+    const s = buildNlvSpark([d('2026-10-06', 44713)], '2026-11-24', 26387);
+    expect(s.change).toBeNull();
+    expect(s.priorClose).toBeNull();
+    expect(s.points.map(p => p.date)).toEqual(['2026-11-24']);
+  });
+
+  it('a 4-day stretch (weekend plus a Monday holiday) is still a valid prior close; 6 days is not', () => {
+    expect(buildNlvSpark([d('2026-11-20', 26000)], '2026-11-24', 26100).change).toBe(100);
+    expect(buildNlvSpark([d('2026-11-18', 26000)], '2026-11-24', 26100).change).toBeNull();
+  });
+
   it('ignores zero, negative, non-finite and malformed rows', () => {
     const s = buildNlvSpark([d('2026-11-20', 0), d('2026-11-21', -5), d('2026-11-22', NaN), d('bad', 100), d('2026-11-23', 26290)], '2026-11-24', 26452);
     expect(s.points.map(p => p.date)).toEqual(['2026-11-23', '2026-11-24']);

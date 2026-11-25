@@ -15,7 +15,7 @@ const H = 44;
 const PAD = 3;
 const MIN_H = 40;
 
-export function NlvSparkline({ spark }: { spark: NlvSpark | null }) {
+export function NlvSparkline({ spark, note }: { spark: NlvSpark | null; note?: string | null }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [fits, setFits] = useState(true);
   useEffect(() => {
@@ -72,9 +72,12 @@ export function NlvSparkline({ spark }: { spark: NlvSpark | null }) {
     );
   } else if (fits && !enough) {
     body = (
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full text-white/40" aria-hidden="true" data-testid="nlv-placeholder">
-        <line x1="0" x2={W} y1={H / 2} y2={H / 2} stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
-      </svg>
+      <div className="absolute inset-0">
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full text-white/40" aria-hidden="true" data-testid="nlv-placeholder">
+          <line x1="0" x2={W} y1={H / 2} y2={H / 2} stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+        </svg>
+        {note && <span className="absolute bottom-0 left-0 max-w-full truncate text-[10px] leading-none text-white/40" data-testid="nlv-note">{note.slice(0, 90)}</span>}
+      </div>
     );
   }
 
