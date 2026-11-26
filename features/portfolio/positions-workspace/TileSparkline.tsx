@@ -2,7 +2,7 @@
 
 // SPARKLINES-0001B/C: the small 30-day line to the right of a tile's P/L number. HEIGHT RULE: everything is absolutely positioned
 // inside a box that only fills the leftover width of the number's own row, so it can never make the tile taller. It hides itself
-// when the box is narrower than MIN_W. A dashed horizontal line marks the prior day; "30d" names the span; hover shows date and value.
+// when the box is narrower than MIN_W. A dashed horizontal line marks the prior day; the span (e.g. "147d") is named top right; hover shows date and value.
 
 'use client';
 
@@ -45,7 +45,7 @@ export function TileSparkline({ spark }: { spark: SeriesSpark | null }) {
     const slot = W / Math.max(1, points.length - 1);
     body = (
       <>
-        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className={`absolute inset-0 h-full w-full ${color}`} role="img" aria-label={`30 days, ${fmtShortDate(first)} to ${fmtShortDate(last)}`}>
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className={`absolute inset-0 h-full w-full ${color}`} role="img" aria-label={`${span} days, ${fmtShortDate(first)} to ${fmtShortDate(last)}`}>
           {spark.priorValue != null && <line x1="0" x2={W} y1={y(spark.priorValue)} y2={y(spark.priorValue)} stroke="currentColor" strokeOpacity="0.45" strokeWidth="1" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" data-testid="tile-prior-line" />}
           <path d={line} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" data-testid="tile-line" />
           {points.map((p, i) => (
@@ -54,7 +54,7 @@ export function TileSparkline({ spark }: { spark: SeriesSpark | null }) {
             </rect>
           ))}
         </svg>
-        <span className="pointer-events-none absolute right-0 top-0 text-[9px] leading-none text-white/40">30d</span>
+        <span className="pointer-events-none absolute right-0 top-0 text-[9px] leading-none text-white/40">{span}d</span>
       </>
     );
   } else if (fits) {

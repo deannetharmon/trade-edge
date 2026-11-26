@@ -71,8 +71,8 @@ describe('buildNlvSpark', () => {
     expect(s.points.map(p => p.date)).toEqual(['2026-11-23', '2026-11-24']);
   });
 
-  it('keeps only the last 30 days and sorts unsorted input', () => {
-    const s = buildNlvSpark([d('2026-11-23', 2), d('2026-10-01', 1), d('2026-10-25', 3), d('2026-10-26', 5)], '2026-11-24', 4);
+  it('keeps only the window and sorts unsorted input', () => {
+    const s = buildNlvSpark([d('2026-11-23', 2), d('2026-10-01', 1), d('2026-10-25', 3), d('2026-10-26', 5)], '2026-11-24', 4, 30);
     expect(s.points.map(p => p.date)).toEqual(['2026-10-26', '2026-11-23', '2026-11-24']);
   });
 });

@@ -10,7 +10,8 @@
 
 import { withLivePoint, type BalanceDayPoint } from './balancePerformance';
 
-export const SPARK_DAYS = 30;
+/** SPARKLINES-0001F (Dean, 2026-11-26): was 30. Long enough to reach back to July; each line starts where its own data starts. */
+export const SPARK_DAYS = 150;
 /** The prior close must be recent. A longer stretch (weekend plus a holiday is 4 days) means history has a gap, and a day-change against a weeks-old close would be a fake number. */
 export const MAX_CLOSE_AGE_DAYS = 5;
 
