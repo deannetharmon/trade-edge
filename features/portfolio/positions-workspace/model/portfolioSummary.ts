@@ -384,7 +384,7 @@ export function buildPortfolioSummary(input: PortfolioSummaryInput): PortfolioSu
     .map(g => ({ g, ms: members.filter(m => m.group === g.key) }))
     .filter(({ ms }) => ms.length > 0)
     .map(({ g, ms }) => tile(g.key, g.label, g.basis, ms, totalCapital));
-  const total = tile('TOTAL', 'Total', null, members, totalCapital);
+  const total = tile('TOTAL', 'All positions', null, members, totalCapital);
   const weekSinceDates = members.map(m => m.weekSince).filter((d): d is string => d != null).sort();
 
   // Cash to deploy (no margin): cash minus what cash-secured positions and opening orders already hold.
