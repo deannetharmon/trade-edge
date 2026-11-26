@@ -124,7 +124,7 @@ export interface SummaryTile {
   weekChange: SummedFigure;
   needsAttention: number;
   /** SPARKLINES-0001B: the positions behind this tile, so its history line can be summed from the same set. */
-  members: Array<{ key: string; kind: 'option' | 'equity'; pnl: number | null }>;
+  members: Array<{ key: string; kind: 'option' | 'equity'; pnl: number | null; symbol?: string; /** SPARKLINES-0001D: shares held, stock members only. */ shares?: number | null }>;
 }
 
 export interface CashToDeploy {
@@ -193,6 +193,7 @@ interface Member {
   group: SummaryGroupKey;
   symbol: string;
   pnl: number | null;
+  shares?: number | null;
   basisAmount: number | null;
   capital: number | null;
   theta: number | null;
@@ -286,7 +287,7 @@ function equityMember(holding: EquityHolding): Member {
   const cost = holding.basisComplete && holding.basis != null && Number.isFinite(holding.basis) ? Math.abs(holding.basis * holding.quantity) : null;
   return {
     key: `EQUITY:${holding.symbol}`, kind: 'equity', strategy: 'EQUITY', dte: null,
-    group: 'EQUITY', symbol: holding.symbol, pnl: holding.unrealizedPnl, basisAmount: cost, capital: cost,
+    group: 'EQUITY', symbol: holding.symbol, pnl: holding.unrealizedPnl, shares: holding.direction === 'Long' ? holding.quantity : null, basisAmount: cost, capital: cost,
     theta: null, day: null, dayReason: EQUITY_DAY_UNAVAILABLE_REASON, week: null, weekSince: null, attention: false, covered: false,
   };
 }
@@ -306,7 +307,7 @@ function tile(key: SummaryTile['key'], label: string, basis: SummaryTile['basis'
     dayMissing: members.filter(m => m.day == null).map(m => ({ symbol: m.symbol, reason: m.dayReason ?? 'unavailable' })),
     weekChange: sumOf(members.map(m => m.week)),
     needsAttention: members.filter(m => m.attention).length,
-    members: members.map(m => ({ key: m.key, kind: m.kind, pnl: m.pnl })),
+    members: members.map(m => ({ key: m.key, kind: m.kind, pnl: m.pnl, symbol: m.symbol, ...(m.kind === 'equity' ? { shares: m.shares ?? null } : {}) })),
   };
 }
 
