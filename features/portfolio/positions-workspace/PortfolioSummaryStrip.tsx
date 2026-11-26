@@ -8,7 +8,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { buildNlvSpark } from '@/lib/portfolio-data/nlvSparkline';
+import { buildNlvSpark, fmtShortDate, type NlvSpark } from '@/lib/portfolio-data/nlvSparkline';
+import { buildAccountPnlSpark, accountPnlSince } from '@/lib/portfolio-data/accountPnl';
+import type { BalanceDayPoint } from '@/lib/portfolio-data/balancePerformance';
+import { useMoneyMovements } from './useMoneyMovements';
 import { todayNewYork } from '@/lib/portfolio-data/balancePerformance';
 import { NlvSparkline } from './NlvSparkline';
 import { TileSparkline } from './TileSparkline';
@@ -38,7 +41,7 @@ function Figure({ figure, prefix }: { figure: SummedFigure; prefix: string }) {
 
 const WIDE_TILE_PX = 420;
 
-function TileBody({ tile, weekSince, store }: { tile: SummaryTile; weekSince: string | null; store: SnapStore | null }) {
+function TileBody({ tile, weekSince, store, accountSpark }: { tile: SummaryTile; weekSince: string | null; store: SnapStore | null; accountSpark?: NlvSpark | null }) {
   // Wide tiles: the chart takes the right ~45% at the tile's full height (Dean, 2026-11-24). Narrow tiles keep the small inline line.
   const rootRef = useRef<HTMLSpanElement>(null);
   const [wide, setWide] = useState(false);
@@ -54,8 +57,8 @@ function TileBody({ tile, weekSince, store }: { tile: SummaryTile; weekSince: st
   return (
     <span ref={rootRef} className="relative block">
       {wide && (
-        <span className="absolute bottom-0 right-0 top-0 flex w-[44%] flex-col" data-testid="tile-side-chart">
-          <NlvSparkline spark={toNlvSpark(tileSpark)} note="Collecting history" label={`${tile.label} P/L`} />
+        <span className="absolute bottom-0 right-0 top-0 flex w-[44%] flex-col" data-testid="tile-side-chart" title={accountSpark ? `Account profit since ${fmtShortDate(accountPnlSince(accountSpark) ?? '')}: net liquidating value minus deposits and withdrawals, so closed trades are included. The number on the left is the open positions only.` : undefined}>
+          <NlvSparkline spark={accountSpark ?? toNlvSpark(tileSpark)} note="Collecting history" label={accountSpark ? 'Account profit' : `${tile.label} P/L`} />
         </span>
       )}
       <span className={wide ? 'block pr-[47%]' : 'block'}>
@@ -91,12 +94,11 @@ const HEADLINE_TILE = 'rounded-lg border border-teal-400/60 bg-slate-950 p-3';
 const reserveTone = (t: 'good' | 'watch' | 'bad') => (t === 'bad' ? 'text-red-400' : t === 'watch' ? 'text-amber-400' : 'text-emerald-400');
 
 /** PORT-HEADLINE-0001: Portfolio Value, Cash to deploy and Deployed Capital, with a line showing how they tie together. */
-function HeadlineStrip({ headline, store }: { headline: PortfolioHeadline; store: SnapStore | null }) {
+function HeadlineStrip({ headline, store, history, historyNote }: { headline: PortfolioHeadline; store: SnapStore | null; history: BalanceDayPoint[]; historyNote: string | null }) {
   const { bridge } = headline;
   const fundedPct = bridge && headline.deployed != null && bridge.funded > 0 ? Math.round((headline.deployed / bridge.funded) * 100) : null;
   const unavailable = <span className="text-white/50">Unavailable</span>;
   // SPARKLINES-0001A: the line and the day-change arrow for Portfolio Value (never makes the tile taller).
-  const { history, note: historyNote } = useNlvHistory();
   const spark = useMemo(() => buildNlvSpark(history, todayNewYork(Date.now()), headline.portfolioValue), [history, headline.portfolioValue]);
   const deployedSpark = useMemo(() => toNlvSpark(buildDeployedSpark(store ?? {}, todayNewYork(Date.now()), headline.deployedPartial ? null : headline.deployed)), [store, headline.deployed, headline.deployedPartial]);
   const dayChange = spark.change;
@@ -171,15 +173,18 @@ export function PortfolioSummaryStrip({ summary, selected, onSelect, onSelectSym
     `min-h-11 rounded-lg border bg-slate-950 p-3 text-left focus:outline-none focus:ring-2 focus:ring-teal-400 ${on ? 'border-teal-400' : 'border-white/15 hover:border-white/30'}`;
   const { cashToDeploy, largest, leveragedCluster } = summary;
   const store = useTileHistory(summary);
+  const { history, note: historyNote } = useNlvHistory();
+  const movements = useMoneyMovements();
+  const accountSpark = useMemo(() => buildAccountPnlSpark(history, movements, todayNewYork(Date.now()), summary.headline.portfolioValue), [history, movements, summary.headline.portfolioValue]);
   const tierClass = (tier: 'normal' | 'amber' | 'red') => tier === 'red' ? 'font-semibold text-red-400' : tier === 'amber' ? 'font-semibold text-amber-400' : 'text-white/50';
   return (
     <>
-    <HeadlineStrip headline={summary.headline} store={store} />
+    <HeadlineStrip headline={summary.headline} store={store} history={history} historyNote={historyNote} />
     {afterHeadline}
     <section aria-label="P/L by position type" className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">
       <div className={tileClass(selected == null)}>
         <button type="button" aria-pressed={selected == null} onClick={() => onSelect(null)} className="block w-full text-left focus:outline-none">
-          <TileBody tile={summary.total} weekSince={summary.weekSince} store={store} />
+          <TileBody tile={summary.total} weekSince={summary.weekSince} store={store} accountSpark={accountSpark} />
         </button>
         <span className="mt-2 block border-t border-white/10 pt-2 text-[11px]" title="Cash balance minus the full strike amount of each short put, the full width of each credit spread and cash held by working opening orders. The premium you kept is already in your cash and counts toward that collateral. Margin buying power is not counted. A negative figure is an estimate that your cash-secured collateral exceeds cash, not a margin loan reported by the broker.">
           <span className="text-white/50">Cash to deploy (no margin) </span>
