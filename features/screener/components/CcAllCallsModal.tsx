@@ -35,6 +35,14 @@ export interface CcAllCallsDeps {
 }
 const REAL_DEPS: CcAllCallsDeps = { lookup: defaultLookupDeps, order: defaultCcOrderDeps };
 
+const columnWidths = 'grid grid-cols-[5rem_9rem_7rem_7rem_7rem_6rem_minmax(9rem,1fr)] gap-x-3 px-3';
+function calledAwayEstimate(delta: number | null) {
+  if (delta === null || !Number.isFinite(delta) || delta < 0 || delta > 1) return '—';
+  const pct = Math.round(delta * 100);
+  if (pct === 0) return '<1%';
+  if (pct === 100) return '>99%';
+  return `~${pct}%`;
+}
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
 /** th is optional: a caller that only has a narrow theme (the disqualified list) lets the button read the saved one when it opens. */
@@ -136,14 +144,15 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
     [ready, rows, dte, price, floorBasis, lots, minPay],
   );
   const shared = allBelowCost(all);
-  const balanced = balancedPickStrike(all);
+  const canOrder = floorBasis !== null && !waiting;
+  const balanced = canOrder ? balancedPickStrike(all) : null;
   const balancedRow = balanced === null ? null : all.find(r => r.strike === balanced) ?? null;
   // Calls under the stock price are mostly stock value, not premium, so they start folded away.
   const underCount = all.filter(r => r.reasons.includes('in_the_money')).length;
   const visible = useMemo(() => sortCcAllRows(showUnder ? all : all.filter(r => !r.reasons.includes('in_the_money')), sort.key, sort.dir), [all, showUnder, sort]);
+  const sortAscending = (sort.dir === 'asc') !== (sort.key === 'keep');
   const bySt = sort.key === 'strike' && sort.dir === 'asc';
   const firstAbove = bySt ? visible.find(r => !r.reasons.includes('in_the_money'))?.strike ?? null : null;
-  const canOrder = floorBasis !== null && !waiting;
 
   const startOrder = (r: CcAllRow) => {
     if (!r.mid || !canOrder) return;
@@ -165,7 +174,7 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
   return (
     <div role="dialog" aria-modal="true" aria-label={`All calls for ${symbol}`} data-testid="cc-all-calls"
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4">
-      <div className="w-full max-w-4xl space-y-3 rounded-xl border border-neutral-700 bg-neutral-950 p-5 text-neutral-100">
+      <div className="w-full max-w-6xl space-y-3 rounded-xl border border-neutral-700 bg-neutral-950 p-5 text-neutral-100">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold tracking-wide">{symbol} · ALL CALLS</h2>
           <button type="button" onClick={onClose} data-testid="cc-all-calls-close" className="rounded border border-neutral-600 px-3 py-1 text-sm text-neutral-300">Close</button>
@@ -173,7 +182,7 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
         <p className="text-sm text-neutral-300" data-testid="cc-all-calls-summary">
           {price !== null ? `Stock ${usd(price)}` : 'Stock price unknown'}
           {typeof rsi === 'number' ? ` · RSI ${Math.round(rsi)}` : ''}
-          {floorBasis !== null ? ` · your cost ${usd(floorBasis)}${fromLots ? ' (oldest shares)' : ''}` : ' · cost basis unknown'}
+          {floorBasis !== null ? ` · your cost ${usd(floorBasis)}${fromLots ? ' (highest-cost lot)' : ''}` : ' · cost basis unknown'}
           {contracts !== null ? ` · covers ${contracts} contract${contracts === 1 ? '' : 's'}` : ''}
         </p>
         {waiting && <p data-testid="cc-all-calls-wait" className="rounded-lg border border-amber-400 px-3 py-2 text-sm text-amber-200">{note.lines[0]} You can still look at everything.</p>}
@@ -209,13 +218,13 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
         </div>
 
         {!error && !ready && <p data-testid="cc-all-calls-loading" className="text-sm text-neutral-400">{rows === null ? 'Loading the chain…' : 'Checking your share lots…'}</p>}
-        {ready && visible.length === 0 && all.length > 0 && <p className="text-sm text-neutral-400">Every strike on this date is under the stock price. Use the button above to see them.</p>}
+        {ready && visible.length === 0 && all.length > 0 && <p className="text-sm text-neutral-400">Every strike on this date is under the stock price. Use the toggle below to see them.</p>}
         {ready && all.length === 0 && <p className="text-sm text-neutral-400">No calls listed for that date.</p>}
         {ready && all.length > 0 && (
           <p data-testid="cc-all-calls-balanced" className={`rounded-lg border px-3 py-2 text-sm ${balancedRow ? 'border-emerald-400 text-emerald-200' : 'border-neutral-700 text-neutral-300'}`}>
             {balancedRow
-              ? `Balanced pick: the ${ccStrikeLabel(balancedRow.strike)} strike collects $${Math.round(balancedRow.timeValue ?? 0)} and you keep your shares ${balancedRow.popPct}% of the time.${waiting ? ' Wait for RSI first.' : ''}`
-              : `No balanced pick on this date: ${shared ? 'every strike is below your cost.' : `no call passes your rules with a ${CC_BALANCED_POP.lo} to ${CC_BALANCED_POP.hi}% chance of keeping your shares.`}`}
+              ? `Balanced pick · ${ccStrikeLabel(balancedRow.strike)} · ${usd(balancedRow.timeValue ?? 0)} time value per contract · ${calledAwayEstimate(balancedRow.delta)} estimated called-away chance at expiration`
+              : `No balanced pick for this expiration. ${shared ? 'Every strike is below your cost.' : waiting ? 'Wait for the RSI threshold.' : floorBasis === null ? 'Your cost basis is unknown.' : `No call passes your rules with an estimated ${100 - CC_BALANCED_POP.hi}–${100 - CC_BALANCED_POP.lo}% chance of being called away.`}`}
           </p>
         )}
         {ready && underCount > 0 && (
@@ -223,14 +232,18 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
             className="rounded-lg border border-neutral-600 px-3 py-1.5 text-sm text-neutral-300">{showUnder ? 'Hide' : 'Show'} {underCount} strike{underCount === 1 ? '' : 's'} under the stock price</button>
         )}
         {ready && visible.length > 0 && (
-          <div className="space-y-1.5" data-testid="cc-all-calls-rows">
-            <div className="flex px-3 text-xs font-bold tracking-wider text-neutral-400">
-              {([['strike', 'STRIKE', 'w-16'], ['premium', 'PREMIUM YOU COLLECT', 'w-40'], ['above', 'ABOVE PRICE', 'w-24'], ['keep', 'KEEP SHARES', 'w-24'], ['gap', 'PRICE GAP', 'w-20'], ['oi', 'OPEN INTEREST', 'w-28']] as Array<[CcAllSortKey, string, string]>).map(([k, label, w]) => (
-                <button key={k} type="button" data-testid={`cc-all-sort-${k}`} aria-sort={sort.key === k ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+          <p className="text-xs text-neutral-400">Time value uses the bid–ask midpoint and excludes intrinsic value. Your fill may differ. The called-away estimate uses option delta as a rough guide to finishing in the money. Early assignment can also occur.</p>
+        )}
+        {ready && visible.length > 0 && (
+          <div className="overflow-x-auto" data-testid="cc-all-calls-rows">
+          <div className="min-w-[900px] space-y-1.5">
+            <div className={`${columnWidths} items-end border border-transparent pb-1 text-xs font-semibold text-neutral-300`}>
+              {([['strike', 'Strike price'], ['premium', 'Time value / contract'], ['above', 'Strike vs. stock'], ['keep', 'Chance called away'], ['gap', 'Bid–ask gap / share'], ['oi', 'Open interest']] as Array<[CcAllSortKey, string]>).map(([k, label]) => (
+                <button key={k} type="button" data-testid={`cc-all-sort-${k}`} aria-label={sort.key === k ? `${label}, sorted ${sortAscending ? 'ascending' : 'descending'}` : label}
                   onClick={() => setSort(sort.key === k ? { key: k, dir: sort.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: k === 'strike' || k === 'gap' ? 'asc' : 'desc' })}
-                  className={`${w} text-left ${sort.key === k ? 'text-cyan-300' : ''}`}>{label}{sort.key === k ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</button>
+                  className={`text-left ${sort.key === k ? 'text-cyan-300' : ''}`}>{label}{sort.key === k ? (sortAscending ? ' ▲' : ' ▼') : ''}</button>
               ))}
-              <div className="flex-1">WHY</div>
+              <div>Rule checks</div>
             </div>
             {visible.map(r => {
               const under = r.reasons.includes('in_the_money');
@@ -240,15 +253,15 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
                 <div key={r.occSymbol || r.strike}>
                   {showUnder && r.strike === firstAbove && price !== null && <p className="py-1 text-sm font-bold text-cyan-300">Stock now {usd(price)}. Higher strikes are above the stock price.</p>}
                   <button type="button" onClick={() => setExpanded(open ? null : r.strike)} aria-expanded={open} data-testid={`cc-all-row-${r.strike}`}
-                    className={`flex w-full items-center rounded-lg border px-3 py-2 text-left text-sm ${open ? 'border-cyan-400 bg-cyan-950/40' : 'border-neutral-800 bg-neutral-900'}`}>
-                    <div className="w-16 font-bold">{ccStrikeLabel(r.strike)}</div>
-                    <div className="w-40">{r.collect !== null ? <><b>${Math.round(r.timeValue ?? 0)}</b> <span className="text-xs text-neutral-400">{under ? `of $${Math.round(r.collect)}, rest is stock value` : `${r.bid?.toFixed(2)} / ${r.ask?.toFixed(2)}`}</span></> : '—'}</div>
-                    <div className="w-24">{r.abovePricePct !== null ? `${r.abovePricePct.toFixed(1)}%` : '—'}</div>
-                    <div className="w-24">{r.popPct !== null ? `${r.popPct}%` : '—'}</div>
-                    <div data-testid={`cc-all-gap-${r.strike}`} data-tone={gapTone(r) ?? 'none'} className={`w-20 font-bold ${{ green: 'text-emerald-400', yellow: 'text-yellow-300', red: 'text-red-400', none: '' }[gapTone(r) ?? 'none']}`}>{r.gapCents !== null ? `$${(r.gapCents / 100).toFixed(2)}` : '—'}</div>
-                    <div className={`w-28 ${r.openInterest === 0 ? 'text-amber-300' : ''}`}>{r.openInterest !== null ? r.openInterest.toLocaleString('en-US') : '—'}</div>
-                    <div className="flex flex-1 flex-wrap gap-1.5">
-                      {r.isPick && <span className="rounded-full border border-emerald-400 px-2 text-xs font-bold text-emerald-300">{r.strike === balanced ? 'Balanced pick' : 'A pick'}</span>}
+                    className={`${columnWidths} w-full items-center rounded-lg border py-2 text-left text-sm tabular-nums ${open ? 'border-cyan-400 bg-cyan-950/40' : 'border-neutral-800 bg-neutral-900'}`}>
+                    <div className="font-bold">{ccStrikeLabel(r.strike)}</div>
+                    <div>{r.collect !== null ? <><b>{usd(r.timeValue ?? 0)}</b><span className="block text-xs text-neutral-400">{under ? `${usd(r.collect)} total credit` : `Bid ${r.bid?.toFixed(2)} · Ask ${r.ask?.toFixed(2)}`}</span></> : '—'}</div>
+                    <div>{r.abovePricePct !== null ? `${r.abovePricePct > 0 ? '+' : ''}${r.abovePricePct.toFixed(1)}%` : '—'}</div>
+                    <div>{calledAwayEstimate(r.delta)}</div>
+                    <div data-testid={`cc-all-gap-${r.strike}`} data-tone={gapTone(r) ?? 'none'} className={`font-bold ${{ green: 'text-emerald-400', yellow: 'text-yellow-300', red: 'text-red-400', none: '' }[gapTone(r) ?? 'none']}`}>{r.gapCents !== null ? `$${(r.gapCents / 100).toFixed(2)}` : '—'}</div>
+                    <div className={`${r.openInterest === 0 ? 'text-amber-300' : ''}`}>{r.openInterest !== null ? r.openInterest.toLocaleString('en-US') : '—'}</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {r.isPick && <span className="rounded-full border border-emerald-400 px-2 text-xs font-bold text-emerald-300">{r.strike === balanced ? 'Balanced pick' : 'Passes scan rules'}</span>}
                       {chipsText.map(c => <span key={c} className="rounded-full border border-amber-400 px-2 text-xs font-bold text-amber-200">{c}</span>)}
                     </div>
                   </button>
@@ -264,10 +277,10 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
               );
             })}
           </div>
+          </div>
         )}
           </>
         )}
-        <p className="border-t border-neutral-800 pt-2 text-xs text-neutral-400">Every call on this date is listed; click a column to sort. The price gap is green when small, yellow when ok, red when too big. A row gets a chip only when it breaks another rule. Rows with a chip have no order button. A pick opens the normal order screen with the same checks.</p>
       </div>
       {order && <CcTradeModal th={th} order={order} deps={deps.order} onClose={() => setOrder(null)} />}
     </div>
