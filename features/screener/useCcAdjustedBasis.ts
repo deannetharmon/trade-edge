@@ -26,6 +26,8 @@ export function useCcAdjustedBasis(symbol: string, sharesOwned: number | null, b
     void loadHistory().then(tx => {
       if (!live || !tx) return;
       const r = computeAdjustedBasis({ transactions: tx, symbol, sharesOwned, brokerBasis, hasLongCallOnSymbol: hasOpenLongCall(tx, symbol) });
+      // CC-LOTS-0001: say why the broker average stands, so a fallback can be traced from the browser console.
+      if (!r.ok) console.info(`[cc-basis] ${symbol}: adjusted basis not used (${r.reason}); using typed or broker basis`);
       setBasis(r.ok ? r.floorBasis : null); // same number the scan floors on: the highest lot basis after put premium
     });
     return () => { live = false; };

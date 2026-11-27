@@ -18,6 +18,7 @@ import { buildCcOrderLeg, buildCreditEntryOto, ccProfitBuyback } from '@/lib/sca
 import { costBasisFromReports, guardCcOrder, submitCcOrderIfSafe, type CcOrderRequest } from '@/lib/scans/ccOrderSubmission';
 import type { CoverageReports } from '@/lib/tradeLookup/loadLookup';
 import { ccOutcomeLines, computeCcOutcome } from '@/lib/scans/ccOutcome';
+import { ccLotLossLine, computeCcLotLoss, type CcLot } from '@/lib/scans/ccLotLoss';
 import { CommittedCallsLine } from './CommittedCallsLine';
 
 export interface CcOrderInput {
@@ -114,6 +115,25 @@ export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // CC-LOTS-0001: the open share lots (oldest first), so "if called" is judged on the shares FIFO would deliver, not the
+  // broker's average. Null when unavailable or unproven; the average cost basis then stands as before.
+  const [lots, setLots] = useState<CcLot[] | null>(null);
+  const heldShares = reports?.capacity?.bySymbol?.[order.symbol]?.sharesOwned;
+  useEffect(() => {
+    let alive = true;
+    if (!deps.readLots || !coverageLoaded || typeof heldShares !== 'number' || !(heldShares > 0)) return;
+    deps.readLots(order.symbol, heldShares).then(
+      (l) => { if (alive) setLots(l); },
+      () => { if (alive) setLots(null); },
+    );
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coverageLoaded, heldShares, order.symbol]);
+  // Highest single lot: a call can be assigned against any lot, so this is the "below your cost" yardstick (Ian).
+  const lotFloor = lots && lots.length > 0 ? Math.max(...lots.map((l) => l.price)) : null;
+  const brokerBasisRaw = costBasisFromReports(reports, order.symbol);
+  const basisOverride = order.typedBasis ?? (lotFloor !== null && (brokerBasisRaw === null || lotFloor > brokerBasisRaw) ? lotFloor : null);
+
   useEffect(() => {
     if (!quoteValidation) return;
     const timer = window.setInterval(() => setTick((t) => t + 1), 1000);
@@ -123,14 +143,16 @@ export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
   const validationFresh = quoteValidation !== null && deps.now() - quoteValidation.at <= VALIDATION_WINDOW_MS;
 
   const request: CcOrderRequest = useMemo(() => ({
-    symbol: order.symbol, expiration: order.expiration, strike: order.strike, quantity, entryPerShare: entryLimit, belowCostBasisAcknowledged: acknowledged, costBasisOverride: order.typedBasis ?? null,
-  }), [order.symbol, order.expiration, order.strike, quantity, entryLimit, acknowledged, order.typedBasis]);
+    symbol: order.symbol, expiration: order.expiration, strike: order.strike, quantity, entryPerShare: entryLimit, belowCostBasisAcknowledged: acknowledged, costBasisOverride: basisOverride,
+  }), [order.symbol, order.expiration, order.strike, quantity, entryLimit, acknowledged, basisOverride]);
 
   const guard = useMemo(() => guardCcOrder(reports, request), [reports, request]);
   const viaLeap = guard.coverage !== null && guard.coverage.status === 'covered_by_leap';
   // A share cost basis only applies when shares cover the call; for a LEAP-covered call it is the wrong yardstick.
-  const costBasis = viaLeap ? null : (order.typedBasis ?? costBasisFromReports(reports, order.symbol));
+  // The typed basis wins; otherwise the larger of the broker average and the highest open lot (CC-LOTS-0001).
+  const costBasis = viaLeap ? null : basisOverride ?? brokerBasisRaw;
   const belowBasis = costBasis !== null && order.strike < costBasis;
+  const lotLoss = viaLeap || !lots ? null : computeCcLotLoss({ lots, strike: order.strike, premiumPerShare: entryLimit, contracts: quantity });
   const legBuild = buildCcOrderLeg(order.occSymbol, quantity, order.isIndex);
   const profitBuyback = entryLimit > 0 ? ccProfitBuyback(entryLimit, profitPct) : 0;
   const premium = entryLimit * 100 * quantity;
@@ -321,7 +343,9 @@ export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
             <div className="flex justify-between"><span className={th.textFaint}>Shares sold at ${order.strike}</span><span className={th.text}>{money0(proceeds)}</span></div>
           )}
           <div className="flex justify-between"><span className={th.textFaint}>Premium kept either way</span><span className="text-emerald-400">{money0(premium)}</span></div>
-          {viaLeap ? null : costBasis !== null ? (
+          {viaLeap ? null : lotLoss !== null ? (
+            <p data-testid="cc-lot-loss" className={lotLoss.gainWithPremium < 0 ? 'text-red-400' : 'text-emerald-400'}>{ccLotLossLine(lotLoss)}</p>
+          ) : costBasis !== null ? (
             <div className="flex justify-between">
               <span className={th.textFaint}>Versus your ${costBasis.toFixed(2)} cost basis</span>
               <span data-testid="cc-vs-basis" className={belowBasis ? 'text-red-400' : 'text-emerald-400'}>

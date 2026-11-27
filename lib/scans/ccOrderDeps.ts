@@ -9,6 +9,9 @@ import { getAccessToken, getExecutableOptionQuotes, ttFetch } from '@/lib/scans/
 import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import { defaultLookupDeps } from '@/lib/tradeLookup/defaultDeps';
 import type { CoverageReports } from '@/lib/tradeLookup/loadLookup';
+import { deriveStockEntry } from '@/lib/portfolio/entryFromTransactions';
+import { fetchTransactionHistory } from '@/lib/tradeLog/reconstructTrades';
+import type { CcLot } from '@/lib/scans/ccLotLoss';
 
 export interface CcExecutableQuote {
   bid: number | null;
@@ -22,6 +25,11 @@ export interface CcOrderDeps {
   fetchQuote(occSymbol: string): Promise<CcExecutableQuote | null>;
   /** Fresh broker reading of share and LEAP coverage. Throws or returns nulls when it cannot verify. */
   readCoverage(): Promise<CoverageReports>;
+  /**
+   * CC-LOTS-0001: the open share lots, oldest first, rebuilt from the broker's transactions. Null when they cannot be
+   * proven to equal the shares held (the dialog then falls back to the average cost basis). Optional so fakes may omit it.
+   */
+  readLots?(symbol: string, sharesOwned: number): Promise<CcLot[] | null>;
   /** Broker dry run of the payload. Returns the broker's `data` object. */
   dryRun(payload: unknown): Promise<any>;
   /** Places the payload. Returns the broker order id. */
@@ -75,6 +83,11 @@ export const defaultCcOrderDeps: CcOrderDeps = {
   async readCoverage() {
     const token = await getAccessToken();
     return defaultLookupDeps.getCoverageReports(token);
+  },
+  async readLots(symbol, sharesOwned) {
+    const tx = await fetchTransactionHistory(3); // three years: the same window the stock card uses
+    const entry = deriveStockEntry({ transactions: tx as unknown as Array<Record<string, any>>, symbol, sharesOwned });
+    return entry ? entry.lots.map(l => ({ shares: l.shares, price: l.price, day: l.day })) : null;
   },
   async dryRun(payload) {
     const data = await postComplexOrder('complex-orders/dry-run', payload);

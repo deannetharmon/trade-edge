@@ -187,4 +187,25 @@ describe('CcTradeModal', () => {
     await open(makeDeps());
     expect(screen.queryByTestId('cc-committed-BITX')).not.toBeInTheDocument();
   });
+  it('judges the call on the oldest lot and gates on the highest lot, not the average (CC-LOTS-0001)', async () => {
+    // Two lots, $18 (older) and $12: the broker average is $15, so a $16 strike looks fine against the average.
+    const r = reports({ basis: 15 });
+    (r.capacity as any).bySymbol.BITX = { ...(r.capacity as any).bySymbol.BITX, sharesOwned: 200, grossCoveredContracts: 2, availableCoveredContracts: 2 };
+    const readLots = vi.fn(async () => [{ shares: 100, price: 12, day: '2026-10-01' }, { shares: 100, price: 18, day: '2026-09-01' }]);
+    await open(makeDeps({ readCoverage: async () => r, readLots }));
+    expect((await screen.findByTestId('cc-lot-loss')).textContent).toBe('You collect $40 · if called, you sell at $16.40 · you lose $160 on your oldest shares ($200 without the $40)');
+    expect(readLots).toHaveBeenCalledWith('BITX', 200);
+    // $16 is below the highest lot ($18), so the order needs the acknowledgment even though it is above the $15 average.
+    expect(screen.getByRole('button', { name: /ACKNOWLEDGE/ })).toBeInTheDocument();
+    expect(screen.queryByTestId('cc-vs-basis')).toBeNull();
+  });
+
+  it('falls back to the average cost basis when the lots cannot be proven', async () => {
+    const r = reports({ basis: 15 });
+    (r.capacity as any).bySymbol.BITX = { ...(r.capacity as any).bySymbol.BITX, sharesOwned: 200, grossCoveredContracts: 2, availableCoveredContracts: 2 };
+    await open(makeDeps({ readCoverage: async () => r, readLots: async () => null }));
+    expect(await screen.findByTestId('cc-vs-basis')).toBeInTheDocument();
+    expect(screen.queryByTestId('cc-lot-loss')).toBeNull();
+    expect(screen.queryByRole('button', { name: /ACKNOWLEDGE/ })).toBeNull();
+  });
 });
