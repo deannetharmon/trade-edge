@@ -58,7 +58,8 @@ describe('buildNlvSpark', () => {
     const s = buildNlvSpark([d('2026-10-06', 44713)], '2026-11-24', 26387);
     expect(s.change).toBeNull();
     expect(s.priorClose).toBeNull();
-    expect(s.points.map(p => p.date)).toEqual(['2026-11-24']);
+    // SPARKLINES-0001F: the line reaches back 150 days, so the old close is drawn as a point; the stale rule only blocks the day change and baseline.
+    expect(s.points.map(p => p.date)).toEqual(['2026-10-06', '2026-11-24']);
   });
 
   it('a 4-day stretch (weekend plus a Monday holiday) is still a valid prior close; 6 days is not', () => {
