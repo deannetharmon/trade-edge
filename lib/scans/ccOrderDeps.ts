@@ -10,7 +10,7 @@ import { requireActiveBrokerAccount } from '@/lib/tastytrade/accountSelection';
 import { defaultLookupDeps } from '@/lib/tradeLookup/defaultDeps';
 import type { CoverageReports } from '@/lib/tradeLookup/loadLookup';
 import { deriveStockEntry } from '@/lib/portfolio/entryFromTransactions';
-import { fetchTransactionHistory } from '@/lib/tradeLog/reconstructTrades';
+import { loadHistory } from '@/features/screener/useCcAdjustedBasis';
 import type { CcLot } from '@/lib/scans/ccLotLoss';
 
 export interface CcExecutableQuote {
@@ -85,8 +85,12 @@ export const defaultCcOrderDeps: CcOrderDeps = {
     return defaultLookupDeps.getCoverageReports(token);
   },
   async readLots(symbol, sharesOwned) {
-    const tx = await fetchTransactionHistory(3); // three years: the same window the stock card uses
-    const entry = deriveStockEntry({ transactions: tx as unknown as Array<Record<string, any>>, symbol, sharesOwned });
+    // The same history the stock card loads, fetched once per page visit and shared (no extra broker calls per dialog).
+    // Null when the fetch failed, and deriveStockEntry returns null when the lots do not add up to today's shares, so a
+    // stale history can only ever fall back to the average, never invent a lot.
+    const tx = await loadHistory();
+    if (!tx) return null;
+    const entry = deriveStockEntry({ transactions: tx, symbol, sharesOwned });
     return entry ? entry.lots.map(l => ({ shares: l.shares, price: l.price, day: l.day })) : null;
   },
   async dryRun(payload) {

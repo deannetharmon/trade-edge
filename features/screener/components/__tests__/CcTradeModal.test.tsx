@@ -208,4 +208,26 @@ describe('CcTradeModal', () => {
     expect(screen.queryByTestId('cc-lot-loss')).toBeNull();
     expect(screen.queryByRole('button', { name: /ACKNOWLEDGE/ })).toBeNull();
   });
+  it('will not place until the lots have been read (CC-LOTS-0001B)', async () => {
+    const r = reports({ basis: 15 });
+    (r.capacity as any).bySymbol.BITX = { ...(r.capacity as any).bySymbol.BITX, sharesOwned: 200, grossCoveredContracts: 2, availableCoveredContracts: 2 };
+    let release: (l: Array<{ shares: number; price: number; day: string }>) => void = () => {};
+    const readLots = vi.fn(() => new Promise<Array<{ shares: number; price: number; day: string }>>((res) => { release = res; }));
+    await open(makeDeps({ readCoverage: async () => r, readLots }));
+    expect(screen.getByTestId('cc-lots-pending')).toBeInTheDocument();
+    expect((screen.getByRole('button', { name: 'DRY RUN' }) as HTMLButtonElement).disabled).toBe(true);
+    release([{ shares: 100, price: 12, day: '2026-10-01' }, { shares: 100, price: 18, day: '2026-09-01' }]);
+    await waitFor(() => expect(screen.queryByTestId('cc-lots-pending')).toBeNull());
+    // $16 is below the $18 lot: the button now asks for the acknowledgment instead of going straight through.
+    expect(screen.getByRole('button', { name: /ACKNOWLEDGE/ })).toBeInTheDocument();
+  });
+
+  it('still opens when the lot read fails, on the average basis', async () => {
+    const r = reports({ basis: 15 });
+    (r.capacity as any).bySymbol.BITX = { ...(r.capacity as any).bySymbol.BITX, sharesOwned: 200, grossCoveredContracts: 2, availableCoveredContracts: 2 };
+    await open(makeDeps({ readCoverage: async () => r, readLots: async () => { throw new Error('history down'); } }));
+    await waitFor(() => expect(screen.queryByTestId('cc-lots-pending')).toBeNull());
+    expect((screen.getByRole('button', { name: 'DRY RUN' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(await screen.findByTestId('cc-vs-basis')).toBeInTheDocument();
+  });
 });

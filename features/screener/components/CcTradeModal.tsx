@@ -118,13 +118,18 @@ export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
   // CC-LOTS-0001: the open share lots (oldest first), so "if called" is judged on the shares FIFO would deliver, not the
   // broker's average. Null when unavailable or unproven; the average cost basis then stands as before.
   const [lots, setLots] = useState<CcLot[] | null>(null);
+  // True once the lots question is answered (loaded, failed, or not applicable). Placing waits for it, so the order can
+  // never go through on the average basis in the seconds before the lots arrive (Quinn).
+  const [lotsSettled, setLotsSettled] = useState(!deps.readLots);
   const heldShares = reports?.capacity?.bySymbol?.[order.symbol]?.sharesOwned;
   useEffect(() => {
     let alive = true;
-    if (!deps.readLots || !coverageLoaded || typeof heldShares !== 'number' || !(heldShares > 0)) return;
+    if (!deps.readLots) { setLotsSettled(true); return; }
+    if (!coverageLoaded) return;
+    if (typeof heldShares !== 'number' || !(heldShares > 0)) { setLotsSettled(true); return; }
     deps.readLots(order.symbol, heldShares).then(
-      (l) => { if (alive) setLots(l); },
-      () => { if (alive) setLots(null); },
+      (l) => { if (alive) { setLots(l); setLotsSettled(true); } },
+      () => { if (alive) { setLots(null); setLotsSettled(true); } },
     );
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -233,7 +238,7 @@ export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
   const needsAck = belowBasis;
   const coverageOk = guard.allowed || (needsAck && !acknowledged && guard.coverage !== null && guard.coverage.canOrder);
   const busy = phase === 'placing' || phase === 'dryrun';
-  const actionBlocked = !legBuild.ok || busy || !coverageLoaded || (needsAck && !acknowledged) || !(entryLimit > 0);
+  const actionBlocked = !legBuild.ok || busy || !coverageLoaded || !lotsSettled || (needsAck && !acknowledged) || !(entryLimit > 0);
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4">
@@ -303,6 +308,10 @@ export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
           {!coverageLoaded ? 'Checking your shares and LEAPs…' : guard.allowed ? guard.coverage.message : guard.coverage && guard.coverage.canOrder ? guard.coverage.message : guard.reason}
         </p>
 
+        {coverageLoaded && !lotsSettled && (
+          <p data-testid="cc-lots-pending" className={`text-[11px] mb-3 px-1 ${th.textFaint}`}>Checking your share lots…</p>
+        )}
+
         {/* CC-VISIBILITY-0001: which short calls already hold your contracts, from the same fresh broker read. */}
         {coverageLoaded && Number.isFinite(reports?.capacity?.bySymbol?.[order.symbol]?.grossCoveredContracts) && (() => {
           const capacityReport = reports?.capacity;
@@ -360,7 +369,7 @@ export function CcTradeModal({ th, order, deps, onClose, onPlaced }: Props) {
         {belowBasis && (
           <label className="flex items-start gap-2 text-xs text-amber-200 mb-4">
             <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} className="mt-0.5" />
-            <span>I understand assignment would sell my shares below my cost basis.</span>
+            <span>{lotLoss !== null ? 'I understand this strike is below what I paid for at least one of my lots.' : 'I understand assignment would sell my shares below my cost basis.'}</span>
           </label>
         )}
 
