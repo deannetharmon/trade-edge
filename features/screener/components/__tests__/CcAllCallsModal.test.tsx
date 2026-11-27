@@ -60,7 +60,7 @@ describe('CcAllCallsModal', () => {
     await userEvent.click(screen.getByTestId('cc-all-row-55'));
     expect(screen.getByTestId('cc-all-lotloss-55').textContent).toContain('you lose $2,609 on your oldest shares');
     expect(screen.queryByRole('button', { name: 'Review order' })).toBeNull();
-    expect(screen.getByTestId('cc-all-calls-summary').textContent).toContain('your cost $82.00 (oldest shares)');
+    expect(screen.getByTestId('cc-all-calls-summary').textContent).toContain('your cost $82.00 (highest-cost lot)');
   });
 
   it('says the RSI wait once and keeps the order off on a pick while it applies', async () => {
@@ -109,14 +109,14 @@ describe('CcAllCallsModal', () => {
     await open(deps, result(60, 40));
     expect(screen.queryByTestId('cc-all-row-27')).toBeNull();
     expect(screen.getByTestId('cc-all-calls-under').textContent).toContain('Show 1 strike under the stock price');
-    expect(screen.getByTestId('cc-all-calls-balanced').textContent).toContain('Balanced pick: the $54C strike collects $102');
+    expect(screen.getByTestId('cc-all-calls-balanced').textContent).toContain('Balanced pick · $54C · $102.00 time value per contract · ~27%');
     await userEvent.click(screen.getByTestId('cc-all-calls-under'));
-    expect(screen.getByTestId('cc-all-row-27').textContent).toContain('of $2152, rest is stock value');
+    expect(screen.getByTestId('cc-all-row-27').textContent).toContain('$2152.00 total credit');
   });
 
   it('says there is no balanced pick when every strike is below cost', async () => {
     await open(makeDeps());
-    expect(screen.getByTestId('cc-all-calls-balanced').textContent).toBe('No balanced pick on this date: every strike is below your cost.');
+    expect(screen.getByTestId('cc-all-calls-balanced').textContent).toBe('No balanced pick for this expiration. Every strike is below your cost.');
   });
 
   it('shows open interest as a column and sorts by a clicked column', async () => {
@@ -130,6 +130,9 @@ describe('CcAllCallsModal', () => {
     expect(order()).toEqual(['cc-all-row-55', 'cc-all-row-57', 'cc-all-row-53']);
     await userEvent.click(screen.getByTestId('cc-all-sort-oi'));
     expect(order()).toEqual(['cc-all-row-53', 'cc-all-row-57', 'cc-all-row-55']);
+    await userEvent.click(screen.getByRole('button', { name: 'Chance called away' }));
+    expect(order()).toEqual(['cc-all-row-57', 'cc-all-row-55', 'cc-all-row-53']);
+    expect(screen.getByTestId('cc-all-row-57').textContent).toContain('~10%');
   });
 
   it('shows the price gap in a colour instead of a chip', async () => {
