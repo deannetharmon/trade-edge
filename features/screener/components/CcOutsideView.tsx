@@ -11,6 +11,7 @@ import { ccGapCents, ccIfCalledLabel, ccMidPerShare, ccExpirationLabel, ccGoalPo
 import { trendRsiForDisplay } from '@/lib/scans/trendRsi';
 import { useCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
 import { CcBasisLine } from './CcBasisLine';
+import { CcAllCallsButton } from './CcAllCallsModal';
 
 export function CcOutsideView({ result, textFaint }: { result: ScreenResult; textFaint: string }) {
   const [cutoff] = useCcRsiCutoff();
@@ -25,6 +26,7 @@ export function CcOutsideView({ result, textFaint }: { result: ScreenResult; tex
       {/* The row already carries the Calls chip; the floor sentence is left out when a timing line says the same thing. */}
       <CcBasisLine basis={result.ccBasis} floor={note.lines.length > 0 ? undefined : result.ccFloorInfo?.floor} price={note.lines.length > 0 ? undefined : result.ccFloorInfo?.price} />
       {note.lines.map(l => <p key={l} className={/below cost/.test(l) ? 'font-bold text-red-400' : 'text-amber-300'}>{l}</p>)}
+      <div><CcAllCallsButton result={result} /></div>
       {outside.length > 0 && (
         <div>
           <p className={textFaint}>{outside.length} call{outside.length === 1 ? ' is' : 's are'} outside your view (chance of keeping your shares {lo} to {hi}%, or price gap)</p>

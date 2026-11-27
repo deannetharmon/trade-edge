@@ -114,6 +114,7 @@ import { CcBasisLine } from '@/features/screener/components/CcBasisLine';
 import { useCcMinPay } from '@/features/screener/useCcMinPay';
 import { ccCellVerdict, ccStrikeLabel, ccExpirationLabel } from '@/lib/scans/ccGuidance';
 import { CcStrikeGrid } from '@/features/screener/components/CcStrikeGrid';
+import { CcAllCallsButton } from '@/features/screener/components/CcAllCallsModal';
 import type { CcGridCell } from '@/lib/scans/ccGridTypes';
 import { ccRsiChip } from '@/lib/scans/ccRsiChip';
 import { ccBriefReason } from '@/lib/scans/ccBrief';
@@ -7156,6 +7157,7 @@ const strategyScores = useMemo(() => {
           )}
 
           {!c && result.strategy === 'CC' && result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} basisInfo={result.ccBasis ?? null} />}
+          {!c && result.strategy === 'CC' && result.ccGrid && <div className="px-3 pb-2"><CcAllCallsButton result={result} th={th} /></div>}
           {!c && result.strategy === 'CC' && result.ccBlocked && <CcBlockedCalls symbol={result.symbol} {...result.ccBlocked} className={th.textFaint} />}
 
           {c && c.strategy === 'CC' && (
@@ -7180,6 +7182,7 @@ const strategyScores = useMemo(() => {
               </details>
               {c.ccAssignmentWarning && <p className={`text-[9px] text-yellow-400 font-medium pt-1`}>⚠ {c.ccAssignmentWarning}</p>}
               {result.ccGrid && <CcStrikeGrid grid={result.ccGrid} th={th} symbol={result.symbol} basisInfo={result.ccBasis ?? null} initial={c.expiration ? { expiration: c.expiration, strike: c.shortStrike } : null} onAnchorChange={setPickedCcCell} />}
+              {result.strategy === 'CC' && result.ccGrid && <div className="pt-1"><CcAllCallsButton result={result} th={th} /></div>}
               {result.strategy === 'CC' && result.ccBlocked && <CcBlockedCalls symbol={result.symbol} {...result.ccBlocked} className={`pt-1 ${th.textFaint}`} />}
               {result.strategy === 'CC' && result.ccCommitted && <CommittedCallsLine symbol={result.symbol} {...result.ccCommitted} className={`pt-1 ${th.textFaint}`} />}
               {result.ccExclusionNote && <p data-testid="cc-exclusion-note" className={`text-[10px] pt-1 ${th.textFaint}`}>{result.ccExclusionNote}</p>}
