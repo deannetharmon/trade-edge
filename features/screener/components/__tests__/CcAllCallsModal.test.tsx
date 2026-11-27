@@ -103,4 +103,39 @@ describe('CcAllCallsModal', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Broker session expired'));
     expect(screen.queryByTestId('cc-all-calls-rows')).toBeNull();
   });
+
+  it('folds the strikes under the stock price away, shows real premium, and names a balanced pick', async () => {
+    const deps = makeDeps({ lots: [{ shares: 200, price: 40, day: '2026-01-05' }], legs: [leg(27, 19.5, 23.55, 0.99, E1, 0), leg(52, 1.5, 1.55, 0.35), leg(54, 1.0, 1.05, 0.27), leg(56, 0.6, 0.65, 0.12)] });
+    await open(deps, result(60, 40));
+    expect(screen.queryByTestId('cc-all-row-27')).toBeNull();
+    expect(screen.getByTestId('cc-all-calls-under').textContent).toContain('Show 1 strike under the stock price');
+    expect(screen.getByTestId('cc-all-calls-balanced').textContent).toContain('Balanced pick: the $54C strike collects $102');
+    await userEvent.click(screen.getByTestId('cc-all-calls-under'));
+    expect(screen.getByTestId('cc-all-row-27').textContent).toContain('of $2152, rest is stock value');
+  });
+
+  it('says there is no balanced pick when every strike is below cost', async () => {
+    await open(makeDeps());
+    expect(screen.getByTestId('cc-all-calls-balanced').textContent).toBe('No balanced pick on this date: every strike is below your cost.');
+  });
+
+  it('shows open interest as a column and sorts by a clicked column', async () => {
+    const deps = makeDeps({ legs: [leg(53, 1.4, 1.54, 0.2, E1, 10), leg(55, 0.88, 0.94, 0.15, E1, 900), leg(57, 0.51, 0.55, 0.1, E1, 300)] });
+    await open(deps);
+    expect(screen.getByTestId('cc-all-row-55').textContent).toContain('900');
+    expect(screen.queryAllByText('No open interest')).toHaveLength(0);
+    const order = () => screen.getAllByTestId(/^cc-all-row-/).map(e => e.getAttribute('data-testid'));
+    expect(order()).toEqual(['cc-all-row-53', 'cc-all-row-55', 'cc-all-row-57']);
+    await userEvent.click(screen.getByTestId('cc-all-sort-oi'));
+    expect(order()).toEqual(['cc-all-row-55', 'cc-all-row-57', 'cc-all-row-53']);
+    await userEvent.click(screen.getByTestId('cc-all-sort-oi'));
+    expect(order()).toEqual(['cc-all-row-53', 'cc-all-row-57', 'cc-all-row-55']);
+  });
+
+  it('shows the price gap in a colour instead of a chip', async () => {
+    await open(makeDeps({ legs: [leg(53, 1.4, 1.42, 0.2), leg(55, 0.1, 0.4, 0.15)] }));
+    expect(screen.getByTestId('cc-all-gap-53').getAttribute('data-tone')).toBe('green');
+    expect(screen.getByTestId('cc-all-gap-55').getAttribute('data-tone')).toBe('red');
+    expect(screen.queryAllByText('Price gap too big')).toHaveLength(0);
+  });
 });

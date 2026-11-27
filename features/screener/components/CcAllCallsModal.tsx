@@ -19,7 +19,7 @@ import { defaultLookupDeps } from '@/lib/tradeLookup/defaultDeps';
 import type { LookupDeps } from '@/lib/tradeLookup/loadLookup';
 import type { ChainRow } from '@/lib/tradeLookup/lookupTypes';
 import { normalizeChainRows } from '@/lib/tradeLookup/chainRows';
-import { allBelowCost, buildCcAllRows, rowChips, type CcAllRow } from '@/lib/scans/ccAllCalls';
+import { allBelowCost, balancedPickStrike, buildCcAllRows, CC_BALANCED_POP, gapTone, rowChips, sortCcAllRows, type CcAllRow, type CcAllSortKey } from '@/lib/scans/ccAllCalls';
 import type { CcLot } from '@/lib/scans/ccLotLoss';
 import { ccExpirationLabel, ccStrikeLabel, ccTimingNote } from '@/lib/scans/ccGuidance';
 import { daysUntil } from '@/lib/scans/scan-utils';
@@ -64,6 +64,8 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [order, setOrder] = useState<CcOrderInput | null>(null);
+  const [showUnder, setShowUnder] = useState(false);
+  const [sort, setSort] = useState<{ key: CcAllSortKey; dir: 'asc' | 'desc' }>({ key: 'strike', dir: 'asc' });
 
   // 1. Token, the listed expirations, the live price, and (in parallel) the share lots.
   useEffect(() => {
@@ -132,6 +134,13 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
     [ready, rows, dte, price, floorBasis, lots, minPay],
   );
   const shared = allBelowCost(all);
+  const balanced = balancedPickStrike(all);
+  const balancedRow = balanced === null ? null : all.find(r => r.strike === balanced) ?? null;
+  // Calls under the stock price are mostly stock value, not premium, so they start folded away.
+  const underCount = all.filter(r => r.reasons.includes('in_the_money')).length;
+  const visible = useMemo(() => sortCcAllRows(showUnder ? all : all.filter(r => !r.reasons.includes('in_the_money')), sort.key, sort.dir), [all, showUnder, sort]);
+  const bySt = sort.key === 'strike' && sort.dir === 'asc';
+  const firstAbove = bySt ? visible.find(r => !r.reasons.includes('in_the_money'))?.strike ?? null : null;
   const canOrder = floorBasis !== null && !waiting;
 
   const startOrder = (r: CcAllRow) => {
@@ -182,32 +191,52 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
         </div>
 
         {!error && !ready && <p data-testid="cc-all-calls-loading" className="text-sm text-neutral-400">{rows === null ? 'Loading the chain…' : 'Checking your share lots…'}</p>}
+        {ready && visible.length === 0 && all.length > 0 && <p className="text-sm text-neutral-400">Every strike on this date is under the stock price. Use the button above to see them.</p>}
         {ready && all.length === 0 && <p className="text-sm text-neutral-400">No calls listed for that date.</p>}
         {ready && all.length > 0 && (
+          <p data-testid="cc-all-calls-balanced" className={`rounded-lg border px-3 py-2 text-sm ${balancedRow ? 'border-emerald-400 text-emerald-200' : 'border-neutral-700 text-neutral-300'}`}>
+            {balancedRow
+              ? `Balanced pick: the ${ccStrikeLabel(balancedRow.strike)} strike collects $${Math.round(balancedRow.timeValue ?? 0)} and you keep your shares ${balancedRow.popPct}% of the time.${waiting ? ' Wait for RSI first.' : ''}`
+              : `No balanced pick on this date: ${shared ? 'every strike is below your cost.' : `no call passes your rules with a ${CC_BALANCED_POP.lo} to ${CC_BALANCED_POP.hi}% chance of keeping your shares.`}`}
+          </p>
+        )}
+        {ready && underCount > 0 && (
+          <button type="button" data-testid="cc-all-calls-under" onClick={() => setShowUnder(v => !v)} aria-expanded={showUnder}
+            className="rounded-lg border border-neutral-600 px-3 py-1.5 text-sm text-neutral-300">{showUnder ? 'Hide' : 'Show'} {underCount} strike{underCount === 1 ? '' : 's'} under the stock price</button>
+        )}
+        {ready && visible.length > 0 && (
           <div className="space-y-1.5" data-testid="cc-all-calls-rows">
             <div className="flex px-3 text-xs font-bold tracking-wider text-neutral-400">
-              <div className="w-16">STRIKE</div><div className="w-36">YOU COLLECT</div><div className="w-24">ABOVE PRICE</div><div className="w-24">KEEP SHARES</div><div className="w-20">PRICE GAP</div><div className="flex-1">WHY</div>
+              {([['strike', 'STRIKE', 'w-16'], ['premium', 'PREMIUM YOU COLLECT', 'w-40'], ['above', 'ABOVE PRICE', 'w-24'], ['keep', 'KEEP SHARES', 'w-24'], ['gap', 'PRICE GAP', 'w-20'], ['oi', 'OPEN INTEREST', 'w-28']] as Array<[CcAllSortKey, string, string]>).map(([k, label, w]) => (
+                <button key={k} type="button" data-testid={`cc-all-sort-${k}`} aria-sort={sort.key === k ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  onClick={() => setSort(sort.key === k ? { key: k, dir: sort.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: k === 'strike' || k === 'gap' ? 'asc' : 'desc' })}
+                  className={`${w} text-left ${sort.key === k ? 'text-cyan-300' : ''}`}>{label}{sort.key === k ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</button>
+              ))}
+              <div className="flex-1">WHY</div>
             </div>
-            {all.map(r => {
+            {visible.map(r => {
+              const under = r.reasons.includes('in_the_money');
               const chipsText = rowChips(r, minPay, shared);
               const open = expanded === r.strike;
               return (
                 <div key={r.occSymbol || r.strike}>
+                  {showUnder && r.strike === firstAbove && price !== null && <p className="py-1 text-sm font-bold text-cyan-300">Stock now {usd(price)}. Higher strikes are above the stock price.</p>}
                   <button type="button" onClick={() => setExpanded(open ? null : r.strike)} aria-expanded={open} data-testid={`cc-all-row-${r.strike}`}
                     className={`flex w-full items-center rounded-lg border px-3 py-2 text-left text-sm ${open ? 'border-cyan-400 bg-cyan-950/40' : 'border-neutral-800 bg-neutral-900'}`}>
                     <div className="w-16 font-bold">{ccStrikeLabel(r.strike)}</div>
-                    <div className="w-36">{r.collect !== null ? <><b>${Math.round(r.collect)}</b> <span className="text-xs text-neutral-400">{r.bid?.toFixed(2)} / {r.ask?.toFixed(2)}</span></> : '—'}</div>
+                    <div className="w-40">{r.collect !== null ? <><b>${Math.round(r.timeValue ?? 0)}</b> <span className="text-xs text-neutral-400">{under ? `of $${Math.round(r.collect)}, rest is stock value` : `${r.bid?.toFixed(2)} / ${r.ask?.toFixed(2)}`}</span></> : '—'}</div>
                     <div className="w-24">{r.abovePricePct !== null ? `${r.abovePricePct.toFixed(1)}%` : '—'}</div>
                     <div className="w-24">{r.popPct !== null ? `${r.popPct}%` : '—'}</div>
-                    <div className="w-20">{r.gapCents !== null ? `$${(r.gapCents / 100).toFixed(2)}` : '—'}</div>
+                    <div data-testid={`cc-all-gap-${r.strike}`} data-tone={gapTone(r) ?? 'none'} className={`w-20 font-bold ${{ green: 'text-emerald-400', yellow: 'text-yellow-300', red: 'text-red-400', none: '' }[gapTone(r) ?? 'none']}`}>{r.gapCents !== null ? `$${(r.gapCents / 100).toFixed(2)}` : '—'}</div>
+                    <div className={`w-28 ${r.openInterest === 0 ? 'text-amber-300' : ''}`}>{r.openInterest !== null ? r.openInterest.toLocaleString('en-US') : '—'}</div>
                     <div className="flex flex-1 flex-wrap gap-1.5">
-                      {r.isPick && <span className="rounded-full border border-emerald-400 px-2 text-xs font-bold text-emerald-300">A pick</span>}
+                      {r.isPick && <span className="rounded-full border border-emerald-400 px-2 text-xs font-bold text-emerald-300">{r.strike === balanced ? 'Balanced pick' : 'A pick'}</span>}
                       {chipsText.map(c => <span key={c} className="rounded-full border border-amber-400 px-2 text-xs font-bold text-amber-200">{c}</span>)}
                     </div>
                   </button>
                   {open && (
                     <div className="mt-1 space-y-2 rounded-lg border border-cyan-400 bg-cyan-950/40 px-4 py-3 text-sm" data-testid={`cc-all-detail-${r.strike}`}>
-                      <p>{r.isPick ? 'This call passes your rules.' : `Not a pick: ${r.reasons.map(x => x === 'pays_under' ? `pays under $${Math.max(minPay, 10)}` : x === 'below_cost' ? `the ${ccStrikeLabel(r.strike)} strike is below your cost` : x === 'in_the_money' ? 'the strike is under the stock price' : x === 'wide' ? 'the price gap is too big' : x === 'no_oi' ? 'no open interest' : 'no quote').join(', ')}.`}</p>
+                      <p>{r.isPick ? 'This call passes your rules.' : `Not a pick: ${r.reasons.map(x => x === 'pays_under' ? `pays under $${Math.max(minPay, 10)}` : x === 'below_cost' ? `the ${ccStrikeLabel(r.strike)} strike is below your cost` : x === 'in_the_money' ? 'the strike is under the stock price' : x === 'wide' ? 'the price gap is too big' : 'no quote').join(', ')}.`}</p>
                       {r.lotLossLine && <p className="text-red-300" data-testid={`cc-all-lotloss-${r.strike}`}>{r.lotLossLine}</p>}
                       {r.isPick && canOrder && <button type="button" onClick={() => startOrder(r)} data-testid={`cc-all-order-${r.strike}`} className="rounded-lg border border-cyan-400 px-4 py-2 text-sm font-bold text-cyan-300">Review order</button>}
                       {r.isPick && !canOrder && <p className="text-xs text-neutral-400">{waiting ? 'Order is off until the RSI wait is over.' : 'Order is off without a cost basis.'}</p>}
@@ -218,7 +247,7 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
             })}
           </div>
         )}
-        <p className="border-t border-neutral-800 pt-2 text-xs text-neutral-400">Every call on this date is listed. A row gets a chip only when it breaks a rule. Rows with a chip have no order button. A pick opens the normal order screen with the same checks.</p>
+        <p className="border-t border-neutral-800 pt-2 text-xs text-neutral-400">Every call on this date is listed; click a column to sort. The price gap is green when small, yellow when ok, red when too big. A row gets a chip only when it breaks another rule. Rows with a chip have no order button. A pick opens the normal order screen with the same checks.</p>
       </div>
       {order && <CcTradeModal th={th} order={order} deps={deps.order} onClose={() => setOrder(null)} />}
     </div>
