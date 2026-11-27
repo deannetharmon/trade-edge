@@ -27,6 +27,7 @@ import { trendRsiForDisplay } from '@/lib/scans/trendRsi';
 import { useCcRsiCutoff } from '@/features/screener/useCcRsiCutoff';
 import { useCcMinPay } from '@/features/screener/useCcMinPay';
 import { CcTradeModal, type CcOrderInput } from './CcTradeModal';
+import { CcRecoveryPanel } from './CcRecoveryPanel';
 
 export interface CcAllCallsDeps {
   lookup: Pick<LookupDeps, 'getToken' | 'getListedExpirations' | 'fetchChain' | 'getUnderlyingPrice'>;
@@ -65,6 +66,7 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
   const [expanded, setExpanded] = useState<number | null>(null);
   const [order, setOrder] = useState<CcOrderInput | null>(null);
   const [showUnder, setShowUnder] = useState(false);
+  const [recovery, setRecovery] = useState(false); // Recovery mode: opt-in, this ticker, forgotten on close
   const [sort, setSort] = useState<{ key: CcAllSortKey; dir: 'asc' | 'desc' }>({ key: 'strike', dir: 'asc' });
 
   // 1. Token, the listed expirations, the live price, and (in parallel) the share lots.
@@ -154,6 +156,9 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
     });
   };
 
+  // Recovery mode is only for shares priced under their cost, and only once the lots are proven.
+  const underwater = lotsSettled && lots !== null && lots.length > 0 && price !== null && floorBasis !== null && price < floorBasis;
+  const recoveryOn = recovery && underwater;
   const chips = listed.filter(e => daysUntil(e) <= 45).slice(0, 4);
   const more = listed.filter(e => !chips.includes(e));
 
@@ -176,6 +181,19 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
         {shared && floorBasis !== null && <p data-testid="cc-all-calls-band" className="rounded-lg border border-red-400 px-3 py-2 text-sm font-bold text-red-300">All strikes are below your {usd(floorBasis)} cost</p>}
         {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
 
+        {underwater && (
+          <div className="flex items-center gap-3">
+            <button type="button" data-testid="cc-recovery-toggle" aria-pressed={recoveryOn} onClick={() => setRecovery(v => !v)}
+              className={`rounded-full px-4 py-1.5 text-sm font-bold ${recoveryOn ? 'bg-amber-400 text-black' : 'border border-amber-400 text-amber-200'}`}>Recovery mode: {recoveryOn ? 'ON' : 'OFF'}</button>
+            {!recoveryOn && <span className="text-xs text-neutral-400">For shares under your cost. Off until you turn it on.</span>}
+          </div>
+        )}
+        {recoveryOn && price !== null && floorBasis !== null && lots && (
+          <CcRecoveryPanel symbol={symbol} token={token} listed={listed} price={price} floorBasis={floorBasis} lots={lots} contracts={contracts}
+            minPay={minPay} waiting={waiting} waitLine={note.lines[0] ?? ''} deps={deps} onOrder={startOrder} />
+        )}
+        {!recoveryOn && (
+          <>
         <div className="flex flex-wrap items-center gap-2">
           {chips.map(e => (
             <button key={e} type="button" aria-pressed={e === selected} onClick={() => setSelected(e)}
@@ -246,6 +264,8 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
               );
             })}
           </div>
+        )}
+          </>
         )}
         <p className="border-t border-neutral-800 pt-2 text-xs text-neutral-400">Every call on this date is listed; click a column to sort. The price gap is green when small, yellow when ok, red when too big. A row gets a chip only when it breaks another rule. Rows with a chip have no order button. A pick opens the normal order screen with the same checks.</p>
       </div>

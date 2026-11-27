@@ -138,4 +138,62 @@ describe('CcAllCallsModal', () => {
     expect(screen.getByTestId('cc-all-gap-55').getAttribute('data-tone')).toBe('red');
     expect(screen.queryAllByText('Price gap too big')).toHaveLength(0);
   });
+
+  describe('Recovery mode', () => {
+    const weekly = [leg(51, 0.77, 0.79, 0.25), leg(52, 0.61, 0.63, 0.21), leg(53, 0.47, 0.49, 0.17), leg(57, 0.2, 0.22, 0.05)];
+
+    it('is not offered when the shares are not under their cost', async () => {
+      await open(makeDeps({ lots: [{ shares: 200, price: 40, day: '2026-01-05' }], legs: weekly }), result(60, 40));
+      expect(screen.queryByTestId('cc-recovery-toggle')).toBeNull();
+    });
+
+    it('is off until turned on, then shows the meter, the question, the chart and the top 3', async () => {
+      await open(makeDeps({ legs: weekly }), result(60));
+      expect(screen.getByTestId('cc-recovery-toggle').textContent).toBe('Recovery mode: OFF');
+      expect(screen.queryByTestId('cc-recovery')).toBeNull();
+      await userEvent.click(screen.getByTestId('cc-recovery-toggle'));
+      await waitFor(() => expect(screen.getByTestId('cc-recovery-rows')).toBeTruthy());
+      expect(screen.getByTestId('cc-recovery-meter').textContent).toContain('$6,148 under water');
+      expect(screen.getByTestId('cc-recovery-meter').textContent).toContain('premium about $156 a week');
+      expect(screen.getByTestId('cc-recovery-meter').textContent).toContain('about 40 weeks if nothing is called');
+      expect(screen.getByTestId('cc-recovery-question').textContent).toBe('Would you sell your oldest shares at about $52?');
+      expect(screen.getByTestId('cc-recovery-chart')).toBeTruthy();
+      expect(screen.getByTestId('cc-recovery-crossovers').textContent).toContain('$51.78');
+      expect(screen.getByTestId('cc-recovery-called').textContent).toContain('1 in 4');
+      expect(screen.getByTestId('cc-recovery-row-1').textContent).toContain('$51C');
+      expect(screen.getByTestId('cc-recovery-row-3')).toBeTruthy();
+      expect(screen.queryByTestId('cc-all-calls-rows')).toBeNull();
+      expect(document.body.textContent).not.toContain('1 in 9');
+    });
+
+    it('keeps the order off during the RSI wait', async () => {
+      await open(makeDeps({ legs: weekly }), result(40));
+      await userEvent.click(screen.getByTestId('cc-recovery-toggle'));
+      await waitFor(() => expect(screen.getByTestId('cc-recovery-rows')).toBeTruthy());
+      expect(screen.getByTestId('cc-recovery-wait').textContent).toContain('Wait for RSI');
+      expect(screen.queryByTestId('cc-recovery-order')).toBeNull();
+    });
+
+    it('opens the normal order screen when the RSI is fine', async () => {
+      await open(makeDeps({ legs: weekly }), result(60));
+      await userEvent.click(screen.getByTestId('cc-recovery-toggle'));
+      await waitFor(() => expect(screen.getByTestId('cc-recovery-order')).toBeTruthy());
+      await userEvent.click(screen.getByTestId('cc-recovery-order'));
+      expect(await screen.findByTestId('cc-coverage')).toBeTruthy();
+    });
+
+    it('says so and draws no chart when no weekly call passes the rules', async () => {
+      await open(makeDeps({ legs: [leg(57, 0.2, 0.22, 0.05)] }), result(60));
+      await userEvent.click(screen.getByTestId('cc-recovery-toggle'));
+      await waitFor(() => expect(screen.getByTestId('cc-recovery-none').textContent).toBe('No weekly call passes your rules today.'));
+      expect(screen.queryByTestId('cc-recovery-chart')).toBeNull();
+    });
+
+    it('turns off again', async () => {
+      await open(makeDeps({ legs: weekly }), result(60));
+      await userEvent.click(screen.getByTestId('cc-recovery-toggle'));
+      await userEvent.click(screen.getByTestId('cc-recovery-toggle'));
+      expect(screen.getByTestId('cc-all-calls-rows')).toBeTruthy();
+    });
+  });
 });
