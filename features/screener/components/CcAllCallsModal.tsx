@@ -35,7 +35,7 @@ export interface CcAllCallsDeps {
 }
 const REAL_DEPS: CcAllCallsDeps = { lookup: defaultLookupDeps, order: defaultCcOrderDeps };
 
-const columnWidths = 'grid grid-cols-[5rem_9rem_7rem_7rem_7rem_6rem_minmax(9rem,1fr)] gap-x-3 px-3';
+const columnWidths = 'grid grid-cols-[4rem_minmax(7rem,1.25fr)_5rem_6rem_5rem_6rem_minmax(8rem,1.5fr)] gap-x-3 px-3';
 function calledAwayEstimate(delta: number | null) {
   if (delta === null || !Number.isFinite(delta) || delta < 0 || delta > 1) return '—';
   const pct = Math.round(delta * 100);
@@ -173,8 +173,8 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
 
   return (
     <div role="dialog" aria-modal="true" aria-label={`All calls for ${symbol}`} data-testid="cc-all-calls"
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4">
-      <div className="w-full max-w-6xl space-y-3 rounded-xl border border-neutral-700 bg-neutral-950 p-5 text-neutral-100">
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4">
+      <div className="max-h-full w-full max-w-6xl space-y-3 overflow-auto overscroll-contain rounded-xl border border-neutral-700 bg-neutral-950 p-5 text-neutral-100">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold tracking-wide">{symbol} · ALL CALLS</h2>
           <button type="button" onClick={onClose} data-testid="cc-all-calls-close" className="rounded border border-neutral-600 px-3 py-1 text-sm text-neutral-300">Close</button>
@@ -235,15 +235,14 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
           <p className="text-xs text-neutral-400">Time value uses the bid–ask midpoint and excludes intrinsic value. Your fill may differ. The called-away estimate uses option delta as a rough guide to finishing in the money. Early assignment can also occur.</p>
         )}
         {ready && visible.length > 0 && (
-          <div className="overflow-x-auto" data-testid="cc-all-calls-rows">
-          <div className="min-w-[900px] space-y-1.5">
-            <div className={`${columnWidths} items-end border border-transparent pb-1 text-xs font-semibold text-neutral-300`}>
-              {([['strike', 'Strike price'], ['premium', 'Time value / contract'], ['above', 'Strike vs. stock'], ['keep', 'Chance called away'], ['gap', 'Bid–ask gap / share'], ['oi', 'Open interest']] as Array<[CcAllSortKey, string]>).map(([k, label]) => (
-                <button key={k} type="button" data-testid={`cc-all-sort-${k}`} aria-label={sort.key === k ? `${label}, sorted ${sortAscending ? 'ascending' : 'descending'}` : label}
+          <div className="min-w-[740px] space-y-1.5" data-testid="cc-all-calls-rows">
+            <div className={`${columnWidths} sticky top-0 z-10 items-center rounded-t-lg border border-neutral-700 bg-neutral-900 py-2 text-sm font-semibold text-neutral-100`}>
+              {([['strike', 'Strike', 'Strike price'], ['premium', 'Time value', 'Time value per contract'], ['above', 'vs. Stock', 'Strike vs. stock price'], ['keep', 'Called away', 'Chance called away'], ['gap', 'Bid–ask', 'Bid–ask gap per share'], ['oi', 'Open interest', 'Open interest']] as Array<[CcAllSortKey, string, string]>).map(([k, label, description]) => (
+                <button key={k} type="button" data-testid={`cc-all-sort-${k}`} title={description} aria-label={sort.key === k ? `${description}, sorted ${sortAscending ? 'ascending' : 'descending'}` : description}
                   onClick={() => setSort(sort.key === k ? { key: k, dir: sort.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: k === 'strike' || k === 'gap' ? 'asc' : 'desc' })}
                   className={`text-left ${sort.key === k ? 'text-cyan-300' : ''}`}>{label}{sort.key === k ? (sortAscending ? ' ▲' : ' ▼') : ''}</button>
               ))}
-              <div>Rule checks</div>
+              <div>Checks</div>
             </div>
             {visible.map(r => {
               const under = r.reasons.includes('in_the_money');
@@ -276,7 +275,6 @@ export function CcAllCallsModal({ result, th, deps, onClose }: { result: ScreenR
                 </div>
               );
             })}
-          </div>
           </div>
         )}
           </>
